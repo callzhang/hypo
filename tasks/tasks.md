@@ -25,7 +25,7 @@ Last Updated: October 1, 2025
   - [ ] Backend: Rust 1.75+, Redis local instance
 
 ### Phase 1.2: Protocol Definition
-- [ ] Define JSON message schema with validation
+- [x] Define JSON message schema with validation (see `docs/protocol.schema.json`)
 - [ ] Implement protocol buffers or stick with JSON (decision point)
 - [ ] Create protocol documentation with examples
 - [ ] Define error codes and handling

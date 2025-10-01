@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Protocol specification with JSON schema and encryption details
   - Platform-specific README files with setup instructions
 
+#### Added - October 2, 2025
+- **Protocol Validation**: Published JSON Schema for clipboard and control messages (`docs/protocol.schema.json`) to enable automated validation in tooling and test suites
+
 #### Infrastructure
 - Initialized Git repository with comprehensive .gitignore
 - Created MIT license file

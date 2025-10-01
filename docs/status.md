@@ -1,9 +1,9 @@
 # Hypo Project Status
 
-**Last Updated**: October 1, 2025  
+**Last Updated**: October 2, 2025
 **Current Sprint**: Sprint 1 - Foundation & Architecture  
 **Project Phase**: Initialization  
-**Overall Progress**: 5%
+**Overall Progress**: 6%
 
 ---
 
@@ -18,6 +18,7 @@
 - [x] Initialize project structure (mono-repo layout)
 - [x] Created comprehensive README with project overview
 - [x] Defined protocol specification (docs/protocol.md)
+- [x] Published JSON Schema for protocol validation (docs/protocol.schema.json)
 - [x] Initialized backend Rust project structure
 - [x] Initialized Android project structure with Gradle
 - [x] Set up Git repository with initial commit
@@ -44,10 +45,10 @@ None currently
 | Phase 1.3: Security Foundation | Pending | 0% |
 
 **Next Steps**:
-1. Create mono-repo directory structure
-2. Initialize platform-specific projects (Xcode, Android Studio, Cargo)
-3. Define and document JSON message protocol
-4. Research and select cryptographic libraries
+1. Decide whether to adopt Protocol Buffers alongside JSON messaging
+2. Prototype schema validation in backend integration tests
+3. Begin evaluating cryptographic libraries across platforms
+4. Schedule kickoff for macOS project initialization
 
 ---
 
@@ -131,6 +132,9 @@ None currently
 - **Backend**: Initialized Rust project with Actix-web, Redis client, rate limiter
 - **Android**: Initialized project with Gradle, Compose, Hilt DI setup
 - **Infrastructure**: Set up Git repository, created 38 files totaling 4600+ lines
+
+### October 2, 2025
+- **Protocol**: Added formal JSON Schema definition for clipboard/control messages to support validation tooling
 
 ---
 

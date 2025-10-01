@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Outlined 16-week development roadmap with 8 sprints (`tasks/tasks.md`)
   - Established project status tracking system (`docs/status.md`)
   - Initialized changelog following Keep a Changelog format
+  - Wrote detailed protocol specification (`docs/protocol.md`)
+  - Created comprehensive README with quickstart guide
   
 - **Architecture Decisions**:
   - Selected Swift 6 + SwiftUI for macOS client
@@ -38,11 +40,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Defined key rotation policy (30-day cycle with 7-day grace period)
   - Established threat model and mitigation strategies
 
-#### Documentation
-- Architecture diagram visualizing component relationships and data flow
-- Technical specification covering implementation details for all platforms
-- Task breakdown with clear dependencies and deliverables
-- Status tracking with metrics, decisions, and risk register
+- **Backend Infrastructure**:
+  - Initialized Rust project with Actix-web and Redis
+  - Created modular architecture (handlers, services, models, middleware)
+  - Implemented WebSocket handler stub with device authentication
+  - Implemented Redis client for device connection mapping
+  - Implemented token bucket rate limiter with tests
+  - Created Docker containerization with docker-compose
+  - Set up health check and metrics endpoints
+
+- **Android Client**:
+  - Initialized Android project with Gradle Kotlin DSL
+  - Configured dependencies (Jetpack Compose, Hilt, Room, OkHttp)
+  - Set up project structure following clean architecture
+  - Created AndroidManifest with required permissions
+  - Defined string resources and ProGuard rules
+
+- **Documentation**:
+  - Architecture diagram visualizing component relationships and data flow
+  - Technical specification covering implementation details for all platforms
+  - Task breakdown with clear dependencies and deliverables
+  - Status tracking with metrics, decisions, and risk register
+  - Protocol specification with JSON schema and encryption details
+  - Platform-specific README files with setup instructions
+
+#### Infrastructure
+- Initialized Git repository with comprehensive .gitignore
+- Created MIT license file
+- Set up mono-repo structure (backend/, android/, macos/, docs/, tasks/)
+- Configured build systems for all platforms
 
 ---
 

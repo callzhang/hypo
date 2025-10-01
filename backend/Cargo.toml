@@ -1,0 +1,65 @@
+[package]
+name = "hypo-relay"
+version = "0.1.0"
+edition = "2021"
+authors = ["Hypo Contributors"]
+license = "MIT"
+description = "Lightweight WebSocket relay server for Hypo clipboard sync"
+readme = "README.md"
+
+[dependencies]
+# Web framework
+actix-web = "4.4"
+actix-ws = "0.2"
+actix-rt = "2.9"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Redis
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-actix-web = "0.7"
+
+# Environment
+dotenv = "0.15"
+config = "0.13"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Metrics
+prometheus = "0.13"
+
+# Security
+sha2 = "0.10"
+base64 = "0.21"
+
+[dev-dependencies]
+actix-test = "0.1"
+mockall = "0.12"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+

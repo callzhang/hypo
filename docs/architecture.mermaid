@@ -1,0 +1,161 @@
+---
+title: "Hypo - Cross-Platform Clipboard Sync Architecture"
+---
+
+graph TB
+    subgraph "macOS Client (Swift/SwiftUI)"
+        MAC_UI[Menu Bar App<br/>SwiftUI]
+        MAC_CLIP[NSPasteboard Monitor]
+        MAC_HIST[Clipboard History<br/>Core Data]
+        MAC_NOTIF[Notification Center]
+        MAC_SYNC[Sync Engine]
+        MAC_CRYPTO[Crypto Module<br/>AES-256]
+        
+        MAC_UI --> MAC_HIST
+        MAC_CLIP --> MAC_SYNC
+        MAC_SYNC --> MAC_CRYPTO
+        MAC_SYNC --> MAC_NOTIF
+    end
+    
+    subgraph "Android Client (Kotlin)"
+        AND_UI[Material You UI<br/>Jetpack Compose]
+        AND_CLIP[ClipboardManager]
+        AND_SVC[Foreground Service]
+        AND_HIST[Room Database<br/>History]
+        AND_SYNC[Sync Engine]
+        AND_CRYPTO[Crypto Module<br/>AES-256]
+        
+        AND_UI --> AND_HIST
+        AND_CLIP --> AND_SVC
+        AND_SVC --> AND_SYNC
+        AND_SYNC --> AND_CRYPTO
+    end
+    
+    subgraph "Transport Layer"
+        LAN[Local Network<br/>mDNS/Bonjour<br/>WebSocket over TLS]
+        CLOUD[Cloud Relay<br/>WebSocket<br/>Stateless]
+        
+        LAN -.Fallback.-> CLOUD
+    end
+    
+    subgraph "Backend Relay (Rust)"
+        WS[WebSocket Server<br/>Actix-web]
+        ROUTER[Message Router<br/>UUID-based routing]
+        REDIS[(Redis<br/>Ephemeral State)]
+        
+        WS --> ROUTER
+        ROUTER --> REDIS
+    end
+    
+    MAC_SYNC <-->|Primary| LAN
+    MAC_SYNC <-->|Fallback| CLOUD
+    AND_SYNC <-->|Primary| LAN
+    AND_SYNC <-->|Fallback| CLOUD
+    
+    CLOUD <--> WS
+    
+    subgraph "Security Layer"
+        PAIR[Device Pairing<br/>QR Code Exchange]
+        E2E[E2E Encryption<br/>Per-device keys]
+        
+        PAIR --> E2E
+    end
+    
+    MAC_CRYPTO -.Key Management.-> E2E
+    AND_CRYPTO -.Key Management.-> E2E
+    
+    subgraph "Protocol"
+        MSG[Message Format<br/>JSON]
+        
+        MSG -->|Fields| ID[UUID]
+        MSG -->|Fields| TS[Timestamp ISO8601]
+        MSG -->|Fields| TYPE[text/link/image/file]
+        MSG -->|Fields| PAYLOAD[Base64 or String]
+        MSG -->|Fields| DEVICE[android/macos]
+    end
+    
+    style MAC_UI fill:#007AFF,color:#fff
+    style AND_UI fill:#3DDC84,color:#000
+    style WS fill:#E43717,color:#fff
+    style E2E fill:#FFD700,color:#000
+    style LAN fill:#90EE90,color:#000
+    style CLOUD fill:#FFB6C1,color:#000
+
+---
+
+## Component Responsibilities
+
+### macOS Client
+- **NSPasteboard Monitor**: Observe clipboard changes via polling (no native events)
+- **Sync Engine**: De-dupe, throttle (300ms), manage transport selection
+- **History Storage**: Core Data with full-text search, 200 item default limit
+- **Notification Center**: Rich previews with thumbnails/text snippets
+- **Menu Bar App**: SwiftUI interface, search, filtering, drag-to-paste
+
+### Android Client
+- **Foreground Service**: Bypass background restrictions, maintain clipboard monitoring
+- **ClipboardManager**: Primary/clip listener (API 29+)
+- **Room Database**: Local history with FTS4 for search
+- **Material You UI**: Dynamic color, adaptive layout, settings
+- **Battery Optimization**: Request exemption, educate user
+
+### Transport Layer
+- **LAN Discovery**: NSD (Android) + Bonjour (macOS)
+- **Direct Connect**: TLS 1.3 WebSocket, mTLS for device verification
+- **Cloud Relay**: Only receives encrypted blobs, routes by device UUID
+- **Fallback Logic**: 3-second LAN timeout → cloud attempt
+
+### Backend Relay
+- **Stateless Design**: No persistent storage of clipboard data
+- **Redis**: Ephemeral connection state (device UUID → WebSocket connection)
+- **Rate Limiting**: Per-device 100 req/min
+- **Metrics**: Prometheus endpoints for latency/throughput
+
+### Security
+- **Pairing**: ECDH key exchange via QR (local) or secure relay (remote)
+- **Encryption**: AES-256-GCM per message, unique nonce
+- **Key Rotation**: Every 30 days, automatic renegotiation
+- **Certificate Pinning**: Prevent MITM on cloud relay
+
+---
+
+## Data Flow Example: Android → macOS
+
+1. User copies text on Android
+2. ClipboardManager detects change
+3. Foreground Service triggers Sync Engine
+4. Sync Engine encrypts payload with shared key
+5. Transport attempts LAN discovery (mDNS)
+   - If found: Direct TLS WebSocket send
+   - If timeout: Cloud relay send
+6. macOS Sync Engine receives encrypted message
+7. Decrypts and validates signature
+8. Updates NSPasteboard
+9. Triggers Notification Center
+10. Saves to Core Data history
+
+---
+
+## Technology Stack
+
+| Component | Technology |
+|-----------|-----------|
+| macOS App | Swift 6, SwiftUI, AppKit |
+| macOS Storage | Core Data + CloudKit (optional) |
+| Android App | Kotlin 2.0, Jetpack Compose |
+| Android Storage | Room + DataStore |
+| Backend | Rust (Actix-web), Redis |
+| Protocol | WebSocket (RFC 6455) |
+| Encryption | RustCrypto / CryptoKit |
+| Build | Gradle (Android), SPM (macOS), Cargo (Backend) |
+
+---
+
+## Performance Targets
+
+- **LAN Latency**: P50 < 200ms, P95 < 500ms
+- **Cloud Latency**: P50 < 1s, P95 < 3s
+- **Throughput**: 10 clips/sec per device
+- **Memory**: macOS < 50MB, Android < 30MB
+- **Battery**: Android < 2% drain per day (foreground service)
+

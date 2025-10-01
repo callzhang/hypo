@@ -1,0 +1,206 @@
+# Hypo - Cross-Platform Clipboard Sync
+# .gitignore for multi-platform mono-repo
+
+# ============================================
+# macOS / Swift / Xcode
+# ============================================
+
+# Xcode
+macos/*.xcodeproj/*
+!macos/*.xcodeproj/project.pbxproj
+!macos/*.xcodeproj/xcshareddata/
+macos/*.xcworkspace/*
+!macos/*.xcworkspace/contents.xcworkspacedata
+!macos/*.xcworkspace/xcshareddata/
+
+# User-specific
+macos/*.xcuserstate
+macos/*.xcuserdatad/
+macos/xcuserdata/
+macos/.DS_Store
+
+# Build artifacts
+macos/build/
+macos/DerivedData/
+macos/*.moved-aside
+macos/*.pbxuser
+macos/*.mode1v3
+macos/*.mode2v3
+macos/*.perspectivev3
+
+# Swift Package Manager
+macos/.swiftpm/
+macos/.build/
+macos/Package.resolved
+
+# CocoaPods (if used)
+macos/Pods/
+macos/*.podspec
+macos/Podfile.lock
+
+# Carthage (if used)
+macos/Carthage/Build/
+
+# Fastlane
+macos/fastlane/report.xml
+macos/fastlane/Preview.html
+macos/fastlane/screenshots/**/*.png
+macos/fastlane/test_output
+
+# Code coverage
+macos/*.gcno
+macos/*.gcda
+
+# ============================================
+# Android / Kotlin / Gradle
+# ============================================
+
+# Gradle
+android/.gradle/
+android/build/
+android/local.properties
+
+# Android Studio
+android/.idea/
+android/*.iml
+android/.externalNativeBuild
+android/.cxx
+android/captures/
+
+# Build outputs
+android/app/build/
+android/*/build/
+android/app/release/
+android/app/debug/
+
+# Signing files
+android/*.jks
+android/*.keystore
+android/keystore.properties
+
+# NDK
+android/obj/
+android/.externalNativeBuild/
+
+# User-specific
+android/.DS_Store
+android/misc.xml
+android/deploymentTargetDropDown.xml
+android/render.experimental.xml
+
+# Lint
+android/lint/
+
+# ============================================
+# Rust / Backend
+# ============================================
+
+# Cargo
+backend/target/
+backend/Cargo.lock
+
+# Build artifacts
+backend/**/*.rs.bk
+backend/*.pdb
+
+# IDE
+backend/.idea/
+backend/.vscode/
+
+# ============================================
+# General
+# ============================================
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.cache
+
+# ============================================
+# Tests
+# ============================================
+
+tests/coverage/
+tests/results/
+tests/*.xml
+
+# ============================================
+# Documentation (build artifacts only)
+# ============================================
+
+docs/build/
+docs/.vuepress/dist/
+
+# ============================================
+# Sensitive Data
+# ============================================
+
+# Keys and secrets
+*.pem
+*.key
+*.p12
+*.cer
+*.mobileprovision
+secrets/
+credentials/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================
+# Distribution
+# ============================================
+
+dist/
+release/
+*.dmg
+*.app.zip
+*.apk
+*.aab
+*.ipa
+
+# ============================================
+# Project-specific
+# ============================================
+
+# Redis dumps
+dump.rdb
+
+# Test devices
+test-devices/
+
+# Temporary notes (but keep official docs)
+notes.md
+scratch.md
+TODO.txt
+

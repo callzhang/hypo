@@ -101,6 +101,7 @@ Sent when clipboard content changes and needs to be synced.
 | `data` | String | Yes | Content (Base64 for binary) |
 | `metadata` | Object | No | Type-specific metadata |
 | `device` | Object | Yes | Source device information |
+| `target` | String | No | Destination device ID (if routing to a specific peer) |
 | `encryption` | Object | Yes | Encryption metadata |
 
 ---

@@ -1,9 +1,9 @@
 # Hypo Project Status
 
-**Last Updated**: October 2, 2025
-**Current Sprint**: Sprint 1 - Foundation & Architecture  
-**Project Phase**: Initialization  
-**Overall Progress**: 6%
+**Last Updated**: October 3, 2025
+**Current Sprint**: Sprint 1 - Foundation & Architecture
+**Project Phase**: Initialization
+**Overall Progress**: 14%
 
 ---
 
@@ -21,12 +21,15 @@
 - [x] Published JSON Schema for protocol validation (docs/protocol.schema.json)
 - [x] Initialized backend Rust project structure
 - [x] Initialized Android project structure with Gradle
-- [x] Set up Git repository with initial commit
+- [x] Bootstrapped macOS Swift package + SwiftUI menu bar shell
+- [x] Implemented Android foreground sync service, Room persistence, and Compose history UI
+- [x] Added Redis-backed WebSocket session manager with tests
 
 ### In Progress 🚧
-- [ ] Initialize macOS Xcode project
+- [ ] Finalize macOS Xcode workspace wiring (SPM package hooked up, throttling pending)
 - [ ] Research and select cryptographic libraries
 - [ ] Set up local development environments for testing
+- [ ] Define protocol error codes and control message catalogue
 
 ### Blocked 🚫
 None currently
@@ -40,15 +43,14 @@ None currently
 
 | Phase | Status | Completion |
 |-------|--------|------------|
-| Phase 1.1: Project Setup | In Progress | 85% |
+| Phase 1.1: Project Setup | Completed | 100% |
 | Phase 1.2: Protocol Definition | Completed | 100% |
 | Phase 1.3: Security Foundation | Pending | 0% |
 
 **Next Steps**:
-1. Decide whether to adopt Protocol Buffers alongside JSON messaging
-2. Prototype schema validation in backend integration tests
-3. Begin evaluating cryptographic libraries across platforms
-4. Schedule kickoff for macOS project initialization
+1. Wire Swift package into Xcode workspace and implement clipboard throttling controls.
+2. Document protocol error codes and control flows, then extend backend validation tests.
+3. Evaluate CryptoKit, Tink, and RustCrypto suites for AES-256-GCM + ECDH support.
 
 ---
 
@@ -135,6 +137,12 @@ None currently
 
 ### October 2, 2025
 - **Protocol**: Added formal JSON Schema definition for clipboard/control messages to support validation tooling
+
+### October 3, 2025
+- **macOS**: Added Swift Package with SwiftUI menu bar shell, history store actor, and NSPasteboard monitor.
+- **Android**: Implemented foreground clipboard sync service, Room persistence, and Compose history UI with clearing support.
+- **Backend**: Added session manager for WebSocket routing plus unit tests; updated protocol schema with optional target routing field.
+- **Planning**: Updated roadmap, tasks, and status dashboards to reflect coding progress and JSON-first protocol decision.
 
 ---
 

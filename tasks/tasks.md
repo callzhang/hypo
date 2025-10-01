@@ -8,26 +8,27 @@ Last Updated: October 1, 2025
 ## Sprint 1: Foundation & Architecture (Weeks 1-2)
 
 ### Phase 1.1: Project Setup
-- [ ] Initialize repository structure
-  - [ ] Create mono-repo with `macos/`, `android/`, `backend/` directories
-  - [ ] Set up `.gitignore` for each platform
-  - [ ] Initialize version control with semantic versioning
-- [ ] Documentation
+- [x] Initialize repository structure
+  - [x] Create mono-repo with `macos/`, `android/`, `backend/` directories
+  - [x] Set up `.gitignore` for each platform
+  - [x] Initialize version control with semantic versioning
+- [x] Documentation
   - [x] Create `docs/architecture.mermaid`
   - [x] Create `docs/technical.md`
   - [x] Create `tasks/tasks.md`
-  - [ ] Create `docs/status.md`
-  - [ ] Create `changelog.md`
-  - [ ] Create `README.md` with setup instructions
+  - [x] Create `docs/status.md`
+  - [x] Create `changelog.md`
+  - [x] Create `README.md` with setup instructions
 - [ ] Development environment
   - [ ] macOS: Xcode 15+, Swift 6 setup
   - [ ] Android: Android Studio, Kotlin 2.0 setup
   - [ ] Backend: Rust 1.75+, Redis local instance
 
 ### Phase 1.2: Protocol Definition
-- [ ] Define JSON message schema with validation
-- [ ] Implement protocol buffers or stick with JSON (decision point)
-- [ ] Create protocol documentation with examples
+- [x] Define JSON message schema with validation (see `docs/protocol.schema.json`)
+- [x] Implement protocol buffers or stick with JSON (decision point)
+  - ✅ Decision: Ship v1 with JSON payloads, revisit binary encoding in Sprint 5 performance review.
+- [x] Create protocol documentation with examples
 - [ ] Define error codes and handling
 
 ### Phase 1.3: Security Foundation
@@ -46,21 +47,21 @@ Last Updated: October 1, 2025
 ## Sprint 2: Core Sync Engine (Weeks 3-4)
 
 ### Phase 2.1: macOS Client - Core
-- [ ] Create Xcode project with SPM dependencies
-- [ ] Implement `ClipboardMonitor` with NSPasteboard polling
-- [ ] Implement `ClipboardItem` Core Data model
-- [ ] Create `HistoryManager` with CRUD operations
-- [ ] Implement de-duplication logic (hash-based)
+- [x] Create Xcode project with SPM dependencies *(Swift Package created in `macos/Package.swift` with executable target ready for Xcode integration)*
+- [x] Implement `ClipboardMonitor` with NSPasteboard polling
+- [x] Implement `ClipboardItem` Core Data model *(implemented as `ClipboardEntry` domain model with metadata structs)*
+- [x] Create `HistoryManager` with CRUD operations
+- [x] Implement de-duplication logic (hash-based)
 - [ ] Implement throttling (token bucket)
-- [ ] Unit tests for clipboard monitoring
+- [ ] Unit tests for clipboard monitoring *(History store coverage in place; monitor tests pending due to AppKit dependency)*
 
 ### Phase 2.2: Android Client - Core
-- [ ] Create Android project with Gradle Kotlin DSL
-- [ ] Implement `ClipboardSyncService` (Foreground)
-- [ ] Implement `ClipboardListener` with ClipboardManager
-- [ ] Create Room database schema
-- [ ] Create `ClipboardRepository` with Flow-based API
-- [ ] Implement de-duplication and throttling
+- [x] Create Android project with Gradle Kotlin DSL *(base project bootstrapped with Compose + Hilt wiring)*
+- [x] Implement `ClipboardSyncService` (Foreground)
+- [x] Implement `ClipboardListener` with ClipboardManager
+- [x] Create Room database schema
+- [x] Create `ClipboardRepository` with Flow-based API
+- [x] Implement de-duplication and throttling *(listener hash guard, repository Flow backpressure)*
 - [ ] Unit tests with MockK
 
 ### Phase 2.3: Backend Relay - Core

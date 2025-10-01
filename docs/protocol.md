@@ -45,6 +45,19 @@ All messages are JSON objects with the following schema:
 | `type` | Enum | Yes | Message type: `clipboard`, `control` |
 | `payload` | Object | Yes | Type-specific payload data |
 
+### 2.2 JSON Schema Reference
+
+A machine-readable JSON Schema for protocol messages is available in
+[`docs/protocol.schema.json`](./protocol.schema.json). The schema codifies all
+required fields, enumerations, and content-specific constraints so clients and
+test suites can validate payloads automatically. Example validation command:
+
+```bash
+pnpm jsonschema docs/protocol.schema.json payload.json
+```
+
+Any linting tool that supports JSON Schema Draft 2020-12 will work.
+
 ---
 
 ## 3. Clipboard Messages
@@ -88,6 +101,7 @@ Sent when clipboard content changes and needs to be synced.
 | `data` | String | Yes | Content (Base64 for binary) |
 | `metadata` | Object | No | Type-specific metadata |
 | `device` | Object | Yes | Source device information |
+| `target` | String | No | Destination device ID (if routing to a specific peer) |
 | `encryption` | Object | Yes | Encryption metadata |
 
 ---

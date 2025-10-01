@@ -1,0 +1,27 @@
+package com.hypo.clipboard.data.local
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import com.hypo.clipboard.domain.model.ClipboardType
+import java.time.Instant
+
+@Entity(tableName = "clipboard_items")
+data class ClipboardEntity(
+    @PrimaryKey
+    val id: String,
+    @ColumnInfo(name = "type")
+    val type: ClipboardType,
+    @ColumnInfo(name = "content")
+    val content: String,
+    @ColumnInfo(name = "preview")
+    val preview: String,
+    @ColumnInfo(name = "metadata")
+    val metadata: Map<String, String>?,
+    @ColumnInfo(name = "device_id")
+    val deviceId: String,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Instant,
+    @ColumnInfo(name = "is_pinned")
+    val isPinned: Boolean
+)

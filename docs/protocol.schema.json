@@ -377,7 +377,11 @@
                   "UNAUTHORIZED",
                   "RATE_LIMITED",
                   "PAYLOAD_TOO_LARGE",
-                  "DEVICE_NOT_PAIRED"
+                  "DEVICE_NOT_PAIRED",
+                  "DEVICE_OFFLINE",
+                  "DUPLICATE_DEVICE_ID",
+                  "SESSION_CONFLICT",
+                  "INTERNAL_ERROR"
                 ],
                 "description": "Machine-readable error code."
               },

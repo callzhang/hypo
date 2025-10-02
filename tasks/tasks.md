@@ -32,10 +32,10 @@ Last Updated: October 3, 2025
 - [x] Define error codes and handling *(see `docs/protocol.md` §4.4 for catalogue and retry rules)*
 
 ### Phase 1.3: Security Foundation
-- [ ] Research and select crypto libraries *(guided by PRD §6 security requirements; spike pending)*
-  - [ ] macOS: CryptoKit evaluation
-  - [ ] Android: Jetpack Security or Tink
-  - [ ] Backend: RustCrypto
+- [x] Research and select crypto libraries *(see `docs/crypto_research.md` for evaluation matrix)*
+  - [x] macOS: CryptoKit evaluation
+  - [x] Android: Jetpack Security or Tink
+  - [x] Backend: RustCrypto
 - [ ] Implement encryption module (cross-platform compatible) *(blocked on library selection)*
   - [ ] AES-256-GCM encryption/decryption
   - [ ] Nonce generation
@@ -53,7 +53,7 @@ Last Updated: October 3, 2025
 ## Sprint 2: Core Sync Engine (Weeks 3-4)
 
 ### Phase 2.1: macOS Client - Core
-- [x] Create Xcode project with SPM dependencies *(Swift Package created in `macos/Package.swift` with executable target ready for Xcode integration)*
+- [x] Create Xcode project with SPM dependencies *(Swift Package created in `macos/Package.swift` with workspace at `macos/HypoApp.xcworkspace` ready for Xcode integration)*
 - [x] Implement `ClipboardMonitor` with NSPasteboard polling
 - [x] Implement `ClipboardItem` Core Data model *(implemented as `ClipboardEntry` domain model with metadata structs)*
 - [x] Create `HistoryManager` with CRUD operations
@@ -77,7 +77,8 @@ Last Updated: October 3, 2025
 - [x] Device registration/unregistration
 - [x] Message routing logic
 - [x] Health check endpoint
-- [ ] Unit tests for routing logic
+- [x] Unit tests for session routing manager *(covers registration, replacement, offline handling)*
+- [ ] Integration tests for router fan-out logic
 
 ---
 

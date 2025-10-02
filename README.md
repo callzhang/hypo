@@ -94,8 +94,8 @@ hypo/
 # Navigate to macOS project
 cd macos
 
-# Open in Xcode
-open Hypo.xcodeproj
+# Open the Swift Package workspace in Xcode
+xed HypoApp.xcworkspace  # or: open HypoApp.xcworkspace
 
 # Set your development team in Signing & Capabilities
 # Build and run (⌘R)

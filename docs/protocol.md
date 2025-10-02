@@ -406,6 +406,10 @@ over time.
 | `RATE_LIMITED` | 429 | warning | Token bucket exhausted. | Exponential backoff; honor `retry_after_ms`. |
 | `PAYLOAD_TOO_LARGE` | 413 | warning | Payload exceeds size cap. | Compress or trim; notify user of skip. |
 | `DEVICE_NOT_PAIRED` | 403 | critical | Target device not paired. | Start pairing flow or show pairing error UI. |
+| `DEVICE_OFFLINE` | 409 | warning | Destination session not connected. | Queue locally and surface offline banner; auto-resend on reconnect. |
+| `DUPLICATE_DEVICE_ID` | 409 | error | Multiple devices attempted to register the same ID. | Force re-registration with unique ID; prompt pairing refresh. |
+| `SESSION_CONFLICT` | 423 | error | Message routing conflict detected (e.g., stale session token). | Drop conflicting session and re-establish transport. |
+| `INTERNAL_ERROR` | 500 | critical | Unexpected server failure. | Retry with exponential backoff; escalate if persistent. |
 
 > ℹ️ **HTTP Mapping** provides guidance for REST-equivalent analytics dashboards.
 > WebSocket frames still use the control message format above.

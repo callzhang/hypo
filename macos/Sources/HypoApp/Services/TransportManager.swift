@@ -19,12 +19,16 @@ public final class TransportManager {
     }
 
     public func loadTransport() -> SyncTransport {
-        let preference = preferenceStorage.loadPreference() ?? .lanFirst
+        let preference = currentPreference()
         return provider.preferredTransport(for: preference)
     }
 
     public func update(preference: TransportPreference) {
         preferenceStorage.savePreference(preference)
+    }
+
+    public func currentPreference() -> TransportPreference {
+        preferenceStorage.loadPreference() ?? .lanFirst
     }
 }
 

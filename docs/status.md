@@ -19,17 +19,19 @@
 - [x] Created comprehensive README with project overview
 - [x] Defined protocol specification (docs/protocol.md)
 - [x] Published JSON Schema for protocol validation (docs/protocol.schema.json)
+- [x] Documented error catalogue, retry, and telemetry guidance for control messages (docs/protocol.md §4.4)
 - [x] Initialized backend Rust project structure
 - [x] Initialized Android project structure with Gradle
 - [x] Bootstrapped macOS Swift package + SwiftUI menu bar shell
 - [x] Implemented Android foreground sync service, Room persistence, and Compose history UI
-- [x] Added Redis-backed WebSocket session manager with tests
+- [x] Added Redis-backed WebSocket session manager with expanded tests
+- [x] Wired Swift Package into reusable Xcode workspace (`macos/HypoApp.xcworkspace`)
+- [x] Completed cross-platform cryptography library evaluation (`docs/crypto_research.md`)
 
 ### In Progress 🚧
-- [ ] Finalize macOS Xcode workspace wiring (SPM package hooked up, throttling pending)
-- [ ] Research and select cryptographic libraries
+- [ ] Implement AES-256-GCM module across platforms
 - [ ] Set up local development environments for testing
-- [ ] Define protocol error codes and control message catalogue
+- [ ] Build router integration test harness
 
 ### Blocked 🚫
 None currently
@@ -45,12 +47,18 @@ None currently
 |-------|--------|------------|
 | Phase 1.1: Project Setup | Completed | 100% |
 | Phase 1.2: Protocol Definition | Completed | 100% |
-| Phase 1.3: Security Foundation | Pending | 0% |
+| Phase 1.3: Security Foundation | In Progress | 30% |
 
 **Next Steps**:
+<<<<<<< HEAD
 1. Wire Swift package into Xcode workspace and implement clipboard throttling controls.
 2. Document protocol error codes and control flows, then extend backend validation tests.
 3. Evaluate CryptoKit, Tink, and RustCrypto suites for AES-256-GCM + ECDH support.
+=======
+1. Implement shared AES-256-GCM abstraction guided by `docs/crypto_research.md`.
+2. Extend backend validation tests to assert error catalogue coverage and retry hints.
+3. Stand up local Redis + backend stack for integration testing of router fan-out.
+>>>>>>> 0088d276b831e08cf61541dacb80eb5e7e9c3cf5
 
 ---
 

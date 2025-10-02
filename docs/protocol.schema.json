@@ -377,9 +377,18 @@
                   "UNAUTHORIZED",
                   "RATE_LIMITED",
                   "PAYLOAD_TOO_LARGE",
-                  "DEVICE_NOT_PAIRED"
+                  "DEVICE_NOT_PAIRED",
+                  "DEVICE_OFFLINE",
+                  "DUPLICATE_DEVICE_ID",
+                  "SESSION_CONFLICT",
+                  "INTERNAL_ERROR"
                 ],
                 "description": "Machine-readable error code."
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["info", "warning", "error", "critical"],
+                "description": "Optional severity hint for client UX adjustments."
               },
               "message": {
                 "type": "string",
@@ -389,7 +398,31 @@
               "details": {
                 "type": "object",
                 "description": "Optional structured context describing the error.",
-                "additionalProperties": true
+                "additionalProperties": false,
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "description": "Logical field name related to the error."
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "JSON pointer-style path that failed validation."
+                  },
+                  "retry_after_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Milliseconds a client SHOULD wait before retrying."
+                  },
+                  "hint": {
+                    "type": "string",
+                    "description": "Human-readable recommendation for recovery."
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Opaque server-provided metadata for logging/diagnostics.",
+                    "additionalProperties": true
+                  }
+                }
               }
             }
           }

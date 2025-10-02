@@ -94,8 +94,8 @@ hypo/
 # Navigate to macOS project
 cd macos
 
-# Open in Xcode
-open Hypo.xcodeproj
+# Open the Swift Package workspace in Xcode
+xed HypoApp.xcworkspace  # or: open HypoApp.xcworkspace
 
 # Set your development team in Signing & Capabilities
 # Build and run (⌘R)
@@ -144,6 +144,25 @@ docker-compose up
 **Requirements**:
 - Rust 1.75+
 - Redis 7+ (or Docker)
+
+### Build Verification
+
+The current toolchain compiles cleanly in this repository. To reproduce the
+latest verification run:
+
+```bash
+# macOS Swift package build (from repo root)
+cd macos
+swift build
+
+# Backend relay (from repo root)
+cd backend
+cargo build
+```
+
+The Android client requires the Android SDK, which is not available in this
+container image; run `./gradlew assembleDebug` locally once the SDK is
+installed.
 
 ---
 

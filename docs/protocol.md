@@ -358,7 +358,9 @@ Sent by client before closing connection gracefully.
 
 ### 4.4 Error
 
-Sent by server when an error occurs.
+Sent by server when an error occurs. Errors always carry a machine readable
+`code`, a human readable `message`, and optional contextual `details` to aid in
+client remediation.
 
 ```json
 {
@@ -369,21 +371,64 @@ Sent by server when an error occurs.
   "payload": {
     "action": "error",
     "code": "INVALID_MESSAGE",
+    "severity": "error",
     "message": "Message validation failed: missing required field 'content_type'",
     "details": {
-      "field": "content_type"
+      "field": "content_type",
+      "path": "payload.content_type",
+      "retry_after_ms": 0
     }
   }
 }
 ```
 
-**Error Codes**:
-- `INVALID_MESSAGE`: Malformed JSON or missing fields
-- `UNSUPPORTED_VERSION`: Protocol version mismatch
-- `UNAUTHORIZED`: Authentication failed
-- `RATE_LIMITED`: Too many requests
-- `PAYLOAD_TOO_LARGE`: Content exceeds size limit
-- `DEVICE_NOT_PAIRED`: Devices not paired
+**Details Object**
+
+The `details` object is a structured envelope that MAY contain the following
+fields. Clients MUST ignore unknown fields so the server can evolve the shape
+over time.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `field` | String | Logical field name related to the error. |
+| `path` | String | JSON pointer-style path that failed validation. |
+| `retry_after_ms` | Integer | Milliseconds a client SHOULD wait before retrying. |
+| `hint` | String | Human-readable recommendation for recovery. |
+| `context` | Object | Opaque server-provided metadata for logging/diagnostics. |
+
+#### 4.4.1 Error Catalogue
+
+| Code | HTTP Mapping | Severity | Description | Client Action |
+|------|--------------|----------|-------------|---------------|
+| `INVALID_MESSAGE` | 400 | error | Schema validation failed. | Log and drop frame; retry after fix. |
+| `UNSUPPORTED_VERSION` | 426 | error | Protocol version unsupported. | Suspend sync; prompt upgrade; retry after update. |
+| `UNAUTHORIZED` | 401 | critical | Authentication failure. | Trigger re-auth; if repeated, force re-pair. |
+| `RATE_LIMITED` | 429 | warning | Token bucket exhausted. | Exponential backoff; honor `retry_after_ms`. |
+| `PAYLOAD_TOO_LARGE` | 413 | warning | Payload exceeds size cap. | Compress or trim; notify user of skip. |
+| `DEVICE_NOT_PAIRED` | 403 | critical | Target device not paired. | Start pairing flow or show pairing error UI. |
+| `DEVICE_OFFLINE` | 409 | warning | Destination session not connected. | Queue locally and surface offline banner; auto-resend on reconnect. |
+| `DUPLICATE_DEVICE_ID` | 409 | error | Multiple devices attempted to register the same ID. | Force re-registration with unique ID; prompt pairing refresh. |
+| `SESSION_CONFLICT` | 423 | error | Message routing conflict detected (e.g., stale session token). | Drop conflicting session and re-establish transport. |
+| `INTERNAL_ERROR` | 500 | critical | Unexpected server failure. | Retry with exponential backoff; escalate if persistent. |
+
+> ℹ️ **HTTP Mapping** provides guidance for REST-equivalent analytics dashboards.
+> WebSocket frames still use the control message format above.
+
+#### 4.4.2 Retry & Telemetry Guidance
+
+- **Retry Budget**: Clients may retry up to three times for `RATE_LIMITED` and
+  `PAYLOAD_TOO_LARGE` after resolving the underlying issue. All other error
+  codes require human action.
+- **Telemetry**: Log the `code` and `details` fields locally and forward
+  aggregates to diagnostics (when user opts in) to track error budgets.
+- **Backoff**: Use 1s, 5s, 30s exponential backoff for retryable errors. Reset
+  timers after successful message delivery.
+
+#### 4.4.3 Control Message Acknowledgements
+
+For recoverable errors (`RATE_LIMITED`, `PAYLOAD_TOO_LARGE`) the backend MAY
+attach a `retry_after` value (in milliseconds) inside `details`. Clients SHOULD
+respect this hint before retrying to avoid unnecessary load.
 
 ---
 

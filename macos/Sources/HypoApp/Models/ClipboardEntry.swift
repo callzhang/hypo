@@ -62,6 +62,21 @@ public enum ClipboardContent: Equatable, Codable {
         case .file: return "doc"
         }
     }
+
+    public var previewDescription: String {
+        switch self {
+        case .text(let text):
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.count > 100 ? "\(trimmed.prefix(100))…" : trimmed
+        case .link(let url):
+            let absolute = url.absoluteString
+            return absolute.count > 100 ? "\(absolute.prefix(100))…" : absolute
+        case .image(let metadata):
+            return "Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+        case .file(let metadata):
+            return "\(metadata.fileName) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+        }
+    }
 }
 
 public struct ImageMetadata: Equatable, Codable {
@@ -69,12 +84,16 @@ public struct ImageMetadata: Equatable, Codable {
     public let byteSize: Int
     public let format: String
     public let altText: String?
+    public let data: Data?
+    public let thumbnail: Data?
 
-    public init(pixelSize: CGSizeValue, byteSize: Int, format: String, altText: String?) {
+    public init(pixelSize: CGSizeValue, byteSize: Int, format: String, altText: String?, data: Data?, thumbnail: Data?) {
         self.pixelSize = pixelSize
         self.byteSize = byteSize
         self.format = format
         self.altText = altText
+        self.data = data
+        self.thumbnail = thumbnail
     }
 }
 
@@ -82,11 +101,15 @@ public struct FileMetadata: Equatable, Codable {
     public let fileName: String
     public let byteSize: Int
     public let uti: String
+    public let url: URL?
+    public let base64: String?
 
-    public init(fileName: String, byteSize: Int, uti: String) {
+    public init(fileName: String, byteSize: Int, uti: String, url: URL?, base64: String?) {
         self.fileName = fileName
         self.byteSize = byteSize
         self.uti = uti
+        self.url = url
+        self.base64 = base64
     }
 }
 
@@ -97,5 +120,40 @@ public struct CGSizeValue: Equatable, Codable {
     public init(width: Int, height: Int) {
         self.width = width
         self.height = height
+    }
+}
+
+public extension ClipboardEntry {
+    var previewText: String {
+        content.previewDescription
+    }
+
+    func accessibilityDescription() -> String {
+        switch content {
+        case .text(let text):
+            return "Text from \(originDeviceId): \(text)"
+        case .link(let url):
+            return "Link from \(originDeviceId): \(url.absoluteString)"
+        case .image(let metadata):
+            return "Image from \(originDeviceId), format \(metadata.format), size \(metadata.pixelSize.width) by \(metadata.pixelSize.height)"
+        case .file(let metadata):
+            return "File from \(originDeviceId): \(metadata.fileName)"
+        }
+    }
+
+    func previewData() -> Data? {
+        switch content {
+        case .text(let text):
+            return text.data(using: .utf8)
+        case .link(let url):
+            return url.absoluteString.data(using: .utf8)
+        case .image(let metadata):
+            return metadata.data
+        case .file(let metadata):
+            if let base64 = metadata.base64 {
+                return Data(base64Encoded: base64)
+            }
+            return nil
+        }
     }
 }

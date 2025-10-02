@@ -1,0 +1,429 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hypo.app/schemas/protocol.schema.json",
+  "title": "Hypo Clipboard Sync Message",
+  "description": "Schema definition for clipboard and control messages exchanged between Hypo clients and relay services.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "timestamp", "version", "type", "payload"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for each message."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp in UTC."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(\\.(0|[1-9]\\d*))?$",
+      "description": "Protocol version in semantic versioning format (major.minor[.patch])."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["clipboard", "control"],
+      "description": "Message category. Clipboard messages contain clipboard payloads, control messages coordinate sessions."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Typed payload whose structure depends on the message type."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": { "const": "clipboard" }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/clipboardPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": { "const": "control" }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/controlPayload" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "base64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+      "description": "Base64-encoded data without newlines."
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Lowercase hexadecimal SHA-256 digest."
+    },
+    "clipboardPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_type", "data", "device", "encryption"],
+      "properties": {
+        "content_type": {
+          "type": "string",
+          "enum": ["text", "link", "image", "file"],
+          "description": "Type of clipboard content being synchronized."
+        },
+        "data": {
+          "type": "string",
+          "description": "Encrypted clipboard payload. Plain UTF-8 string for text and link types, Base64 for binary types."
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["size", "hash"],
+          "properties": {
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Original payload size in bytes before encryption."
+            },
+            "hash": {
+              "$ref": "#/$defs/hash"
+            },
+            "encoding": {
+              "type": "string",
+              "description": "Character encoding for text payloads (defaults to UTF-8)."
+            },
+            "mime_type": {
+              "type": "string",
+              "description": "MIME type for image or file payloads."
+            },
+            "filename": {
+              "type": "string",
+              "description": "Original filename for file payloads, including extension."
+            },
+            "extension": {
+              "type": "string",
+              "description": "File extension for file payloads."
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Image width in pixels."
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Image height in pixels."
+            },
+            "title": {
+              "type": "string",
+              "description": "Page title for link payloads."
+            },
+            "favicon": {
+              "$ref": "#/$defs/base64",
+              "description": "Base64-encoded favicon for link payloads."
+            }
+          }
+        },
+        "device": {
+          "$ref": "#/$defs/device"
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Destination device identifier for directed delivery."
+        },
+        "encryption": {
+          "$ref": "#/$defs/encryption"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "content_type": { "const": "text" }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "string",
+                "maxLength": 102400,
+                "description": "UTF-8 encoded text up to 100KB."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "content_type": { "const": "link" }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "string",
+                "format": "uri",
+                "maxLength": 2048,
+                "description": "URL conforming to RFC 3986."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "content_type": { "enum": ["image", "file"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/base64",
+                "description": "Base64-encoded binary content." }
+            }
+          }
+        }
+      ]
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "platform", "name", "version"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable device identifier generated during pairing."
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["macos", "android", "ios", "windows", "linux"],
+          "description": "Source platform for the clipboard event."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable device name shown in UI."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(\\.(0|[1-9]\\d*))?$",
+          "description": "Application version running on the device."
+        }
+      }
+    },
+    "encryption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "nonce", "tag"],
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "const": "AES-256-GCM",
+          "description": "Encryption algorithm identifier."
+        },
+        "nonce": {
+          "$ref": "#/$defs/base64",
+          "description": "Base64-encoded 12-byte nonce."
+        },
+        "tag": {
+          "$ref": "#/$defs/base64",
+          "description": "Base64-encoded 16-byte authentication tag."
+        }
+      }
+    },
+    "controlPayload": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "handshake",
+            "handshake_ack",
+            "ping",
+            "pong",
+            "disconnect",
+            "error"
+          ],
+          "description": "Control command identifier."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": { "const": "handshake" }
+            }
+          },
+          "then": {
+            "required": ["device", "auth"],
+            "additionalProperties": false,
+            "properties": {
+              "action": { "const": "handshake" },
+              "device": { "$ref": "#/$defs/device" },
+              "auth": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["signature"],
+                "properties": {
+                  "signature": {
+                    "$ref": "#/$defs/base64",
+                    "description": "Signed challenge proving device identity."
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": { "const": "handshake_ack" }
+            }
+          },
+          "then": {
+            "required": ["session_id", "expires_at"],
+            "additionalProperties": false,
+            "properties": {
+              "action": { "const": "handshake_ack" },
+              "session_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Opaque token referencing the active session."
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Timestamp when the session will expire."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": { "const": "ping" }
+            }
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "action": { "const": "ping" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": { "const": "pong" }
+            }
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "action": { "const": "pong" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": { "const": "disconnect" }
+            }
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "action": { "const": "disconnect" },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "user_logout",
+                  "app_background",
+                  "network_change",
+                  "device_sleep"
+                ],
+                "description": "Reason for disconnecting."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": { "const": "error" }
+            }
+          },
+          "then": {
+            "required": ["code", "message"],
+            "additionalProperties": false,
+            "properties": {
+              "action": { "const": "error" },
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_MESSAGE",
+                  "UNSUPPORTED_VERSION",
+                  "UNAUTHORIZED",
+                  "RATE_LIMITED",
+                  "PAYLOAD_TOO_LARGE",
+                  "DEVICE_NOT_PAIRED"
+                ],
+                "description": "Machine-readable error code."
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["info", "warning", "error", "critical"],
+                "description": "Optional severity hint for client UX adjustments."
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Human-readable error description."
+              },
+              "details": {
+                "type": "object",
+                "description": "Optional structured context describing the error.",
+                "additionalProperties": false,
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "description": "Logical field name related to the error."
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "JSON pointer-style path that failed validation."
+                  },
+                  "retry_after_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Milliseconds a client SHOULD wait before retrying."
+                  },
+                  "hint": {
+                    "type": "string",
+                    "description": "Human-readable recommendation for recovery."
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Opaque server-provided metadata for logging/diagnostics.",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -64,6 +64,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Protocol specification with JSON schema and encryption details
   - Platform-specific README files with setup instructions
 
+#### Added - October 2, 2025
+- **Protocol Validation**: Published JSON Schema for clipboard and control messages (`docs/protocol.schema.json`) to enable automated validation in tooling and test suites
+
+#### Added - October 3, 2025
+- **macOS Client Foundations**: Introduced Swift Package with SwiftUI menu bar shell, history store actor, and NSPasteboard monitor implementation.
+- **Android Client Foundations**: Implemented foreground clipboard sync service, Room-backed history persistence, Hilt DI graph, and Compose history UI.
+- **Backend Relay Enhancements**: Added in-memory session manager for WebSocket routing with targeted broadcast logic and unit tests.
+- **macOS Tooling**: Created reusable Xcode workspace (`macos/HypoApp.xcworkspace`) to streamline local builds of the Swift Package.
+- **Security Planning**: Documented cross-platform cryptography library evaluation (`docs/crypto_research.md`) selecting CryptoKit, Tink, and RustCrypto AES-GCM.
+- **Protocol Hardening**: Expanded structured error catalogue with offline, conflict, and internal error codes.
+- **Roadmap Alignment**: Updated task tracker and project status to reflect coding progress and JSON protocol decision for MVP.
+
 #### Infrastructure
 - Initialized Git repository with comprehensive .gitignore
 - Created MIT license file
@@ -138,6 +150,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-**Changelog Maintained By**: Principal Engineering Team  
-**Last Updated**: October 1, 2025
+**Changelog Maintained By**: Principal Engineering Team
+**Last Updated**: October 3, 2025
 

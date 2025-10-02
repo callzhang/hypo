@@ -94,8 +94,8 @@ hypo/
 # Navigate to macOS project
 cd macos
 
-# Open in Xcode
-open Hypo.xcodeproj
+# Open the Swift Package workspace in Xcode
+xed HypoApp.xcworkspace  # or: open HypoApp.xcworkspace
 
 # Set your development team in Signing & Capabilities
 # Build and run (⌘R)
@@ -145,6 +145,25 @@ docker-compose up
 - Rust 1.75+
 - Redis 7+ (or Docker)
 
+### Build Verification
+
+The current toolchain compiles cleanly in this repository. To reproduce the
+latest verification run:
+
+```bash
+# macOS Swift package build (from repo root)
+cd macos
+swift build
+
+# Backend relay (from repo root)
+cd backend
+cargo build
+```
+
+The Android client requires the Android SDK, which is not available in this
+container image; run `./gradlew assembleDebug` locally once the SDK is
+installed.
+
 ---
 
 ## 🔒 Security
@@ -181,19 +200,22 @@ Hypo takes security seriously:
 ## 📊 Current Status
 
 **Phase**: Sprint 1 - Foundation & Architecture  
-**Progress**: 5%  
+**Progress**: 14%
 **Last Updated**: October 1, 2025
 
 **Recent Milestones**:
 - ✅ Architecture designed
 - ✅ Technical specifications complete
 - ✅ Development roadmap defined
-- 🚧 Project structure initialization
+- ✅ Project structure initialization
+- ✅ macOS Swift package + history store prototype
+- ✅ Android foreground sync service + Room storage
+- ✅ Backend WebSocket session manager with tests
 
 **Next Steps**:
-1. Initialize platform-specific projects
-2. Define JSON protocol schema
-3. Research and select crypto libraries
+1. Wire Swift package into Xcode workspace and add throttling controls
+2. Backfill protocol error codes and control message catalogue
+3. Research and select crypto libraries across platforms
 
 **Full Status**: See [`docs/status.md`](docs/status.md)
 

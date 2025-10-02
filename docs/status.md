@@ -50,15 +50,9 @@ None currently
 | Phase 1.3: Security Foundation | In Progress | 30% |
 
 **Next Steps**:
-<<<<<<< HEAD
-1. Wire Swift package into Xcode workspace and implement clipboard throttling controls.
-2. Document protocol error codes and control flows, then extend backend validation tests.
-3. Evaluate CryptoKit, Tink, and RustCrypto suites for AES-256-GCM + ECDH support.
-=======
 1. Implement shared AES-256-GCM abstraction guided by `docs/crypto_research.md`.
 2. Extend backend validation tests to assert error catalogue coverage and retry hints.
 3. Stand up local Redis + backend stack for integration testing of router fan-out.
->>>>>>> 0088d276b831e08cf61541dacb80eb5e7e9c3cf5
 
 ---
 

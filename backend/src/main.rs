@@ -3,6 +3,7 @@ use actix_web::{web, App, HttpResponse, HttpServer};
 use std::time::Instant;
 use tracing::info;
 
+mod crypto;
 mod handlers;
 mod middleware;
 mod models;

@@ -48,6 +48,11 @@ prometheus = "0.13"
 # Security
 sha2 = "0.10"
 base64 = "0.21"
+aes-gcm = "0.10"
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+hkdf = "0.12"
+rand = { version = "0.8", features = ["std"] }
+hex = "0.4"
 
 [dev-dependencies]
 actix-test = "0.1"

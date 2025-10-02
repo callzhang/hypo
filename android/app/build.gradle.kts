@@ -85,6 +85,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.google.android.material:material:1.11.0")
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.6")
@@ -119,6 +120,7 @@ dependencies {
 
     // Security
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("com.google.crypto.tink:tink-android:1.13.0")
 
     // QR Code Scanning
     implementation("com.google.mlkit:barcode-scanning:17.2.0")
@@ -133,6 +135,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.5.0")
 
     // Testing
+    testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     testImplementation("io.mockk:mockk:1.13.9")

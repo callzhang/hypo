@@ -13,8 +13,7 @@ pub struct DeviceInfo {
 pub enum Platform {
     MacOS,
     Android,
-    iOS,
+    Ios,
     Windows,
     Linux,
 }
-

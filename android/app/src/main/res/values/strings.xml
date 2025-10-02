@@ -1,29 +1,31 @@
 <resources>
     <string name="app_name">Hypo</string>
     <string name="app_description">Cross-platform clipboard sync</string>
-    
+
     <!-- Service -->
     <string name="service_notification_title">Hypo Clipboard Sync</string>
     <string name="service_notification_text">Syncing clipboard with macOS</string>
     <string name="service_notification_channel_name">Clipboard Sync</string>
     <string name="service_notification_channel_description">Persistent notification for clipboard synchronization</string>
-    
+
     <!-- Actions -->
     <string name="action_pause">Pause</string>
     <string name="action_resume">Resume</string>
     <string name="action_stop">Stop</string>
-    
+
     <!-- Home Screen -->
     <string name="home_title">Clipboard</string>
     <string name="home_latest_item">Latest Item</string>
     <string name="home_no_items">No clipboard items yet</string>
     <string name="home_view_history">View History</string>
-    
+
     <!-- History Screen -->
     <string name="history_title">Clipboard History</string>
     <string name="history_search_hint">Search clipboard…</string>
-    <string name="history_empty">No clipboard history</string>
-    
+    <string name="history_empty_title">History is empty</string>
+    <string name="history_empty_message">Copy something on Android or macOS to see it here.</string>
+    <string name="clear_history">Clear history</string>
+
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
     <string name="settings_sync">Sync Settings</string>
@@ -40,7 +42,7 @@
     <string name="settings_add_device">Add Device</string>
     <string name="settings_battery">Battery Optimization</string>
     <string name="settings_battery_description">Disable battery optimization for reliable background sync</string>
-    
+
     <!-- Pairing Screen -->
     <string name="pairing_title">Pair Device</string>
     <string name="pairing_scan_qr">Scan QR Code</string>
@@ -49,7 +51,7 @@
     <string name="pairing_pair">Pair</string>
     <string name="pairing_success">Device paired successfully</string>
     <string name="pairing_failed">Pairing failed. Please try again.</string>
-    
+
     <!-- Connection Status -->
     <string name="status_connected">Connected</string>
     <string name="status_connecting">Connecting…</string>
@@ -57,22 +59,21 @@
     <string name="status_lan">LAN</string>
     <string name="status_cloud">Cloud</string>
     <string name="status_offline">Offline</string>
-    
+
     <!-- Content Types -->
     <string name="type_text">Text</string>
     <string name="type_link">Link</string>
     <string name="type_image">Image</string>
     <string name="type_file">File</string>
-    
+
     <!-- Notifications -->
     <string name="notif_new_clipboard">New clipboard item from %s</string>
     <string name="notif_action_copy">Copy Again</string>
     <string name="notif_action_delete">Delete</string>
-    
+
     <!-- Errors -->
     <string name="error_generic">Something went wrong</string>
     <string name="error_network">Network error. Please check your connection.</string>
     <string name="error_permission">Permission required</string>
     <string name="error_camera">Camera permission required for QR scanning</string>
 </resources>
-

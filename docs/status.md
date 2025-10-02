@@ -1,13 +1,13 @@
 # Hypo Project Status
 
-**Last Updated**: October 1, 2025  
-**Current Sprint**: Sprint 1 - Foundation & Architecture  
-**Project Phase**: Initialization  
-**Overall Progress**: 5%
+**Last Updated**: October 8, 2025
+**Current Sprint**: Sprint 3 - Transport Layer (Planning)
+**Project Phase**: Core Platform Bring-up
+**Overall Progress**: 30%
 
 ---
 
-## 🎯 Current Milestone: Foundation Setup
+## 🎯 Current Milestone: Core Sync Engine Completion
 
 ### Completed ✅
 - [x] Project inception and PRD analysis
@@ -18,14 +18,29 @@
 - [x] Initialize project structure (mono-repo layout)
 - [x] Created comprehensive README with project overview
 - [x] Defined protocol specification (docs/protocol.md)
+- [x] Published JSON Schema for protocol validation (docs/protocol.schema.json)
+- [x] Documented error catalogue, retry, and telemetry guidance for control messages (docs/protocol.md §4.4)
 - [x] Initialized backend Rust project structure
 - [x] Initialized Android project structure with Gradle
-- [x] Set up Git repository with initial commit
+- [x] Bootstrapped macOS Swift package + SwiftUI menu bar shell
+- [x] Implemented Android foreground sync service, Room persistence, and Compose history UI
+- [x] Added Redis-backed WebSocket session manager with expanded tests
+- [x] Wired Swift Package into reusable Xcode workspace (`macos/HypoApp.xcworkspace`)
+- [x] Completed cross-platform cryptography library evaluation (`docs/crypto_research.md`)
+- [x] Implemented backend AES-256-GCM facade with RFC 5116 vectors and tests
+- [x] Added macOS CryptoKit-based encryption service with deterministic nonce support and unit coverage
+- [x] Delivered Android AES-256-GCM CryptoService with HKDF key derivation and unit coverage
+- [x] Added MockK-backed Android clipboard sync tests for repository fan-out
+- [x] Published shared crypto interoperability vectors (`tests/crypto_test_vectors.json`)
+- [x] Added backend session manager integration tests covering broadcast and direct routing
+- [x] Provisioned Android SDK + Gradle wrapper for reproducible CI-friendly unit tests
+- [x] Realigned Android project to Kotlin 1.9.22 and restored CryptoService/SyncCoordinator test pass
+- [x] Documented Android test workflow alongside macOS/backend build verification
+- [x] Wired encrypted clipboard envelopes end-to-end across macOS, Android, and the relay with shared tests
+- [x] Implemented Android SyncEngine with secure key storage, encrypted envelope emission, and unit coverage for send/decode paths
 
 ### In Progress 🚧
-- [ ] Initialize macOS Xcode project
-- [ ] Research and select cryptographic libraries
-- [ ] Set up local development environments for testing
+- [ ] LAN discovery prototype for macOS ↔ Android
 
 ### Blocked 🚫
 None currently
@@ -39,15 +54,28 @@ None currently
 
 | Phase | Status | Completion |
 |-------|--------|------------|
-| Phase 1.1: Project Setup | In Progress | 85% |
+| Phase 1.1: Project Setup | Completed | 100% |
 | Phase 1.2: Protocol Definition | Completed | 100% |
-| Phase 1.3: Security Foundation | Pending | 0% |
+| Phase 1.3: Security Foundation | In Progress | 30% |
 
 **Next Steps**:
-1. Create mono-repo directory structure
-2. Initialize platform-specific projects (Xcode, Android Studio, Cargo)
-3. Define and document JSON message protocol
-4. Research and select cryptographic libraries
+1. Schedule PRD v0.1 stakeholder review and sign-off.
+2. Finalize device pairing flow specification and QR payload schema.
+3. Publish success metrics dashboard derived from PRD §9.
+
+### Sprint 2: Core Sync Engine (Weeks 3-4)
+**Progress**: 100%
+
+| Phase | Status | Completion |
+|-------|--------|------------|
+| Phase 2.1: macOS Client - Core | Completed | 100% |
+| Phase 2.2: Android Client - Core | Completed | 100% |
+| Phase 2.3: Backend Relay - Core | Completed | 100% |
+
+**Highlights**:
+1. Cross-platform AES-256-GCM modules ship with shared interoperability vectors.
+2. Android unit suites execute via Gradle wrapper against the provisioned SDK/JDK 17 toolchain.
+3. Backend session routing fan-out validated with integration coverage.
 
 ---
 
@@ -57,7 +85,7 @@ None currently
 | Component | Decision | Rationale | Date |
 |-----------|----------|-----------|------|
 | macOS Client | Swift 6 + SwiftUI | Native performance, modern concurrency | Oct 1, 2025 |
-| Android Client | Kotlin 2.0 + Compose | Modern UI, coroutines for async | Oct 1, 2025 |
+| Android Client | Kotlin 1.9.22 + Compose | Modern UI, coroutines for async | Oct 6, 2025 |
 | Backend Relay | Rust + Actix-web | Performance, memory safety, WebSocket support | Oct 1, 2025 |
 | Storage - macOS | Core Data | Native integration, CloudKit future-proof | Oct 1, 2025 |
 | Storage - Android | Room | Official Jetpack library, Flow support | Oct 1, 2025 |
@@ -131,6 +159,25 @@ None currently
 - **Backend**: Initialized Rust project with Actix-web, Redis client, rate limiter
 - **Android**: Initialized project with Gradle, Compose, Hilt DI setup
 - **Infrastructure**: Set up Git repository, created 38 files totaling 4600+ lines
+
+### October 2, 2025
+- **Protocol**: Added formal JSON Schema definition for clipboard/control messages to support validation tooling
+
+### October 3, 2025
+- **macOS**: Added Swift Package with SwiftUI menu bar shell, history store actor, and NSPasteboard monitor.
+- **Android**: Implemented foreground clipboard sync service, Room persistence, and Compose history UI with clearing support.
+- **Backend**: Added session manager for WebSocket routing plus unit tests; updated protocol schema with optional target routing field.
+- **Planning**: Updated roadmap, tasks, and status dashboards to reflect coding progress and JSON-first protocol decision.
+
+### October 5, 2025
+- **Security**: Delivered shared AES-256-GCM implementations across Android, macOS, and the relay with aligned HKDF salt/info parameters and JSON-hosted test vectors.
+- **Android**: Added Tink-backed CryptoService along with MockK-based SyncCoordinator tests to validate repository fan-out behaviour.
+- **Backend**: Added session manager integration tests to verify broadcast fan-out and direct routing paths.
+
+### October 6, 2025
+- **Tooling**: Added Gradle wrapper + SDK provisioning scripts enabling container-friendly Android unit tests.
+- **Android**: Downgraded to Kotlin 1.9.22 for Compose compatibility, restored CryptoService/SyncCoordinator unit suites, and updated manifest resources for build stability.
+- **Documentation**: Refreshed README build verification and status dashboards to reflect Sprint 2 completion and new testing workflow.
 
 ---
 

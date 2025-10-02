@@ -1,76 +1,84 @@
 # Hypo Development Tasks
 
-Version: 0.1.0  
-Last Updated: October 1, 2025
+Version: 0.1.0
+Last Updated: October 3, 2025
 
 ---
 
 ## Sprint 1: Foundation & Architecture (Weeks 1-2)
 
 ### Phase 1.1: Project Setup
-- [ ] Initialize repository structure
-  - [ ] Create mono-repo with `macos/`, `android/`, `backend/` directories
-  - [ ] Set up `.gitignore` for each platform
-  - [ ] Initialize version control with semantic versioning
-- [ ] Documentation
+- [x] Initialize repository structure
+  - [x] Create mono-repo with `macos/`, `android/`, `backend/` directories
+  - [x] Set up `.gitignore` for each platform
+  - [x] Initialize version control with semantic versioning
+- [x] Documentation
   - [x] Create `docs/architecture.mermaid`
   - [x] Create `docs/technical.md`
   - [x] Create `tasks/tasks.md`
-  - [ ] Create `docs/status.md`
-  - [ ] Create `changelog.md`
-  - [ ] Create `README.md` with setup instructions
-- [ ] Development environment
+  - [x] Create `docs/status.md`
+  - [x] Create `changelog.md`
+  - [x] Create `README.md` with setup instructions
+- [ ] Development environment *(see README prerequisites; need validation run on clean machines)*
   - [ ] macOS: Xcode 15+, Swift 6 setup
   - [ ] Android: Android Studio, Kotlin 2.0 setup
   - [ ] Backend: Rust 1.75+, Redis local instance
 
 ### Phase 1.2: Protocol Definition
-- [ ] Define JSON message schema with validation
-- [ ] Implement protocol buffers or stick with JSON (decision point)
-- [ ] Create protocol documentation with examples
-- [ ] Define error codes and handling
+- [x] Define JSON message schema with validation (see `docs/protocol.schema.json`)
+- [x] Implement protocol buffers or stick with JSON (decision point)
+  - ✅ Decision: Ship v1 with JSON payloads, revisit binary encoding in Sprint 5 performance review.
+- [x] Create protocol documentation with examples
+- [x] Define error codes and handling *(see `docs/protocol.md` §4.4 for catalogue and retry rules)*
 
 ### Phase 1.3: Security Foundation
-- [ ] Research and select crypto libraries
-  - [ ] macOS: CryptoKit evaluation
-  - [ ] Android: Jetpack Security or Tink
-  - [ ] Backend: RustCrypto
-- [ ] Implement encryption module (cross-platform compatible)
-  - [ ] AES-256-GCM encryption/decryption
-  - [ ] Nonce generation
-  - [ ] Key derivation from ECDH
-- [ ] Design device pairing flow (QR code format)
+- [x] Research and select crypto libraries *(see `docs/crypto_research.md` for evaluation matrix)*
+  - [x] macOS: CryptoKit evaluation
+  - [x] Android: Jetpack Security or Tink
+  - [x] Backend: RustCrypto
+- [x] Implement encryption module (cross-platform compatible)
+  - [x] AES-256-GCM encryption/decryption
+  - [x] Nonce generation
+  - [x] Key derivation from ECDH
+- [ ] Design device pairing flow (QR code format) *(align detailed spec with PRD §6.1/6.2)*
+
+### Phase 1.4: Product Definition & Planning
+- [x] Draft Product Requirements Document (`docs/prd.md`)
+- [x] Capture UX and interaction concepts for macOS and Android within PRD
+- [ ] Schedule stakeholder review and sign-off for PRD v0.1
+- [ ] Derive success metrics dashboard from PRD §9
 
 ---
 
 ## Sprint 2: Core Sync Engine (Weeks 3-4)
 
 ### Phase 2.1: macOS Client - Core
-- [ ] Create Xcode project with SPM dependencies
-- [ ] Implement `ClipboardMonitor` with NSPasteboard polling
-- [ ] Implement `ClipboardItem` Core Data model
-- [ ] Create `HistoryManager` with CRUD operations
-- [ ] Implement de-duplication logic (hash-based)
-- [ ] Implement throttling (token bucket)
-- [ ] Unit tests for clipboard monitoring
+- [x] Create Xcode project with SPM dependencies *(Swift Package created in `macos/Package.swift` with workspace at `macos/HypoApp.xcworkspace` ready for Xcode integration)*
+- [x] Implement `ClipboardMonitor` with NSPasteboard polling
+- [x] Implement `ClipboardItem` Core Data model *(implemented as `ClipboardEntry` domain model with metadata structs)*
+- [x] Create `HistoryManager` with CRUD operations
+- [x] Implement de-duplication logic (hash-based)
+- [x] Implement throttling (token bucket)
+- [x] Unit tests for clipboard monitoring *(History store coverage in place; monitor tests pending due to AppKit dependency)*
 
 ### Phase 2.2: Android Client - Core
-- [ ] Create Android project with Gradle Kotlin DSL
-- [ ] Implement `ClipboardSyncService` (Foreground)
-- [ ] Implement `ClipboardListener` with ClipboardManager
-- [ ] Create Room database schema
-- [ ] Create `ClipboardRepository` with Flow-based API
-- [ ] Implement de-duplication and throttling
-- [ ] Unit tests with MockK
+- [x] Create Android project with Gradle Kotlin DSL *(base project bootstrapped with Compose + Hilt wiring)*
+- [x] Implement `ClipboardSyncService` (Foreground)
+- [x] Implement `ClipboardListener` with ClipboardManager
+- [x] Create Room database schema
+- [x] Create `ClipboardRepository` with Flow-based API
+- [x] Implement de-duplication and throttling *(listener hash guard, repository Flow backpressure)*
+- [x] Unit tests with MockK
 
 ### Phase 2.3: Backend Relay - Core
-- [ ] Initialize Rust project with Actix-web
-- [ ] Implement WebSocket handler
-- [ ] Implement Redis connection pool
-- [ ] Device registration/unregistration
-- [ ] Message routing logic
-- [ ] Health check endpoint
-- [ ] Unit tests for routing logic
+- [x] Initialize Rust project with Actix-web
+- [x] Implement WebSocket handler
+- [x] Implement Redis connection pool
+- [x] Device registration/unregistration
+- [x] Message routing logic
+- [x] Health check endpoint
+- [x] Unit tests for session routing manager *(covers registration, replacement, offline handling)*
+- [x] Integration tests for router fan-out logic
 
 ---
 
@@ -106,27 +114,27 @@ Last Updated: October 1, 2025
 ## Sprint 4: Content Type Handling (Weeks 7-8)
 
 ### Phase 4.1: Text & Links
-- [ ] macOS: Extract text from NSPasteboard
+- [x] macOS: Extract text from NSPasteboard
 - [ ] Android: Extract text from ClipData
-- [ ] URL validation and link detection
-- [ ] Preview generation (first 100 chars)
+- [x] URL validation and link detection
+- [x] Preview generation (first 100 chars)
 - [ ] End-to-end test: text sync
 
 ### Phase 4.2: Images
-- [ ] macOS: Extract image from NSPasteboard
-- [ ] macOS: Compress to PNG/JPEG if >1MB
-- [ ] macOS: Generate thumbnail for history
+- [x] macOS: Extract image from NSPasteboard
+- [x] macOS: Compress to PNG/JPEG if >1MB
+- [x] macOS: Generate thumbnail for history
 - [ ] Android: Extract bitmap from ClipData
 - [ ] Android: Compress and encode to Base64
 - [ ] Android: Generate thumbnail
 - [ ] End-to-end test: image sync
 
 ### Phase 4.3: Files
-- [ ] macOS: Extract file URL from NSPasteboard
-- [ ] macOS: Read file bytes, encode Base64
+- [x] macOS: Extract file URL from NSPasteboard
+- [x] macOS: Read file bytes, encode Base64
 - [ ] Android: Extract file URI from ClipData
 - [ ] Android: Read content resolver, encode Base64
-- [ ] Implement size limit checks (1MB)
+- [x] Implement size limit checks (1MB)
 - [ ] End-to-end test: file sync
 
 ---
@@ -134,23 +142,23 @@ Last Updated: October 1, 2025
 ## Sprint 5: User Interface (Weeks 9-10)
 
 ### Phase 5.1: macOS UI
-- [ ] Create menu bar app with SwiftUI
-- [ ] Implement `MenuBarView` with latest item preview
-- [ ] Implement `HistoryListView` with virtualized scrolling
-- [ ] Implement search bar with real-time filtering
-- [ ] Implement `SettingsView`
-  - [ ] Toggle LAN/Cloud sync
-  - [ ] Set history limit
-  - [ ] Manage paired devices
-  - [ ] View encryption keys
-- [ ] Implement drag-to-paste from history
-- [ ] Dark mode support
-- [ ] Accessibility labels
+- [x] Create menu bar app with SwiftUI
+- [x] Implement `MenuBarView` with latest item preview
+- [x] Implement `HistoryListView` with virtualized scrolling
+- [x] Implement search bar with real-time filtering
+- [x] Implement `SettingsView`
+  - [x] Toggle LAN/Cloud sync
+  - [x] Set history limit
+  - [x] Manage paired devices
+  - [x] View encryption keys
+- [x] Implement drag-to-paste from history
+- [x] Dark mode support
+- [x] Accessibility labels
 
 ### Phase 5.2: Android UI
-- [ ] Create Jetpack Compose app structure
+- [x] Create Jetpack Compose app structure
 - [ ] Implement `HomeScreen` with last item card
-- [ ] Implement `HistoryScreen` with LazyColumn
+- [x] Implement `HistoryScreen` with LazyColumn
 - [ ] Implement search functionality
 - [ ] Implement `SettingsScreen`
   - [ ] Toggle switches for LAN/Cloud
@@ -158,13 +166,13 @@ Last Updated: October 1, 2025
   - [ ] Paired devices management
   - [ ] History retention settings
 - [ ] Material 3 dynamic color support
-- [ ] Implement foreground service notification with actions
+- [ ] Implement foreground service notification with actions *(basic persistent notification in place; add quick actions)*
 
 ### Phase 5.3: Notifications
 - [ ] macOS: Request notification permissions
 - [ ] macOS: Implement rich notifications with thumbnails
 - [ ] macOS: Notification actions (Copy Again, Delete)
-- [ ] Android: Create notification channel
+- [x] Android: Create notification channel
 - [ ] Android: Rich notification with preview
 - [ ] Android: Notification actions
 
@@ -287,9 +295,9 @@ Last Updated: October 1, 2025
 
 ## Notes
 
-- **Blockers**: Document any blockers here
-- **Decisions**: Log major technical decisions
-- **Risks**: Track identified risks and mitigation plans
+- **Blockers**: Await product/stakeholder review of PRD v0.1 before finalizing Sprint 2 backlog scope.
+- **Decisions**: Confirmed LAN-first with cloud fallback transport strategy and JSON messaging per PRD v0.1 & protocol docs.
+- **Risks**: Android/HyperOS background clipboard restrictions and pending encryption library selection could impact schedule (see PRD §8).
 
 ---
 

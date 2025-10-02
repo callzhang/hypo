@@ -24,8 +24,14 @@ impl CryptoService {
     ///
     /// The ciphertext must contain the authentication tag appended to the end of
     /// the encrypted bytes as produced by [`CryptoService::encrypt`].
-    pub fn decrypt(key: &[u8], nonce: &[u8], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
-        decrypt(key, nonce, ciphertext, aad)
+    pub fn decrypt(
+        key: &[u8],
+        nonce: &[u8],
+        ciphertext: &[u8],
+        tag: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>> {
+        decrypt(key, nonce, ciphertext, tag, aad)
     }
 
     /// Performs an X25519 Diffie-Hellman exchange and derives a 256-bit key using HKDF.
@@ -50,8 +56,14 @@ mod tests {
         let aad = b"device:test";
 
         let encrypted = CryptoService::encrypt(&key, plaintext, aad).expect("encryption failed");
-        let decrypted = CryptoService::decrypt(&key, &encrypted.nonce, &encrypted.ciphertext, aad)
-            .expect("decryption failed");
+        let decrypted = CryptoService::decrypt(
+            &key,
+            &encrypted.nonce,
+            &encrypted.ciphertext,
+            &encrypted.tag,
+            aad,
+        )
+        .expect("decryption failed");
 
         assert_eq!(decrypted, plaintext);
     }
@@ -68,9 +80,14 @@ mod tests {
                 .expect("vector encryption failed");
         assert_eq!(encrypted, vector.ciphertext);
 
-        let decrypted =
-            CryptoService::decrypt(&vector.key, &vector.nonce, &vector.ciphertext, &vector.aad)
-                .expect("vector decryption failed");
+        let decrypted = CryptoService::decrypt(
+            &vector.key,
+            &vector.nonce,
+            &vector.ciphertext[..vector.ciphertext.len() - 16],
+            &vector.ciphertext[vector.ciphertext.len() - 16..],
+            &vector.aad,
+        )
+        .expect("vector decryption failed");
         assert_eq!(decrypted, vector.plaintext);
     }
 

@@ -122,7 +122,12 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 **Requirements**:
 - Android Studio Hedgehog or later
 - Android SDK 26+ (API 26)
-- Kotlin 2.0
+- Kotlin 1.9.22 toolchain (Gradle wrapper 8.7; wrapper JAR is downloaded on demand)
+
+> **Note:** The repository omits the binary `gradle-wrapper.jar` in favour of a
+> base64-encoded copy. The provided `gradlew` scripts reconstruct the official
+> Gradle 8.7 wrapper JAR automatically the first time you run them, keeping the
+> tree free of binaries while preserving reproducible builds.
 
 ### Backend Relay
 
@@ -158,6 +163,10 @@ swift build
 # Backend relay (from repo root)
 cd backend
 cargo build
+
+# Android unit tests (requires Android SDK + JDK 17)
+cd android
+./gradlew testDebugUnitTest --tests "*CryptoServiceTest" --tests "*SyncCoordinatorTest"
 ```
 
 The Android client requires the Android SDK, which is not available in this
@@ -184,9 +193,9 @@ Hypo takes security seriously:
 
 | Sprint | Timeline | Milestone |
 |--------|----------|-----------|
-| **Sprint 1** | Weeks 1-2 | Foundation & Architecture ← *We are here* |
-| **Sprint 2** | Weeks 3-4 | Core Sync Engine |
-| **Sprint 3** | Weeks 5-6 | Transport Layer (LAN + Cloud) |
+| **Sprint 1** | Weeks 1-2 | Foundation & Architecture |
+| **Sprint 2** | Weeks 3-4 | Core Sync Engine ✅ |
+| **Sprint 3** | Weeks 5-6 | Transport Layer (LAN + Cloud) ← *We are here* |
 | **Sprint 4** | Weeks 7-8 | Content Type Handling (Text, Images, Files) |
 | **Sprint 5** | Weeks 9-10 | User Interface Polish |
 | **Sprint 6** | Weeks 11-12 | Device Pairing (QR + Remote) |
@@ -199,23 +208,20 @@ Hypo takes security seriously:
 
 ## 📊 Current Status
 
-**Phase**: Sprint 1 - Foundation & Architecture  
-**Progress**: 14%
-**Last Updated**: October 1, 2025
+**Phase**: Sprint 2 - Core Sync Engine ✅
+**Progress**: 25%
+**Last Updated**: October 6, 2025
 
 **Recent Milestones**:
-- ✅ Architecture designed
-- ✅ Technical specifications complete
-- ✅ Development roadmap defined
-- ✅ Project structure initialization
-- ✅ macOS Swift package + history store prototype
-- ✅ Android foreground sync service + Room storage
-- ✅ Backend WebSocket session manager with tests
+- ✅ Provisioned Android SDK toolchain and Gradle wrapper for reproducible builds
+- ✅ Realigned Android project to Kotlin 1.9.22 for Compose compiler compatibility
+- ✅ Android CryptoService and SyncCoordinator unit suites passing via `./gradlew`
+- ✅ macOS and backend crypto regression tests green after interop vector refresh
 
 **Next Steps**:
-1. Wire Swift package into Xcode workspace and add throttling controls
-2. Backfill protocol error codes and control message catalogue
-3. Research and select crypto libraries across platforms
+1. Plumb CryptoService into sync engines for encrypted payload exchange
+2. Prototype LAN discovery (Bonjour on macOS, NSD on Android) for direct transport
+3. Stand up integrated relay + Redis environment for end-to-end encrypted routing tests
 
 **Full Status**: See [`docs/status.md`](docs/status.md)
 
@@ -226,11 +232,11 @@ Hypo takes security seriously:
 ```bash
 # macOS: Run unit tests
 cd macos
-xcodebuild test -scheme Hypo -destination 'platform=macOS'
+swift test
 
-# Android: Run unit tests
+# Android: Run unit tests (after provisioning the SDK + JDK 17)
 cd android
-./gradlew test
+./gradlew testDebugUnitTest --tests "*CryptoServiceTest" --tests "*SyncCoordinatorTest"
 
 # Backend: Run unit tests
 cd backend

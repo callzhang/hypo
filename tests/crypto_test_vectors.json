@@ -1,0 +1,24 @@
+{
+  "hkdf": {
+    "salt_base64": "aHlwby1jbGlwYm9hcmQtZWNkaA==",
+    "info_base64": "aHlwby1hZXMtMjU2LWdjbQ=="
+  },
+  "test_cases": [
+    {
+      "name": "rfc-5116-case-17",
+      "plaintext_base64": "AAAAAAAAAAAAAAAAAAAAAA==",
+      "key_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "nonce_base64": "AAAAAAAAAAAAAAAA",
+      "aad_base64": "",
+      "ciphertext_base64": "zqdAPU1ga24HTsXTuvOdGA==",
+      "tag_base64": "0NHIp5mZa/AmW5i11Iq5GQ=="
+    }
+  ],
+  "key_agreement": {
+    "alice_private_base64": "9pKJeIXAyyCj5M0QagsVvDYHlPF+cymJCbB5iHPsdEE=",
+    "alice_public_base64": "ACG/n84Mm4nrPPX0x3zvphyXzeGoAAkCqfhvA9xTvBU=",
+    "bob_private_base64": "gYj5PaHP9CCg3aR/WASi21CJR0mxp/tojUc2JR1RKSU=",
+    "bob_public_base64": "0Bdsk+FlRveSB70cQcwTnaksP5iNPa1bAK2Yb7bpsls=",
+    "shared_key_base64": "qeEkuYq/7Hrvr8Fc5UxPyzBF8zoxmqhBjhG1x6Nal7Q="
+  }
+}

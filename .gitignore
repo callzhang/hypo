@@ -59,6 +59,7 @@ macos/*.gcda
 android/.gradle/
 android/build/
 android/local.properties
+android/gradle/wrapper/gradle-wrapper.jar
 
 # Android Studio
 android/.idea/

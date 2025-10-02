@@ -1,26 +1,17 @@
 use actix_web::middleware::Logger;
 use actix_web::{web, App, HttpResponse, HttpServer};
+use hypo_relay::{
+    handlers::{health::health_check, websocket::websocket_handler},
+    services::{
+        device_key_store::DeviceKeyStore,
+        redis_client::RedisClient,
+        session_manager::SessionManager,
+    },
+    AppState,
+};
 use std::time::Instant;
 use tracing::info;
-
-mod crypto;
-mod handlers;
-mod middleware;
-mod models;
-mod services;
-mod utils;
-
-use handlers::health::health_check;
-use handlers::websocket::websocket_handler;
-use services::redis_client::RedisClient;
-use services::session_manager::SessionManager;
-
-#[derive(Clone)]
-pub struct AppState {
-    pub redis: RedisClient,
-    pub start_time: Instant,
-    pub sessions: SessionManager,
-}
+>>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -52,6 +43,10 @@ async fn main() -> std::io::Result<()> {
         redis: redis_client,
         start_time: Instant::now(),
         sessions: SessionManager::new(),
+<<<<<<< HEAD
+=======
+        device_keys: DeviceKeyStore::new(),
+>>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
     };
 
     info!("Server starting on {}:{}", host, port);

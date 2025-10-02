@@ -76,6 +76,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Protocol Hardening**: Expanded structured error catalogue with offline, conflict, and internal error codes.
 - **Roadmap Alignment**: Updated task tracker and project status to reflect coding progress and JSON protocol decision for MVP.
 
+#### Added - October 7, 2025
+- **Encrypted Clipboard Envelopes**: Updated the protocol to transmit AES-256-GCM ciphertext with explicit encryption metadata and refreshed the specification to reflect the new structure.
+- **Relay Key Registry**: Added an in-memory device key store, control-message handlers for registering keys, and validation that all clipboard payloads include properly sized nonce/tag values.
+- **macOS Sync Engine**: Wired CryptoKit encryption/decryption into the menu bar client with injectable key providers, producing encrypted envelopes and decoding remote payloads in unit tests.
+- **Cross-Platform Tests**: Added Swift unit coverage for the SyncEngine, extended Rust tests for the WebSocket handler, and tightened AES-GCM utilities to track authentication tags explicitly.
+- **Status Tracking**: Marked end-to-end encryption plumbing complete in the project dashboard to unblock Sprint 3 LAN discovery work.
 #### Infrastructure
 - Initialized Git repository with comprehensive .gitignore
 - Created MIT license file

@@ -74,7 +74,7 @@ Sent when clipboard content changes and needs to be synced.
   "type": "clipboard",
   "payload": {
     "content_type": "text",
-    "data": "Hello, world!",
+    "ciphertext": "BASE64_ENCRYPTED_BYTES",
     "metadata": {
       "size": 13,
       "hash": "315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3"
@@ -98,11 +98,12 @@ Sent when clipboard content changes and needs to be synced.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `content_type` | Enum | Yes | One of: `text`, `link`, `image`, `file` |
-| `data` | String | Yes | Content (Base64 for binary) |
-| `metadata` | Object | No | Type-specific metadata |
+| `ciphertext` | String | Yes | Base64-encoded AES-256-GCM payload |
 | `device` | Object | Yes | Source device information |
 | `target` | String | No | Destination device ID (if routing to a specific peer) |
 | `encryption` | Object | Yes | Encryption metadata |
+
+> The `ciphertext` decrypts to a JSON document containing the clipboard bytes and any type-specific metadata (e.g. hashes, filenames, thumbnails).
 
 ---
 

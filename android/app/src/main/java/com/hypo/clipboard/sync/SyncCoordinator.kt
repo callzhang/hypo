@@ -7,16 +7,20 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class SyncCoordinator @Inject constructor(
-    private val repository: ClipboardRepository
+    private val repository: ClipboardRepository,
+    private val syncEngine: SyncEngine,
+    private val identity: DeviceIdentity
 ) {
     private val events = MutableSharedFlow<ClipboardEvent>(extraBufferCapacity = 16)
     private var job: Job? = null
+    private val targets = MutableStateFlow<Set<String>>(emptySet())
 
     fun start(scope: CoroutineScope) {
         if (job != null) return
@@ -28,11 +32,15 @@ class SyncCoordinator @Inject constructor(
                     content = event.text,
                     preview = event.text.take(64),
                     metadata = emptyMap(),
-                    deviceId = "android",
+                    deviceId = identity.deviceId,
                     createdAt = event.createdAt,
                     isPinned = false
                 )
                 repository.upsert(item)
+
+                targets.value.forEach { target ->
+                    runCatching { syncEngine.sendClipboard(item, target) }
+                }
             }
         }
     }
@@ -44,5 +52,9 @@ class SyncCoordinator @Inject constructor(
 
     suspend fun onClipboardEvent(event: ClipboardEvent) {
         events.emit(event)
+    }
+
+    fun setTargetDevices(deviceIds: Set<String>) {
+        targets.value = deviceIds
     }
 }

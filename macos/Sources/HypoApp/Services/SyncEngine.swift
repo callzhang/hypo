@@ -7,7 +7,13 @@ public struct SyncEnvelope: Codable {
     public let type: MessageType
     public let payload: Payload
 
-    public init(id: UUID = UUID(), timestamp: Date = Date(), version: String = "1.0", type: MessageType, payload: Payload) {
+    public init(
+        id: UUID = UUID(),
+        timestamp: Date = Date(),
+        version: String = "1.0",
+        type: MessageType,
+        payload: Payload
+    ) {
         self.id = id
         self.timestamp = timestamp
         self.version = version
@@ -22,24 +28,40 @@ public struct SyncEnvelope: Codable {
 
     public struct Payload: Codable {
         public let contentType: ClipboardPayload.ContentType
-        public let data: Data
-        public let metadata: [String: String]?
+        public let ciphertext: Data
         public let deviceId: String
+        public let target: String?
+        public let encryption: EncryptionMetadata
+
+        public init(
+            contentType: ClipboardPayload.ContentType,
+            ciphertext: Data,
+            deviceId: String,
+            target: String?,
+            encryption: EncryptionMetadata
+        ) {
+            self.contentType = contentType
+            self.ciphertext = ciphertext
+            self.deviceId = deviceId
+            self.target = target
+            self.encryption = encryption
+        }
+    }
+
+    public struct EncryptionMetadata: Codable {
+        public let algorithm: String
         public let nonce: Data
         public let tag: Data
 
-        public init(contentType: ClipboardPayload.ContentType, data: Data, metadata: [String: String]? = nil, deviceId: String, nonce: Data, tag: Data) {
-            self.contentType = contentType
-            self.data = data
-            self.metadata = metadata
-            self.deviceId = deviceId
+        public init(algorithm: String = "AES-256-GCM", nonce: Data, tag: Data) {
+            self.algorithm = algorithm
             self.nonce = nonce
             self.tag = tag
         }
     }
 }
 
-public struct ClipboardPayload {
+public struct ClipboardPayload: Codable {
     public enum ContentType: String, Codable {
         case text
         case link
@@ -73,11 +95,23 @@ public final actor SyncEngine {
     }
 
     private let transport: SyncTransport
+    private let cryptoService: CryptoService
+    private let keyProvider: DeviceKeyProviding
+    private let localDeviceId: String
     private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
     private(set) var state: State = .idle
 
-    public init(transport: SyncTransport) {
+    public init(
+        transport: SyncTransport,
+        cryptoService: CryptoService = CryptoService(),
+        keyProvider: DeviceKeyProviding,
+        localDeviceId: String
+    ) {
         self.transport = transport
+        self.cryptoService = cryptoService
+        self.keyProvider = keyProvider
+        self.localDeviceId = localDeviceId
     }
 
     public func establishConnection() async {
@@ -90,27 +124,49 @@ public final actor SyncEngine {
         }
     }
 
-    public func transmit(entry: ClipboardEntry, payload: ClipboardPayload) async throws {
+    public func transmit(
+        entry: ClipboardEntry,
+        payload: ClipboardPayload,
+        targetDeviceId: String
+    ) async throws {
         guard state == .connected else {
-            throw NSError(domain: "SyncEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Transport not connected"])
+            throw NSError(
+                domain: "SyncEngine",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Transport not connected"]
+            )
         }
+
+        let key = try await keyProvider.key(for: targetDeviceId)
+        let plaintext = try encoder.encode(payload)
+        let aad = Data(localDeviceId.utf8)
+        let sealed = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
 
         let envelope = SyncEnvelope(
             type: .clipboard,
             payload: .init(
                 contentType: payload.contentType,
-                data: payload.data,
-                metadata: payload.metadata,
+                ciphertext: sealed.ciphertext,
                 deviceId: entry.originDeviceId,
-                nonce: Data(),
-                tag: Data()
+                target: targetDeviceId,
+                encryption: .init(nonce: sealed.nonce, tag: sealed.tag)
             )
         )
         try await transport.send(envelope)
     }
 
-    public func decode(_ data: Data) throws -> ClipboardPayload {
+    public func decode(_ data: Data) async throws -> ClipboardPayload {
         let envelope = try decoder.decode(SyncEnvelope.self, from: data)
-        return ClipboardPayload(contentType: envelope.payload.contentType, data: envelope.payload.data, metadata: envelope.payload.metadata)
+        let senderId = envelope.payload.deviceId
+        let key = try await keyProvider.key(for: senderId)
+        let aad = Data(senderId.utf8)
+        let plaintext = try await cryptoService.decrypt(
+            ciphertext: envelope.payload.ciphertext,
+            key: key,
+            nonce: envelope.payload.encryption.nonce,
+            tag: envelope.payload.encryption.tag,
+            aad: aad
+        )
+        return try decoder.decode(ClipboardPayload.self, from: plaintext)
     }
 }

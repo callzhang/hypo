@@ -1,5 +1,8 @@
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_ws::Message;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+use serde::Deserialize;
 use serde_json::Value;
 use tracing::{error, info, warn};
 
@@ -60,13 +63,27 @@ pub async fn websocket_handler(
     let mut reader_session = session;
     let reader_sessions = data.sessions.clone();
     let reader_device_id = device_id.clone();
+<<<<<<< HEAD
+=======
+    let key_store = data.device_keys.clone();
+>>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
 
     actix_web::rt::spawn(async move {
         while let Some(Ok(msg)) = msg_stream.recv().await {
             match msg {
                 Message::Text(text) => {
+<<<<<<< HEAD
                     if let Err(err) =
                         handle_text_message(&reader_device_id, &text, &reader_sessions).await
+=======
+                    if let Err(err) = handle_text_message(
+                        &reader_device_id,
+                        &text,
+                        &reader_sessions,
+                        &key_store,
+                    )
+                    .await
+>>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
                     {
                         error!(
                             "Failed to handle message from {}: {:?}",
@@ -94,6 +111,10 @@ async fn handle_text_message(
     sender_id: &str,
     message: &str,
     sessions: &crate::services::session_manager::SessionManager,
+<<<<<<< HEAD
+=======
+    key_store: &crate::services::device_key_store::DeviceKeyStore,
+>>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
 ) -> Result<(), SessionError> {
     let parsed: ClipboardMessage = match serde_json::from_str(message) {
         Ok(value) => value,
@@ -104,6 +125,20 @@ async fn handle_text_message(
     };
 
     let payload: &Value = &parsed.payload;
+<<<<<<< HEAD
+=======
+
+    if parsed.msg_type == crate::models::message::MessageType::Control {
+        handle_control_message(sender_id, payload, key_store).await;
+        return Ok(());
+    }
+
+    if let Err(err) = validate_encryption_block(payload) {
+        warn!("Discarding message from {}: {}", sender_id, err);
+        return Ok(());
+    }
+
+>>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
     let target_device = payload
         .get("target")
         .and_then(Value::as_str)
@@ -116,3 +151,132 @@ async fn handle_text_message(
         Ok(())
     }
 }
+<<<<<<< HEAD
+=======
+
+#[derive(Debug, Deserialize)]
+struct RegisterKeyPayload {
+    action: String,
+    #[serde(default)]
+    _device_id: Option<String>,
+    #[serde(default)]
+    symmetric_key: Option<String>,
+}
+
+async fn handle_control_message(
+    sender_id: &str,
+    payload: &Value,
+    key_store: &crate::services::device_key_store::DeviceKeyStore,
+) {
+    let Ok(registration) = serde_json::from_value::<RegisterKeyPayload>(payload.clone()) else {
+        warn!("Invalid control payload from {}", sender_id);
+        return;
+    };
+
+    match registration.action.as_str() {
+        "register_key" => {
+            let Some(encoded_key) = registration.symmetric_key else {
+                warn!("register_key missing symmetric_key field for {}", sender_id);
+                return;
+            };
+
+            match BASE64.decode(encoded_key.as_bytes()) {
+                Ok(key) if key.len() == 32 => {
+                    key_store.store(sender_id.to_string(), key).await;
+                    info!("Registered symmetric key for device {}", sender_id);
+                }
+                Ok(_) => {
+                    warn!("Key registration rejected for {}: invalid key length", sender_id);
+                }
+                Err(err) => {
+                    warn!("Failed to decode symmetric key for {}: {}", sender_id, err);
+                }
+            }
+        }
+        "deregister_key" => {
+            key_store.remove(sender_id).await;
+            info!("Deregistered symmetric key for device {}", sender_id);
+        }
+        other => {
+            warn!("Unhandled control action '{}' from {}", other, sender_id);
+        }
+    }
+}
+
+fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
+    let Some(encryption) = payload.get("encryption") else {
+        return Err("missing encryption block");
+    };
+
+    let nonce = encryption
+        .get("nonce")
+        .and_then(Value::as_str)
+        .ok_or("missing nonce")?;
+    let tag = encryption
+        .get("tag")
+        .and_then(Value::as_str)
+        .ok_or("missing tag")?;
+
+    BASE64
+        .decode(nonce.as_bytes())
+        .map_err(|_| "invalid nonce encoding")
+        .and_then(|decoded| if decoded.len() == 12 { Ok(()) } else { Err("nonce must be 12 bytes") })?;
+
+    BASE64
+        .decode(tag.as_bytes())
+        .map_err(|_| "invalid tag encoding")
+        .and_then(|decoded| if decoded.len() == 16 { Ok(()) } else { Err("tag must be 16 bytes") })?;
+
+    let data = payload
+        .get("data")
+        .and_then(Value::as_str)
+        .ok_or("missing data field")?;
+
+    BASE64
+        .decode(data.as_bytes())
+        .map_err(|_| "invalid data encoding")
+        .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[actix_rt::test]
+    async fn register_key_control_message_stores_key() {
+        let store = crate::services::device_key_store::DeviceKeyStore::new();
+        let payload = json!({
+            "action": "register_key",
+            "symmetric_key": BASE64.encode([0u8; 32])
+        });
+
+        handle_control_message("device-1", &payload, &store).await;
+
+        assert!(store.is_registered("device-1").await);
+    }
+
+    #[test]
+    fn validate_encryption_block_checks_lengths() {
+        let payload = json!({
+            "data": BASE64.encode(b"cipher"),
+            "encryption": {
+                "nonce": BASE64.encode([1u8; 12]),
+                "tag": BASE64.encode([2u8; 16])
+            }
+        });
+
+        assert!(validate_encryption_block(&payload).is_ok());
+
+        let bad_payload = json!({
+            "data": "not-base64",
+            "encryption": {
+                "nonce": BASE64.encode([1u8; 12]),
+                "tag": BASE64.encode([2u8; 16])
+            }
+        });
+
+        assert!(validate_encryption_block(&bad_payload).is_err());
+    }
+}
+>>>>>>> c2cd144792db8aca501a0b387245f8506392a44c

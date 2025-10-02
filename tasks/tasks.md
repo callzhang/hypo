@@ -36,10 +36,10 @@ Last Updated: October 3, 2025
   - [x] macOS: CryptoKit evaluation
   - [x] Android: Jetpack Security or Tink
   - [x] Backend: RustCrypto
-- [ ] Implement encryption module (cross-platform compatible) *(blocked on library selection)*
-  - [ ] AES-256-GCM encryption/decryption
-  - [ ] Nonce generation
-  - [ ] Key derivation from ECDH
+- [x] Implement encryption module (cross-platform compatible)
+  - [x] AES-256-GCM encryption/decryption
+  - [x] Nonce generation
+  - [x] Key derivation from ECDH
 - [ ] Design device pairing flow (QR code format) *(align detailed spec with PRD §6.1/6.2)*
 
 ### Phase 1.4: Product Definition & Planning
@@ -68,7 +68,7 @@ Last Updated: October 3, 2025
 - [x] Create Room database schema
 - [x] Create `ClipboardRepository` with Flow-based API
 - [x] Implement de-duplication and throttling *(listener hash guard, repository Flow backpressure)*
-- [ ] Unit tests with MockK
+- [x] Unit tests with MockK
 
 ### Phase 2.3: Backend Relay - Core
 - [x] Initialize Rust project with Actix-web
@@ -78,7 +78,7 @@ Last Updated: October 3, 2025
 - [x] Message routing logic
 - [x] Health check endpoint
 - [x] Unit tests for session routing manager *(covers registration, replacement, offline handling)*
-- [ ] Integration tests for router fan-out logic
+- [x] Integration tests for router fan-out logic
 
 ---
 

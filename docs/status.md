@@ -38,6 +38,7 @@
 - [x] Documented Android test workflow alongside macOS/backend build verification
 - [x] Wired encrypted clipboard envelopes end-to-end across macOS, Android, and the relay with shared tests
 - [x] Implemented Android SyncEngine with secure key storage, encrypted envelope emission, and unit coverage for send/decode paths
+- [x] Finalized device pairing flow specification and QR payload schema (PRD §6.1/6.2, Technical Spec §3.2)
 
 ### In Progress 🚧
 - [ ] LAN discovery prototype for macOS ↔ Android
@@ -60,8 +61,7 @@ None currently
 
 **Next Steps**:
 1. Schedule PRD v0.1 stakeholder review and sign-off.
-2. Finalize device pairing flow specification and QR payload schema.
-3. Publish success metrics dashboard derived from PRD §9.
+2. Publish success metrics dashboard derived from PRD §9.
 
 ### Sprint 2: Core Sync Engine (Weeks 3-4)
 **Progress**: 100%

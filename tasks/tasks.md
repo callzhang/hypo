@@ -40,7 +40,7 @@ Last Updated: October 3, 2025
   - [x] AES-256-GCM encryption/decryption
   - [x] Nonce generation
   - [x] Key derivation from ECDH
-- [ ] Design device pairing flow (QR code format) *(align detailed spec with PRD §6.1/6.2)*
+- [x] Design device pairing flow (QR code format) *(see PRD §6.1/6.2 and technical spec §3.2)*
 
 ### Phase 1.4: Product Definition & Planning
 - [x] Draft Product Requirements Document (`docs/prd.md`)

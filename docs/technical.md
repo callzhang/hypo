@@ -143,25 +143,29 @@ To prevent clipboard ping-pong loops:
 ### 3.2 Device Pairing Protocol
 
 #### Initial Pairing (LAN)
-1. User opens "Pair Device" on macOS
-2. macOS generates QR code containing:
-   - Device UUID
-   - ECDH public key
-   - mDNS service name
-   - Timestamp (valid 5 min)
-3. User scans QR on Android
-4. Android extracts public key, performs ECDH to derive shared secret
-5. Android sends encrypted challenge to macOS via mDNS-discovered IP
-6. macOS decrypts challenge, sends encrypted response
-7. Pairing complete, shared key stored in Keychain/EncryptedSharedPreferences
+1. User opens "Pair Device" on macOS.
+2. macOS fetches/rotates its long-term Ed25519 signing key (stored in Keychain) and generates an ephemeral Curve25519 key pair for this attempt.
+3. Compose QR payload using fields defined in PRD §6.1 (`ver`, `mac_device_id`, `mac_pub_key`, `service`, `port`, `relay_hint`, `issued_at`, `expires_at`).
+4. Create canonical byte representation: JSON sorted by key, UTF-8 encoded; sign with Ed25519 → `signature` field.
+5. Render QR (error correction level M, 256×256) and expose to user until `expires_at`.
+6. Android scans QR, parses JSON, validates schema + TTL window (±5 min) and verifies signature against macOS long-term public key (distributed during previous pairing or bootstrap update channel).
+7. Android publishes ephemeral Curve25519 key pair, derives shared key = HKDF-SHA256(X25519(mac_pub_key, android_priv_key), salt = 32 bytes of 0x00, info = "hypo/pairing").
+8. Resolve Bonjour service `service` and `port`; connect via TLS WebSocket. If connection fails within 3 s, fallback path triggers (see Remote Pairing).
+9. Android emits `PAIRING_CHALLENGE` message: AES-256-GCM encrypt random 32-byte challenge, associated data = `mac_device_id`. Include `nonce`, `ciphertext`, `tag`.
+10. macOS decrypts, ensures nonce monotonicity (LRU cache of last 32 seen). Responds with `PAIRING_ACK` containing device descriptor and hashed Android ID.
+11. Both sides persist shared key + peer metadata; handshake complete. macOS invalidates QR (even if `expires_at` not reached) and logs telemetry `pairing_lan_success` with anonymized latency.
 
 #### Remote Pairing (via Cloud Relay)
-1. macOS generates 6-digit pairing code + ephemeral ECDH key pair
-2. macOS sends public key to relay with pairing code
-3. User enters pairing code on Android
-4. Android retrieves public key from relay, performs ECDH
-5. Same challenge-response flow as LAN, routed through relay
-6. Relay cannot decrypt (only routes encrypted blobs)
+1. macOS obtains pairing code by calling relay `POST /pairing/code` with TLS + HMAC header. Response includes `{ code, expires_at }`.
+2. Relay stores entry in Redis: key `pairing:code:<code>` → JSON { mac_device_id, mac_pub_key, issued_at, expires_at } with TTL 60 s.
+3. Android collects 6-digit code from user, invokes `POST /pairing/claim` with `{ code, android_device_id, android_pub_key }` and same HMAC header.
+4. Relay verifies TTL + rate limits (5 attempts/min/IP). On success, it returns macOS payload (excluding signature) and pushes WebSocket control message `PAIRING_CLAIMED` to macOS.
+5. Android derives shared key using retrieved `mac_pub_key` (HKDF parameters identical to LAN flow) and sends `PAIRING_CHALLENGE` via relay channel. Relay treats body as opaque bytes.
+6. macOS replies with `PAIRING_ACK`; relay forwards to Android. After acknowledgement, relay deletes Redis entry and emits audit log.
+7. Failure Cases:
+   - Expired code → HTTP 410; Android prompts for regeneration.
+   - macOS offline → relay retries notify for 30 s; if unacknowledged, entry resets for reuse until TTL.
+   - Duplicate `mac_device_id` claims → HTTP 409 `DEVICE_NOT_PAIRED`; instruct client to restart handshake.
 
 ### 3.3 Message Encryption
 

@@ -1,7 +1,7 @@
 # Hypo Project Status
 
-**Last Updated**: October 8, 2025
-**Current Sprint**: Sprint 3 - Transport Layer (Planning)
+**Last Updated**: October 9, 2025
+**Current Sprint**: Sprint 3 - Transport Layer (Execution)
 **Project Phase**: Core Platform Bring-up
 **Overall Progress**: 30%
 
@@ -38,9 +38,12 @@
 - [x] Documented Android test workflow alongside macOS/backend build verification
 - [x] Wired encrypted clipboard envelopes end-to-end across macOS, Android, and the relay with shared tests
 - [x] Implemented Android SyncEngine with secure key storage, encrypted envelope emission, and unit coverage for send/decode paths
+- [x] Finalized device pairing flow specification and QR payload schema (PRD §6.1/6.2, Technical Spec §3.2)
 
 ### In Progress 🚧
-- [ ] LAN discovery prototype for macOS ↔ Android
+- [ ] LAN discovery prototype for macOS ↔ Android (Bonjour/NSD services wired, awaiting QA sign-off)
+- [ ] TLS WebSocket client with certificate pinning on macOS and Android
+- [ ] Cloud relay staging deployment on Fly.io with telemetry wiring
 
 ### Blocked 🚫
 None currently
@@ -60,8 +63,7 @@ None currently
 
 **Next Steps**:
 1. Schedule PRD v0.1 stakeholder review and sign-off.
-2. Finalize device pairing flow specification and QR payload schema.
-3. Publish success metrics dashboard derived from PRD §9.
+2. Publish success metrics dashboard derived from PRD §9.
 
 ### Sprint 2: Core Sync Engine (Weeks 3-4)
 **Progress**: 100%
@@ -76,6 +78,25 @@ None currently
 1. Cross-platform AES-256-GCM modules ship with shared interoperability vectors.
 2. Android unit suites execute via Gradle wrapper against the provisioned SDK/JDK 17 toolchain.
 3. Backend session routing fan-out validated with integration coverage.
+
+### Sprint 3: Transport Layer (Weeks 5-6)
+**Progress**: 35%
+
+| Phase | Status | Completion |
+|-------|--------|------------|
+| Phase 3.1: LAN Discovery & Connection | In Progress | 30% |
+| Phase 3.2: Cloud Relay Integration | In Progress | 20% |
+| Phase 3.3: Transport Manager | In Progress | 15% |
+
+**Highlights (to date)**:
+1. Detailed LAN discovery implementation plan (Bonjour/NSD actors, diagnostics, retry policies) documented in technical spec.
+2. Transport client design finalized with certificate pinning, telemetry hooks, and fallback sequencing.
+3. Fly.io staging deployment blueprint completed, including GitHub Actions promotion flow and secrets rotation policy.
+
+**Next Steps**:
+1. Implement multicast discovery actors on both platforms and capture initial LAN latency metrics.
+2. Deploy relay to staging and validate telemetry/monitoring dashboard connectivity.
+3. Complete transport state machine implementation with integration tests covering LAN failure → cloud fallback.
 
 ---
 
@@ -128,12 +149,12 @@ None currently
 ### Performance Targets
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| LAN Sync Latency (P95) | < 500ms | N/A | Not Measured |
-| Cloud Sync Latency (P95) | < 3s | N/A | Not Measured |
+| LAN Sync Latency (P95) | < 500ms | Instrumentation in progress (handshake timers) | In Progress |
+| Cloud Sync Latency (P95) | < 3s | Instrumentation in progress (staging relay) | In Progress |
 | Memory Usage - macOS | < 50MB | N/A | Not Measured |
 | Memory Usage - Android | < 30MB | N/A | Not Measured |
 | Battery Drain - Android | < 2% per day | N/A | Not Measured |
-| Error Rate | < 0.1% | N/A | Not Measured |
+| Error Rate | < 0.1% | Telemetry schema drafted | In Progress |
 
 ### Test Coverage
 | Platform | Target | Current |
@@ -178,6 +199,11 @@ None currently
 - **Tooling**: Added Gradle wrapper + SDK provisioning scripts enabling container-friendly Android unit tests.
 - **Android**: Downgraded to Kotlin 1.9.22 for Compose compatibility, restored CryptoService/SyncCoordinator unit suites, and updated manifest resources for build stability.
 - **Documentation**: Refreshed README build verification and status dashboards to reflect Sprint 2 completion and new testing workflow.
+
+### October 9, 2025
+- **Transport Planning**: Documented LAN discovery, TLS transport client, and cloud relay staging rollout plans in technical spec.
+- **Task Breakdown**: Expanded Sprint 3 task list with detailed sub-tasks covering instrumentation, telemetry, and QA workflows.
+- **Status Update**: Updated project dashboard with Sprint 3 progress metrics and performance instrumentation status.
 
 ---
 

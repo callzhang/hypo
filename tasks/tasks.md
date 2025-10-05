@@ -40,7 +40,7 @@ Last Updated: October 3, 2025
   - [x] AES-256-GCM encryption/decryption
   - [x] Nonce generation
   - [x] Key derivation from ECDH
-- [ ] Design device pairing flow (QR code format) *(align detailed spec with PRD §6.1/6.2)*
+- [x] Design device pairing flow (QR code format) *(see PRD §6.1/6.2 and technical spec §3.2)*
 
 ### Phase 1.4: Product Definition & Planning
 - [x] Draft Product Requirements Document (`docs/prd.md`)
@@ -86,28 +86,73 @@ Last Updated: October 3, 2025
 
 ### Phase 3.1: LAN Discovery & Connection
 - [ ] macOS: Implement Bonjour browser (`NetService`)
+  - [ ] Build `BonjourBrowser` actor that wraps `NetServiceBrowser` with async sequence APIs.
+  - [ ] Emit discovery events to `TransportManager` and persist the last seen timestamp for stale record pruning.
+  - [ ] Add unit harness using `NetService` test doubles to validate add/remove callbacks.
 - [ ] macOS: Implement Bonjour publisher
+  - [ ] Create `BonjourPublisher` struct that exposes current LAN endpoint (port, TXT record with fingerprint hash).
+  - [ ] Integrate with lifecycle hooks so advertise starts on app foreground and stops on suspend/terminate.
+  - [ ] Add diagnostics command (`hypo://debug/lan`) to surface active registrations.
 - [ ] Android: Implement NSD discovery (`NsdManager`)
+  - [ ] Create `LanDiscoveryRepository` with Flow stream of `DiscoveredPeer` models sourced from `NsdManager` callbacks.
+  - [ ] Handle multicast lock acquisition/release inside service scope with structured concurrency.
+  - [ ] Write instrumentation test using `ShadowNsdManager` to verify discovery restart on network change.
 - [ ] Android: Implement NSD registration
+  - [ ] Publish device endpoint with TXT record containing certificate fingerprint + supported protocols.
+  - [ ] Add automatic re-registration after Wi-Fi reconnect with exponential backoff.
+  - [ ] Document OEM-specific quirks (HyperOS multicast throttling) in `docs/technical.md`.
 - [ ] Implement TLS WebSocket client (both platforms)
+  - [ ] macOS: Wrap `URLSessionWebSocketTask` with certificate pinning and idle timeout watchdog.
+  - [ ] Android: Build `OkHttp` WebSocket factory with `CertificatePinner` and coroutine-based send queue.
+  - [ ] Share protobuf-free message framing utilities and include binary tests in `tests/transport/`.
 - [ ] Test LAN discovery on same network
+  - [ ] Create manual QA checklist for dual-device LAN pairing (success + failure cases).
+  - [ ] Capture Wireshark traces to confirm mDNS advertisement cadence and TLS handshake flow.
+  - [ ] Log metrics into `docs/status.md#Performance Targets` once baseline captured.
 - [ ] Measure LAN latency
+  - [ ] Instrument round-trip measurement inside transport handshake (T1 pairing, T2 data message) and persist anonymized metrics.
+  - [ ] Produce comparison chart vs success criteria (<500 ms P95) in status report.
+  - [ ] File follow-up task if latency target missed for remediation in Sprint 4.
 
 ### Phase 3.2: Cloud Relay Integration
 - [ ] Backend: Deploy to Fly.io staging environment
+  - [ ] Create `fly.toml` with auto-scaling (min=1, max=3) and Redis attachment configuration.
+  - [ ] Automate GitHub Actions workflow to build Docker image, run tests, and deploy on `main` branch merges.
+  - [ ] Publish staging endpoint + credentials in `docs/technical.md#Deployment` and rotate monthly.
 - [ ] Implement WebSocket client fallback logic
+  - [ ] Extend `TransportManager` to race LAN dial vs 3 s timeout before initiating relay session.
+  - [ ] Persist fallback reason codes for telemetry (`lan_timeout`, `lan_rejected`, `lan_not_supported`).
+  - [ ] Unit test matrix covering LAN success, LAN timeout → cloud success, and dual failure surfaces proper errors to UI.
 - [ ] Certificate pinning implementation
+  - [ ] Export relay certificate fingerprint pipeline script (`backend/scripts/cert_fingerprint.sh`).
+  - [ ] Integrate fingerprint check into both clients with update mechanism keyed off remote config version.
+  - [ ] Add failure analytics event `transport_pinning_failure` with environment metadata.
 - [ ] Test cloud relay with both clients
+  - [ ] Execute smoke suite covering connect, send text payload, send binary payload, disconnect for macOS + Android.
+  - [ ] Validate telemetry ingestion and error reporting into staging logging stack.
+  - [ ] Document observed latency and packet loss to compare with LAN results.
 - [ ] Measure cloud latency
+  - [ ] Instrument handshake + first payload metrics over relay path and export aggregated results.
+  - [ ] Add automated nightly test hitting relay from CI runner to capture variability windows.
+  - [ ] Update `docs/status.md` metrics table once results available.
 
 ### Phase 3.3: Transport Manager
 - [ ] Implement transport selection algorithm
-  - [ ] Attempt LAN first (3s timeout)
-  - [ ] Fallback to cloud
-  - [ ] Retry logic with exponential backoff
+  - [ ] Model state machine with `Idle → ConnectingLan → ConnectedLan → ConnectingCloud → ConnectedCloud → Error` states.
+  - [ ] Attempt LAN first (3 s timeout) with cancellation support and structured concurrency.
+  - [ ] Fallback to cloud with jittered exponential backoff (base 2, cap 60 s) and loop guard to prevent thundering herd.
 - [ ] Connection state management
+  - [ ] Emit state updates via Combine/Flow to UI layers for status indicators.
+  - [ ] Persist last successful transport per peer for heuristics on next attempt.
+  - [ ] Add graceful shutdown path ensuring in-flight messages flushed before closing socket.
 - [ ] Reconnection handling
+  - [ ] Implement health checks (heartbeat + application-level ack timers) to detect dead connections.
+  - [ ] Support automatic rejoin after transient network changes with backoff reset once success.
+  - [ ] Provide manual retry trigger surfaced in UI with actionable error copy.
 - [ ] Integration tests for fallback
+  - [ ] Build multi-platform test harness (Swift + Kotlin + Rust) using shared JSON vectors to simulate transport failures.
+  - [ ] Ensure metrics + telemetry generated during tests align with dashboards.
+  - [ ] Capture regression scripts to run pre-release before Sprint 3 demo.
 
 ---
 

@@ -282,6 +282,19 @@ func showNotification(for item: ClipboardItem) {
 }
 ```
 
+#### 4.1.5 LAN Discovery & Advertising
+
+- **BonjourBrowser** (`Utilities/BonjourBrowser.swift`): Actor-backed wrapper around `NetServiceBrowser` that normalizes discovery callbacks into an `AsyncStream<LanDiscoveryEvent>`. Each `DiscoveredPeer` carries resolved host, port, TXT metadata (including `fingerprint_sha256`), and the `lastSeen` timestamp. The browser supports explicit stale pruning (`prunePeers`) and is unit-tested with driver doubles in `BonjourBrowserTests`.
+- **TransportManager Integration** (`Services/TransportManager.swift`): The manager now persists LAN sightings via `UserDefaultsLanDiscoveryCache`, auto-starts discovery/advertising on foreground using `ApplicationLifecycleObserver`, and exposes `lanDiscoveredPeers()` plus a diagnostics string for `hypo://debug/lan`. Deep links are surfaced through SwiftUI's `.onOpenURL`, logging active registrations alongside publisher state.
+- **BonjourPublisher** (`Utilities/BonjourPublisher.swift`): Publishes `_hypo._tcp` with TXT payload `{ version, fingerprint_sha256, protocols }`, tracks the currently advertised endpoint, and restarts advertising when configuration changes (e.g., port update). Diagnostics reuse this metadata so operators can validate fingerprints during support sessions.
+- **Testing**: `TransportManagerLanTests` validate that discovery events update persisted timestamps, diagnostics include discovered peers, and lifecycle hooks stop advertising on suspend.
+
+#### 4.1.6 LAN WebSocket Client
+
+- **Transport Pipeline**: `LanTransport` composes certificate pinning (SHA-256 fingerprint fetched from pairing metadata), TLS configuration with ALPN `hypo/1`, and a `URLSessionWebSocketTask` send/receive loop using `AsyncStream` bridging.
+- **Timeouts**: LAN dial attempts are cancelled after 3 s; success resets the transport manager state to `ConnectedLan`. Idle watchdog closes sockets after 60 s of inactivity while leaving heartbeat timers running.
+- **Metrics**: Each connection records handshake duration, first-message latency, and disconnect reason; results feed into `TelemetryClient` for ingestion and status reporting.
+
 ### 4.2 Android Client
 
 #### 4.2.1 Project Structure
@@ -303,11 +316,13 @@ android/
 │   │   │   │   ├── repository/ClipboardRepository.kt
 │   │   │   ├── sync/
 │   │   │   │   ├── SyncEngine.kt
-│   │   │   │   ├── TransportManager.kt
 │   │   │   │   ├── CryptoService.kt
-│   │   │   ├── network/
-│   │   │   │   ├── NsdDiscovery.kt
-│   │   │   │   ├── WebSocketClient.kt
+│   │   │   ├── transport/
+│   │   │   │   ├── TransportManager.kt
+│   │   │   │   └── lan/
+│   │   │   │       ├── LanDiscoveryRepository.kt
+│   │   │   │       ├── LanRegistrationManager.kt
+│   │   │   │       └── LanModels.kt
 │   │   ├── res/
 │   │   ├── AndroidManifest.xml
 ├── build.gradle.kts
@@ -357,11 +372,24 @@ data class ClipboardItem(
 interface ClipboardDao {
     @Query("SELECT * FROM clipboard_history ORDER BY timestamp DESC LIMIT :limit")
     fun getRecent(limit: Int = 200): Flow<List<ClipboardItem>>
-    
+
     @Query("SELECT * FROM clipboard_history WHERE previewText LIKE '%' || :query || '%'")
     fun search(query: String): Flow<List<ClipboardItem>>
 }
 ```
+
+#### 4.2.4 NSD Discovery & Registration
+
+- **LanDiscoveryRepository** (`transport/lan/LanDiscoveryRepository.kt`): Bridges `NsdManager` callbacks into a `callbackFlow<LanDiscoveryEvent>` while acquiring a scoped multicast lock. Network-change events are injectable (default implementation listens for Wi-Fi broadcasts) so tests can drive deterministic restarts without Robolectric, and the repository guards `discoverServices` restarts with a `Mutex` to avoid overlapping NSD calls.
+- **LanRegistrationManager** (`transport/lan/LanRegistrationManager.kt`): Publishes `_hypo._tcp` with TXT payload `{ fingerprint_sha256, version, protocols }`, listens for Wi-Fi connectivity changes, and re-registers using exponential backoff (1 s, 2 s, 4 s… capped at 5 minutes). Backoff attempts reset after successful registration.
+- **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. Helpers surface last-seen timestamps and prune stale peers, ensuring telemetry and UI layers can render an accurate LAN roster.
+- **OEM Notes**: HyperOS throttles multicast after ~15 minutes of screen-off time. The repository exposes lock lifecycle hooks so the service can prompt users to re-open the app, and the registration manager schedules immediate retries when connectivity resumes to mitigate OEM suppression.
+
+#### 4.2.5 Android WebSocket Client
+
+- **OkHttp Integration**: `OkHttpClient` configured with `CertificatePinner` keyed to the relay fingerprint and LAN fingerprint when available. Coroutine-based `Channel` ensures backpressure while sending messages.
+- **Fallback Orchestration**: `TransportManager` races LAN connection vs. a 3 s timeout before instantiating a relay `WebSocket`. Cloud attempts use jittered exponential backoff, persisting the last successful transport in `DataStore` for heuristics.
+- **Instrumentation**: `MetricsReporter` logs handshake and first payload durations (`transport_handshake_ms`, `transport_first_payload_ms`) with transport label `lan` or `cloud` for downstream analytics.
 
 ### 4.3 Backend Relay
 
@@ -428,6 +456,12 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 }
 ```
 
+#### 4.3.4 Cloud Relay Enhancements
+
+- **Staging Deployment**: Relay packaged via Docker and deployed to Fly.io. `fly.toml` defines auto-scaling (min=1, max=3) and binds Redis through the `redis` add-on. Secrets (`RELAY_HMAC_KEY`, `CERT_FINGERPRINT`) managed through Fly secrets and rotated monthly.
+- **Pairing Support**: Adds `/pairing/code` and `/pairing/claim` endpoints secured with HMAC header `X-Hypo-Signature`. Pairing codes stored in Redis with 60 s TTL and replay protection counters.
+- **Observability**: Structured logs via `tracing` include connection IDs, transport path (`lan`, `relay`), and latency histograms exported to Prometheus. Alerts trigger when relay error rate exceeds 1% over 5 min.
+
 ---
 
 ## 5. Testing Strategy
@@ -440,20 +474,25 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 ### 5.2 Integration Tests
 - **E2E Encryption**: Encrypt on one platform, decrypt on other
 - **Transport Fallback**: Simulate LAN unavailable, verify cloud fallback
+- **LAN Discovery Harness**: Simulate multicast announcements and ensure discovery emits add/remove events and prunes stale entries after 10 s.
+- **Latency Instrumentation**: Assert handshake timers produce metrics for `transport_handshake_ms` and `transport_first_payload_ms` across LAN and cloud paths.
 - **De-duplication**: Send same content twice, verify single sync
 
 ### 5.3 Manual Test Cases
 1. Copy text on Android → verify appears on macOS within 1s
 2. Copy image on macOS → verify appears on Android
 3. Disconnect Wi-Fi → verify cloud fallback works
-4. Device pairing via QR code
-5. Clipboard history search
-6. Notification display with preview
+4. Toggle airplane mode to confirm automatic LAN re-registration and fallback recovery
+5. Device pairing via QR code
+6. Run LAN latency capture script and validate telemetry upload
+7. Clipboard history search
+8. Notification display with preview
 
 ### 5.4 Performance Tests
-- Latency: Measure P50/P95/P99 for LAN and cloud
+- Latency: Measure P50/P95/P99 for LAN and cloud; publish results in `docs/status.md`
 - Throughput: Send 100 clips in 10s, measure success rate
 - Memory: Profile both apps under sustained load
+- Availability: Track transport error rates (<0.5% target) using relay Prometheus metrics
 
 ---
 
@@ -470,10 +509,12 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 - **Minimum API**: 26 (Android 8.0) for foreground service stability
 
 ### 6.3 Backend Deployment
-- **Platform**: Fly.io or Railway
-- **Scaling**: Horizontal (stateless), Redis cluster for high availability
-- **Monitoring**: Prometheus + Grafana
-- **Logging**: Structured logs via `tracing` crate
+- **Platform**: Fly.io (staging) with optional Railway fallback for load tests
+- **Configuration**: `fly.toml` checked into `backend/infra/` defines regions (`iad`, `sjc`), auto-scaling (min=1, max=3), health checks (`/healthz` every 15 s), and Redis attachment `hypo-redis`.
+- **Release Flow**: GitHub Actions pipeline builds Docker image, runs `cargo test`, executes integration suite, and deploys tagged images to Fly with release annotations. Rollbacks executed via `fly deploy --image` referencing previous digest.
+- **Secrets Management**: Use `fly secrets set RELAY_HMAC_KEY=... CERT_FINGERPRINT=...` per environment; rotate monthly and update client fingerprints.
+- **Monitoring**: Prometheus scraping via Fly metrics exporter, Grafana dashboard for connection counts, latency percentiles, and error ratios (<0.5% target).
+- **Logging**: Structured logs via `tracing` crate shipped to Loki for retention (14 days) with alerts when pairing/code endpoints exceed 5% failure rate.
 
 ### 6.4 CI/CD
 - **macOS**: Xcode Cloud or GitHub Actions with macOS runners

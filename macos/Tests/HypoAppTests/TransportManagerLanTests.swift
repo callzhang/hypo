@@ -1,0 +1,151 @@
+import XCTest
+@testable import HypoApp
+
+final class TransportManagerLanTests: XCTestCase {
+    func testDiscoveryEventsUpdateStateAndDiagnostics() async throws {
+        let driver = MockBonjourDriver()
+        let now = Date(timeIntervalSince1970: 1_000)
+        let browser = BonjourBrowser(driver: driver, clock: { now })
+        let publisher = MockBonjourPublisher()
+        let cache = InMemoryLanDiscoveryCache()
+        let manager = await TransportManager(
+            provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
+            browser: browser,
+            publisher: publisher,
+            discoveryCache: cache,
+            lanConfiguration: BonjourPublisher.Configuration(
+                serviceName: "local-device",
+                port: 7010,
+                version: "1.0",
+                fingerprint: "fingerprint",
+                protocols: ["ws+tls"]
+            )
+        )
+
+        await manager.ensureLanDiscoveryActive()
+        XCTAssertEqual(publisher.startCount, 1)
+
+        let record = BonjourServiceRecord(
+            serviceName: "peer-one",
+            host: "peer.local",
+            port: 7010,
+            txtRecords: ["fingerprint_sha256": "abc", "protocols": "ws+tls"]
+        )
+        driver.emit(.resolved(record))
+        try await Task.sleep(nanoseconds: 5_000_000)
+
+        let peers = await manager.lanDiscoveredPeers()
+        XCTAssertEqual(peers.count, 1)
+        XCTAssertEqual(peers.first?.serviceName, "peer-one")
+        XCTAssertEqual(cache.storage["peer-one"], Date(timeIntervalSince1970: 1_000))
+
+        let diagnostics = await manager.handleDeepLink(URL(string: "hypo://debug/lan")!)
+        XCTAssertNotNil(diagnostics)
+        XCTAssertTrue(diagnostics?.contains("peer-one") ?? false)
+
+        driver.emit(.removed("peer-one"))
+        try await Task.sleep(nanoseconds: 5_000_000)
+        let remainingPeers = await manager.lanDiscoveredPeers()
+        XCTAssertTrue(remainingPeers.isEmpty)
+        XCTAssertNotNil(cache.storage["peer-one"])
+
+        await manager.suspendLanDiscovery()
+        XCTAssertEqual(publisher.stopCount, 1)
+    }
+}
+
+private final class MockBonjourPublisher: BonjourPublishing {
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    private(set) var metadataUpdates: [[String: String]] = []
+    private var configuration: BonjourPublisher.Configuration?
+
+    var currentConfiguration: BonjourPublisher.Configuration? { configuration }
+    var currentEndpoint: LanEndpoint? {
+        guard let configuration else { return nil }
+        return LanEndpoint(
+            host: "localhost",
+            port: configuration.port,
+            fingerprint: configuration.fingerprint,
+            metadata: configuration.txtRecord
+        )
+    }
+
+    func start(with configuration: BonjourPublisher.Configuration) {
+        startCount += 1
+        self.configuration = configuration
+    }
+
+    func stop() {
+        stopCount += 1
+        configuration = nil
+    }
+
+    func updateTXTRecord(_ metadata: [String : String]) {
+        metadataUpdates.append(metadata)
+        guard let configuration else { return }
+        let fingerprint = metadata["fingerprint_sha256"] ?? configuration.fingerprint
+        let version = metadata["version"] ?? configuration.version
+        let protocols = (metadata["protocols"] ?? configuration.protocols.joined(separator: ",")).split(separator: ",").map(String.init)
+        self.configuration = BonjourPublisher.Configuration(
+            domain: configuration.domain,
+            serviceType: configuration.serviceType,
+            serviceName: configuration.serviceName,
+            port: configuration.port,
+            version: version,
+            fingerprint: fingerprint,
+            protocols: protocols
+        )
+    }
+}
+
+private final class InMemoryLanDiscoveryCache: LanDiscoveryCache {
+    var storage: [String: Date] = [:]
+
+    func load() -> [String : Date] {
+        storage
+    }
+
+    func save(_ lastSeen: [String : Date]) {
+        storage = lastSeen
+    }
+}
+
+private final class MockTransportProvider: TransportProvider {
+    func preferredTransport(for preference: TransportPreference) -> SyncTransport {
+        MockSyncTransport()
+    }
+}
+
+private struct MockSyncTransport: SyncTransport {
+    func connect() async throws {}
+    func send(_ envelope: SyncEnvelope) async throws {}
+    func disconnect() async {}
+}
+
+private final class MockPreferenceStorage: PreferenceStorage {
+    var stored: TransportPreference?
+
+    func loadPreference() -> TransportPreference? { stored }
+
+    func savePreference(_ preference: TransportPreference) {
+        stored = preference
+    }
+}
+
+private final class MockBonjourDriver: BonjourBrowsingDriver {
+    private var handler: ((BonjourBrowsingDriverEvent) -> Void)?
+
+    func startBrowsing(serviceType: String, domain: String) {}
+
+    func stopBrowsing() {}
+
+    func setEventHandler(_ handler: @escaping (BonjourBrowsingDriverEvent) -> Void) {
+        self.handler = handler
+    }
+
+    func emit(_ event: BonjourBrowsingDriverEvent) {
+        handler?(event)
+    }
+}

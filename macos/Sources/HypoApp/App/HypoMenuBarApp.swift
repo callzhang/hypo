@@ -16,6 +16,9 @@ struct HypoMenuBarApp: App {
                 .environmentObject(viewModel)
                 .preferredColorScheme(viewModel.appearancePreference.colorScheme)
                 .task { await viewModel.start() }
+                .onOpenURL { url in
+                    Task { await viewModel.handleDeepLink(url) }
+                }
                 .onAppear(perform: setupMonitor)
         }
         .menuBarExtraStyle(.window)

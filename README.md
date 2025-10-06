@@ -165,13 +165,18 @@ cd backend
 cargo build
 
 # Android unit tests (requires Android SDK + JDK 17)
+./scripts/setup-android-sdk.sh              # downloads command-line tools + platform 34 into .android-sdk/
+export ANDROID_SDK_ROOT="$(pwd)/.android-sdk"
+export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" # adjust for your platform
 cd android
-./gradlew testDebugUnitTest --tests "*CryptoServiceTest" --tests "*SyncCoordinatorTest"
+./gradlew test --console=plain
 ```
 
-The Android client requires the Android SDK, which is not available in this
-container image; run `./gradlew assembleDebug` locally once the SDK is
-installed.
+The helper script `scripts/setup-android-sdk.sh` fetches the Android command-
+line tools and installs platform 34 + Build Tools 34.0.0 in `.android-sdk/`. If
+you already have an SDK installed, set `ANDROID_SDK_ROOT` to that location and
+skip the script. Unit tests require JDK 17; set `JAVA_HOME` accordingly before
+invoking Gradle.
 
 ---
 

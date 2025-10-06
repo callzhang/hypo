@@ -1,6 +1,8 @@
 package com.hypo.clipboard.di
 
 import android.content.Context
+import android.net.nsd.NsdManager
+import android.net.wifi.WifiManager
 import androidx.room.Room
 import com.hypo.clipboard.crypto.CryptoService
 import com.hypo.clipboard.crypto.NonceGenerator
@@ -14,6 +16,11 @@ import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.sync.DeviceKeyStore
 import com.hypo.clipboard.sync.NoopSyncTransport
 import com.hypo.clipboard.sync.SyncTransport
+import com.hypo.clipboard.transport.TransportManager
+import com.hypo.clipboard.transport.lan.LanDiscoveryRepository
+import com.hypo.clipboard.transport.lan.LanDiscoverySource
+import com.hypo.clipboard.transport.lan.LanRegistrationController
+import com.hypo.clipboard.transport.lan.LanRegistrationManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -59,4 +66,41 @@ object AppModule {
     @Provides
     @Singleton
     fun provideSyncTransport(): SyncTransport = NoopSyncTransport()
+
+    @Provides
+    fun provideNsdManager(@ApplicationContext context: Context): NsdManager =
+        context.getSystemService(Context.NSD_SERVICE) as NsdManager
+
+    @Provides
+    fun provideWifiManager(@ApplicationContext context: Context): WifiManager =
+        context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+
+    @Provides
+    @Singleton
+    fun provideLanDiscoveryRepository(
+        @ApplicationContext context: Context,
+        nsdManager: NsdManager,
+        wifiManager: WifiManager
+    ): LanDiscoveryRepository = LanDiscoveryRepository(context, nsdManager, wifiManager)
+
+    @Provides
+    fun provideLanDiscoverySource(repository: LanDiscoveryRepository): LanDiscoverySource = repository
+
+    @Provides
+    @Singleton
+    fun provideLanRegistrationManager(
+        @ApplicationContext context: Context,
+        nsdManager: NsdManager,
+        wifiManager: WifiManager
+    ): LanRegistrationManager = LanRegistrationManager(context, nsdManager, wifiManager)
+
+    @Provides
+    fun provideLanRegistrationController(manager: LanRegistrationManager): LanRegistrationController = manager
+
+    @Provides
+    @Singleton
+    fun provideTransportManager(
+        discoverySource: LanDiscoverySource,
+        registrationController: LanRegistrationController
+    ): TransportManager = TransportManager(discoverySource, registrationController)
 }

@@ -71,7 +71,7 @@ class SyncEngineTest {
         val key = ByteArray(32) { 9 }
 
         coEvery { deviceKeyStore.loadKey("mac-device") } returns key
-        every {
+        coEvery {
             cryptoService.decrypt(
                 encrypted = any(),
                 key = key,

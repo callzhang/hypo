@@ -5,9 +5,11 @@ import android.net.nsd.NsdManager
 import android.net.wifi.WifiManager
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.net.InetAddress
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -50,10 +52,19 @@ class LanDiscoveryRepositoryTest {
     @Test
     fun restartsDiscoveryWhenNetworkChanges() = runTest(dispatcher) {
         var discoverCount = 0
+        var stopCount = 0
+        val listeners = mutableListOf<NsdManager.DiscoveryListener>()
+        val stoppedListeners = mutableListOf<NsdManager.DiscoveryListener>()
         every {
             nsdManager.discoverServices(any(), any(), any())
         } answers {
+            val listener = thirdArg<NsdManager.DiscoveryListener>()
+            listeners.add(listener)
             discoverCount += 1
+        }
+        every { nsdManager.stopServiceDiscovery(any()) } answers {
+            stopCount += 1
+            stoppedListeners.add(firstArg())
         }
 
         val job = launch { repository.discover().collect { /* keep active */ } }
@@ -64,30 +75,61 @@ class LanDiscoveryRepositoryTest {
         networkEvents.emit(Unit)
         advanceUntilIdle()
         assertEquals(2, discoverCount)
+        assertEquals(2, stopCount)
+        assertTrue(stoppedListeners.isNotEmpty())
+        assertTrue(stoppedListeners.all { it === listeners.first() })
 
         job.cancelAndJoin()
         advanceUntilIdle()
+        assertEquals(3, stopCount)
         assertEquals(1, multicastLock.releaseCount)
-    }
-}
-
-private class FakeMulticastLock : LanDiscoveryRepository.MulticastLockHandle {
-    private var held = false
-    var acquireCount: Int = 0
-        private set
-    var releaseCount: Int = 0
-        private set
-
-    override val isHeld: Boolean
-        get() = held
-
-    override fun acquire() {
-        acquireCount += 1
-        held = true
+        assertTrue(stoppedListeners.all { it === listeners.first() })
     }
 
-    override fun release() {
-        releaseCount += 1
-        held = false
+    @Test
+    fun releasesResourcesWhenScopeFinishes() = runTest(dispatcher) {
+        val listeners = mutableListOf<NsdManager.DiscoveryListener>()
+        val stoppedListeners = mutableListOf<NsdManager.DiscoveryListener>()
+        every {
+            nsdManager.discoverServices(any(), any(), any())
+        } answers {
+            val listener = thirdArg<NsdManager.DiscoveryListener>()
+            listeners.add(listener)
+            listener.onServiceFound(mockk(relaxed = true))
+        }
+
+        var stopCalls = 0
+        every { nsdManager.stopServiceDiscovery(any()) } answers {
+            stopCalls += 1
+            stoppedListeners.add(firstArg())
+        }
+
+        every { nsdManager.resolveService(any(), any()) } answers {
+            val resolveListener = secondArg<NsdManager.ResolveListener>()
+            val serviceInfo = mockk<android.net.nsd.NsdServiceInfo>()
+            every { serviceInfo.serviceName } returns "peer"
+            every { serviceInfo.host } returns InetAddress.getByName("192.168.1.10")
+            every { serviceInfo.port } returns 9000
+            every { serviceInfo.attributes } returns mapOf(
+                "fingerprint_sha256" to "fingerprint".toByteArray()
+            )
+            resolveListener.onServiceResolved(serviceInfo)
+        }
+
+        val events = mutableListOf<LanDiscoveryEvent>()
+        val job = launch {
+            repository.discover().collect { events += it }
+        }
+
+        advanceUntilIdle()
+        job.cancelAndJoin()
+        advanceUntilIdle()
+
+        assertTrue(events.isNotEmpty())
+        assertEquals(1, multicastLock.releaseCount)
+        assertEquals(2, stopCalls)
+        assertTrue(stoppedListeners.isNotEmpty())
+        assertTrue(stoppedListeners.all { it === listeners.first() })
+        verify(exactly = 1) { nsdManager.resolveService(any(), any()) }
     }
 }

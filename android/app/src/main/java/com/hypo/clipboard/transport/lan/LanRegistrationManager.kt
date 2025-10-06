@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -20,11 +21,11 @@ class LanRegistrationManager(
     context: Context,
     private val nsdManager: NsdManager,
     private val wifiManager: WifiManager,
-    private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + dispatcher),
     private val initialBackoff: Duration = Duration.ofSeconds(1),
     private val maxBackoff: Duration = Duration.ofMinutes(5)
-) {
+): LanRegistrationController {
     private val applicationContext = context.applicationContext
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var connectivityReceiver: BroadcastReceiver? = null
@@ -32,14 +33,14 @@ class LanRegistrationManager(
     private var attempts = 0
     private var currentConfig: LanRegistrationConfig? = null
 
-    fun start(config: LanRegistrationConfig) {
+    override fun start(config: LanRegistrationConfig) {
         currentConfig = config
         registerReceiverIfNeeded()
         attempts = 0
         registerService(config)
     }
 
-    fun stop() {
+    override fun stop() {
         retryJob?.cancel()
         retryJob = null
         currentConfig = null
@@ -130,3 +131,8 @@ data class LanRegistrationConfig(
     val protocols: List<String>,
     val serviceType: String = SERVICE_TYPE
 )
+
+interface LanRegistrationController {
+    fun start(config: LanRegistrationConfig)
+    fun stop()
+}

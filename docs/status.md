@@ -93,6 +93,7 @@ None currently
 2. Brought up Android NSD discovery/registration with structured concurrency plus injectable network events for deterministic unit coverage.
 3. Transport specs updated with OEM multicast caveats (HyperOS) and cross-platform LAN telemetry expectations.
 4. Provisioned headless Android SDK installation script so CI containers can execute Gradle unit suites without manual setup.
+5. Android foreground service now boots the LAN transport manager, exposing discovered peers and restartable advertising from a shared coroutine scope.
 
 **Next Steps**:
 1. Implement LAN TLS WebSocket clients with certificate pinning and idle watchdogs on macOS and Android.

@@ -316,11 +316,13 @@ android/
 │   │   │   │   ├── repository/ClipboardRepository.kt
 │   │   │   ├── sync/
 │   │   │   │   ├── SyncEngine.kt
-│   │   │   │   ├── TransportManager.kt
 │   │   │   │   ├── CryptoService.kt
-│   │   │   ├── network/
-│   │   │   │   ├── NsdDiscovery.kt
-│   │   │   │   ├── WebSocketClient.kt
+│   │   │   ├── transport/
+│   │   │   │   ├── TransportManager.kt
+│   │   │   │   └── lan/
+│   │   │   │       ├── LanDiscoveryRepository.kt
+│   │   │   │       ├── LanRegistrationManager.kt
+│   │   │   │       └── LanModels.kt
 │   │   ├── res/
 │   │   ├── AndroidManifest.xml
 ├── build.gradle.kts
@@ -380,6 +382,7 @@ interface ClipboardDao {
 
 - **LanDiscoveryRepository** (`transport/lan/LanDiscoveryRepository.kt`): Bridges `NsdManager` callbacks into a `callbackFlow<LanDiscoveryEvent>` while acquiring a scoped multicast lock. Network-change events are injectable (default implementation listens for Wi-Fi broadcasts) so tests can drive deterministic restarts without Robolectric, and the repository guards `discoverServices` restarts with a `Mutex` to avoid overlapping NSD calls.
 - **LanRegistrationManager** (`transport/lan/LanRegistrationManager.kt`): Publishes `_hypo._tcp` with TXT payload `{ fingerprint_sha256, version, protocols }`, listens for Wi-Fi connectivity changes, and re-registers using exponential backoff (1 s, 2 s, 4 s… capped at 5 minutes). Backoff attempts reset after successful registration.
+- **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. Helpers surface last-seen timestamps and prune stale peers, ensuring telemetry and UI layers can render an accurate LAN roster.
 - **OEM Notes**: HyperOS throttles multicast after ~15 minutes of screen-off time. The repository exposes lock lifecycle hooks so the service can prompt users to re-open the app, and the registration manager schedules immediate retries when connectivity resumes to mitigate OEM suppression.
 
 #### 4.2.5 Android WebSocket Client

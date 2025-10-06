@@ -25,11 +25,11 @@ class LanDiscoveryRepository(
     private val clock: Clock = Clock.systemUTC(),
     private val networkEvents: Flow<Unit>? = null,
     private val multicastLockFactory: (() -> MulticastLockHandle)? = null
-) {
+): LanDiscoverySource {
     private val applicationContext = context.applicationContext
     private val discoveryMutex = Mutex()
 
-    fun discover(serviceType: String = SERVICE_TYPE): Flow<LanDiscoveryEvent> = callbackFlow {
+    override fun discover(serviceType: String): Flow<LanDiscoveryEvent> = callbackFlow {
         val multicastLock = (multicastLockFactory ?: { createMulticastLock() }).invoke().also { it.acquire() }
 
         val listener = object : NsdManager.DiscoveryListener {
@@ -148,4 +148,8 @@ class LanDiscoveryRepository(
         fun acquire()
         fun release()
     }
+}
+
+interface LanDiscoverySource {
+    fun discover(serviceType: String = SERVICE_TYPE): Flow<LanDiscoveryEvent>
 }

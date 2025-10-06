@@ -89,10 +89,6 @@ class LanRegistrationManager(
             override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                 scheduleRetry(config)
             }
-
-            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
-                scheduleRetry(config)
-            }
         }
         registrationListener = listener
         scope.launch(dispatcher) {

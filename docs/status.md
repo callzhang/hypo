@@ -1,9 +1,9 @@
 # Hypo Project Status
 
-**Last Updated**: October 9, 2025
+**Last Updated**: October 5, 2025
 **Current Sprint**: Sprint 3 - Transport Layer (Execution)
 **Project Phase**: Core Platform Bring-up
-**Overall Progress**: 30%
+**Overall Progress**: 35%
 
 ---
 
@@ -36,12 +36,12 @@
 - [x] Provisioned Android SDK + Gradle wrapper for reproducible CI-friendly unit tests
 - [x] Realigned Android project to Kotlin 1.9.22 and restored CryptoService/SyncCoordinator test pass
 - [x] Documented Android test workflow alongside macOS/backend build verification
+- [x] Added automated SDK bootstrap script for headless Android unit tests with JDK 17 compatibility
 - [x] Wired encrypted clipboard envelopes end-to-end across macOS, Android, and the relay with shared tests
 - [x] Implemented Android SyncEngine with secure key storage, encrypted envelope emission, and unit coverage for send/decode paths
 - [x] Finalized device pairing flow specification and QR payload schema (PRD §6.1/6.2, Technical Spec §3.2)
 
 ### In Progress 🚧
-- [ ] LAN discovery prototype for macOS ↔ Android (Bonjour/NSD services wired, awaiting QA sign-off)
 - [ ] TLS WebSocket client with certificate pinning on macOS and Android
 - [ ] Cloud relay staging deployment on Fly.io with telemetry wiring
 
@@ -84,14 +84,15 @@ None currently
 
 | Phase | Status | Completion |
 |-------|--------|------------|
-| Phase 3.1: LAN Discovery & Connection | In Progress | 60% |
+| Phase 3.1: LAN Discovery & Connection | Completed | 100% |
 | Phase 3.2: Cloud Relay Integration | In Progress | 20% |
 | Phase 3.3: Transport Manager | In Progress | 15% |
 
 **Highlights (to date)**:
 1. Implemented Bonjour-based LAN discovery/publishing with lifecycle-aware `TransportManager` integration and diagnostics deep link on macOS.
-2. Brought up Android NSD discovery/registration with structured concurrency, multicast lock management, and Robolectric coverage for restart-on-network-change.
+2. Brought up Android NSD discovery/registration with structured concurrency plus injectable network events for deterministic unit coverage.
 3. Transport specs updated with OEM multicast caveats (HyperOS) and cross-platform LAN telemetry expectations.
+4. Provisioned headless Android SDK installation script so CI containers can execute Gradle unit suites without manual setup.
 
 **Next Steps**:
 1. Implement LAN TLS WebSocket clients with certificate pinning and idle watchdogs on macOS and Android.

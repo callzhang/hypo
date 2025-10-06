@@ -1,90 +1,93 @@
 package com.hypo.clipboard.transport.lan
 
 import android.content.Context
-import android.content.Intent
 import android.net.nsd.NsdManager
 import android.net.wifi.WifiManager
-import androidx.test.core.app.ApplicationProvider
+import io.mockk.every
+import io.mockk.mockk
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
-import org.junit.After
-import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
-import org.robolectric.annotation.Implements
-import org.robolectric.annotation.Implementation
-import org.robolectric.annotation.Resetter
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 
 @OptIn(ExperimentalCoroutinesApi::class)
-@RunWith(RobolectricTestRunner::class)
-@Config(shadows = [TrackingShadowNsdManager::class])
 class LanDiscoveryRepositoryTest {
-    private val context: Context = ApplicationProvider.getApplicationContext()
-    private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
-    private val wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    private val context: Context = mockk(relaxed = true)
+    private val nsdManager: NsdManager = mockk(relaxed = true)
+    private val wifiManager: WifiManager = mockk(relaxed = true)
     private val dispatcher = UnconfinedTestDispatcher()
     private val clock = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
+    private val networkEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val multicastLock = FakeMulticastLock()
     private lateinit var repository: LanDiscoveryRepository
 
     @Before
     fun setUp() {
-        TrackingShadowNsdManager.reset()
-        repository = LanDiscoveryRepository(context, nsdManager, wifiManager, dispatcher, clock)
-    }
-
-    @After
-    fun tearDown() {
-        TrackingShadowNsdManager.reset()
+        every { context.applicationContext } returns context
+        every { nsdManager.stopServiceDiscovery(any()) } returns Unit
+        every { nsdManager.resolveService(any(), any()) } answers {}
+        repository = LanDiscoveryRepository(
+            context = context,
+            nsdManager = nsdManager,
+            wifiManager = wifiManager,
+            dispatcher = dispatcher,
+            clock = clock,
+            networkEvents = networkEvents,
+            multicastLockFactory = { multicastLock }
+        )
     }
 
     @Test
     fun restartsDiscoveryWhenNetworkChanges() = runTest(dispatcher) {
+        var discoverCount = 0
+        every {
+            nsdManager.discoverServices(any(), any(), any())
+        } answers {
+            discoverCount += 1
+        }
+
         val job = launch { repository.discover().collect { /* keep active */ } }
         advanceUntilIdle()
-        assertEquals(1, TrackingShadowNsdManager.discoverCount)
+        assertEquals(1, discoverCount)
+        assertTrue(multicastLock.isHeld)
 
-        context.sendBroadcast(Intent(WifiManager.NETWORK_STATE_CHANGED_ACTION))
+        networkEvents.emit(Unit)
         advanceUntilIdle()
-        assertEquals(2, TrackingShadowNsdManager.discoverCount)
+        assertEquals(2, discoverCount)
 
         job.cancelAndJoin()
+        advanceUntilIdle()
+        assertEquals(1, multicastLock.releaseCount)
     }
 }
 
-@Implements(value = NsdManager::class, inheritImplementationMethods = true)
-class TrackingShadowNsdManager : org.robolectric.shadows.ShadowNsdManager() {
-    companion object {
-        var discoverCount: Int = 0
-            private set
+private class FakeMulticastLock : LanDiscoveryRepository.MulticastLockHandle {
+    private var held = false
+    var acquireCount: Int = 0
+        private set
+    var releaseCount: Int = 0
+        private set
 
-        @JvmStatic
-        @Resetter
-        fun reset() {
-            discoverCount = 0
-        }
+    override val isHeld: Boolean
+        get() = held
+
+    override fun acquire() {
+        acquireCount += 1
+        held = true
     }
 
-    @Implementation
-    protected fun discoverServices(
-        serviceType: String?,
-        protocolType: Int,
-        listener: NsdManager.DiscoveryListener?
-    ) {
-        discoverCount += 1
-    }
-
-    @Implementation
-    protected fun stopServiceDiscovery(listener: NsdManager.DiscoveryListener?) {
-        // no-op for tests
+    override fun release() {
+        releaseCount += 1
+        held = false
     }
 }

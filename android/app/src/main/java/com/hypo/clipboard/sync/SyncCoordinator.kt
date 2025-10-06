@@ -4,9 +4,8 @@ import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -18,14 +17,16 @@ class SyncCoordinator @Inject constructor(
     private val syncEngine: SyncEngine,
     private val identity: DeviceIdentity
 ) {
-    private val events = MutableSharedFlow<ClipboardEvent>(extraBufferCapacity = 16)
+    private var eventChannel: Channel<ClipboardEvent>? = null
     private var job: Job? = null
     private val targets = MutableStateFlow<Set<String>>(emptySet())
 
     fun start(scope: CoroutineScope) {
         if (job != null) return
-        job = scope.launch(Dispatchers.IO) {
-            events.collect { event ->
+        val channel = Channel<ClipboardEvent>(Channel.BUFFERED)
+        eventChannel = channel
+        job = scope.launch {
+            for (event in channel) {
                 val item = ClipboardItem(
                     id = event.id,
                     type = ClipboardType.TEXT,
@@ -46,12 +47,14 @@ class SyncCoordinator @Inject constructor(
     }
 
     fun stop() {
+        eventChannel?.close()
+        eventChannel = null
         job?.cancel()
         job = null
     }
 
     suspend fun onClipboardEvent(event: ClipboardEvent) {
-        events.emit(event)
+        eventChannel?.send(event)
     }
 
     fun setTargetDevices(deviceIds: Set<String>) {

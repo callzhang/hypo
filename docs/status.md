@@ -1,9 +1,9 @@
 # Hypo Project Status
 
-**Last Updated**: October 8, 2025
-**Current Sprint**: Sprint 3 - Transport Layer (Planning)
+**Last Updated**: October 5, 2025
+**Current Sprint**: Sprint 3 - Transport Layer (Execution)
 **Project Phase**: Core Platform Bring-up
-**Overall Progress**: 30%
+**Overall Progress**: 35%
 
 ---
 
@@ -36,11 +36,14 @@
 - [x] Provisioned Android SDK + Gradle wrapper for reproducible CI-friendly unit tests
 - [x] Realigned Android project to Kotlin 1.9.22 and restored CryptoService/SyncCoordinator test pass
 - [x] Documented Android test workflow alongside macOS/backend build verification
+- [x] Added automated SDK bootstrap script for headless Android unit tests with JDK 17 compatibility
 - [x] Wired encrypted clipboard envelopes end-to-end across macOS, Android, and the relay with shared tests
 - [x] Implemented Android SyncEngine with secure key storage, encrypted envelope emission, and unit coverage for send/decode paths
+- [x] Finalized device pairing flow specification and QR payload schema (PRD §6.1/6.2, Technical Spec §3.2)
 
 ### In Progress 🚧
-- [ ] LAN discovery prototype for macOS ↔ Android
+- [x] TLS WebSocket client with certificate pinning on macOS and Android
+- [ ] Cloud relay staging deployment on Fly.io with telemetry wiring
 
 ### Blocked 🚫
 None currently
@@ -60,8 +63,7 @@ None currently
 
 **Next Steps**:
 1. Schedule PRD v0.1 stakeholder review and sign-off.
-2. Finalize device pairing flow specification and QR payload schema.
-3. Publish success metrics dashboard derived from PRD §9.
+2. Publish success metrics dashboard derived from PRD §9.
 
 ### Sprint 2: Core Sync Engine (Weeks 3-4)
 **Progress**: 100%
@@ -76,6 +78,29 @@ None currently
 1. Cross-platform AES-256-GCM modules ship with shared interoperability vectors.
 2. Android unit suites execute via Gradle wrapper against the provisioned SDK/JDK 17 toolchain.
 3. Backend session routing fan-out validated with integration coverage.
+
+### Sprint 3: Transport Layer (Weeks 5-6)
+**Progress**: 55%
+
+| Phase | Status | Completion |
+|-------|--------|------------|
+| Phase 3.1: LAN Discovery & Connection | Completed | 100% |
+| Phase 3.2: Cloud Relay Integration | In Progress | 20% |
+| Phase 3.3: Transport Manager | In Progress | 15% |
+
+**Highlights (to date)**:
+1. Implemented Bonjour-based LAN discovery/publishing with lifecycle-aware `TransportManager` integration and diagnostics deep link on macOS.
+2. Brought up Android NSD discovery/registration with structured concurrency plus injectable network events for deterministic unit coverage.
+3. Transport specs updated with OEM multicast caveats (HyperOS) and cross-platform LAN telemetry expectations.
+4. Provisioned headless Android SDK installation script so CI containers can execute Gradle unit suites without manual setup.
+5. Android foreground service now boots the LAN transport manager, exposing discovered peers and restartable advertising from a shared coroutine scope.
+6. Published loopback LAN latency baseline with automated metrics hooks and manual QA checklist for same-network validation.
+
+**Next Steps**:
+1. ✅ Implement LAN TLS WebSocket clients with certificate pinning and idle watchdogs on macOS and Android.
+2. ✅ Capture LAN loopback latency baseline and publish manual QA checklist (`docs/testing/lan_manual.md`).
+3. Deploy the Rust relay to Fly.io staging and validate telemetry/monitoring integration.
+4. Complete the transport state machine (LAN-first with cloud fallback) and expand integration coverage for failure cases.
 
 ---
 
@@ -128,12 +153,12 @@ None currently
 ### Performance Targets
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| LAN Sync Latency (P95) | < 500ms | N/A | Not Measured |
-| Cloud Sync Latency (P95) | < 3s | N/A | Not Measured |
+| LAN Sync Latency (P95) | < 500ms | 44 ms (loopback harness, n=5) | On Track |
+| Cloud Sync Latency (P95) | < 3s | Instrumentation in progress (staging relay) | In Progress |
 | Memory Usage - macOS | < 50MB | N/A | Not Measured |
 | Memory Usage - Android | < 30MB | N/A | Not Measured |
 | Battery Drain - Android | < 2% per day | N/A | Not Measured |
-| Error Rate | < 0.1% | N/A | Not Measured |
+| Error Rate | < 0.1% | Telemetry schema drafted | In Progress |
 
 ### Test Coverage
 | Platform | Target | Current |
@@ -178,6 +203,11 @@ None currently
 - **Tooling**: Added Gradle wrapper + SDK provisioning scripts enabling container-friendly Android unit tests.
 - **Android**: Downgraded to Kotlin 1.9.22 for Compose compatibility, restored CryptoService/SyncCoordinator unit suites, and updated manifest resources for build stability.
 - **Documentation**: Refreshed README build verification and status dashboards to reflect Sprint 2 completion and new testing workflow.
+
+### October 9, 2025
+- **Transport Planning**: Documented LAN discovery, TLS transport client, and cloud relay staging rollout plans in technical spec.
+- **Task Breakdown**: Expanded Sprint 3 task list with detailed sub-tasks covering instrumentation, telemetry, and QA workflows.
+- **Status Update**: Updated project dashboard with Sprint 3 progress metrics and performance instrumentation status.
 
 ---
 

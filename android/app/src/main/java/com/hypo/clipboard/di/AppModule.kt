@@ -1,6 +1,8 @@
 package com.hypo.clipboard.di
 
 import android.content.Context
+import android.net.nsd.NsdManager
+import android.net.wifi.WifiManager
 import androidx.room.Room
 import com.hypo.clipboard.crypto.CryptoService
 import com.hypo.clipboard.crypto.NonceGenerator
@@ -12,14 +14,27 @@ import com.hypo.clipboard.data.local.ClipboardDao
 import com.hypo.clipboard.data.local.HypoDatabase
 import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.sync.DeviceKeyStore
-import com.hypo.clipboard.sync.NoopSyncTransport
 import com.hypo.clipboard.sync.SyncTransport
+import com.hypo.clipboard.transport.TransportManager
+import com.hypo.clipboard.transport.lan.LanDiscoveryRepository
+import com.hypo.clipboard.transport.lan.LanDiscoverySource
+import com.hypo.clipboard.transport.lan.LanRegistrationController
+import com.hypo.clipboard.transport.lan.LanRegistrationManager
+import com.hypo.clipboard.transport.ws.LanWebSocketClient
+import com.hypo.clipboard.transport.ws.OkHttpWebSocketConnector
+import com.hypo.clipboard.transport.ws.TlsWebSocketConfig
+import com.hypo.clipboard.transport.ws.TransportFrameCodec
+import com.hypo.clipboard.transport.ws.WebSocketConnector
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.time.Clock
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -58,5 +73,69 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideSyncTransport(): SyncTransport = NoopSyncTransport()
+    fun provideTlsWebSocketConfig(): TlsWebSocketConfig =
+        TlsWebSocketConfig(
+            url = "wss://127.0.0.1:${TransportManager.DEFAULT_PORT}/ws",
+            fingerprintSha256 = null
+        )
+
+    @Provides
+    @Singleton
+    fun provideWebSocketConnector(config: TlsWebSocketConfig): WebSocketConnector =
+        OkHttpWebSocketConnector(config)
+
+    @Provides
+    @Singleton
+    fun provideTransportFrameCodec(): TransportFrameCodec = TransportFrameCodec()
+
+    @Provides
+    @Singleton
+    fun provideSyncTransport(
+        config: TlsWebSocketConfig,
+        connector: WebSocketConnector,
+        frameCodec: TransportFrameCodec
+    ): SyncTransport = LanWebSocketClient(
+        config,
+        connector,
+        frameCodec,
+        CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        Clock.systemUTC()
+    )
+
+    @Provides
+    fun provideNsdManager(@ApplicationContext context: Context): NsdManager =
+        context.getSystemService(Context.NSD_SERVICE) as NsdManager
+
+    @Provides
+    fun provideWifiManager(@ApplicationContext context: Context): WifiManager =
+        context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+
+    @Provides
+    @Singleton
+    fun provideLanDiscoveryRepository(
+        @ApplicationContext context: Context,
+        nsdManager: NsdManager,
+        wifiManager: WifiManager
+    ): LanDiscoveryRepository = LanDiscoveryRepository(context, nsdManager, wifiManager)
+
+    @Provides
+    fun provideLanDiscoverySource(repository: LanDiscoveryRepository): LanDiscoverySource = repository
+
+    @Provides
+    @Singleton
+    fun provideLanRegistrationManager(
+        @ApplicationContext context: Context,
+        nsdManager: NsdManager,
+        wifiManager: WifiManager
+    ): LanRegistrationManager = LanRegistrationManager(context, nsdManager, wifiManager)
+
+    @Provides
+    fun provideLanRegistrationController(manager: LanRegistrationManager): LanRegistrationController = manager
+
+    @Provides
+    @Singleton
+    fun provideTransportManager(
+        discoverySource: LanDiscoverySource,
+        registrationController: LanRegistrationController
+    ): TransportManager = TransportManager(discoverySource, registrationController)
 }

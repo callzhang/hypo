@@ -205,3 +205,6 @@ notes.md
 scratch.md
 TODO.txt
 
+# Downloaded Android SDK for local testing
+.android-sdk/
+

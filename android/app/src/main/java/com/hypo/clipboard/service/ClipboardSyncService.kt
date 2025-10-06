@@ -11,7 +11,10 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.hypo.clipboard.R
 import com.hypo.clipboard.sync.ClipboardListener
+import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.sync.SyncCoordinator
+import com.hypo.clipboard.transport.TransportManager
+import com.hypo.clipboard.transport.lan.LanRegistrationConfig
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +26,8 @@ import javax.inject.Inject
 class ClipboardSyncService : Service() {
 
     @Inject lateinit var syncCoordinator: SyncCoordinator
+    @Inject lateinit var transportManager: TransportManager
+    @Inject lateinit var deviceIdentity: DeviceIdentity
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var listener: ClipboardListener
@@ -42,12 +47,14 @@ class ClipboardSyncService : Service() {
         )
 
         syncCoordinator.start(scope)
+        transportManager.start(buildLanRegistrationConfig())
         listener.start()
     }
 
     override fun onDestroy() {
         listener.stop()
         syncCoordinator.stop()
+        transportManager.stop()
         scope.coroutineContext.cancelChildren()
         super.onDestroy()
     }
@@ -81,8 +88,24 @@ class ClipboardSyncService : Service() {
             .build()
     }
 
+    private fun buildLanRegistrationConfig(): LanRegistrationConfig {
+        val version = runCatching {
+            val packageInfo = packageManager.getPackageInfo(packageName, 0)
+            packageInfo.versionName ?: DEFAULT_VERSION
+        }.getOrDefault(DEFAULT_VERSION)
+
+        return LanRegistrationConfig(
+            serviceName = deviceIdentity.deviceId,
+            port = TransportManager.DEFAULT_PORT,
+            fingerprint = TransportManager.DEFAULT_FINGERPRINT,
+            version = version,
+            protocols = TransportManager.DEFAULT_PROTOCOLS
+        )
+    }
+
     companion object {
         private const val CHANNEL_ID = "clipboard-sync"
         private const val NOTIFICATION_ID = 42
+        private const val DEFAULT_VERSION = "1.0.0"
     }
 }

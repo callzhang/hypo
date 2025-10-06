@@ -1,6 +1,5 @@
 package com.hypo.clipboard.sync
 
-import android.util.Base64
 import com.hypo.clipboard.crypto.CryptoService
 import com.hypo.clipboard.domain.model.ClipboardItem
 import javax.inject.Inject
@@ -9,8 +8,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.util.Base64
 
-private const val BASE64_FLAGS = Base64.NO_WRAP
+private val base64Encoder = Base64.getEncoder().withoutPadding()
+private val base64Decoder = Base64.getDecoder()
 
 @Singleton
 class SyncEngine @Inject constructor(
@@ -35,7 +36,7 @@ class SyncEngine @Inject constructor(
 
         val payload = ClipboardPayload(
             contentType = item.type,
-            dataBase64 = Base64.encodeToString(item.content.encodeToByteArray(), BASE64_FLAGS),
+            dataBase64 = base64Encoder.encodeToString(item.content.encodeToByteArray()),
             metadata = item.metadata ?: emptyMap()
         )
         val plaintext = json.encodeToString(payload).encodeToByteArray()
@@ -91,6 +92,6 @@ sealed class SyncEngineException(message: String) : Exception(message) {
     class MissingKey(deviceId: String) : SyncEngineException("No symmetric key registered for $deviceId")
 }
 
-private fun ByteArray.toBase64(): String = Base64.encodeToString(this, BASE64_FLAGS)
+private fun ByteArray.toBase64(): String = base64Encoder.encodeToString(this)
 
-private fun String.fromBase64(): ByteArray = Base64.decode(this, BASE64_FLAGS)
+private fun String.fromBase64(): ByteArray = base64Decoder.decode(this)

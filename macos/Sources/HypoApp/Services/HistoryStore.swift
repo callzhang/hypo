@@ -6,6 +6,9 @@ import Combine
 #if canImport(AppKit)
 import AppKit
 #endif
+#if canImport(os)
+import os.log
+#endif
 #if canImport(UniformTypeIdentifiers)
 import UniformTypeIdentifiers
 #endif
@@ -95,6 +98,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     private let transportManager: TransportManager
     private let defaults: UserDefaults
     private var loadTask: Task<Void, Never>?
+#if canImport(os)
+    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
+#endif
 
     private enum DefaultsKey {
         static let allowsCloudFallback = "allow_cloud_fallback"
@@ -139,6 +145,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func start() async {
+        await transportManager.ensureLanDiscoveryActive()
         loadTask?.cancel()
         loadTask = Task { [store] in
             async let snapshotTask = store.all()
@@ -151,6 +158,15 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 self.historyLimit = limit
             }
         }
+    }
+
+    public func handleDeepLink(_ url: URL) async {
+        guard let report = transportManager.handleDeepLink(url) else { return }
+#if canImport(os)
+        logger.info("\n\(report, privacy: .public)")
+#else
+        print(report)
+#endif
     }
 
     public func add(_ entry: ClipboardEntry) async {

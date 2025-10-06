@@ -143,25 +143,29 @@ To prevent clipboard ping-pong loops:
 ### 3.2 Device Pairing Protocol
 
 #### Initial Pairing (LAN)
-1. User opens "Pair Device" on macOS
-2. macOS generates QR code containing:
-   - Device UUID
-   - ECDH public key
-   - mDNS service name
-   - Timestamp (valid 5 min)
-3. User scans QR on Android
-4. Android extracts public key, performs ECDH to derive shared secret
-5. Android sends encrypted challenge to macOS via mDNS-discovered IP
-6. macOS decrypts challenge, sends encrypted response
-7. Pairing complete, shared key stored in Keychain/EncryptedSharedPreferences
+1. User opens "Pair Device" on macOS.
+2. macOS fetches/rotates its long-term Ed25519 signing key (stored in Keychain) and generates an ephemeral Curve25519 key pair for this attempt.
+3. Compose QR payload using fields defined in PRD §6.1 (`ver`, `mac_device_id`, `mac_pub_key`, `service`, `port`, `relay_hint`, `issued_at`, `expires_at`).
+4. Create canonical byte representation: JSON sorted by key, UTF-8 encoded; sign with Ed25519 → `signature` field.
+5. Render QR (error correction level M, 256×256) and expose to user until `expires_at`.
+6. Android scans QR, parses JSON, validates schema + TTL window (±5 min) and verifies signature against macOS long-term public key (distributed during previous pairing or bootstrap update channel).
+7. Android publishes ephemeral Curve25519 key pair, derives shared key = HKDF-SHA256(X25519(mac_pub_key, android_priv_key), salt = 32 bytes of 0x00, info = "hypo/pairing").
+8. Resolve Bonjour service `service` and `port`; connect via TLS WebSocket. If connection fails within 3 s, fallback path triggers (see Remote Pairing).
+9. Android emits `PAIRING_CHALLENGE` message: AES-256-GCM encrypt random 32-byte challenge, associated data = `mac_device_id`. Include `nonce`, `ciphertext`, `tag`.
+10. macOS decrypts, ensures nonce monotonicity (LRU cache of last 32 seen). Responds with `PAIRING_ACK` containing device descriptor and hashed Android ID.
+11. Both sides persist shared key + peer metadata; handshake complete. macOS invalidates QR (even if `expires_at` not reached) and logs telemetry `pairing_lan_success` with anonymized latency.
 
 #### Remote Pairing (via Cloud Relay)
-1. macOS generates 6-digit pairing code + ephemeral ECDH key pair
-2. macOS sends public key to relay with pairing code
-3. User enters pairing code on Android
-4. Android retrieves public key from relay, performs ECDH
-5. Same challenge-response flow as LAN, routed through relay
-6. Relay cannot decrypt (only routes encrypted blobs)
+1. macOS obtains pairing code by calling relay `POST /pairing/code` with TLS + HMAC header. Response includes `{ code, expires_at }`.
+2. Relay stores entry in Redis: key `pairing:code:<code>` → JSON { mac_device_id, mac_pub_key, issued_at, expires_at } with TTL 60 s.
+3. Android collects 6-digit code from user, invokes `POST /pairing/claim` with `{ code, android_device_id, android_pub_key }` and same HMAC header.
+4. Relay verifies TTL + rate limits (5 attempts/min/IP). On success, it returns macOS payload (excluding signature) and pushes WebSocket control message `PAIRING_CLAIMED` to macOS.
+5. Android derives shared key using retrieved `mac_pub_key` (HKDF parameters identical to LAN flow) and sends `PAIRING_CHALLENGE` via relay channel. Relay treats body as opaque bytes.
+6. macOS replies with `PAIRING_ACK`; relay forwards to Android. After acknowledgement, relay deletes Redis entry and emits audit log.
+7. Failure Cases:
+   - Expired code → HTTP 410; Android prompts for regeneration.
+   - macOS offline → relay retries notify for 30 s; if unacknowledged, entry resets for reuse until TTL.
+   - Duplicate `mac_device_id` claims → HTTP 409 `DEVICE_NOT_PAIRED`; instruct client to restart handshake.
 
 ### 3.3 Message Encryption
 
@@ -278,6 +282,19 @@ func showNotification(for item: ClipboardItem) {
 }
 ```
 
+#### 4.1.5 LAN Discovery & Advertising
+
+- **BonjourBrowser** (`Utilities/BonjourBrowser.swift`): Actor-backed wrapper around `NetServiceBrowser` that normalizes discovery callbacks into an `AsyncStream<LanDiscoveryEvent>`. Each `DiscoveredPeer` carries resolved host, port, TXT metadata (including `fingerprint_sha256`), and the `lastSeen` timestamp. The browser supports explicit stale pruning (`prunePeers`) and is unit-tested with driver doubles in `BonjourBrowserTests`.
+- **TransportManager Integration** (`Services/TransportManager.swift`): The manager now persists LAN sightings via `UserDefaultsLanDiscoveryCache`, auto-starts discovery/advertising on foreground using `ApplicationLifecycleObserver`, and exposes `lanDiscoveredPeers()` plus a diagnostics string for `hypo://debug/lan`. Deep links are surfaced through SwiftUI's `.onOpenURL`, logging active registrations alongside publisher state.
+- **BonjourPublisher** (`Utilities/BonjourPublisher.swift`): Publishes `_hypo._tcp` with TXT payload `{ version, fingerprint_sha256, protocols }`, tracks the currently advertised endpoint, and restarts advertising when configuration changes (e.g., port update). Diagnostics reuse this metadata so operators can validate fingerprints during support sessions.
+- **Testing**: `TransportManagerLanTests` validate that discovery events update persisted timestamps, diagnostics include discovered peers, and lifecycle hooks stop advertising on suspend.
+
+#### 4.1.6 LAN WebSocket Client
+
+- **Transport Pipeline**: `LanWebSocketTransport` wraps `URLSessionWebSocketTask` behind the shared `SyncTransport` protocol. The client pins the SHA-256 fingerprint advertised in the Bonjour TXT record, frames JSON envelopes with a 4-byte length prefix via `TransportFrameCodec`, and restarts its receive loop after each payload.
+- **Timeouts**: Dial attempts still cancel after 3 s; once connected the configurable idle watchdog (30 s default) tears down sockets when no LAN traffic is observed.
+- **Metrics**: Every connection records handshake duration, first-message latency, idle timeout events, and disconnect reasons which feed into `TelemetryClient` and status reporting.
+
 ### 4.2 Android Client
 
 #### 4.2.1 Project Structure
@@ -299,11 +316,17 @@ android/
 │   │   │   │   ├── repository/ClipboardRepository.kt
 │   │   │   ├── sync/
 │   │   │   │   ├── SyncEngine.kt
-│   │   │   │   ├── TransportManager.kt
 │   │   │   │   ├── CryptoService.kt
-│   │   │   ├── network/
-│   │   │   │   ├── NsdDiscovery.kt
-│   │   │   │   ├── WebSocketClient.kt
+│   │   │   ├── transport/
+│   │   │   │   ├── TransportManager.kt
+│   │   │   │   ├── lan/
+│   │   │   │   │   ├── LanDiscoveryRepository.kt
+│   │   │   │   │   ├── LanRegistrationManager.kt
+│   │   │   │   │   └── LanModels.kt
+│   │   │   │   └── ws/
+│   │   │   │       ├── LanWebSocketClient.kt
+│   │   │   │       ├── TransportFrameCodec.kt
+│   │   │   │       └── TlsWebSocketConfig.kt
 │   │   ├── res/
 │   │   ├── AndroidManifest.xml
 ├── build.gradle.kts
@@ -353,11 +376,24 @@ data class ClipboardItem(
 interface ClipboardDao {
     @Query("SELECT * FROM clipboard_history ORDER BY timestamp DESC LIMIT :limit")
     fun getRecent(limit: Int = 200): Flow<List<ClipboardItem>>
-    
+
     @Query("SELECT * FROM clipboard_history WHERE previewText LIKE '%' || :query || '%'")
     fun search(query: String): Flow<List<ClipboardItem>>
 }
 ```
+
+#### 4.2.4 NSD Discovery & Registration
+
+- **LanDiscoveryRepository** (`transport/lan/LanDiscoveryRepository.kt`): Bridges `NsdManager` callbacks into a `callbackFlow<LanDiscoveryEvent>` while acquiring a scoped multicast lock. Network-change events are injectable (default implementation listens for Wi-Fi broadcasts) so tests can drive deterministic restarts without Robolectric, and the repository guards `discoverServices` restarts with a `Mutex` to avoid overlapping NSD calls.
+- **LanRegistrationManager** (`transport/lan/LanRegistrationManager.kt`): Publishes `_hypo._tcp` with TXT payload `{ fingerprint_sha256, version, protocols }`, listens for Wi-Fi connectivity changes, and re-registers using exponential backoff (1 s, 2 s, 4 s… capped at 5 minutes). Backoff attempts reset after successful registration.
+- **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. Helpers surface last-seen timestamps and prune stale peers, ensuring telemetry and UI layers can render an accurate LAN roster.
+- **OEM Notes**: HyperOS throttles multicast after ~15 minutes of screen-off time. The repository exposes lock lifecycle hooks so the service can prompt users to re-open the app, and the registration manager schedules immediate retries when connectivity resumes to mitigate OEM suppression.
+
+#### 4.2.5 Android WebSocket Client
+
+- **OkHttp Integration**: `OkHttpClient` configured with `CertificatePinner` keyed to the relay fingerprint and LAN fingerprint when available. Coroutine-based `Channel` ensures backpressure while sending messages.
+- **Fallback Orchestration**: `TransportManager` races LAN connection vs. a 3 s timeout before instantiating a relay `WebSocket`. Cloud attempts use jittered exponential backoff, persisting the last successful transport in `DataStore` for heuristics.
+- **Instrumentation**: `MetricsReporter` logs handshake and first payload durations (`transport_handshake_ms`, `transport_first_payload_ms`) with transport label `lan` or `cloud` for downstream analytics.
 
 ### 4.3 Backend Relay
 
@@ -424,6 +460,12 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 }
 ```
 
+#### 4.3.4 Cloud Relay Enhancements
+
+- **Staging Deployment**: Relay packaged via Docker and deployed to Fly.io. `fly.toml` defines auto-scaling (min=1, max=3) and binds Redis through the `redis` add-on. Secrets (`RELAY_HMAC_KEY`, `CERT_FINGERPRINT`) managed through Fly secrets and rotated monthly.
+- **Pairing Support**: Adds `/pairing/code` and `/pairing/claim` endpoints secured with HMAC header `X-Hypo-Signature`. Pairing codes stored in Redis with 60 s TTL and replay protection counters.
+- **Observability**: Structured logs via `tracing` include connection IDs, transport path (`lan`, `relay`), and latency histograms exported to Prometheus. Alerts trigger when relay error rate exceeds 1% over 5 min.
+
 ---
 
 ## 5. Testing Strategy
@@ -436,20 +478,25 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 ### 5.2 Integration Tests
 - **E2E Encryption**: Encrypt on one platform, decrypt on other
 - **Transport Fallback**: Simulate LAN unavailable, verify cloud fallback
+- **LAN Discovery Harness**: Simulate multicast announcements and ensure discovery emits add/remove events and prunes stale entries after 10 s.
+- **Latency Instrumentation**: Assert the `TransportMetricsRecorder` hooks on macOS (`LanWebSocketTransport`) and Android (`LanWebSocketClient`) emit `transport_handshake_ms` and `transport_first_payload_ms` samples, and persist the aggregation to `tests/transport/lan_loopback_metrics.json`.
 - **De-duplication**: Send same content twice, verify single sync
 
 ### 5.3 Manual Test Cases
 1. Copy text on Android → verify appears on macOS within 1s
 2. Copy image on macOS → verify appears on Android
 3. Disconnect Wi-Fi → verify cloud fallback works
-4. Device pairing via QR code
-5. Clipboard history search
-6. Notification display with preview
+4. Toggle airplane mode to confirm automatic LAN re-registration and fallback recovery
+5. Device pairing via QR code
+6. Run LAN latency capture script and validate telemetry upload (see `docs/testing/lan_manual.md`)
+7. Clipboard history search
+8. Notification display with preview
 
 ### 5.4 Performance Tests
-- Latency: Measure P50/P95/P99 for LAN and cloud
+- Latency: Measure P50/P95/P99 for LAN and cloud; publish results in `docs/status.md`
 - Throughput: Send 100 clips in 10s, measure success rate
 - Memory: Profile both apps under sustained load
+- Availability: Track transport error rates (<0.5% target) using relay Prometheus metrics
 
 ---
 
@@ -466,10 +513,12 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 - **Minimum API**: 26 (Android 8.0) for foreground service stability
 
 ### 6.3 Backend Deployment
-- **Platform**: Fly.io or Railway
-- **Scaling**: Horizontal (stateless), Redis cluster for high availability
-- **Monitoring**: Prometheus + Grafana
-- **Logging**: Structured logs via `tracing` crate
+- **Platform**: Fly.io (staging) with optional Railway fallback for load tests
+- **Configuration**: `fly.toml` checked into `backend/infra/` defines regions (`iad`, `sjc`), auto-scaling (min=1, max=3), health checks (`/healthz` every 15 s), and Redis attachment `hypo-redis`.
+- **Release Flow**: GitHub Actions pipeline builds Docker image, runs `cargo test`, executes integration suite, and deploys tagged images to Fly with release annotations. Rollbacks executed via `fly deploy --image` referencing previous digest.
+- **Secrets Management**: Use `fly secrets set RELAY_HMAC_KEY=... CERT_FINGERPRINT=...` per environment; rotate monthly and update client fingerprints.
+- **Monitoring**: Prometheus scraping via Fly metrics exporter, Grafana dashboard for connection counts, latency percentiles, and error ratios (<0.5% target).
+- **Logging**: Structured logs via `tracing` crate shipped to Loki for retention (14 days) with alerts when pairing/code endpoints exceed 5% failure rate.
 
 ### 6.4 CI/CD
 - **macOS**: Xcode Cloud or GitHub Actions with macOS runners

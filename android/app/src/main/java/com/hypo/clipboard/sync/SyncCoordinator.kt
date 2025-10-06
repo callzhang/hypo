@@ -53,8 +53,16 @@ class SyncCoordinator @Inject constructor(
         job = null
     }
 
-    suspend fun onClipboardEvent(event: ClipboardEvent) {
-        eventChannel?.send(event)
+    fun onClipboardEvent(event: ClipboardEvent) {
+        // Use tryEmit() to avoid suspending and handle the case where events are dropped
+        // Returns false if buffer is full or there's no collector, preventing crashes
+        val success = events.tryEmit(event)
+        if (!success) {
+            // Event was dropped - either buffer is full or no active collector
+            // This is expected behavior when stopped or buffer is full
+            android.util.Log.w("SyncCoordinator", "Clipboard event dropped - coordinator may not be started or buffer full")
+        }
+
     }
 
     fun setTargetDevices(deviceIds: Set<String>) {

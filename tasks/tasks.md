@@ -85,22 +85,23 @@ Last Updated: October 3, 2025
 ## Sprint 3: Transport Layer (Weeks 5-6)
 
 ### Phase 3.1: LAN Discovery & Connection
-- [ ] macOS: Implement Bonjour browser (`NetService`)
-  - [ ] Build `BonjourBrowser` actor that wraps `NetServiceBrowser` with async sequence APIs.
-  - [ ] Emit discovery events to `TransportManager` and persist the last seen timestamp for stale record pruning.
-  - [ ] Add unit harness using `NetService` test doubles to validate add/remove callbacks.
-- [ ] macOS: Implement Bonjour publisher
-  - [ ] Create `BonjourPublisher` struct that exposes current LAN endpoint (port, TXT record with fingerprint hash).
-  - [ ] Integrate with lifecycle hooks so advertise starts on app foreground and stops on suspend/terminate.
-  - [ ] Add diagnostics command (`hypo://debug/lan`) to surface active registrations.
-- [ ] Android: Implement NSD discovery (`NsdManager`)
-  - [ ] Create `LanDiscoveryRepository` with Flow stream of `DiscoveredPeer` models sourced from `NsdManager` callbacks.
-  - [ ] Handle multicast lock acquisition/release inside service scope with structured concurrency.
-  - [ ] Write instrumentation test using `ShadowNsdManager` to verify discovery restart on network change.
-- [ ] Android: Implement NSD registration
-  - [ ] Publish device endpoint with TXT record containing certificate fingerprint + supported protocols.
-  - [ ] Add automatic re-registration after Wi-Fi reconnect with exponential backoff.
-  - [ ] Document OEM-specific quirks (HyperOS multicast throttling) in `docs/technical.md`.
+
+- [x] macOS: Implement Bonjour browser (`NetService`)
+  - [x] Build `BonjourBrowser` actor that wraps `NetServiceBrowser` with async sequence APIs.
+  - [x] Emit discovery events to `TransportManager` and persist the last seen timestamp for stale record pruning.
+  - [x] Add unit harness using `NetService` test doubles to validate add/remove callbacks.
+- [x] macOS: Implement Bonjour publisher
+  - [x] Create `BonjourPublisher` struct that exposes current LAN endpoint (port, TXT record with fingerprint hash).
+  - [x] Integrate with lifecycle hooks so advertise starts on app foreground and stops on suspend/terminate.
+  - [x] Add diagnostics command (`hypo://debug/lan`) to surface active registrations.
+- [x] Android: Implement NSD discovery (`NsdManager`)
+  - [x] Create `LanDiscoveryRepository` with Flow stream of `DiscoveredPeer` models sourced from `NsdManager` callbacks.
+  - [x] Handle multicast lock acquisition/release inside service scope with structured concurrency.
+  - [x] Write instrumentation test using `ShadowNsdManager` to verify discovery restart on network change.
+- [x] Android: Implement NSD registration
+  - [x] Publish device endpoint with TXT record containing certificate fingerprint + supported protocols.
+  - [x] Add automatic re-registration after Wi-Fi reconnect with exponential backoff.
+  - [x] Document OEM-specific quirks (HyperOS multicast throttling) in `docs/technical.md`.
 - [ ] Implement TLS WebSocket client (both platforms)
   - [ ] macOS: Wrap `URLSessionWebSocketTask` with certificate pinning and idle timeout watchdog.
   - [ ] Android: Build `OkHttp` WebSocket factory with `CertificatePinner` and coroutine-based send queue.

@@ -80,23 +80,23 @@ None currently
 3. Backend session routing fan-out validated with integration coverage.
 
 ### Sprint 3: Transport Layer (Weeks 5-6)
-**Progress**: 35%
+**Progress**: 55%
 
 | Phase | Status | Completion |
 |-------|--------|------------|
-| Phase 3.1: LAN Discovery & Connection | In Progress | 30% |
+| Phase 3.1: LAN Discovery & Connection | In Progress | 60% |
 | Phase 3.2: Cloud Relay Integration | In Progress | 20% |
 | Phase 3.3: Transport Manager | In Progress | 15% |
 
 **Highlights (to date)**:
-1. Detailed LAN discovery implementation plan (Bonjour/NSD actors, diagnostics, retry policies) documented in technical spec.
-2. Transport client design finalized with certificate pinning, telemetry hooks, and fallback sequencing.
-3. Fly.io staging deployment blueprint completed, including GitHub Actions promotion flow and secrets rotation policy.
+1. Implemented Bonjour-based LAN discovery/publishing with lifecycle-aware `TransportManager` integration and diagnostics deep link on macOS.
+2. Brought up Android NSD discovery/registration with structured concurrency, multicast lock management, and Robolectric coverage for restart-on-network-change.
+3. Transport specs updated with OEM multicast caveats (HyperOS) and cross-platform LAN telemetry expectations.
 
 **Next Steps**:
-1. Implement multicast discovery actors on both platforms and capture initial LAN latency metrics.
-2. Deploy relay to staging and validate telemetry/monitoring dashboard connectivity.
-3. Complete transport state machine implementation with integration tests covering LAN failure → cloud fallback.
+1. Implement LAN TLS WebSocket clients with certificate pinning and idle watchdogs on macOS and Android.
+2. Deploy the Rust relay to Fly.io staging and validate telemetry/monitoring integration.
+3. Complete the transport state machine (LAN-first with cloud fallback) and expand integration coverage for failure cases.
 
 ---
 

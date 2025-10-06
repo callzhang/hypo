@@ -284,9 +284,10 @@ func showNotification(for item: ClipboardItem) {
 
 #### 4.1.5 LAN Discovery & Advertising
 
-- **BonjourBrowser**: Actor wrapping `NetServiceBrowser` that exposes an `AsyncStream<DiscoveredPeer>` API. Each discovery event normalizes TXT records into a `LanEndpoint` struct (`host`, `port`, `fingerprint`, `lastSeen`). Entries expire after 10 s of silence.
-- **BonjourPublisher**: Struct that publishes `_hypo._tcp` with TXT record fields `{ version, fingerprint_sha256, protocols="ws+tls" }`. Lifecycle hooks start advertising when the sync service becomes active and stop on app suspension/termination. The publisher exposes diagnostics through the `hypo://debug/lan` deep link.
-- **Error Handling**: Discovery failure triggers a retry ladder (1 s, 2 s, 4 s) capped at 30 s, with telemetry events `lan_discovery_failed` and reason codes (`no_wifi`, `bonjour_disabled`, `socket_error`).
+- **BonjourBrowser** (`Utilities/BonjourBrowser.swift`): Actor-backed wrapper around `NetServiceBrowser` that normalizes discovery callbacks into an `AsyncStream<LanDiscoveryEvent>`. Each `DiscoveredPeer` carries resolved host, port, TXT metadata (including `fingerprint_sha256`), and the `lastSeen` timestamp. The browser supports explicit stale pruning (`prunePeers`) and is unit-tested with driver doubles in `BonjourBrowserTests`.
+- **TransportManager Integration** (`Services/TransportManager.swift`): The manager now persists LAN sightings via `UserDefaultsLanDiscoveryCache`, auto-starts discovery/advertising on foreground using `ApplicationLifecycleObserver`, and exposes `lanDiscoveredPeers()` plus a diagnostics string for `hypo://debug/lan`. Deep links are surfaced through SwiftUI's `.onOpenURL`, logging active registrations alongside publisher state.
+- **BonjourPublisher** (`Utilities/BonjourPublisher.swift`): Publishes `_hypo._tcp` with TXT payload `{ version, fingerprint_sha256, protocols }`, tracks the currently advertised endpoint, and restarts advertising when configuration changes (e.g., port update). Diagnostics reuse this metadata so operators can validate fingerprints during support sessions.
+- **Testing**: `TransportManagerLanTests` validate that discovery events update persisted timestamps, diagnostics include discovered peers, and lifecycle hooks stop advertising on suspend.
 
 #### 4.1.6 LAN WebSocket Client
 
@@ -377,9 +378,9 @@ interface ClipboardDao {
 
 #### 4.2.4 NSD Discovery & Registration
 
-- **LanDiscoveryRepository**: Wraps `NsdManager` discovery callbacks and exposes `Flow<DiscoveredPeer>`. A multicast lock is acquired while discovery is active and released on stop, with structured concurrency ensuring scope-bound cleanup.
-- **Registration**: `LanAdvertiser` publishes `_hypo._tcp` with TXT payload containing `{ fingerprint_sha256, protocols, android_version }`. The component observes connectivity broadcasts and re-registers with exponential backoff (2^n seconds, capped at 5 minutes).
-- **Diagnostics**: Discovery emits state changes through a shared `LanDiagnosticsStore` so UI and telemetry can surface issues (`wifi_disabled`, `permission_denied`, `multicast_failure`).
+- **LanDiscoveryRepository** (`transport/lan/LanDiscoveryRepository.kt`): Bridges `NsdManager` callbacks into a `callbackFlow<LanDiscoveryEvent>` while acquiring a scoped multicast lock. Network-state broadcasts trigger `discoverServices` restarts under a `Mutex` guard, and a Robolectric test (`LanDiscoveryRepositoryTest`) leverages a custom `ShadowNsdManager` to assert re-discovery on Wi-Fi changes.
+- **LanRegistrationManager** (`transport/lan/LanRegistrationManager.kt`): Publishes `_hypo._tcp` with TXT payload `{ fingerprint_sha256, version, protocols }`, listens for Wi-Fi connectivity changes, and re-registers using exponential backoff (1 s, 2 s, 4 s… capped at 5 minutes). Backoff attempts reset after successful registration.
+- **OEM Notes**: HyperOS throttles multicast after ~15 minutes of screen-off time. The repository exposes lock lifecycle hooks so the service can prompt users to re-open the app, and the registration manager schedules immediate retries when connectivity resumes to mitigate OEM suppression.
 
 #### 4.2.5 Android WebSocket Client
 

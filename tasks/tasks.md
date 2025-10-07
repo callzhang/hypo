@@ -114,6 +114,10 @@ Last Updated: October 3, 2025
   - [x] Instrument round-trip measurement inside transport handshake (T1 pairing, T2 data message) and persist anonymized metrics. *(Implemented `TransportMetricsRecorder` on macOS and Android; data exported to `tests/transport/lan_loopback_metrics.json`.)*
   - [x] Produce comparison chart vs success criteria (<500 ms P95) in status report.
   - [x] File follow-up task if latency target missed for remediation in Sprint 4. *(Tracked as doc follow-up for hardware Wireshark capture.)*
+- [x] Auto-prune stale LAN peers
+  - [x] Android: schedule coroutine-driven pruning inside `TransportManager` with configurable thresholds.
+  - [x] macOS: add main-actor prune task with injectable clock for deterministic testing.
+  - [x] Update documentation and QA notes to include idle-staleness expectations.
 
 ### Phase 3.2: Cloud Relay Integration
 - [ ] Backend: Deploy to Fly.io staging environment

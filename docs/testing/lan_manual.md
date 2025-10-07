@@ -14,6 +14,7 @@ This checklist documents the LAN discovery verification steps, telemetry capture
 | QA-LAN-04 | TLS WebSocket handshake (LAN) with fingerprint pinning | ✅ Pass | ✅ Pass | Verified handshake succeeds with pinned SHA-256 fingerprint vector. |
 | QA-LAN-05 | TLS WebSocket idle watchdog timeout | ✅ Pass | ✅ Pass | macOS + Android unit harness confirm watchdog closes connection after idle threshold. |
 | QA-LAN-06 | TLS WebSocket frame codec echo | ✅ Pass | ✅ Pass | Encoded payload echoed through local loopback, round-trip metrics captured. |
+| QA-LAN-07 | LAN peer auto-pruning after idle | ✅ Pass | ✅ Pass | Stale entries dropped by background prune loop after 5 minutes of inactivity (configurable). |
 
 > **Note**: Real dual-device validation still requires execution on physical hardware. Use the steps below to rerun the checklist on macOS and Android devices connected to the same Wi-Fi network.
 
@@ -33,7 +34,9 @@ This checklist documents the LAN discovery verification steps, telemetry capture
 5. **Metrics capture**
    - Run `swift test --filter LanWebSocketTransportTests/testMetricsRecorderCapturesHandshakeAndRoundTrip` and `./android/gradlew -p android testDebugUnitTest --tests com.hypo.clipboard.transport.ws.LanWebSocketClientTest` to refresh simulated baselines.
    - Review `tests/transport/lan_loopback_metrics.json` for aggregated handshake/round-trip timings produced by the harness.
-6. **Telemetry export**
+6. **Idle stale check**
+   - Leave both applications idle for ≥5 minutes (or adjust the developer override to 60 seconds) and confirm the peer list collapses to active entries only (`hypo://debug/lan` and Android logs).
+7. **Telemetry export**
    - Upload captured Wireshark trace (if collected on hardware) to the shared drive and reference in `docs/status.md` under Performance Targets.
 
 ## Artifact Locations

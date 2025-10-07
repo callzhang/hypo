@@ -10,9 +10,13 @@ public final class TransportManager {
     private let browser: BonjourBrowser
     private let publisher: BonjourPublishing
     private let discoveryCache: LanDiscoveryCache
+    private let pruneInterval: TimeInterval
+    private let stalePeerInterval: TimeInterval
+    private let dateProvider: () -> Date
     private var lanConfiguration: BonjourPublisher.Configuration
 
     private var discoveryTask: Task<Void, Never>?
+    private var pruneTask: Task<Void, Never>?
     private var isAdvertising = false
     private var lanPeers: [String: DiscoveredPeer] = [:]
     private var lastSeen: [String: Date]
@@ -27,13 +31,19 @@ public final class TransportManager {
         browser: BonjourBrowser = BonjourBrowser(),
         publisher: BonjourPublishing = BonjourPublisher(),
         discoveryCache: LanDiscoveryCache = UserDefaultsLanDiscoveryCache(),
-        lanConfiguration: BonjourPublisher.Configuration? = nil
+        lanConfiguration: BonjourPublisher.Configuration? = nil,
+        pruneInterval: TimeInterval = 60,
+        stalePeerInterval: TimeInterval = 300,
+        dateProvider: @escaping () -> Date = Date.init
     ) {
         self.provider = provider
         self.preferenceStorage = preferenceStorage
         self.browser = browser
         self.publisher = publisher
         self.discoveryCache = discoveryCache
+        self.pruneInterval = pruneInterval
+        self.stalePeerInterval = stalePeerInterval
+        self.dateProvider = dateProvider
         self.lanConfiguration = lanConfiguration ?? TransportManager.defaultLanConfiguration()
         self.lastSeen = discoveryCache.load()
 
@@ -85,7 +95,7 @@ public final class TransportManager {
 
     public func pruneLanPeers(olderThan interval: TimeInterval) {
         guard interval > 0 else { return }
-        let threshold = Date().addingTimeInterval(-interval)
+        let threshold = dateProvider().addingTimeInterval(-interval)
         lanPeers = lanPeers.filter { $0.value.lastSeen >= threshold }
         lastSeen = lastSeen.filter { $0.value >= threshold }
         discoveryCache.save(lastSeen)
@@ -136,7 +146,7 @@ public final class TransportManager {
         var lines: [String] = []
         let formatter = ISO8601DateFormatter()
         lines.append("Hypo LAN Diagnostics")
-        lines.append("Timestamp: \(formatter.string(from: Date()))")
+        lines.append("Timestamp: \(formatter.string(from: dateProvider()))")
 
         if let endpoint = publisher.currentEndpoint {
             lines.append("Local Service: \(lanConfiguration.serviceName) @ \(endpoint.host):\(endpoint.port)")
@@ -186,12 +196,14 @@ public final class TransportManager {
             }
         }
         await browser.start()
+        startPruneTaskIfNeeded()
     }
 
     private func deactivateLanServices() async {
         discoveryTask?.cancel()
         discoveryTask = nil
         await browser.stop()
+        cancelPruneTask()
         if isAdvertising {
             publisher.stop()
             isAdvertising = false
@@ -200,6 +212,24 @@ public final class TransportManager {
 
     private func shutdownLanServices() async {
         await deactivateLanServices()
+    }
+
+    private func startPruneTaskIfNeeded() {
+        guard pruneTask == nil, pruneInterval > 0, stalePeerInterval > 0 else { return }
+        pruneTask = Task { [weak self] in
+            guard let self else { return }
+            let interval = UInt64(pruneInterval * 1_000_000_000)
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: interval)
+                if Task.isCancelled { break }
+                await self.pruneLanPeers(olderThan: self.stalePeerInterval)
+            }
+        }
+    }
+
+    private func cancelPruneTask() {
+        pruneTask?.cancel()
+        pruneTask = nil
     }
 
     private func handle(event: LanDiscoveryEvent) {

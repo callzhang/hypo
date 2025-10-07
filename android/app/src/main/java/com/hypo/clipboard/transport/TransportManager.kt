@@ -12,17 +12,21 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 
 class TransportManager(
     private val discoverySource: LanDiscoverySource,
     private val registrationController: LanRegistrationController,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-    private val clock: Clock = Clock.systemUTC()
+    private val clock: Clock = Clock.systemUTC(),
+    private val pruneInterval: Duration = Duration.ofMinutes(1),
+    private val staleThreshold: Duration = Duration.ofMinutes(5)
 ) {
     private val stateLock = Any()
     private val peersByService = mutableMapOf<String, DiscoveredPeer>()
@@ -33,6 +37,7 @@ class TransportManager(
     private val _isAdvertising = MutableStateFlow(false)
 
     private var discoveryJob: Job? = null
+    private var pruneJob: Job? = null
     private var currentConfig: LanRegistrationConfig? = null
 
     val peers: StateFlow<List<DiscoveredPeer>> = _peers.asStateFlow()
@@ -49,11 +54,22 @@ class TransportManager(
                 }
             }
         }
+
+        if (pruneJob == null && pruneInterval.isPositiveDuration() && staleThreshold.isPositiveDuration()) {
+            pruneJob = scope.launch {
+                while (isActive) {
+                    delay(pruneInterval.toMillis())
+                    pruneStale(staleThreshold)
+                }
+            }
+        }
     }
 
     fun stop() {
         discoveryJob?.cancel()
         discoveryJob = null
+        pruneJob?.cancel()
+        pruneJob = null
         if (_isAdvertising.value) {
             registrationController.stop()
             _isAdvertising.value = false
@@ -148,4 +164,6 @@ class TransportManager(
         const val DEFAULT_FINGERPRINT = "uninitialized"
         val DEFAULT_PROTOCOLS: List<String> = listOf("ws+tls")
     }
+
+    private fun Duration.isPositiveDuration(): Boolean = !isZero && !isNegative
 }

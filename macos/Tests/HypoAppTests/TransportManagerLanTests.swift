@@ -53,6 +53,54 @@ final class TransportManagerLanTests: XCTestCase {
         await manager.suspendLanDiscovery()
         XCTAssertEqual(publisher.stopCount, 1)
     }
+
+    func testAutomaticPruneRemovesStalePeers() async throws {
+        let driver = MockBonjourDriver()
+        var now = Date(timeIntervalSince1970: 10_000)
+        let browser = BonjourBrowser(driver: driver, clock: { now })
+        let publisher = MockBonjourPublisher()
+        let cache = InMemoryLanDiscoveryCache()
+        let manager = await TransportManager(
+            provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
+            browser: browser,
+            publisher: publisher,
+            discoveryCache: cache,
+            lanConfiguration: BonjourPublisher.Configuration(
+                serviceName: "local-device",
+                port: 7010,
+                version: "1.0",
+                fingerprint: "fingerprint",
+                protocols: ["ws+tls"]
+            ),
+            pruneInterval: 0.05,
+            stalePeerInterval: 0.1,
+            dateProvider: { now }
+        )
+
+        await manager.ensureLanDiscoveryActive()
+
+        let record = BonjourServiceRecord(
+            serviceName: "peer-auto",
+            host: "peer.local",
+            port: 7010,
+            txtRecords: ["fingerprint_sha256": "abc", "protocols": "ws+tls"]
+        )
+        driver.emit(.resolved(record))
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        var peers = await manager.lanDiscoveredPeers()
+        XCTAssertEqual(peers.count, 1)
+
+        now = now.addingTimeInterval(0.2)
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        peers = await manager.lanDiscoveredPeers()
+        XCTAssertTrue(peers.isEmpty)
+        XCTAssertTrue(cache.storage.isEmpty)
+
+        await manager.suspendLanDiscovery()
+    }
 }
 
 private final class MockBonjourPublisher: BonjourPublishing {

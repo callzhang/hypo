@@ -11,10 +11,14 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -29,16 +33,19 @@ class TransportManagerTest {
         val discovery = FakeDiscoverySource()
         val registration = FakeRegistrationController()
         val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
         val manager = TransportManager(
             discoverySource = discovery,
             registrationController = registration,
-            scope = this,
-            clock = clock
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO
         )
 
         val initialConfig = defaultConfig()
         manager.start(initialConfig)
-        advanceUntilIdle()
+        scope.runCurrent()
 
         assertTrue(registration.started)
         assertEquals(initialConfig, registration.lastConfig)
@@ -46,18 +53,20 @@ class TransportManagerTest {
 
         val peer = peer("peer-1", clock.instant())
         discovery.emit(LanDiscoveryEvent.Added(peer))
-        advanceUntilIdle()
+        scope.runCurrent()
 
         assertEquals(listOf(peer), manager.currentPeers())
         assertEquals(peer.lastSeen, manager.lastSeen(peer.serviceName))
 
         discovery.emit(LanDiscoveryEvent.Removed(peer.serviceName))
-        advanceUntilIdle()
+        scope.runCurrent()
 
         assertTrue(manager.currentPeers().isEmpty())
         assertNull(manager.lastSeen(peer.serviceName))
 
         manager.stop()
+        scope.runCurrent()
+        scope.cancel()
     }
 
     @Test
@@ -65,19 +74,27 @@ class TransportManagerTest {
         val discovery = FakeDiscoverySource()
         val registration = FakeRegistrationController()
         val clock = MutableClock()
-        val manager = TransportManager(discovery, registration, this, clock)
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO
+        )
 
         manager.start(defaultConfig())
-        advanceUntilIdle()
+        scope.runCurrent()
 
         val stalePeer = peer("stale", clock.instant())
         discovery.emit(LanDiscoveryEvent.Added(stalePeer))
-        advanceUntilIdle()
+        scope.runCurrent()
 
         clock.advance(Duration.ofMinutes(3))
         val freshPeer = peer("fresh", clock.instant())
         discovery.emit(LanDiscoveryEvent.Added(freshPeer))
-        advanceUntilIdle()
+        scope.runCurrent()
 
         clock.advance(Duration.ofMinutes(4))
 
@@ -86,6 +103,44 @@ class TransportManagerTest {
         assertEquals(listOf(freshPeer), manager.currentPeers())
 
         manager.stop()
+        scope.runCurrent()
+        scope.cancel()
+    }
+
+    @Test
+    fun automaticPruneRemovesPeersAfterInterval() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ofSeconds(30),
+            staleThreshold = Duration.ofSeconds(60)
+        )
+
+        manager.start(defaultConfig())
+        scope.runCurrent()
+
+        val peer = peer("peer-auto", clock.instant())
+        discovery.emit(LanDiscoveryEvent.Added(peer))
+        scope.runCurrent()
+
+        assertEquals(listOf(peer), manager.currentPeers())
+
+        clock.advance(Duration.ofSeconds(61))
+        scope.advanceTimeBy(Duration.ofSeconds(30).toMillis())
+        scope.runCurrent()
+
+        assertTrue(manager.currentPeers().isEmpty())
+
+        manager.stop()
+        scope.runCurrent()
+        scope.cancel()
     }
 
     @Test
@@ -93,13 +148,21 @@ class TransportManagerTest {
         val discovery = FakeDiscoverySource()
         val registration = FakeRegistrationController()
         val clock = MutableClock()
-        val manager = TransportManager(discovery, registration, this, clock)
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO
+        )
 
         manager.start(defaultConfig())
-        advanceUntilIdle()
+        scope.runCurrent()
 
         discovery.emit(LanDiscoveryEvent.Added(peer("peer", clock.instant())))
-        advanceUntilIdle()
+        scope.runCurrent()
         assertFalse(manager.currentPeers().isEmpty())
 
         manager.stop()
@@ -107,21 +170,27 @@ class TransportManagerTest {
         assertTrue(manager.currentPeers().isEmpty())
         assertFalse(manager.isAdvertising.value)
         assertTrue(registration.stopped)
+
+        scope.runCurrent()
+        scope.cancel()
     }
 
     @Test
     fun updateAdvertisementRestartsRegistration() = runTest {
         val discovery = FakeDiscoverySource()
         val registration = FakeRegistrationController()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
         val manager = TransportManager(
             discoverySource = discovery,
             registrationController = registration,
-            scope = this,
-            clock = MutableClock()
+            scope = scope,
+            clock = MutableClock(),
+            pruneInterval = Duration.ZERO
         )
 
         manager.start(defaultConfig())
-        advanceUntilIdle()
+        scope.runCurrent()
 
         manager.updateAdvertisement(port = 9000, fingerprint = "updated")
 
@@ -131,6 +200,8 @@ class TransportManagerTest {
         assertEquals("updated", config.fingerprint)
 
         manager.stop()
+        scope.runCurrent()
+        scope.cancel()
     }
 
     private fun defaultConfig() = LanRegistrationConfig(
@@ -151,12 +222,14 @@ class TransportManagerTest {
     )
 
     private class FakeDiscoverySource : LanDiscoverySource {
-        private val events = MutableSharedFlow<LanDiscoveryEvent>()
+        private val events = MutableSharedFlow<LanDiscoveryEvent>(replay = 0, extraBufferCapacity = Int.MAX_VALUE)
 
         override fun discover(serviceType: String): Flow<LanDiscoveryEvent> = events
 
         suspend fun emit(event: LanDiscoveryEvent) {
-            events.emit(event)
+            if (!events.tryEmit(event)) {
+                events.emit(event)
+            }
         }
     }
 

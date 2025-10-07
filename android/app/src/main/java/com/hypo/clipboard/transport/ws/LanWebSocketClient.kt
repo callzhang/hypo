@@ -10,17 +10,20 @@ import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.selects.select
+import kotlin.coroutines.coroutineContext
 import okhttp3.CertificatePinner
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -113,70 +116,116 @@ class LanWebSocketClient @Inject constructor(
     private suspend fun ensureConnection() {
         mutex.withLock {
             if (connectionJob == null || connectionJob?.isActive != true) {
-                connectionJob = scope.launch {
-                    runConnectionLoop()
+                val job = scope.launch {
+                    try {
+                        runConnectionLoop()
+                    } finally {
+                        val current = coroutineContext[Job]
+                        mutex.withLock {
+                            if (connectionJob === current) {
+                                connectionJob = null
+                            }
+                        }
+                    }
                 }
+                connectionJob = job
             }
         }
     }
 
     private suspend fun runConnectionLoop() {
-        val listener = object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                scope.launch {
-                    mutex.withLock {
-                        this@LanWebSocketClient.webSocket = webSocket
-                        touch()
-                        startWatchdog()
+        while (!sendQueue.isClosedForReceive) {
+            val closedSignal = CompletableDeferred<Unit>()
+            val listener = object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    scope.launch {
+                        mutex.withLock {
+                            this@LanWebSocketClient.webSocket = webSocket
+                            touch()
+                            startWatchdog()
+                        }
+                        val started = handshakeStarted
+                        if (started != null) {
+                            val duration = Duration.between(started, clock.instant())
+                            metricsRecorder.recordHandshake(duration, clock.instant())
+                        }
+                        handshakeStarted = null
                     }
-                    val started = handshakeStarted
-                    if (started != null) {
-                        val duration = Duration.between(started, clock.instant())
-                        metricsRecorder.recordHandshake(duration, clock.instant())
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    touch()
+                }
+
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    touch()
+                    handleIncoming(bytes)
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (!closedSignal.isCompleted) {
+                        closedSignal.complete(Unit)
                     }
+                    shutdownSocket()
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    if (!closedSignal.isCompleted) {
+                        closedSignal.complete(Unit)
+                    }
+                    shutdownSocket()
                     handshakeStarted = null
                 }
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                touch()
-            }
+            handshakeStarted = clock.instant()
+            val socket = connector.connect(listener)
 
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                touch()
-                handleIncoming(bytes)
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            try {
+                loop@ while (true) {
+                    when (val event = waitForEvent(closedSignal)) {
+                        LoopEvent.ChannelClosed -> {
+                            socket.close(1000, "channel closed")
+                            return
+                        }
+                        LoopEvent.ConnectionClosed -> {
+                            break@loop
+                        }
+                        is LoopEvent.Envelope -> {
+                            val payload = frameCodec.encode(event.envelope)
+                            synchronized(pendingLock) {
+                                pendingRoundTrips[event.envelope.id] = clock.instant()
+                            }
+                            val sent = socket.send(of(*payload))
+                            if (!sent) {
+                                throw IOException("websocket send failed")
+                            }
+                            touch()
+                        }
+                    }
+                }
+            } finally {
+                val cancelled = coroutineContext[Job]?.isCancelled == true
+                if (!cancelled) {
+                    socket.close(1000, null)
+                }
                 shutdownSocket()
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                shutdownSocket()
-                handshakeStarted = null
             }
         }
+    }
 
-        handshakeStarted = clock.instant()
-        val socket = connector.connect(listener)
-        try {
-            while (true) {
-                val envelope = sendQueue.receive()
-                val payload = frameCodec.encode(envelope)
-                synchronized(pendingLock) { pendingRoundTrips[envelope.id] = clock.instant() }
-                val sent = socket.send(of(*payload))
-                if (!sent) {
-                    throw IOException("websocket send failed")
+    private suspend fun waitForEvent(closedSignal: CompletableDeferred<Unit>): LoopEvent {
+        return select {
+            sendQueue.onReceiveCatching { result ->
+                if (result.isClosed) {
+                    LoopEvent.ChannelClosed
+                } else {
+                    LoopEvent.Envelope(result.getOrThrow())
                 }
-                touch()
             }
-        } catch (closed: ClosedReceiveChannelException) {
-            socket.close(1000, "channel closed")
-        } catch (ex: Exception) {
-            socket.close(1011, ex.message ?: "send failure")
-            throw ex
-        } finally {
-            shutdownSocket()
+            closedSignal.onAwait {
+                LoopEvent.ConnectionClosed
+            }
         }
     }
 
@@ -198,15 +247,15 @@ class LanWebSocketClient @Inject constructor(
         watchdogJob?.cancel()
         watchdogJob = scope.launch {
             val timeout = Duration.ofMillis(config.idleTimeoutMillis)
-            while (true) {
+            while (isActive) {
                 delay(timeout.toMillis())
                 val elapsed = Duration.between(lastActivity, clock.instant())
                 if (elapsed >= timeout) {
-                    mutex.withLock {
-                        webSocket?.close(1001, "idle timeout")
-                        webSocket = null
-                    }
-                    sendQueue.close()
+                    val socket = mutex.withLock { webSocket }
+                    socket?.close(1001, "idle timeout")
+                    mutex.withLock { webSocket = null }
+                    connectionJob?.cancel()
+                    watchdogJob = null
                     return@launch
                 }
             }
@@ -226,6 +275,12 @@ class LanWebSocketClient @Inject constructor(
         }
     }
 
+}
+
+private sealed interface LoopEvent {
+    data object ChannelClosed : LoopEvent
+    data object ConnectionClosed : LoopEvent
+    data class Envelope(val envelope: SyncEnvelope) : LoopEvent
 }
 
 private fun fingerprintToPin(hex: String): String {

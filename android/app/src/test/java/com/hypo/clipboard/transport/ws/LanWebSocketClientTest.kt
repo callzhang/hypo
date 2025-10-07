@@ -18,6 +18,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.Protocol
@@ -50,8 +51,8 @@ class LanWebSocketClientTest {
 
             sendJob.join()
 
-            assertEquals(1, connector.socket.sent.size)
-            val frame = connector.socket.sent.first()
+            assertEquals(1, connector.latestSocket().sent.size)
+            val frame = connector.latestSocket().sent.first()
             val decoded = TransportFrameCodec().decode(frame.toByteArray())
             assertEquals("mac-device", decoded.payload.deviceId)
         }
@@ -104,6 +105,56 @@ class LanWebSocketClientTest {
         result.getOrThrow()
     }
 
+    @Test
+    fun `reconnects after idle timeout`() = runTest {
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val connector = FakeConnector()
+        val clock = FakeClock(Instant.parse("2025-10-07T00:00:00Z"))
+        val config = TlsWebSocketConfig(
+            url = "wss://example.com/ws",
+            fingerprintSha256 = null,
+            idleTimeoutMillis = 10
+        )
+        val client = LanWebSocketClient(config, connector, TransportFrameCodec(), scope, clock)
+
+        val firstEnvelope = sampleEnvelope()
+        val firstJob = scope.launch { client.send(firstEnvelope) }
+        scope.runCurrent()
+        runCurrent()
+        connector.open(0)
+        scope.runCurrent()
+        runCurrent()
+        firstJob.join()
+
+        clock.advanceMillis(15)
+        repeat(3) {
+            testScheduler.advanceTimeBy(5)
+            testScheduler.advanceUntilIdle()
+            if (connector.socket(0).closedCode != null) {
+                return@repeat
+            }
+        }
+
+        assertEquals(1001, connector.socket(0).closedCode)
+        assertEquals("idle timeout", connector.socket(0).closedReason)
+
+        val secondEnvelope = sampleEnvelope()
+        val secondJob = scope.launch { client.send(secondEnvelope) }
+        scope.runCurrent()
+        runCurrent()
+        testScheduler.advanceUntilIdle()
+        connector.open(1)
+        scope.runCurrent()
+        runCurrent()
+        secondJob.join()
+
+        assertEquals(1, connector.socket(1).sent.size)
+        assertEquals(2, connector.connectionCount)
+
+        scope.cancel()
+    }
+
     private fun sampleEnvelope(): SyncEnvelope = SyncEnvelope(
         type = MessageType.CLIPBOARD,
         payload = Payload(
@@ -116,15 +167,22 @@ class LanWebSocketClientTest {
     )
 
     private class FakeConnector : WebSocketConnector {
-        val socket = FakeWebSocket()
-        lateinit var listener: WebSocketListener
+        private val listeners = mutableListOf<WebSocketListener>()
+        private val sockets = mutableListOf<FakeWebSocket>()
+
+        val connectionCount: Int
+            get() = sockets.size
 
         override fun connect(listener: WebSocketListener): WebSocket {
-            this.listener = listener
+            listeners += listener
+            val socket = FakeWebSocket()
+            sockets += socket
             return socket
         }
 
-        fun open() {
+        fun open(index: Int = listeners.lastIndex) {
+            val socket = sockets[index]
+            val listener = listeners[index]
             val request = socket.request()
             val response = Response.Builder()
                 .request(request)
@@ -135,9 +193,13 @@ class LanWebSocketClientTest {
             listener.onOpen(socket, response)
         }
 
-        fun deliver(bytes: ByteString) {
-            listener.onMessage(socket, bytes)
+        fun deliver(bytes: ByteString, index: Int = listeners.lastIndex) {
+            listeners[index].onMessage(sockets[index], bytes)
         }
+
+        fun latestSocket(): FakeWebSocket = sockets.last()
+
+        fun socket(index: Int): FakeWebSocket = sockets[index]
     }
 
     private class FakeWebSocket : WebSocket {

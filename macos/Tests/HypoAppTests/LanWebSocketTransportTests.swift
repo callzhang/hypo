@@ -108,6 +108,32 @@ final class LanWebSocketTransportTests: XCTestCase {
         XCTAssertEqual(metrics.recordedHandshakes.count, 1)
         XCTAssertEqual(metrics.recordedRoundTrips[envelope.id]?.count ?? 0, 1)
     }
+
+    func testReconnectAfterDisconnect() async throws {
+        let stubTask = StubWebSocketTask()
+        let session = StubSession(task: stubTask)
+        let transport = LanWebSocketTransport(
+            configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
+            sessionFactory: { _, _ in session }
+        )
+
+        var resumeCount = 0
+        stubTask.onResume = {
+            resumeCount += 1
+            transport.handleOpen(task: stubTask)
+        }
+
+        try await transport.connect()
+        await transport.disconnect()
+
+        stubTask.onResume = {
+            resumeCount += 1
+            transport.handleOpen(task: stubTask)
+        }
+
+        try await transport.connect()
+        XCTAssertEqual(resumeCount, 2)
+    }
 }
 
 private final class StubSession: URLSessionProviding {

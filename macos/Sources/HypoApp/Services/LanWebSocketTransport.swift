@@ -51,7 +51,6 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         case idle
         case connecting
         case connected(WebSocketTasking)
-        case closed
     }
 
     private let configuration: LanWebSocketConfiguration
@@ -97,8 +96,6 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                 handshakeContinuation = continuation
             }
             return
-        case .closed:
-            throw NSError(domain: "LanWebSocketTransport", code: -1, userInfo: [NSLocalizedDescriptionKey: "Transport closed"])
         case .idle:
             break
         }
@@ -151,15 +148,19 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         switch state {
         case .connected(let task):
             taskToCancel = task
-            state = .closed
         case .connecting:
-            state = .closed
+            if let continuation = handshakeContinuation {
+                handshakeContinuation = nil
+                continuation.resume(throwing: CancellationError())
+            }
         default:
             break
         }
+        state = .idle
         taskToCancel?.cancel(with: .normalClosure, reason: nil)
         session?.invalidateAndCancel()
         session = nil
+        handshakeStartedAt = nil
         await pendingRoundTrips.removeAll()
     }
 
@@ -169,8 +170,6 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             return
         case .idle, .connecting:
             try await connect()
-        case .closed:
-            throw NSError(domain: "LanWebSocketTransport", code: -3, userInfo: [NSLocalizedDescriptionKey: "Transport closed"])
         }
     }
 
@@ -208,7 +207,7 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        state = .closed
+        state = .idle
         watchdogTask?.cancel()
         watchdogTask = nil
     }
@@ -219,7 +218,7 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
             continuation.resume(throwing: error ?? NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown))
         }
         handshakeStartedAt = nil
-        state = .closed
+        state = .idle
         watchdogTask?.cancel()
         watchdogTask = nil
     }

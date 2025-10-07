@@ -11,7 +11,6 @@ use hypo_relay::{
 };
 use std::time::Instant;
 use tracing::info;
->>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -43,10 +42,7 @@ async fn main() -> std::io::Result<()> {
         redis: redis_client,
         start_time: Instant::now(),
         sessions: SessionManager::new(),
-<<<<<<< HEAD
-=======
         device_keys: DeviceKeyStore::new(),
->>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
     };
 
     info!("Server starting on {}:{}", host, port);

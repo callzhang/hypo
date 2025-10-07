@@ -120,26 +120,28 @@ Last Updated: October 3, 2025
   - [x] Update documentation and QA notes to include idle-staleness expectations.
 
 ### Phase 3.2: Cloud Relay Integration
-- [ ] Backend: Deploy to Fly.io staging environment
-  - [ ] Create `fly.toml` with auto-scaling (min=1, max=3) and Redis attachment configuration.
-  - [ ] Automate GitHub Actions workflow to build Docker image, run tests, and deploy on `main` branch merges.
-  - [ ] Publish staging endpoint + credentials in `docs/technical.md#Deployment` and rotate monthly.
-- [ ] Implement WebSocket client fallback logic
-  - [ ] Extend `TransportManager` to race LAN dial vs 3 s timeout before initiating relay session.
-  - [ ] Persist fallback reason codes for telemetry (`lan_timeout`, `lan_rejected`, `lan_not_supported`).
-  - [ ] Unit test matrix covering LAN success, LAN timeout → cloud success, and dual failure surfaces proper errors to UI.
-- [ ] Certificate pinning implementation
-  - [ ] Export relay certificate fingerprint pipeline script (`backend/scripts/cert_fingerprint.sh`).
-  - [ ] Integrate fingerprint check into both clients with update mechanism keyed off remote config version.
-  - [ ] Add failure analytics event `transport_pinning_failure` with environment metadata.
-- [ ] Test cloud relay with both clients
-  - [ ] Execute smoke suite covering connect, send text payload, send binary payload, disconnect for macOS + Android.
-  - [ ] Validate telemetry ingestion and error reporting into staging logging stack.
-  - [ ] Document observed latency and packet loss to compare with LAN results.
-- [ ] Measure cloud latency
-  - [ ] Instrument handshake + first payload metrics over relay path and export aggregated results.
-  - [ ] Add automated nightly test hitting relay from CI runner to capture variability windows.
-  - [ ] Update `docs/status.md` metrics table once results available.
+- [x] Backend: Deploy to Fly.io staging environment
+  - [x] Create `fly.toml` with auto-scaling (min=1, max=3) and Redis attachment configuration.
+  - [x] Automate GitHub Actions workflow to build Docker image, run tests, and deploy on `main` branch merges.
+  - [x] Publish staging endpoint + credentials in `docs/technical.md#Deployment` and rotate monthly.
+- [x] Implement WebSocket client fallback logic
+  - [x] Extend `TransportManager` to race LAN dial vs 3 s timeout before initiating relay session.
+  - [x] Persist fallback reason codes for telemetry (`lan_timeout`, `lan_rejected`, `lan_not_supported`).
+  - [x] Unit test matrix covering LAN success, LAN timeout → cloud success, and dual failure surfaces proper errors to UI.
+  - [x] Introduce dedicated Android/macOS relay WebSocket clients with pinning-aware unit suites (Oct 10, 2025).
+- [x] Certificate pinning implementation
+  - [x] Export relay certificate fingerprint pipeline script (`backend/scripts/cert_fingerprint.sh`).
+  - [x] Integrate fingerprint check into both clients with update mechanism keyed off remote config version.
+  - [x] Add failure analytics event `transport_pinning_failure` with environment metadata.
+  - [x] Surface staging relay fingerprint via generated BuildConfig fields and Swift configuration wrappers (Oct 10, 2025).
+- [x] Test cloud relay with both clients
+  - [x] Execute smoke suite covering connect, send text payload, send binary payload, disconnect for macOS + Android.
+  - [x] Validate telemetry ingestion and error reporting into staging logging stack.
+  - [x] Document observed latency and packet loss to compare with LAN results.
+- [x] Measure cloud latency
+  - [x] Instrument handshake + first payload metrics over relay path and export aggregated results.
+  - [x] Add automated nightly test hitting relay from CI runner to capture variability windows.
+  - [x] Update `docs/status.md` metrics table once results available.
 
 ### Phase 3.3: Transport Manager
 - [ ] Implement transport selection algorithm

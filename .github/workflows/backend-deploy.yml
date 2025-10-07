@@ -1,0 +1,43 @@
+name: Deploy Backend Relay
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      REDIS_URL: ${{ secrets.FLY_REDIS_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run backend tests
+        working-directory: backend
+        run: cargo test --all-features --locked
+
+      - name: Build Docker image
+        working-directory: backend
+        run: |
+          flyctl auth docker
+          docker build -t registry.fly.io/hypo-relay-staging:latest .
+
+      - name: Push image
+        run: docker push registry.fly.io/hypo-relay-staging:latest
+
+      - name: Deploy to Fly.io
+        working-directory: backend
+        run: |
+          flyctl deploy --remote-only --image registry.fly.io/hypo-relay-staging:latest --config fly.toml

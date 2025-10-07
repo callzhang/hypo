@@ -13,6 +13,7 @@ public final class TransportManager {
     private let pruneInterval: TimeInterval
     private let stalePeerInterval: TimeInterval
     private let dateProvider: () -> Date
+    private let analytics: TransportAnalytics
     private var lanConfiguration: BonjourPublisher.Configuration
 
     private var discoveryTask: Task<Void, Never>?
@@ -20,6 +21,7 @@ public final class TransportManager {
     private var isAdvertising = false
     private var lanPeers: [String: DiscoveredPeer] = [:]
     private var lastSeen: [String: Date]
+    public private(set) var connectionState: ConnectionState = .idle
 
     #if canImport(AppKit)
     private var lifecycleObserver: ApplicationLifecycleObserver?
@@ -34,7 +36,8 @@ public final class TransportManager {
         lanConfiguration: BonjourPublisher.Configuration? = nil,
         pruneInterval: TimeInterval = 60,
         stalePeerInterval: TimeInterval = 300,
-        dateProvider: @escaping () -> Date = Date.init
+        dateProvider: @escaping () -> Date = Date.init,
+        analytics: TransportAnalytics = NoopTransportAnalytics()
     ) {
         self.provider = provider
         self.preferenceStorage = preferenceStorage
@@ -44,6 +47,7 @@ public final class TransportManager {
         self.pruneInterval = pruneInterval
         self.stalePeerInterval = stalePeerInterval
         self.dateProvider = dateProvider
+        self.analytics = analytics
         self.lanConfiguration = lanConfiguration ?? TransportManager.defaultLanConfiguration()
         self.lastSeen = discoveryCache.load()
 
@@ -232,6 +236,74 @@ public final class TransportManager {
         pruneTask = nil
     }
 
+    @discardableResult
+    public func connect(
+        lanDialer: @escaping () async throws -> LanDialResult,
+        cloudDialer: @escaping () async throws -> Bool,
+        timeout: TimeInterval = 3
+    ) async -> ConnectionState {
+        precondition(timeout > 0, "Timeout must be positive")
+        connectionState = .connectingLan
+        let outcome: LanDialOutcome
+        do {
+            outcome = try await withThrowingTaskGroup(of: LanDialOutcome.self) { group in
+                group.addTask {
+                    let result = try await lanDialer()
+                    return LanDialOutcome.result(result)
+                }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    return LanDialOutcome.timeout
+                }
+                guard let first = try await group.next() else {
+                    return .timeout
+                }
+                group.cancelAll()
+                return first
+            }
+        } catch {
+            outcome = .failure(error)
+        }
+
+        switch outcome {
+        case .result(.success):
+            connectionState = .connectedLan
+            return connectionState
+        case .result(.failure(let reason, let error)):
+            recordFallback(reason: reason, error: error)
+            return await connectCloud(cloudDialer: cloudDialer)
+        case .timeout:
+            recordFallback(reason: .lanTimeout, error: nil)
+            return await connectCloud(cloudDialer: cloudDialer)
+        case .failure(let error):
+            recordFallback(reason: .unknown, error: error)
+            return await connectCloud(cloudDialer: cloudDialer)
+        }
+    }
+
+    private func connectCloud(cloudDialer: @escaping () async throws -> Bool) async -> ConnectionState {
+        connectionState = .connectingCloud
+        do {
+            let success = try await cloudDialer()
+            if success {
+                connectionState = .connectedCloud
+            } else {
+                connectionState = .error("Cloud connection failed")
+            }
+        } catch {
+            connectionState = .error(error.localizedDescription)
+        }
+        return connectionState
+    }
+
+    private func recordFallback(reason: TransportFallbackReason, error: Error?) {
+        var metadata: [String: String] = ["reason": reason.rawValue]
+        if let error {
+            metadata["error"] = error.localizedDescription
+        }
+        analytics.record(.fallback(reason: reason, metadata: metadata, timestamp: dateProvider()))
+    }
+
     private func handle(event: LanDiscoveryEvent) {
         switch event {
         case .added(let peer):
@@ -255,6 +327,26 @@ public final class TransportManager {
             protocols: ["ws+tls"]
         )
     }
+}
+
+public enum ConnectionState: Equatable {
+    case idle
+    case connectingLan
+    case connectedLan
+    case connectingCloud
+    case connectedCloud
+    case error(String)
+}
+
+public enum LanDialResult {
+    case success
+    case failure(reason: TransportFallbackReason, error: Error?)
+}
+
+private enum LanDialOutcome {
+    case result(LanDialResult)
+    case timeout
+    case failure(Error)
 }
 
 public enum TransportPreference: String, Codable {

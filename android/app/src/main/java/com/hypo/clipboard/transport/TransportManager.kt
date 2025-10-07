@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.collections.buildMap
 
 class TransportManager(
     private val discoverySource: LanDiscoverySource,
@@ -26,7 +28,8 @@ class TransportManager(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val clock: Clock = Clock.systemUTC(),
     private val pruneInterval: Duration = Duration.ofMinutes(1),
-    private val staleThreshold: Duration = Duration.ofMinutes(5)
+    private val staleThreshold: Duration = Duration.ofMinutes(5),
+    private val analytics: TransportAnalytics = NoopTransportAnalytics
 ) {
     private val stateLock = Any()
     private val peersByService = mutableMapOf<String, DiscoveredPeer>()
@@ -35,6 +38,7 @@ class TransportManager(
     private val _peers = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
     private val _lastSeen = MutableStateFlow<Map<String, Instant>>(emptyMap())
     private val _isAdvertising = MutableStateFlow(false)
+    private val _connectionState = MutableStateFlow(ConnectionState.Idle)
 
     private var discoveryJob: Job? = null
     private var pruneJob: Job? = null
@@ -42,6 +46,7 @@ class TransportManager(
 
     val peers: StateFlow<List<DiscoveredPeer>> = _peers.asStateFlow()
     val isAdvertising: StateFlow<Boolean> = _isAdvertising.asStateFlow()
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     fun start(config: LanRegistrationConfig) {
         currentConfig = config
@@ -129,6 +134,36 @@ class TransportManager(
         return removed
     }
 
+    suspend fun connect(
+        lanDialer: suspend () -> LanDialResult,
+        cloudDialer: suspend () -> Boolean,
+        fallbackTimeout: Duration = Duration.ofSeconds(3)
+    ): ConnectionState {
+        require(!fallbackTimeout.isNegative && !fallbackTimeout.isZero) { "Timeout must be positive" }
+        _connectionState.value = ConnectionState.ConnectingLan
+        val lanResult = withTimeoutOrNull(fallbackTimeout.toMillis()) {
+            lanDialer()
+        } ?: LanDialResult.Failure(FallbackReason.LanTimeout, null)
+
+        return when (lanResult) {
+            LanDialResult.Success -> {
+                _connectionState.value = ConnectionState.ConnectedLan
+                ConnectionState.ConnectedLan
+            }
+            is LanDialResult.Failure -> {
+                recordFallback(lanResult.reason, lanResult.throwable)
+                _connectionState.value = ConnectionState.ConnectingCloud
+                val cloudSuccess = runCatching { cloudDialer() }.getOrDefault(false)
+                _connectionState.value = if (cloudSuccess) {
+                    ConnectionState.ConnectedCloud
+                } else {
+                    ConnectionState.Error
+                }
+                _connectionState.value
+            }
+        }
+    }
+
     private fun handleEvent(event: LanDiscoveryEvent) {
         when (event) {
             is LanDiscoveryEvent.Added -> addPeer(event.peer)
@@ -159,6 +194,20 @@ class TransportManager(
         _lastSeen.value = HashMap(lastSeenByService)
     }
 
+    private fun recordFallback(reason: FallbackReason, error: Throwable?) {
+        val metadata = buildMap {
+            put("reason", reason.code)
+            error?.message?.let { put("error", it) }
+        }
+        analytics.record(
+            TransportAnalyticsEvent.Fallback(
+                reason = reason,
+                metadata = metadata,
+                occurredAt = clock.instant()
+            )
+        )
+    }
+
     companion object {
         const val DEFAULT_PORT = 7010
         const val DEFAULT_FINGERPRINT = "uninitialized"
@@ -166,4 +215,18 @@ class TransportManager(
     }
 
     private fun Duration.isPositiveDuration(): Boolean = !isZero && !isNegative
+}
+
+sealed interface LanDialResult {
+    data object Success : LanDialResult
+    data class Failure(val reason: FallbackReason, val throwable: Throwable?) : LanDialResult
+}
+
+enum class ConnectionState {
+    Idle,
+    ConnectingLan,
+    ConnectedLan,
+    ConnectingCloud,
+    ConnectedCloud,
+    Error
 }

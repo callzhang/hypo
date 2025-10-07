@@ -21,6 +21,14 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        buildConfigField("String", "RELAY_WS_URL", "\"wss://hypo-relay-staging.fly.dev/ws\"")
+        buildConfigField(
+            "String",
+            "RELAY_CERT_FINGERPRINT",
+            "\"3f5d8b2ad3c6e6b0f1c2d4a9b6e8f0c1d2a3b4c5d6e7f8091a2b3c4d5e6f7089\""
+        )
+        buildConfigField("String", "RELAY_ENVIRONMENT", "\"staging\"")
     }
 
     buildTypes {

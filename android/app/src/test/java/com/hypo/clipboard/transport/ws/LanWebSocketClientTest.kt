@@ -5,6 +5,8 @@ import com.hypo.clipboard.sync.EncryptionMetadata
 import com.hypo.clipboard.sync.MessageType
 import com.hypo.clipboard.sync.Payload
 import com.hypo.clipboard.sync.SyncEnvelope
+import com.hypo.clipboard.transport.TransportAnalytics
+import com.hypo.clipboard.transport.TransportAnalyticsEvent
 import com.hypo.clipboard.transport.TransportMetricsRecorder
 import java.time.Clock
 import java.time.Duration
@@ -13,9 +15,11 @@ import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import javax.net.ssl.SSLPeerUnverifiedException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -155,6 +159,46 @@ class LanWebSocketClientTest {
         scope.cancel()
     }
 
+    @Test
+    fun `records pinning failure analytics`() = runTest {
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val connector = FakeConnector()
+        val clock = FakeClock(Instant.parse("2025-10-07T00:00:00Z"))
+        val analytics = RecordingAnalytics()
+        val config = TlsWebSocketConfig(
+            url = "wss://relay.example/ws",
+            fingerprintSha256 = "abcd",
+            environment = "cloud"
+        )
+        val client = LanWebSocketClient(
+            config,
+            connector,
+            TransportFrameCodec(),
+            scope,
+            clock,
+            RecordingMetricsRecorder(),
+            analytics
+        )
+
+        val job = scope.launch { runCatching { client.send(sampleEnvelope()) }.getOrNull() }
+        scope.runCurrent()
+        runCurrent()
+
+        connector.fail(SSLPeerUnverifiedException("pin mismatch"))
+        scope.runCurrent()
+        runCurrent()
+
+        job.cancel()
+        scope.cancel()
+
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.PinningFailure
+        assertEquals("cloud", event.environment)
+        assertEquals("relay.example", event.host)
+        assertEquals("pin mismatch", event.message)
+        assertEquals(clock.instant(), event.occurredAt)
+    }
+
     private fun sampleEnvelope(): SyncEnvelope = SyncEnvelope(
         type = MessageType.CLIPBOARD,
         payload = Payload(
@@ -200,6 +244,10 @@ class LanWebSocketClientTest {
         fun latestSocket(): FakeWebSocket = sockets.last()
 
         fun socket(index: Int): FakeWebSocket = sockets[index]
+
+        fun fail(exception: Throwable, index: Int = listeners.lastIndex) {
+            listeners[index].onFailure(sockets[index], exception, null)
+        }
     }
 
     private class FakeWebSocket : WebSocket {
@@ -252,6 +300,18 @@ class LanWebSocketClientTest {
 
         override fun recordRoundTrip(envelopeId: String, duration: Duration) {
             roundTripDurations += duration
+        }
+    }
+
+    private class RecordingAnalytics : TransportAnalytics {
+        private val _events = mutableListOf<TransportAnalyticsEvent>()
+        val recorded: List<TransportAnalyticsEvent>
+            get() = _events
+
+        override val events = MutableSharedFlow<TransportAnalyticsEvent>()
+
+        override fun record(event: TransportAnalyticsEvent) {
+            _events += event
         }
     }
 }

@@ -12,17 +12,20 @@ public struct LanWebSocketConfiguration: Sendable, Equatable {
     public let pinnedFingerprint: String?
     public let headers: [String: String]
     public let idleTimeout: TimeInterval
+    public let environment: String
 
     public init(
         url: URL,
         pinnedFingerprint: String?,
         headers: [String: String] = [:],
-        idleTimeout: TimeInterval = 30
+        idleTimeout: TimeInterval = 30,
+        environment: String = "lan"
     ) {
         self.url = url
         self.pinnedFingerprint = pinnedFingerprint
         self.headers = headers
         self.idleTimeout = idleTimeout
+        self.environment = environment
     }
 }
 
@@ -57,6 +60,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
     private let sessionFactory: @Sendable (URLSessionDelegate, TimeInterval) -> URLSessionProviding
     private let frameCodec: TransportFrameCodec
     private let metricsRecorder: TransportMetricsRecorder
+    private let analytics: TransportAnalytics
     private var session: URLSessionProviding?
     private var state: ConnectionState = .idle
     private var handshakeContinuation: CheckedContinuation<Void, Error>?
@@ -69,6 +73,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         configuration: LanWebSocketConfiguration,
         frameCodec: TransportFrameCodec = TransportFrameCodec(),
         metricsRecorder: TransportMetricsRecorder = NullTransportMetricsRecorder(),
+        analytics: TransportAnalytics = NoopTransportAnalytics(),
         sessionFactory: @escaping @Sendable (URLSessionDelegate, TimeInterval) -> URLSessionProviding = { delegate, timeout in
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = timeout
@@ -79,6 +84,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         self.configuration = configuration
         self.frameCodec = frameCodec
         self.metricsRecorder = metricsRecorder
+        self.analytics = analytics
         self.sessionFactory = sessionFactory
     }
 
@@ -279,6 +285,14 @@ extension LanWebSocketTransport: URLSessionDelegate {
         }
 
         guard let serverCertificate = SecTrustGetCertificateAtIndex(trust, 0) else {
+            analytics.record(
+                .pinningFailure(
+                    environment: configuration.environment,
+                    host: configuration.url.host ?? "unknown",
+                    message: "Missing server certificate",
+                    timestamp: Date()
+                )
+            )
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
@@ -288,6 +302,14 @@ extension LanWebSocketTransport: URLSessionDelegate {
         if fingerprint.caseInsensitiveCompare(expected) == .orderedSame {
             completionHandler(.useCredential, URLCredential(trust: trust))
         } else {
+            analytics.record(
+                .pinningFailure(
+                    environment: configuration.environment,
+                    host: configuration.url.host ?? "unknown",
+                    message: "Fingerprint mismatch",
+                    timestamp: Date()
+                )
+            )
             completionHandler(.cancelAuthenticationChallenge, nil)
         }
 #else

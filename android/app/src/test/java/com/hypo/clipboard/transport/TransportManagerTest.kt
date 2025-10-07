@@ -1,5 +1,6 @@
 package com.hypo.clipboard.transport
 
+import com.hypo.clipboard.transport.TransportAnalyticsEvent
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
 import com.hypo.clipboard.transport.lan.LanDiscoveryEvent
 import com.hypo.clipboard.transport.lan.LanDiscoverySource
@@ -11,7 +12,9 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -204,6 +207,130 @@ class TransportManagerTest {
         scope.cancel()
     }
 
+    @Test
+    fun connectPrefersLanWhenSuccessful() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        val state = manager.connect(
+            lanDialer = { LanDialResult.Success },
+            cloudDialer = { error("cloud should not be called") }
+        )
+
+        assertEquals(ConnectionState.ConnectedLan, state)
+        assertTrue(analytics.recorded.isEmpty())
+    }
+
+    @Test
+    fun connectFallsBackAfterTimeout() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        var cloudAttempts = 0
+        val result = async {
+            manager.connect(
+                lanDialer = {
+                    delay(Duration.ofSeconds(5).toMillis())
+                    LanDialResult.Success
+                },
+                cloudDialer = {
+                    cloudAttempts += 1
+                    true
+                },
+                fallbackTimeout = Duration.ofSeconds(3)
+            )
+        }
+
+        advanceTimeBy(Duration.ofSeconds(5).toMillis())
+        runCurrent()
+
+        assertEquals(ConnectionState.ConnectedCloud, result.await())
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.Fallback
+        assertEquals(FallbackReason.LanTimeout, event.reason)
+        assertEquals(1, cloudAttempts)
+    }
+
+    @Test
+    fun connectRecordsLanFailureReason() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        val state = manager.connect(
+            lanDialer = {
+                LanDialResult.Failure(FallbackReason.LanRejected, IllegalStateException("bad handshake"))
+            },
+            cloudDialer = { true }
+        )
+
+        assertEquals(ConnectionState.ConnectedCloud, state)
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.Fallback
+        assertEquals(FallbackReason.LanRejected, event.reason)
+        assertEquals("bad handshake", event.metadata["error"])
+    }
+
+    @Test
+    fun connectReturnsErrorWhenCloudFails() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        val state = manager.connect(
+            lanDialer = { LanDialResult.Failure(FallbackReason.LanNotSupported, null) },
+            cloudDialer = { false }
+        )
+
+        assertEquals(ConnectionState.Error, state)
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.Fallback
+        assertEquals(FallbackReason.LanNotSupported, event.reason)
+    }
+
     private fun defaultConfig() = LanRegistrationConfig(
         serviceName = "android-device",
         port = 7010,
@@ -262,6 +389,18 @@ class TransportManagerTest {
 
         fun advance(duration: Duration) {
             current = current.plus(duration)
+        }
+    }
+
+    private class RecordingAnalytics : TransportAnalytics {
+        private val _recorded = mutableListOf<TransportAnalyticsEvent>()
+        val recorded: List<TransportAnalyticsEvent>
+            get() = _recorded
+
+        override val events: MutableSharedFlow<TransportAnalyticsEvent> = MutableSharedFlow()
+
+        override fun record(event: TransportAnalyticsEvent) {
+            _recorded += event
         }
     }
 }

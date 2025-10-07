@@ -2,7 +2,10 @@ package com.hypo.clipboard.transport.ws
 
 import com.hypo.clipboard.sync.SyncEnvelope
 import com.hypo.clipboard.sync.SyncTransport
+import com.hypo.clipboard.transport.NoopTransportAnalytics
 import com.hypo.clipboard.transport.NoopTransportMetricsRecorder
+import com.hypo.clipboard.transport.TransportAnalytics
+import com.hypo.clipboard.transport.TransportAnalyticsEvent
 import com.hypo.clipboard.transport.TransportMetricsRecorder
 import java.io.IOException
 import java.time.Clock
@@ -10,6 +13,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
+import javax.net.ssl.SSLPeerUnverifiedException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +29,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.selects.select
 import kotlin.coroutines.coroutineContext
 import okhttp3.CertificatePinner
+import java.net.URI
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -79,7 +85,8 @@ class LanWebSocketClient @Inject constructor(
     private val frameCodec: TransportFrameCodec = TransportFrameCodec(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val clock: Clock = Clock.systemUTC(),
-    private val metricsRecorder: TransportMetricsRecorder = NoopTransportMetricsRecorder
+    private val metricsRecorder: TransportMetricsRecorder = NoopTransportMetricsRecorder,
+    private val analytics: TransportAnalytics = NoopTransportAnalytics
 ) : SyncTransport {
     private val sendQueue = Channel<SyncEnvelope>(Channel.BUFFERED)
     private val mutex = Mutex()
@@ -175,6 +182,19 @@ class LanWebSocketClient @Inject constructor(
                     }
                     shutdownSocket()
                     handshakeStarted = null
+                    if (t is SSLPeerUnverifiedException) {
+                        val host = config.url.toHttpUrlOrNull()?.host
+                            ?: runCatching { URI(config.url).host }.getOrNull()
+                            ?: "unknown"
+                        analytics.record(
+                            TransportAnalyticsEvent.PinningFailure(
+                                environment = config.environment,
+                                host = host,
+                                message = t.message,
+                                occurredAt = clock.instant()
+                            )
+                        )
+                    }
                 }
             }
 

@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.wifi.WifiManager
 import androidx.room.Room
+import com.hypo.clipboard.BuildConfig
 import com.hypo.clipboard.crypto.CryptoService
 import com.hypo.clipboard.crypto.NonceGenerator
 import com.hypo.clipboard.crypto.SecureKeyStore
@@ -15,13 +16,16 @@ import com.hypo.clipboard.data.local.HypoDatabase
 import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.sync.DeviceKeyStore
 import com.hypo.clipboard.sync.SyncTransport
+import com.hypo.clipboard.transport.InMemoryTransportAnalytics
 import com.hypo.clipboard.transport.TransportManager
+import com.hypo.clipboard.transport.TransportAnalytics
 import com.hypo.clipboard.transport.lan.LanDiscoveryRepository
 import com.hypo.clipboard.transport.lan.LanDiscoverySource
 import com.hypo.clipboard.transport.lan.LanRegistrationController
 import com.hypo.clipboard.transport.lan.LanRegistrationManager
 import com.hypo.clipboard.transport.ws.LanWebSocketClient
 import com.hypo.clipboard.transport.ws.OkHttpWebSocketConnector
+import com.hypo.clipboard.transport.ws.RelayWebSocketClient
 import com.hypo.clipboard.transport.ws.TlsWebSocketConfig
 import com.hypo.clipboard.transport.ws.TransportFrameCodec
 import com.hypo.clipboard.transport.ws.WebSocketConnector
@@ -31,6 +35,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import java.time.Clock
+import javax.inject.Named
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,7 +78,8 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideTlsWebSocketConfig(): TlsWebSocketConfig =
+    @Named("lan_ws_config")
+    fun provideLanTlsWebSocketConfig(): TlsWebSocketConfig =
         TlsWebSocketConfig(
             url = "wss://127.0.0.1:${TransportManager.DEFAULT_PORT}/ws",
             fingerprintSha256 = null
@@ -81,7 +87,32 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideWebSocketConnector(config: TlsWebSocketConfig): WebSocketConnector =
+    @Named("lan_ws_connector")
+    fun provideLanWebSocketConnector(
+        @Named("lan_ws_config") config: TlsWebSocketConfig
+    ): WebSocketConnector =
+        OkHttpWebSocketConnector(config)
+
+    @Provides
+    @Singleton
+    @Named("cloud_ws_config")
+    fun provideCloudTlsWebSocketConfig(): TlsWebSocketConfig =
+        TlsWebSocketConfig(
+            url = BuildConfig.RELAY_WS_URL,
+            fingerprintSha256 = BuildConfig.RELAY_CERT_FINGERPRINT.takeIf { it.isNotBlank() },
+            headers = mapOf(
+                "X-Hypo-Client" to BuildConfig.VERSION_NAME,
+                "X-Hypo-Environment" to BuildConfig.RELAY_ENVIRONMENT
+            ),
+            environment = "cloud"
+        )
+
+    @Provides
+    @Singleton
+    @Named("cloud_ws_connector")
+    fun provideCloudWebSocketConnector(
+        @Named("cloud_ws_config") config: TlsWebSocketConfig
+    ): WebSocketConnector =
         OkHttpWebSocketConnector(config)
 
     @Provides
@@ -91,15 +122,31 @@ object AppModule {
     @Provides
     @Singleton
     fun provideSyncTransport(
-        config: TlsWebSocketConfig,
-        connector: WebSocketConnector,
-        frameCodec: TransportFrameCodec
+        @Named("lan_ws_config") config: TlsWebSocketConfig,
+        @Named("lan_ws_connector") connector: WebSocketConnector,
+        frameCodec: TransportFrameCodec,
+        analytics: TransportAnalytics
     ): SyncTransport = LanWebSocketClient(
         config,
         connector,
         frameCodec,
         CoroutineScope(SupervisorJob() + Dispatchers.IO),
-        Clock.systemUTC()
+        Clock.systemUTC(),
+        analytics = analytics
+    )
+
+    @Provides
+    @Singleton
+    fun provideRelayWebSocketClient(
+        @Named("cloud_ws_config") config: TlsWebSocketConfig,
+        @Named("cloud_ws_connector") connector: WebSocketConnector,
+        frameCodec: TransportFrameCodec,
+        analytics: TransportAnalytics
+    ): RelayWebSocketClient = RelayWebSocketClient(
+        config = config,
+        connector = connector,
+        frameCodec = frameCodec,
+        analytics = analytics
     )
 
     @Provides
@@ -134,8 +181,13 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideTransportAnalytics(): TransportAnalytics = InMemoryTransportAnalytics()
+
+    @Provides
+    @Singleton
     fun provideTransportManager(
         discoverySource: LanDiscoverySource,
-        registrationController: LanRegistrationController
-    ): TransportManager = TransportManager(discoverySource, registrationController)
+        registrationController: LanRegistrationController,
+        analytics: TransportAnalytics
+    ): TransportManager = TransportManager(discoverySource, registrationController, analytics = analytics)
 }

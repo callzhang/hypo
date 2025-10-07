@@ -63,19 +63,12 @@ pub async fn websocket_handler(
     let mut reader_session = session;
     let reader_sessions = data.sessions.clone();
     let reader_device_id = device_id.clone();
-<<<<<<< HEAD
-=======
     let key_store = data.device_keys.clone();
->>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
 
     actix_web::rt::spawn(async move {
         while let Some(Ok(msg)) = msg_stream.recv().await {
             match msg {
                 Message::Text(text) => {
-<<<<<<< HEAD
-                    if let Err(err) =
-                        handle_text_message(&reader_device_id, &text, &reader_sessions).await
-=======
                     if let Err(err) = handle_text_message(
                         &reader_device_id,
                         &text,
@@ -83,7 +76,6 @@ pub async fn websocket_handler(
                         &key_store,
                     )
                     .await
->>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
                     {
                         error!(
                             "Failed to handle message from {}: {:?}",
@@ -111,10 +103,7 @@ async fn handle_text_message(
     sender_id: &str,
     message: &str,
     sessions: &crate::services::session_manager::SessionManager,
-<<<<<<< HEAD
-=======
     key_store: &crate::services::device_key_store::DeviceKeyStore,
->>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
 ) -> Result<(), SessionError> {
     let parsed: ClipboardMessage = match serde_json::from_str(message) {
         Ok(value) => value,
@@ -125,8 +114,6 @@ async fn handle_text_message(
     };
 
     let payload: &Value = &parsed.payload;
-<<<<<<< HEAD
-=======
 
     if parsed.msg_type == crate::models::message::MessageType::Control {
         handle_control_message(sender_id, payload, key_store).await;
@@ -138,7 +125,6 @@ async fn handle_text_message(
         return Ok(());
     }
 
->>>>>>> c2cd144792db8aca501a0b387245f8506392a44c
     let target_device = payload
         .get("target")
         .and_then(Value::as_str)
@@ -151,8 +137,6 @@ async fn handle_text_message(
         Ok(())
     }
 }
-<<<<<<< HEAD
-=======
 
 #[derive(Debug, Deserialize)]
 struct RegisterKeyPayload {
@@ -279,4 +263,3 @@ mod tests {
         assert!(validate_encryption_block(&bad_payload).is_err());
     }
 }
->>>>>>> c2cd144792db8aca501a0b387245f8506392a44c

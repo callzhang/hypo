@@ -1,0 +1,45 @@
+app = "hypo-relay-staging"
+primary_region = "iad"
+kill_signal = "SIGINT"
+kill_timeout = 5
+
+[build]
+  image = "registry.fly.io/hypo-relay-staging:latest"
+
+[env]
+  RUST_LOG = "info"
+  SERVER_HOST = "0.0.0.0"
+  SERVER_PORT = "8080"
+  REDIS_URL = "${REDIS_URL}"
+  MAX_CONNECTIONS = "2000"
+  RATE_LIMIT_PER_MIN = "120"
+  MESSAGE_SIZE_LIMIT = "2097152"
+
+[[mounts]]
+  source = "redis"
+  destination = "/data"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "30s"
+    restart_limit = 0
+
+[checks.health]
+  type = "http"
+  port = 8080
+  interval = "30s"
+  timeout = "3s"
+  path = "/health"

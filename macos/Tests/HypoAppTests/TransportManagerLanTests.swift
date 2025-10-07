@@ -101,6 +101,78 @@ final class TransportManagerLanTests: XCTestCase {
 
         await manager.suspendLanDiscovery()
     }
+
+    func testConnectPrefersLan() async {
+        let manager = await TransportManager(
+            provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
+            analytics: InMemoryTransportAnalytics()
+        )
+
+        let state = await manager.connect(
+            lanDialer: { .success },
+            cloudDialer: { XCTFail("Cloud should not be invoked"); return false }
+        )
+
+        XCTAssertEqual(state, .connectedLan)
+        let recordedState = await MainActor.run { manager.connectionState }
+        XCTAssertEqual(recordedState, .connectedLan)
+    }
+
+    func testConnectFallsBackOnTimeout() async {
+        let analytics = InMemoryTransportAnalytics()
+        let manager = await TransportManager(
+            provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
+            analytics: analytics
+        )
+
+        let task = Task {
+            await manager.connect(
+                lanDialer: {
+                    try await Task.sleep(nanoseconds: 4_000_000_000)
+                    return .success
+                },
+                cloudDialer: { true },
+                timeout: 1
+            )
+        }
+
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let state = await task.value
+        XCTAssertEqual(state, .connectedCloud)
+        let events = analytics.events()
+        XCTAssertEqual(events.count, 1)
+        if case let .fallback(reason, _, _) = events.first {
+            XCTAssertEqual(reason, .lanTimeout)
+        } else {
+            XCTFail("Expected fallback analytics event")
+        }
+    }
+
+    func testConnectRecordsLanFailureReason() async {
+        let analytics = InMemoryTransportAnalytics()
+        let manager = await TransportManager(
+            provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
+            analytics: analytics
+        )
+
+        let state = await manager.connect(
+            lanDialer: { .failure(reason: .lanRejected, error: NSError(domain: "test", code: 1)) },
+            cloudDialer: { false }
+        )
+
+        XCTAssertEqual(state, .error("Cloud connection failed"))
+        let events = analytics.events()
+        XCTAssertEqual(events.count, 1)
+        if case let .fallback(reason, metadata, _) = events.first {
+            XCTAssertEqual(reason, .lanRejected)
+            XCTAssertEqual(metadata["reason"], "lan_rejected")
+        } else {
+            XCTFail("Expected fallback analytics event")
+        }
+    }
 }
 
 private final class MockBonjourPublisher: BonjourPublishing {

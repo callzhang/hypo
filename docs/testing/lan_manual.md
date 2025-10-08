@@ -34,6 +34,7 @@ This checklist documents the LAN discovery verification steps, telemetry capture
 5. **Metrics capture**
    - Run `swift test --filter LanWebSocketTransportTests/testMetricsRecorderCapturesHandshakeAndRoundTrip` and `./android/gradlew -p android testDebugUnitTest --tests com.hypo.clipboard.transport.ws.LanWebSocketClientTest` to refresh simulated baselines.
    - Review `tests/transport/lan_loopback_metrics.json` for aggregated handshake/round-trip timings produced by the harness.
+   - Execute `scripts/run-transport-regression.sh` to validate the cross-platform metrics aggregators before sending dashboard snapshots.
 6. **Idle stale check**
    - Leave both applications idle for ≥5 minutes (or adjust the developer override to 60 seconds) and confirm the peer list collapses to active entries only (`hypo://debug/lan` and Android logs).
 7. **Telemetry export**

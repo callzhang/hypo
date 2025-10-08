@@ -111,12 +111,15 @@ final class TransportManagerLanTests: XCTestCase {
 
         let state = await manager.connect(
             lanDialer: { .success },
-            cloudDialer: { XCTFail("Cloud should not be invoked"); return false }
+            cloudDialer: { XCTFail("Cloud should not be invoked"); return false },
+            peerIdentifier: "peer"
         )
 
         XCTAssertEqual(state, .connectedLan)
         let recordedState = await MainActor.run { manager.connectionState }
         XCTAssertEqual(recordedState, .connectedLan)
+        let lastRoute = await MainActor.run { manager.lastSuccessfulTransport(for: "peer") }
+        XCTAssertEqual(lastRoute, .lan)
     }
 
     func testConnectFallsBackOnTimeout() async {
@@ -134,7 +137,8 @@ final class TransportManagerLanTests: XCTestCase {
                     return .success
                 },
                 cloudDialer: { true },
-                timeout: 1
+                timeout: 1,
+                peerIdentifier: "peer"
             )
         }
 
@@ -160,7 +164,8 @@ final class TransportManagerLanTests: XCTestCase {
 
         let state = await manager.connect(
             lanDialer: { .failure(reason: .lanRejected, error: NSError(domain: "test", code: 1)) },
-            cloudDialer: { false }
+            cloudDialer: { false },
+            peerIdentifier: "peer"
         )
 
         XCTAssertEqual(state, .error("Cloud connection failed"))
@@ -172,6 +177,117 @@ final class TransportManagerLanTests: XCTestCase {
         } else {
             XCTFail("Expected fallback analytics event")
         }
+        let route = await MainActor.run { manager.lastSuccessfulTransport(for: "peer") }
+        XCTAssertNil(route)
+    }
+
+    func testConnectionSupervisorReconnectsAfterHeartbeatFailure() async {
+        let analytics = InMemoryTransportAnalytics()
+        let manager = await TransportManager(
+            provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
+            analytics: analytics
+        )
+
+        var lanAttempts = 0
+        var heartbeatCalls = 0
+        await manager.startConnectionSupervisor(
+            peerIdentifier: "peer",
+            lanDialer: {
+                lanAttempts += 1
+                return .success
+            },
+            cloudDialer: { true },
+            sendHeartbeat: {
+                heartbeatCalls += 1
+                return heartbeatCalls < 2
+            },
+            awaitAck: { true },
+            configuration: ConnectionSupervisorConfiguration(
+                fallbackTimeout: 1,
+                heartbeatInterval: 0.1,
+                ackTimeout: 0.1,
+                initialBackoff: 0.1,
+                maxBackoff: 1,
+                jitterRange: 0...0,
+                maxAttempts: 5
+            )
+        )
+
+        try? await Task.sleep(nanoseconds: 600_000_000)
+
+        let attempts = lanAttempts
+        XCTAssertGreaterThanOrEqual(attempts, 2)
+        let last = await manager.lastSuccessfulTransport(for: "peer")
+        XCTAssertEqual(last, .lan)
+
+        await manager.stopConnectionSupervisor()
+    }
+
+    func testManualRetrySkipsBackoffDelay() async {
+        let manager = await TransportManager(
+            provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
+            analytics: InMemoryTransportAnalytics()
+        )
+
+        var attempts = 0
+        await manager.startConnectionSupervisor(
+            peerIdentifier: "peer",
+            lanDialer: {
+                attempts += 1
+                if attempts == 1 {
+                    return .failure(reason: .lanTimeout, error: nil)
+                }
+                return .success
+            },
+            cloudDialer: { false },
+            sendHeartbeat: { true },
+            awaitAck: { true },
+            configuration: ConnectionSupervisorConfiguration(
+                fallbackTimeout: 0.1,
+                heartbeatInterval: 0.2,
+                ackTimeout: 0.1,
+                initialBackoff: 5,
+                maxBackoff: 10,
+                jitterRange: 0...0,
+                maxAttempts: 3
+            )
+        )
+
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        await manager.requestReconnect()
+        try? await Task.sleep(nanoseconds: 800_000_000)
+
+        await manager.stopConnectionSupervisor()
+        await Task.yield()
+        let last = await manager.lastSuccessfulTransport(for: "peer")
+        XCTAssertEqual(last, .lan)
+    }
+
+    func testShutdownTransportFlushesCallback() async {
+        let manager = await TransportManager(
+            provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
+            analytics: InMemoryTransportAnalytics()
+        )
+
+        var flushed = false
+        await manager.startConnectionSupervisor(
+            peerIdentifier: "peer",
+            lanDialer: { .success },
+            cloudDialer: { true },
+            sendHeartbeat: { true },
+            awaitAck: { true }
+        )
+
+        await manager.shutdownTransport {
+            flushed = true
+        }
+
+        XCTAssertTrue(flushed)
+        let state = await MainActor.run { manager.connectionState }
+        XCTAssertEqual(state, .idle)
     }
 }
 

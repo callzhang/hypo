@@ -18,6 +18,11 @@ sealed class TransportAnalyticsEvent {
         val message: String?,
         val occurredAt: Instant
     ) : TransportAnalyticsEvent()
+
+    data class Metrics(
+        val transport: ActiveTransport,
+        val snapshot: TransportMetricsSnapshot
+    ) : TransportAnalyticsEvent()
 }
 
 enum class FallbackReason(val code: String) {

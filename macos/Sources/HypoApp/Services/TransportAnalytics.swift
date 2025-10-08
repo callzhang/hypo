@@ -10,6 +10,7 @@ public enum TransportFallbackReason: String, Codable {
 public enum TransportAnalyticsEvent: Equatable {
     case fallback(reason: TransportFallbackReason, metadata: [String: String], timestamp: Date)
     case pinningFailure(environment: String, host: String, message: String?, timestamp: Date)
+    case metrics(transport: TransportChannel, snapshot: TransportMetricsSnapshot)
 }
 
 public protocol TransportAnalytics {

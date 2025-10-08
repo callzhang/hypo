@@ -144,22 +144,22 @@ Last Updated: October 3, 2025
   - [x] Update `docs/status.md` metrics table once results available.
 
 ### Phase 3.3: Transport Manager
-- [ ] Implement transport selection algorithm
-  - [ ] Model state machine with `Idle → ConnectingLan → ConnectedLan → ConnectingCloud → ConnectedCloud → Error` states.
-  - [ ] Attempt LAN first (3 s timeout) with cancellation support and structured concurrency.
-  - [ ] Fallback to cloud with jittered exponential backoff (base 2, cap 60 s) and loop guard to prevent thundering herd.
-- [ ] Connection state management
-  - [ ] Emit state updates via Combine/Flow to UI layers for status indicators.
-  - [ ] Persist last successful transport per peer for heuristics on next attempt.
-  - [ ] Add graceful shutdown path ensuring in-flight messages flushed before closing socket.
-- [ ] Reconnection handling
-  - [ ] Implement health checks (heartbeat + application-level ack timers) to detect dead connections.
-  - [ ] Support automatic rejoin after transient network changes with backoff reset once success.
-  - [ ] Provide manual retry trigger surfaced in UI with actionable error copy.
-- [ ] Integration tests for fallback
-  - [ ] Build multi-platform test harness (Swift + Kotlin + Rust) using shared JSON vectors to simulate transport failures.
-  - [ ] Ensure metrics + telemetry generated during tests align with dashboards.
-  - [ ] Capture regression scripts to run pre-release before Sprint 3 demo.
+- [x] Implement transport selection algorithm
+  - [x] Model state machine with `Idle → ConnectingLan → ConnectedLan → ConnectingCloud → ConnectedCloud → Error` states.
+  - [x] Attempt LAN first (3 s timeout) with cancellation support and structured concurrency.
+  - [x] Fallback to cloud with jittered exponential backoff (base 2, cap 60 s) and loop guard to prevent thundering herd.
+- [x] Connection state management
+  - [x] Emit state updates via Combine/Flow to UI layers for status indicators.
+  - [x] Persist last successful transport per peer for heuristics on next attempt.
+  - [x] Add graceful shutdown path ensuring in-flight messages flushed before closing socket.
+- [x] Reconnection handling
+  - [x] Implement health checks (heartbeat + application-level ack timers) to detect dead connections.
+  - [x] Support automatic rejoin after transient network changes with backoff reset once success.
+  - [x] Provide manual retry trigger surfaced in UI with actionable error copy.
+- [x] Integration tests for fallback
+  - [x] Build multi-platform test harness (Swift + Kotlin + Rust) using shared JSON vectors to simulate transport failures.
+  - [x] Ensure metrics + telemetry generated during tests align with dashboards.
+  - [x] Capture regression scripts to run pre-release before Sprint 3 demo.
 
 ---
 

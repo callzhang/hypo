@@ -13,19 +13,22 @@ public struct LanWebSocketConfiguration: Sendable, Equatable {
     public let headers: [String: String]
     public let idleTimeout: TimeInterval
     public let environment: String
+    public let roundTripTimeout: TimeInterval
 
     public init(
         url: URL,
         pinnedFingerprint: String?,
         headers: [String: String] = [:],
         idleTimeout: TimeInterval = 30,
-        environment: String = "lan"
+        environment: String = "lan",
+        roundTripTimeout: TimeInterval = 60
     ) {
         self.url = url
         self.pinnedFingerprint = pinnedFingerprint
         self.headers = headers
         self.idleTimeout = idleTimeout
         self.environment = environment
+        self.roundTripTimeout = roundTripTimeout
     }
 }
 
@@ -67,7 +70,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
     private var watchdogTask: Task<Void, Never>?
     private var lastActivity: Date = Date()
     private var handshakeStartedAt: Date?
-    private let pendingRoundTrips = PendingRoundTripStore()
+    private let pendingRoundTrips: PendingRoundTripStore
 
     public init(
         configuration: LanWebSocketConfiguration,
@@ -86,6 +89,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         self.metricsRecorder = metricsRecorder
         self.analytics = analytics
         self.sessionFactory = sessionFactory
+        self.pendingRoundTrips = PendingRoundTripStore(maxAge: configuration.roundTripTimeout)
     }
 
     deinit {
@@ -246,11 +250,19 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func handleIncoming(data: Data) {
-        guard let envelope = try? frameCodec.decode(data) else { return }
-        Task { [metricsRecorder] in
-            if let startedAt = await pendingRoundTrips.remove(id: envelope.id) {
-                let duration = Date().timeIntervalSince(startedAt)
-                metricsRecorder.recordRoundTrip(envelopeId: envelope.id, duration: duration)
+        do {
+            let envelope = try frameCodec.decode(data)
+            Task { [metricsRecorder] in
+                let now = Date()
+                if let startedAt = await pendingRoundTrips.remove(id: envelope.id) {
+                    let duration = now.timeIntervalSince(startedAt)
+                    metricsRecorder.recordRoundTrip(envelopeId: envelope.id.uuidString, duration: duration)
+                }
+                await pendingRoundTrips.pruneExpired(referenceDate: now)
+            }
+        } catch {
+            Task {
+                await pendingRoundTrips.pruneExpired(referenceDate: Date())
             }
         }
     }
@@ -320,13 +332,28 @@ extension LanWebSocketTransport: URLSessionDelegate {
 
 private actor PendingRoundTripStore {
     private var storage: [UUID: Date] = [:]
+    private let maxAge: TimeInterval
+
+    init(maxAge: TimeInterval) {
+        self.maxAge = max(0, maxAge)
+    }
 
     func store(date: Date, for id: UUID) {
+        pruneExpired(referenceDate: date)
         storage[id] = date
     }
 
     func remove(id: UUID) -> Date? {
         storage.removeValue(forKey: id)
+    }
+
+    func pruneExpired(referenceDate: Date) {
+        guard maxAge > 0 else {
+            storage.removeAll()
+            return
+        }
+        let cutoff = referenceDate.addingTimeInterval(-maxAge)
+        storage = storage.filter { $0.value >= cutoff }
     }
 
     func removeAll() {

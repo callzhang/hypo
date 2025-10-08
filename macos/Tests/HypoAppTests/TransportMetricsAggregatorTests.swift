@@ -43,7 +43,7 @@ final class TransportMetricsAggregatorTests: XCTestCase {
 
     private func recordRoundTripSamples(aggregator: TransportMetricsAggregator) {
         [15.0, 14.5, 16.2, 13.8, 15.3].forEach { value in
-            aggregator.recordRoundTrip(envelopeId: UUID(), duration: value / 1_000)
+            aggregator.recordRoundTrip(envelopeId: UUID().uuidString, duration: value / 1_000)
         }
     }
 }

@@ -106,7 +106,7 @@ final class LanWebSocketTransportTests: XCTestCase {
 
         await fulfillment(of: [handshakeExpectation, roundTripExpectation], timeout: 1.0)
         XCTAssertEqual(metrics.recordedHandshakes.count, 1)
-        XCTAssertEqual(metrics.recordedRoundTrips[envelope.id]?.count ?? 0, 1)
+        XCTAssertEqual(metrics.recordedRoundTrips[envelope.id.uuidString]?.count ?? 0, 1)
     }
 
     func testReconnectAfterDisconnect() async throws {
@@ -180,7 +180,7 @@ private final class StubWebSocketTask: WebSocketTasking {
 
 private final class RecordingMetricsRecorder: TransportMetricsRecorder {
     private(set) var recordedHandshakes: [TimeInterval] = []
-    private(set) var recordedRoundTrips: [UUID: [TimeInterval]] = [:]
+    private(set) var recordedRoundTrips: [String: [TimeInterval]] = [:]
     private let handshakeExpectation: XCTestExpectation?
     private let roundTripExpectation: XCTestExpectation?
 
@@ -194,7 +194,7 @@ private final class RecordingMetricsRecorder: TransportMetricsRecorder {
         handshakeExpectation?.fulfill()
     }
 
-    func recordRoundTrip(envelopeId: UUID, duration: TimeInterval) {
+    func recordRoundTrip(envelopeId: String, duration: TimeInterval) {
         var durations = recordedRoundTrips[envelopeId, default: []]
         durations.append(duration)
         recordedRoundTrips[envelopeId] = durations

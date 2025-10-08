@@ -5,5 +5,6 @@ data class TlsWebSocketConfig(
     val fingerprintSha256: String?,
     val headers: Map<String, String> = emptyMap(),
     val idleTimeoutMillis: Long = 30_000L,
-    val environment: String = "lan"
+    val environment: String = "lan",
+    val roundTripTimeoutMillis: Long = 60_000L
 )

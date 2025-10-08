@@ -39,6 +39,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.of
+import kotlin.math.max
 
 interface WebSocketConnector {
     fun connect(listener: WebSocketListener): WebSocket
@@ -98,6 +99,7 @@ class LanWebSocketClient @Inject constructor(
     @Volatile private var handshakeStarted: Instant? = null
     private val pendingLock = Any()
     private val pendingRoundTrips = mutableMapOf<String, Instant>()
+    private val pendingTtl = Duration.ofMillis(max(0L, config.roundTripTimeoutMillis))
 
     override suspend fun send(envelope: SyncEnvelope) {
         ensureConnection()
@@ -213,8 +215,10 @@ class LanWebSocketClient @Inject constructor(
                         }
                         is LoopEvent.Envelope -> {
                             val payload = frameCodec.encode(event.envelope)
+                            val now = clock.instant()
                             synchronized(pendingLock) {
-                                pendingRoundTrips[event.envelope.id] = clock.instant()
+                                prunePendingLocked(now)
+                                pendingRoundTrips[event.envelope.id] = now
                             }
                             val sent = socket.send(of(*payload))
                             if (!sent) {
@@ -283,15 +287,36 @@ class LanWebSocketClient @Inject constructor(
     }
 
     private fun handleIncoming(bytes: ByteString) {
+        val now = clock.instant()
         val envelope = try {
             frameCodec.decode(bytes.toByteArray())
         } catch (_: Exception) {
+            synchronized(pendingLock) { prunePendingLocked(now) }
             return
         }
-        val started = synchronized(pendingLock) { pendingRoundTrips.remove(envelope.id) }
+        val started = synchronized(pendingLock) {
+            val removed = pendingRoundTrips.remove(envelope.id)
+            prunePendingLocked(now)
+            removed
+        }
         if (started != null) {
-            val duration = Duration.between(started, clock.instant())
+            val duration = Duration.between(started, now)
             metricsRecorder.recordRoundTrip(envelope.id, duration)
+        }
+    }
+
+    private fun prunePendingLocked(reference: Instant) {
+        if (pendingTtl.isZero || pendingTtl.isNegative) {
+            pendingRoundTrips.clear()
+            return
+        }
+        val cutoff = reference.minus(pendingTtl)
+        val iterator = pendingRoundTrips.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.value.isBefore(cutoff)) {
+                iterator.remove()
+            }
         }
     }
 

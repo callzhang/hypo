@@ -2,7 +2,7 @@ import Foundation
 
 public protocol TransportMetricsRecorder {
     func recordHandshake(duration: TimeInterval, timestamp: Date)
-    func recordRoundTrip(envelopeId: UUID, duration: TimeInterval)
+    func recordRoundTrip(envelopeId: String, duration: TimeInterval)
 }
 
 public struct NullTransportMetricsRecorder: TransportMetricsRecorder {
@@ -10,7 +10,7 @@ public struct NullTransportMetricsRecorder: TransportMetricsRecorder {
 
     public func recordHandshake(duration: TimeInterval, timestamp: Date) {}
 
-    public func recordRoundTrip(envelopeId: UUID, duration: TimeInterval) {}
+    public func recordRoundTrip(envelopeId: String, duration: TimeInterval) {}
 }
 
 public struct TransportMetricDistribution: Equatable {
@@ -46,7 +46,7 @@ public final class TransportMetricsAggregator: TransportMetricsRecorder {
         }
     }
 
-    public func recordRoundTrip(envelopeId: UUID, duration: TimeInterval) {
+    public func recordRoundTrip(envelopeId: String, duration: TimeInterval) {
         let millis = duration * 1_000
         lock.withLock {
             roundTripDurationsMs.append(millis)

@@ -312,6 +312,36 @@ class TransportManagerTest {
     }
 
     @Test
+    fun connectHandlesLanExceptionAndFallsBack() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        val state = manager.connect(
+            lanDialer = { throw IllegalStateException("socket error") },
+            cloudDialer = { true },
+            peerServiceName = "peer"
+        )
+
+        assertEquals(ConnectionState.ConnectedCloud, state)
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.Fallback
+        assertEquals(FallbackReason.Unknown, event.reason)
+        assertEquals("socket error", event.metadata["error"])
+        assertEquals(ActiveTransport.CLOUD, manager.lastSuccessfulTransport("peer"))
+    }
+
+    @Test
     fun connectReturnsErrorWhenCloudFails() = runTest {
         val discovery = FakeDiscoverySource()
         val registration = FakeRegistrationController()

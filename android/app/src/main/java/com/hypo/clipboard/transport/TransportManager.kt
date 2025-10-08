@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
 import kotlin.random.Random
 import kotlin.collections.buildMap
@@ -158,9 +159,23 @@ class TransportManager(
     ): ConnectionState {
         require(!fallbackTimeout.isNegative && !fallbackTimeout.isZero) { "Timeout must be positive" }
         _connectionState.value = ConnectionState.ConnectingLan
-        val lanResult = withTimeoutOrNull(fallbackTimeout.toMillis()) {
-            lanDialer()
-        } ?: LanDialResult.Failure(FallbackReason.LanTimeout, null)
+        val lanAttempt: LanDialResult? = try {
+            withTimeoutOrNull(fallbackTimeout.toMillis()) {
+                try {
+                    lanDialer()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (throwable: Throwable) {
+                    LanDialResult.Failure(FallbackReason.Unknown, throwable)
+                }
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (throwable: Throwable) {
+            LanDialResult.Failure(FallbackReason.Unknown, throwable)
+        }
+
+        val lanResult = lanAttempt ?: LanDialResult.Failure(FallbackReason.LanTimeout, null)
 
         return when (lanResult) {
             LanDialResult.Success -> {

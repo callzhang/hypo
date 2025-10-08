@@ -28,6 +28,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.reflect.full.callSuspend
+import kotlin.reflect.full.declaredFunctions
+import kotlin.reflect.jvm.isAccessible
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TransportManagerTest {
@@ -339,6 +343,41 @@ class TransportManagerTest {
         assertEquals(FallbackReason.Unknown, event.reason)
         assertEquals("socket error", event.metadata["error"])
         assertEquals(ActiveTransport.CLOUD, manager.lastSuccessfulTransport("peer"))
+    }
+
+    @Test
+    fun waitForBackoffPreservesPendingSignals() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = this,
+            clock = MutableClock(),
+            pruneInterval = Duration.ZERO
+        )
+
+        val manualField = TransportManager::class.java.getDeclaredField("manualRetryRequested").apply {
+            isAccessible = true
+        }
+        val networkField = TransportManager::class.java.getDeclaredField("networkChangeDetected").apply {
+            isAccessible = true
+        }
+        val waitFunction = TransportManager::class.declaredFunctions.first { it.name == "waitForBackoff" }.apply {
+            isAccessible = true
+        }
+
+        val manual = manualField.get(manager) as AtomicBoolean
+        val network = networkField.get(manager) as AtomicBoolean
+
+        manual.set(true)
+        network.set(true)
+
+        val result = waitFunction.callSuspend(manager, Duration.ofSeconds(1)) as Boolean
+
+        assertTrue(result)
+        assertFalse(manual.get())
+        assertTrue(network.get())
     }
 
     @Test

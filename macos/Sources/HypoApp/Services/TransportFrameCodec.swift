@@ -53,6 +53,9 @@ public struct TransportFrameCodec: Sendable {
         guard data.count - MemoryLayout<UInt32>.size >= length else {
             throw TransportFrameError.truncated
         }
+        guard length <= maxPayloadSize else {
+            throw TransportFrameError.payloadTooLarge
+        }
         let payload = data.subdata(in: MemoryLayout<UInt32>.size..<(MemoryLayout<UInt32>.size + length))
         return try decoder.decode(SyncEnvelope.self, from: payload)
     }

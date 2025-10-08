@@ -204,6 +204,9 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
     }
 
     private func closeDueToIdle(task: WebSocketTasking) async {
+        guard case .connected(let current) = state, current === task else {
+            return
+        }
         task.cancel(with: .goingAway, reason: "Idle timeout".data(using: .utf8))
         await disconnect()
     }

@@ -77,4 +77,20 @@ final class TransportFrameCodecTests: XCTestCase {
             XCTAssertEqual(error as? TransportFrameError, .payloadTooLarge)
         }
     }
+
+    func testDecodeRejectsOversizedPayload() throws {
+        let codec = TransportFrameCodec()
+        let envelope = SyncEnvelope(type: .clipboard, payload: .init(
+            contentType: .text,
+            ciphertext: Data("payload".utf8),
+            deviceId: "device",
+            target: nil,
+            encryption: .init(nonce: Data("nonce".utf8), tag: Data("tag".utf8))
+        ))
+        let frame = try codec.encode(envelope)
+        let strict = TransportFrameCodec(maxPayloadSize: 8)
+        XCTAssertThrowsError(try strict.decode(frame)) { error in
+            XCTAssertEqual(error as? TransportFrameError, .payloadTooLarge)
+        }
+    }
 }

@@ -376,7 +376,10 @@ class TransportManager(
     private suspend fun waitForBackoff(duration: Duration): Boolean {
         var remaining = duration.toMillis()
         while (remaining > 0 && scope.isActive) {
-            if (manualRetryRequested.getAndSet(false) || networkChangeDetected.getAndSet(false)) {
+            if (manualRetryRequested.getAndSet(false)) {
+                return true
+            }
+            if (networkChangeDetected.getAndSet(false)) {
                 return true
             }
             val step = min(remaining, 100L)

@@ -7,7 +7,9 @@ import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNamingStrategy
 import java.util.Base64
 
 private val base64Encoder = Base64.getEncoder().withoutPadding()
@@ -20,7 +22,12 @@ class SyncEngine @Inject constructor(
     private val transport: SyncTransport,
     private val identity: DeviceIdentity
 ) {
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    @OptIn(ExperimentalSerializationApi::class)
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        namingStrategy = JsonNamingStrategy.SnakeCase
+    }
 
     suspend fun registerKey(deviceId: String, key: ByteArray) {
         keyStore.saveKey(deviceId, key)

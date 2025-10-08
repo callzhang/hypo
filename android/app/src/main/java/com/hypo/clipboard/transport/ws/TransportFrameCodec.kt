@@ -1,13 +1,20 @@
 package com.hypo.clipboard.transport.ws
 
 import com.hypo.clipboard.sync.SyncEnvelope
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNamingStrategy
 import java.nio.ByteBuffer
 
+@OptIn(ExperimentalSerializationApi::class)
 class TransportFrameCodec(
-    private val json: Json = Json { encodeDefaults = true; ignoreUnknownKeys = false },
+    private val json: Json = Json {
+        encodeDefaults = true
+        ignoreUnknownKeys = false
+        namingStrategy = JsonNamingStrategy.SnakeCase
+    },
     private val maxPayloadBytes: Int = 256 * 1024
 ) {
     fun encode(envelope: SyncEnvelope): ByteArray {
@@ -27,6 +34,9 @@ class TransportFrameCodec(
         val length = buffer.int
         if (length < 0 || length > frame.size - 4) {
             throw TransportFrameException("frame truncated")
+        }
+        if (length > maxPayloadBytes) {
+            throw TransportFrameException("payload exceeds $maxPayloadBytes bytes")
         }
         val payload = ByteArray(length)
         buffer.get(payload)

@@ -74,6 +74,26 @@ class TransportFrameCodecTest {
         assertFailsWith<TransportFrameException> { codec.encode(envelope) }
     }
 
+    @Test
+    fun `decode fails when payload exceeds limit`() {
+        val envelope = SyncEnvelope(
+            type = MessageType.CLIPBOARD,
+            payload = Payload(
+                contentType = com.hypo.clipboard.domain.model.ClipboardType.TEXT,
+                ciphertext = "payload",
+                deviceId = "device",
+                target = null,
+                encryption = com.hypo.clipboard.sync.EncryptionMetadata(
+                    nonce = "nonce",
+                    tag = "tag"
+                )
+            )
+        )
+        val frame = codec.encode(envelope)
+        val strictCodec = TransportFrameCodec(maxPayloadBytes = 8)
+        assertFailsWith<TransportFrameException> { strictCodec.decode(frame) }
+    }
+
     @kotlinx.serialization.Serializable
     private data class FrameVector(
         val description: String,

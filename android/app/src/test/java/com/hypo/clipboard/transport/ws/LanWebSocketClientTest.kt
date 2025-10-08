@@ -14,6 +14,7 @@ import java.time.Instant
 import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import javax.net.ssl.SSLPeerUnverifiedException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -197,6 +198,67 @@ class LanWebSocketClientTest {
         assertEquals("relay.example", event.host)
         assertEquals("pin mismatch", event.message)
         assertEquals(clock.instant(), event.occurredAt)
+    }
+
+    @Test
+    fun `stale shutdown does not clear new socket`() = runTest {
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val connector = FakeConnector()
+        val clock = FakeClock(Instant.parse("2025-10-07T00:00:00Z"))
+        val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null)
+        val client = LanWebSocketClient(config, connector, TransportFrameCodec(), scope, clock)
+
+        val firstEnvelope = sampleEnvelope()
+        val firstJob = scope.launch { client.send(firstEnvelope) }
+        scope.runCurrent()
+        runCurrent()
+        connector.open(0)
+        scope.runCurrent()
+        runCurrent()
+        firstJob.join()
+
+        val firstSocket = connector.socket(0)
+        connector.fail(RuntimeException("boom"), 0)
+
+        val secondEnvelope = sampleEnvelope()
+        val secondJob = scope.launch { client.send(secondEnvelope) }
+        scope.runCurrent()
+        runCurrent()
+        connector.open(1)
+        scope.runCurrent()
+        runCurrent()
+        secondJob.join()
+
+        val webSocketField = LanWebSocketClient::class.java.getDeclaredField("webSocket").apply {
+            isAccessible = true
+        }
+        val shutdownMethod = LanWebSocketClient::class.java.getDeclaredMethod(
+            "shutdownSocket",
+            WebSocket::class.java
+        ).apply {
+            isAccessible = true
+        }
+
+        val activeSocket = webSocketField.get(client) as WebSocket
+        assertSame(connector.socket(1), activeSocket)
+
+        shutdownMethod.invoke(client, firstSocket)
+        scope.runCurrent()
+        runCurrent()
+
+        val afterShutdownSocket = webSocketField.get(client) as WebSocket
+        assertSame(connector.socket(1), afterShutdownSocket)
+
+        val thirdEnvelope = sampleEnvelope()
+        val thirdJob = scope.launch { client.send(thirdEnvelope) }
+        scope.runCurrent()
+        runCurrent()
+        thirdJob.join()
+
+        assertEquals(2, connector.socket(1).sent.size)
+
+        scope.cancel()
     }
 
     private fun sampleEnvelope(): SyncEnvelope = SyncEnvelope(

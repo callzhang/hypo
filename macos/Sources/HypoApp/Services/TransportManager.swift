@@ -518,8 +518,11 @@ public final class TransportManager {
         guard duration > 0 else { return false }
         var remaining = duration
         while remaining > 0 && !Task.isCancelled {
-            if manualRetryRequested || networkChangeRequested {
+            if manualRetryRequested {
                 manualRetryRequested = false
+                return true
+            }
+            if networkChangeRequested {
                 networkChangeRequested = false
                 return true
             }

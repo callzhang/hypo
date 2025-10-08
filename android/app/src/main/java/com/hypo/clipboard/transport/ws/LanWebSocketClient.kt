@@ -175,14 +175,14 @@ class LanWebSocketClient @Inject constructor(
                     if (!closedSignal.isCompleted) {
                         closedSignal.complete(Unit)
                     }
-                    shutdownSocket()
+                    shutdownSocket(webSocket)
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     if (!closedSignal.isCompleted) {
                         closedSignal.complete(Unit)
                     }
-                    shutdownSocket()
+                    shutdownSocket(webSocket)
                     handshakeStarted = null
                     if (t is SSLPeerUnverifiedException) {
                         val host = config.url.toHttpUrlOrNull()?.host
@@ -233,7 +233,7 @@ class LanWebSocketClient @Inject constructor(
                 if (!cancelled) {
                     socket.close(1000, null)
                 }
-                shutdownSocket()
+                shutdownSocket(socket)
             }
         }
     }
@@ -253,12 +253,14 @@ class LanWebSocketClient @Inject constructor(
         }
     }
 
-    private fun shutdownSocket() {
+    private fun shutdownSocket(expected: WebSocket? = null) {
         watchdogJob?.cancel()
         watchdogJob = null
         scope.launch {
             mutex.withLock {
-                webSocket = null
+                if (expected == null || webSocket === expected) {
+                    webSocket = null
+                }
             }
         }
     }
@@ -269,6 +271,7 @@ class LanWebSocketClient @Inject constructor(
 
     private fun startWatchdog() {
         watchdogJob?.cancel()
+        val observedJob = connectionJob
         watchdogJob = scope.launch {
             val timeout = Duration.ofMillis(config.idleTimeoutMillis)
             while (isActive) {
@@ -277,8 +280,14 @@ class LanWebSocketClient @Inject constructor(
                 if (elapsed >= timeout) {
                     val socket = mutex.withLock { webSocket }
                     socket?.close(1001, "idle timeout")
-                    mutex.withLock { webSocket = null }
-                    connectionJob?.cancel()
+                    if (socket != null) {
+                        mutex.withLock {
+                            if (webSocket === socket) {
+                                webSocket = null
+                            }
+                        }
+                    }
+                    observedJob?.cancel()
                     watchdogJob = null
                     return@launch
                 }

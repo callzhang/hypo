@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
@@ -19,9 +20,14 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(AndroidJUnit4::class)
+@Config(sdk = [34])
 class ClipboardPipelineTest {
 
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
@@ -30,6 +36,11 @@ class ClipboardPipelineTest {
         every { deviceId } returns "android-device"
     }
     private val syncEngine = mockk<SyncEngine>(relaxed = true)
+
+    @Before
+    fun setUp() {
+        clipboardManager.clearPrimaryClip()
+    }
 
     @Test
     fun processesTextClipEndToEnd() = runTest {

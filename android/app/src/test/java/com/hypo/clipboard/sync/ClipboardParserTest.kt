@@ -3,6 +3,7 @@ package com.hypo.clipboard.sync
 import android.content.ClipData
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hypo.clipboard.domain.model.ClipboardType
 import java.io.File
 import java.io.FileOutputStream
@@ -11,7 +12,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
 
+@RunWith(AndroidJUnit4::class)
+@Config(sdk = [34])
 class ClipboardParserTest {
 
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()

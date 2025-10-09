@@ -11,6 +11,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.hypo.clipboard.R
 import com.hypo.clipboard.sync.ClipboardListener
+import com.hypo.clipboard.sync.ClipboardParser
 import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.sync.SyncCoordinator
 import com.hypo.clipboard.transport.TransportManager
@@ -40,6 +41,7 @@ class ClipboardSyncService : Service() {
         val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         listener = ClipboardListener(
             clipboardManager = clipboardManager,
+            parser = ClipboardParser(contentResolver),
             onClipboardChanged = { event ->
                 syncCoordinator.onClipboardEvent(event)
             },

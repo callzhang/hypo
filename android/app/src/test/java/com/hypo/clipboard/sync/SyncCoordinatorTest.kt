@@ -44,7 +44,14 @@ class SyncCoordinatorTest {
         coordinator.start(this)
 
         val timestamp = Instant.parse("2024-03-21T12:30:45Z")
-        val event = ClipboardEvent(id = "event-1", text = "Hello", createdAt = timestamp)
+        val event = ClipboardEvent(
+            id = "event-1",
+            type = ClipboardType.TEXT,
+            content = "Hello",
+            preview = "Hello",
+            metadata = emptyMap(),
+            createdAt = timestamp
+        )
 
         coordinator.onClipboardEvent(event)
         advanceUntilIdle()
@@ -74,7 +81,14 @@ class SyncCoordinatorTest {
         coordinator.start(this)
         coordinator.start(this)
 
-        val event = ClipboardEvent(id = "event-2", text = "World", createdAt = Instant.parse("2024-03-22T08:00:00Z"))
+        val event = ClipboardEvent(
+            id = "event-2",
+            type = ClipboardType.TEXT,
+            content = "World",
+            preview = "World",
+            metadata = emptyMap(),
+            createdAt = Instant.parse("2024-03-22T08:00:00Z")
+        )
         coordinator.onClipboardEvent(event)
         advanceUntilIdle()
 

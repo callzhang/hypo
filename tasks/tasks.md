@@ -167,27 +167,27 @@ Last Updated: October 3, 2025
 
 ### Phase 4.1: Text & Links
 - [x] macOS: Extract text from NSPasteboard
-- [ ] Android: Extract text from ClipData
+- [x] Android: Extract text from ClipData
 - [x] URL validation and link detection
 - [x] Preview generation (first 100 chars)
-- [ ] End-to-end test: text sync
+- [x] End-to-end test: text sync
 
 ### Phase 4.2: Images
 - [x] macOS: Extract image from NSPasteboard
 - [x] macOS: Compress to PNG/JPEG if >1MB
 - [x] macOS: Generate thumbnail for history
-- [ ] Android: Extract bitmap from ClipData
-- [ ] Android: Compress and encode to Base64
-- [ ] Android: Generate thumbnail
-- [ ] End-to-end test: image sync
+- [x] Android: Extract bitmap from ClipData
+- [x] Android: Compress and encode to Base64
+- [x] Android: Generate thumbnail
+- [x] End-to-end test: image sync
 
 ### Phase 4.3: Files
 - [x] macOS: Extract file URL from NSPasteboard
 - [x] macOS: Read file bytes, encode Base64
-- [ ] Android: Extract file URI from ClipData
-- [ ] Android: Read content resolver, encode Base64
+- [x] Android: Extract file URI from ClipData
+- [x] Android: Read content resolver, encode Base64
 - [x] Implement size limit checks (1MB)
-- [ ] End-to-end test: file sync
+- [x] End-to-end test: file sync
 
 ---
 

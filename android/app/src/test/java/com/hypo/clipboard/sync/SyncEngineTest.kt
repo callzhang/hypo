@@ -7,12 +7,14 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import java.time.Instant
 import java.util.Base64
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -138,5 +140,48 @@ class SyncEngineTest {
         assertFailsWith<SyncEngineException.MissingKey> {
             engine.decode(envelope)
         }
+    }
+
+    @Test
+    fun doesNotDoubleEncodeBinaryPayloads() = runTest {
+        val cryptoService = mockk<CryptoService>()
+        val key = ByteArray(32) { 5 }
+        val rawBase64 = Base64.getEncoder().withoutPadding().encodeToString("image-bytes".encodeToByteArray())
+        var capturedPlaintext: ByteArray? = null
+        val plaintextSlot = io.mockk.slot<ByteArray>()
+
+        coEvery { deviceKeyStore.loadKey("mac-device") } returns key
+        coEvery {
+            cryptoService.encrypt(
+                plaintext = capture(plaintextSlot),
+                key = key,
+                aad = any()
+            )
+        } answers {
+            capturedPlaintext = plaintextSlot.captured
+            com.hypo.clipboard.crypto.EncryptedData(
+                ciphertext = ByteArray(0),
+                nonce = ByteArray(12),
+                tag = ByteArray(16)
+            )
+        }
+        coEvery { transport.send(any()) } returns Unit
+
+        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity)
+        val item = ClipboardItem(
+            id = "clip-image",
+            type = ClipboardType.IMAGE,
+            content = rawBase64,
+            preview = "preview",
+            metadata = mapOf("size" to "12"),
+            deviceId = identity.deviceId,
+            createdAt = Instant.parse("2024-03-21T12:30:45Z"),
+            isPinned = false
+        )
+
+        engine.sendClipboard(item, "mac-device")
+
+        val plaintext = requireNotNull(capturedPlaintext).decodeToString()
+        assertTrue(plaintext.contains("\"data_base64\":\"$rawBase64\""))
     }
 }

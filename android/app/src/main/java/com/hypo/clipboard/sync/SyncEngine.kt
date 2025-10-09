@@ -2,6 +2,7 @@ package com.hypo.clipboard.sync
 
 import com.hypo.clipboard.crypto.CryptoService
 import com.hypo.clipboard.domain.model.ClipboardItem
+import com.hypo.clipboard.domain.model.ClipboardType
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -41,9 +42,14 @@ class SyncEngine @Inject constructor(
         val key = keyStore.loadKey(targetDeviceId)
             ?: throw SyncEngineException.MissingKey(targetDeviceId)
 
+        val dataBase64 = when (item.type) {
+            ClipboardType.TEXT, ClipboardType.LINK ->
+                base64Encoder.encodeToString(item.content.encodeToByteArray())
+            ClipboardType.IMAGE, ClipboardType.FILE -> item.content
+        }
         val payload = ClipboardPayload(
             contentType = item.type,
-            dataBase64 = base64Encoder.encodeToString(item.content.encodeToByteArray()),
+            dataBase64 = dataBase64,
             metadata = item.metadata ?: emptyMap()
         )
         val plaintext = json.encodeToString(payload).encodeToByteArray()

@@ -2,7 +2,6 @@ package com.hypo.clipboard.sync
 
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
-import com.hypo.clipboard.domain.model.ClipboardType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -29,10 +28,10 @@ class SyncCoordinator @Inject constructor(
             for (event in channel) {
                 val item = ClipboardItem(
                     id = event.id,
-                    type = ClipboardType.TEXT,
-                    content = event.text,
-                    preview = event.text.take(64),
-                    metadata = emptyMap(),
+                    type = event.type,
+                    content = event.content,
+                    preview = event.preview,
+                    metadata = event.metadata.ifEmpty { emptyMap() },
                     deviceId = identity.deviceId,
                     createdAt = event.createdAt,
                     isPinned = false

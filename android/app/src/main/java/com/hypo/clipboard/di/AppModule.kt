@@ -15,6 +15,7 @@ import com.hypo.clipboard.data.local.ClipboardDao
 import com.hypo.clipboard.data.local.HypoDatabase
 import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.sync.DeviceKeyStore
+import com.hypo.clipboard.sync.NoopSyncTransport
 import com.hypo.clipboard.sync.SyncTransport
 import com.hypo.clipboard.transport.InMemoryTransportAnalytics
 import com.hypo.clipboard.transport.TransportManager

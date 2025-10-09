@@ -209,24 +209,25 @@ Last Updated: October 3, 2025
 
 ### Phase 5.2: Android UI
 - [x] Create Jetpack Compose app structure
-- [ ] Implement `HomeScreen` with last item card
+- [x] Implement `HomeScreen` with last item card
 - [x] Implement `HistoryScreen` with LazyColumn
-- [ ] Implement search functionality
-- [ ] Implement `SettingsScreen`
-  - [ ] Toggle switches for LAN/Cloud
-  - [ ] Battery optimization guidance
-  - [ ] Paired devices management
-  - [ ] History retention settings
-- [ ] Material 3 dynamic color support
-- [ ] Implement foreground service notification with actions *(basic persistent notification in place; add quick actions)*
+- [x] Implement search functionality
+- [x] Implement `SettingsScreen`
+  - [x] Toggle switches for LAN/Cloud
+  - [x] Battery optimization guidance
+  - [x] Paired devices management
+  - [x] History retention settings
+- [x] Material 3 dynamic color support
+- [x] Implement foreground service notification with actions *(basic persistent notification in place; add quick actions)*
+- [x] Unit tests for Home, History, and Settings view models plus settings persistence
 
 ### Phase 5.3: Notifications
-- [ ] macOS: Request notification permissions
-- [ ] macOS: Implement rich notifications with thumbnails
-- [ ] macOS: Notification actions (Copy Again, Delete)
+- [x] macOS: Request notification permissions
+- [x] macOS: Implement rich notifications with thumbnails
+- [x] macOS: Notification actions (Copy Again, Delete)
 - [x] Android: Create notification channel
-- [ ] Android: Rich notification with preview
-- [ ] Android: Notification actions
+- [x] Android: Rich notification with preview
+- [x] Android: Notification actions
 
 ---
 

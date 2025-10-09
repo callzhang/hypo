@@ -3,6 +3,10 @@ package com.hypo.clipboard.di
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.wifi.WifiManager
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStoreFile
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
 import com.hypo.clipboard.BuildConfig
 import com.hypo.clipboard.crypto.CryptoService
@@ -13,6 +17,8 @@ import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.data.ClipboardRepositoryImpl
 import com.hypo.clipboard.data.local.ClipboardDao
 import com.hypo.clipboard.data.local.HypoDatabase
+import com.hypo.clipboard.data.settings.SettingsRepository
+import com.hypo.clipboard.data.settings.SettingsRepositoryImpl
 import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.sync.DeviceKeyStore
 import com.hypo.clipboard.sync.NoopSyncTransport
@@ -57,6 +63,20 @@ object AppModule {
     @Provides
     @Singleton
     fun provideRepository(dao: ClipboardDao): ClipboardRepository = ClipboardRepositoryImpl(dao)
+
+    @Provides
+    @Singleton
+    fun provideDataStore(
+        @ApplicationContext context: Context
+    ): DataStore<Preferences> = PreferenceDataStoreFactory.create(
+        produceFile = { context.preferencesDataStoreFile("hypo_settings") }
+    )
+
+    @Provides
+    @Singleton
+    fun provideSettingsRepository(
+        dataStore: DataStore<Preferences>
+    ): SettingsRepository = SettingsRepositoryImpl(dataStore)
 
     @Provides
     @Singleton

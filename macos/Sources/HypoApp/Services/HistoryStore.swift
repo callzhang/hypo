@@ -36,6 +36,10 @@ public actor HistoryStore {
         entries
     }
 
+    public func entry(withID id: UUID) -> ClipboardEntry? {
+        entries.first { $0.id == id }
+    }
+
     public func remove(id: UUID) {
         entries.removeAll { $0.id == id }
     }
@@ -97,6 +101,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     private let store: HistoryStore
     private let transportManager: TransportManager?
     private let defaults: UserDefaults
+#if canImport(UserNotifications)
+    private let notificationController: ClipboardNotificationScheduling?
+#endif
     private var loadTask: Task<Void, Never>?
 #if canImport(os)
     private let logger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
@@ -118,6 +125,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         self.store = store
         self.transportManager = transportManager
         self.defaults = defaults
+#if canImport(UserNotifications)
+        self.notificationController = ClipboardNotificationController.shared
+#endif
         self.transportPreference = transportManager?.currentPreference() ?? .lanFirst
         self.allowsCloudFallback = defaults.object(forKey: DefaultsKey.allowsCloudFallback) as? Bool ?? true
         self.autoDeleteAfterHours = defaults.object(forKey: DefaultsKey.autoDeleteHours) as? Int ?? 0
@@ -138,6 +148,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
            let decoded = try? JSONDecoder().decode([PairedDevice].self, from: storedDevices) {
             self.pairedDevices = decoded.sorted { $0.lastSeen > $1.lastSeen }
         }
+#if canImport(UserNotifications)
+        self.notificationController?.configure(handler: self)
+#endif
     }
 
     deinit {
@@ -145,6 +158,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func start() async {
+#if canImport(UserNotifications)
+        notificationController?.requestAuthorizationIfNeeded()
+#endif
         await transportManager?.ensureLanDiscoveryActive()
         loadTask?.cancel()
         loadTask = Task { [store] in
@@ -180,6 +196,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             self.items = updated
             self.latestItem = updated.first
         }
+#if canImport(UserNotifications)
+        notificationController?.deliverNotification(for: entry)
+#endif
     }
 
     public func remove(id: UUID) async {
@@ -349,6 +368,29 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 extension ClipboardHistoryViewModel: ClipboardMonitorDelegate {
     nonisolated public func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture entry: ClipboardEntry) {
         Task { await self.add(entry) }
+    }
+}
+#endif
+
+#if canImport(UserNotifications)
+extension ClipboardHistoryViewModel: ClipboardNotificationHandling {
+    public func handleNotificationCopy(for id: UUID) {
+        Task { [weak self] in
+            guard let self else { return }
+            guard let entry = await self.store.entry(withID: id) else { return }
+#if canImport(AppKit)
+            await MainActor.run {
+                self.copyToPasteboard(entry)
+            }
+#endif
+        }
+    }
+
+    public func handleNotificationDelete(for id: UUID) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.remove(id: id)
+        }
     }
 }
 #endif

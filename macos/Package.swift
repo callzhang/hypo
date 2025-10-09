@@ -14,7 +14,7 @@ let package = Package(
         ),
         .executable(
             name: "HypoMenuBar",
-            targets: ["HypoExecutable"]
+            targets: ["HypoMenuBarApp"]
         )
     ],
     dependencies: [
@@ -29,9 +29,9 @@ let package = Package(
             path: "Sources/HypoApp"
         ),
         .executableTarget(
-            name: "HypoExecutable",
+            name: "HypoMenuBarApp",
             dependencies: ["HypoApp"],
-            path: "Sources/HypoExecutable"
+            path: "Sources/HypoMenuBarApp"
         ),
         .testTarget(
             name: "HypoAppTests",

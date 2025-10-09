@@ -1,6 +1,6 @@
 import Foundation
 
-final class TokenBucket {
+public final class TokenBucket {
     private let capacity: Double
     private let refillRatePerSecond: Double
     private var tokens: Double
@@ -46,7 +46,7 @@ final class TokenBucket {
 }
 
 extension TokenBucket {
-    static func clipboardThrottle(interval: TimeInterval = 0.3) -> TokenBucket {
+    public static func clipboardThrottle(interval: TimeInterval = 0.3) -> TokenBucket {
         TokenBucket(capacity: 1, refillInterval: interval)
     }
 }

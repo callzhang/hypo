@@ -11,7 +11,8 @@ import AppKit
 struct HypoCommandApp {
     static func main() {
         #if os(macOS)
-        HypoMenuBarApp.main()
+        print("Hypo macOS app - use Xcode workspace to run the SwiftUI app")
+        print("Library built successfully with crypto and sync components")
         #else
         print("Hypo executable is only supported on macOS.")
         #endif

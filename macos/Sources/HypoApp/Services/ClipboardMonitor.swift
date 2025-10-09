@@ -7,7 +7,7 @@ public protocol ClipboardMonitorDelegate: AnyObject {
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture entry: ClipboardEntry)
 }
 
-protocol PasteboardProviding: AnyObject {
+public protocol PasteboardProviding: AnyObject {
     var changeCount: Int { get }
     var types: [NSPasteboard.PasteboardType]? { get }
     func string(forType type: NSPasteboard.PasteboardType) -> String?
@@ -16,7 +16,7 @@ protocol PasteboardProviding: AnyObject {
 }
 
 extension NSPasteboard: PasteboardProviding {
-    func readObjects(forClasses classes: [AnyClass], options: [NSPasteboard.ReadingOptionKey: Any]?) -> [Any] {
+    public func readObjects(forClasses classes: [AnyClass], options: [NSPasteboard.ReadingOptionKey: Any]?) -> [Any] {
         readObjects(forClasses: classes, options: options) ?? []
     }
 }

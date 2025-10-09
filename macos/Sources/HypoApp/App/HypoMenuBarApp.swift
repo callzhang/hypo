@@ -4,7 +4,6 @@ import SwiftUI
 import AppKit
 #endif
 
-@main
 struct HypoMenuBarApp: App {
     @StateObject private var viewModel = ClipboardHistoryViewModel()
     @State private var monitor: ClipboardMonitor?
@@ -190,7 +189,7 @@ private struct ClipboardCard: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
                 Image(systemName: entry.content.iconName)
-                    .foregroundStyle(.accent)
+                    .foregroundStyle(.primary)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(entry.content.title)
                         .font(.headline)
@@ -218,7 +217,7 @@ private struct ClipboardRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center) {
                 Image(systemName: entry.content.iconName)
-                    .foregroundStyle(.accent)
+                    .foregroundStyle(.primary)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.content.title)

@@ -1,0 +1,23 @@
+[
+  {
+    "description": "LAN clipboard payload",
+    "base64": "AAABJXsiaWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEiLCJ2ZXJzaW9uIjoiMS4wIiwicGF5bG9hZCI6eyJlbmNyeXB0aW9uIjp7Im5vbmNlIjoicXJ2TSIsImFsZ29yaXRobSI6IkFFUy0yNTYtR0NNIiwidGFnIjoiRUJFUyJ9LCJjb250ZW50X3R5cGUiOiJ0ZXh0IiwiY2lwaGVydGV4dCI6IjNxMis3dz09IiwiZGV2aWNlX2lkIjoibWFjLWRldmljZSIsInRhcmdldCI6ImFuZHJvaWQtZGV2aWNlIn0sInRpbWVzdGFtcCI6IjIwMjUtMTAtMDNUMDA6MDA6MDBaIiwidHlwZSI6ImNsaXBib2FyZCJ9",
+    "envelope": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "timestamp": "2025-10-03T00:00:00Z",
+      "version": "1.0",
+      "type": "clipboard",
+      "payload": {
+        "content_type": "text",
+        "ciphertext": "3q2+7w==",
+        "device_id": "mac-device",
+        "target": "android-device",
+        "encryption": {
+          "algorithm": "AES-256-GCM",
+          "nonce": "qrvM",
+          "tag": "EBES"
+        }
+      }
+    }
+  }
+]

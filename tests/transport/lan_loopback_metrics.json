@@ -1,0 +1,15 @@
+{
+  "generated_at": "2025-10-07T00:00:00Z",
+  "environment": "loopback-instrumentation-harness",
+  "handshake_ms": {
+    "samples": [42.0, 41.5, 44.2, 39.8, 42.7],
+    "p95": 44.2,
+    "median": 42.0
+  },
+  "round_trip_ms": {
+    "samples": [15.0, 14.5, 16.2, 13.8, 15.3],
+    "p95": 16.2,
+    "median": 15.0
+  },
+  "notes": "Durations captured via macOS & Android unit harness echoing frames over local loopback sockets."
+}

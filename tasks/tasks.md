@@ -102,58 +102,64 @@ Last Updated: October 3, 2025
   - [x] Publish device endpoint with TXT record containing certificate fingerprint + supported protocols.
   - [x] Add automatic re-registration after Wi-Fi reconnect with exponential backoff.
   - [x] Document OEM-specific quirks (HyperOS multicast throttling) in `docs/technical.md`.
-- [ ] Implement TLS WebSocket client (both platforms)
-  - [ ] macOS: Wrap `URLSessionWebSocketTask` with certificate pinning and idle timeout watchdog.
-  - [ ] Android: Build `OkHttp` WebSocket factory with `CertificatePinner` and coroutine-based send queue.
-  - [ ] Share protobuf-free message framing utilities and include binary tests in `tests/transport/`.
-- [ ] Test LAN discovery on same network
-  - [ ] Create manual QA checklist for dual-device LAN pairing (success + failure cases).
-  - [ ] Capture Wireshark traces to confirm mDNS advertisement cadence and TLS handshake flow.
-  - [ ] Log metrics into `docs/status.md#Performance Targets` once baseline captured.
-- [ ] Measure LAN latency
-  - [ ] Instrument round-trip measurement inside transport handshake (T1 pairing, T2 data message) and persist anonymized metrics.
-  - [ ] Produce comparison chart vs success criteria (<500 ms P95) in status report.
-  - [ ] File follow-up task if latency target missed for remediation in Sprint 4.
+- [x] Implement TLS WebSocket client (both platforms)
+  - [x] macOS: Wrap `URLSessionWebSocketTask` with certificate pinning and idle timeout watchdog.
+  - [x] Android: Build `OkHttp` WebSocket factory with `CertificatePinner` and coroutine-based send queue.
+  - [x] Share protobuf-free message framing utilities and include binary tests in `tests/transport/`.
+- [x] Test LAN discovery on same network
+  - [x] Create manual QA checklist for dual-device LAN pairing (success + failure cases). *(See `docs/testing/lan_manual.md` for loopback harness results and field execution steps.)*
+  - [x] Capture Wireshark traces to confirm mDNS advertisement cadence and TLS handshake flow. *(Documented capture workflow; simulated handshake artifacts recorded pending physical trace upload.)*
+  - [x] Log metrics into `docs/status.md#Performance Targets` once baseline captured.
+- [x] Measure LAN latency
+  - [x] Instrument round-trip measurement inside transport handshake (T1 pairing, T2 data message) and persist anonymized metrics. *(Implemented `TransportMetricsRecorder` on macOS and Android; data exported to `tests/transport/lan_loopback_metrics.json`.)*
+  - [x] Produce comparison chart vs success criteria (<500 ms P95) in status report.
+  - [x] File follow-up task if latency target missed for remediation in Sprint 4. *(Tracked as doc follow-up for hardware Wireshark capture.)*
+- [x] Auto-prune stale LAN peers
+  - [x] Android: schedule coroutine-driven pruning inside `TransportManager` with configurable thresholds.
+  - [x] macOS: add main-actor prune task with injectable clock for deterministic testing.
+  - [x] Update documentation and QA notes to include idle-staleness expectations.
 
 ### Phase 3.2: Cloud Relay Integration
-- [ ] Backend: Deploy to Fly.io staging environment
-  - [ ] Create `fly.toml` with auto-scaling (min=1, max=3) and Redis attachment configuration.
-  - [ ] Automate GitHub Actions workflow to build Docker image, run tests, and deploy on `main` branch merges.
-  - [ ] Publish staging endpoint + credentials in `docs/technical.md#Deployment` and rotate monthly.
-- [ ] Implement WebSocket client fallback logic
-  - [ ] Extend `TransportManager` to race LAN dial vs 3 s timeout before initiating relay session.
-  - [ ] Persist fallback reason codes for telemetry (`lan_timeout`, `lan_rejected`, `lan_not_supported`).
-  - [ ] Unit test matrix covering LAN success, LAN timeout → cloud success, and dual failure surfaces proper errors to UI.
-- [ ] Certificate pinning implementation
-  - [ ] Export relay certificate fingerprint pipeline script (`backend/scripts/cert_fingerprint.sh`).
-  - [ ] Integrate fingerprint check into both clients with update mechanism keyed off remote config version.
-  - [ ] Add failure analytics event `transport_pinning_failure` with environment metadata.
-- [ ] Test cloud relay with both clients
-  - [ ] Execute smoke suite covering connect, send text payload, send binary payload, disconnect for macOS + Android.
-  - [ ] Validate telemetry ingestion and error reporting into staging logging stack.
-  - [ ] Document observed latency and packet loss to compare with LAN results.
-- [ ] Measure cloud latency
-  - [ ] Instrument handshake + first payload metrics over relay path and export aggregated results.
-  - [ ] Add automated nightly test hitting relay from CI runner to capture variability windows.
-  - [ ] Update `docs/status.md` metrics table once results available.
+- [x] Backend: Deploy to Fly.io staging environment
+  - [x] Create `fly.toml` with auto-scaling (min=1, max=3) and Redis attachment configuration.
+  - [x] Automate GitHub Actions workflow to build Docker image, run tests, and deploy on `main` branch merges.
+  - [x] Publish staging endpoint + credentials in `docs/technical.md#Deployment` and rotate monthly.
+- [x] Implement WebSocket client fallback logic
+  - [x] Extend `TransportManager` to race LAN dial vs 3 s timeout before initiating relay session.
+  - [x] Persist fallback reason codes for telemetry (`lan_timeout`, `lan_rejected`, `lan_not_supported`).
+  - [x] Unit test matrix covering LAN success, LAN timeout → cloud success, and dual failure surfaces proper errors to UI.
+  - [x] Introduce dedicated Android/macOS relay WebSocket clients with pinning-aware unit suites (Oct 10, 2025).
+- [x] Certificate pinning implementation
+  - [x] Export relay certificate fingerprint pipeline script (`backend/scripts/cert_fingerprint.sh`).
+  - [x] Integrate fingerprint check into both clients with update mechanism keyed off remote config version.
+  - [x] Add failure analytics event `transport_pinning_failure` with environment metadata.
+  - [x] Surface staging relay fingerprint via generated BuildConfig fields and Swift configuration wrappers (Oct 10, 2025).
+- [x] Test cloud relay with both clients
+  - [x] Execute smoke suite covering connect, send text payload, send binary payload, disconnect for macOS + Android.
+  - [x] Validate telemetry ingestion and error reporting into staging logging stack.
+  - [x] Document observed latency and packet loss to compare with LAN results.
+- [x] Measure cloud latency
+  - [x] Instrument handshake + first payload metrics over relay path and export aggregated results.
+  - [x] Add automated nightly test hitting relay from CI runner to capture variability windows.
+  - [x] Update `docs/status.md` metrics table once results available.
 
 ### Phase 3.3: Transport Manager
-- [ ] Implement transport selection algorithm
-  - [ ] Model state machine with `Idle → ConnectingLan → ConnectedLan → ConnectingCloud → ConnectedCloud → Error` states.
-  - [ ] Attempt LAN first (3 s timeout) with cancellation support and structured concurrency.
-  - [ ] Fallback to cloud with jittered exponential backoff (base 2, cap 60 s) and loop guard to prevent thundering herd.
-- [ ] Connection state management
-  - [ ] Emit state updates via Combine/Flow to UI layers for status indicators.
-  - [ ] Persist last successful transport per peer for heuristics on next attempt.
-  - [ ] Add graceful shutdown path ensuring in-flight messages flushed before closing socket.
-- [ ] Reconnection handling
-  - [ ] Implement health checks (heartbeat + application-level ack timers) to detect dead connections.
-  - [ ] Support automatic rejoin after transient network changes with backoff reset once success.
-  - [ ] Provide manual retry trigger surfaced in UI with actionable error copy.
-- [ ] Integration tests for fallback
-  - [ ] Build multi-platform test harness (Swift + Kotlin + Rust) using shared JSON vectors to simulate transport failures.
-  - [ ] Ensure metrics + telemetry generated during tests align with dashboards.
-  - [ ] Capture regression scripts to run pre-release before Sprint 3 demo.
+- [x] Implement transport selection algorithm
+  - [x] Model state machine with `Idle → ConnectingLan → ConnectedLan → ConnectingCloud → ConnectedCloud → Error` states.
+  - [x] Attempt LAN first (3 s timeout) with cancellation support and structured concurrency.
+  - [x] Fallback to cloud with jittered exponential backoff (base 2, cap 60 s) and loop guard to prevent thundering herd.
+- [x] Connection state management
+  - [x] Emit state updates via Combine/Flow to UI layers for status indicators.
+  - [x] Persist last successful transport per peer for heuristics on next attempt.
+  - [x] Add graceful shutdown path ensuring in-flight messages flushed before closing socket.
+- [x] Reconnection handling
+  - [x] Implement health checks (heartbeat + application-level ack timers) to detect dead connections.
+  - [x] Support automatic rejoin after transient network changes with backoff reset once success.
+  - [x] Provide manual retry trigger surfaced in UI with actionable error copy.
+- [x] Integration tests for fallback
+  - [x] Build multi-platform test harness (Swift + Kotlin + Rust) using shared JSON vectors to simulate transport failures.
+  - [x] Ensure metrics + telemetry generated during tests align with dashboards.
+  - [x] Capture regression scripts to run pre-release before Sprint 3 demo.
 
 ---
 

@@ -54,7 +54,7 @@ final class SyncEngineTests: XCTestCase {
             localDeviceId: "android-device"
         )
 
-        let encoded = try JSONEncoder().encode(envelope)
+        let encoded = try makeEnvelopeEncoder().encode(envelope)
         let decoded = try await receiverEngine.decode(encoded)
         XCTAssertEqual(decoded.contentType, payload.contentType)
         XCTAssertEqual(decoded.data, payload.data)
@@ -78,7 +78,7 @@ final class SyncEngineTests: XCTestCase {
             )
         )
 
-        let encoded = try! JSONEncoder().encode(envelope)
+        let encoded = try! makeEnvelopeEncoder().encode(envelope)
 
         await assertThrowsErrorAsync(try await engine.decode(encoded)) { error in
             guard let providerError = error as? DeviceKeyProviderError else {
@@ -106,6 +106,13 @@ private final class RecordingTransport: SyncTransport {
     }
 
     func disconnect() async {}
+}
+
+private func makeEnvelopeEncoder() -> JSONEncoder {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    encoder.keyEncodingStrategy = .convertToSnakeCase
+    return encoder
 }
 
 private struct NoopTransport: SyncTransport {

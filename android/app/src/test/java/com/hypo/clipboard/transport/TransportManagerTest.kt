@@ -1,5 +1,6 @@
 package com.hypo.clipboard.transport
 
+import com.hypo.clipboard.transport.TransportAnalyticsEvent
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
 import com.hypo.clipboard.transport.lan.LanDiscoveryEvent
 import com.hypo.clipboard.transport.lan.LanDiscoverySource
@@ -11,15 +12,26 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.reflect.full.callSuspend
+import kotlin.reflect.full.declaredFunctions
+import kotlin.reflect.jvm.isAccessible
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TransportManagerTest {
@@ -29,16 +41,19 @@ class TransportManagerTest {
         val discovery = FakeDiscoverySource()
         val registration = FakeRegistrationController()
         val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
         val manager = TransportManager(
             discoverySource = discovery,
             registrationController = registration,
-            scope = this,
-            clock = clock
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO
         )
 
         val initialConfig = defaultConfig()
         manager.start(initialConfig)
-        advanceUntilIdle()
+        scope.runCurrent()
 
         assertTrue(registration.started)
         assertEquals(initialConfig, registration.lastConfig)
@@ -46,18 +61,20 @@ class TransportManagerTest {
 
         val peer = peer("peer-1", clock.instant())
         discovery.emit(LanDiscoveryEvent.Added(peer))
-        advanceUntilIdle()
+        scope.runCurrent()
 
         assertEquals(listOf(peer), manager.currentPeers())
         assertEquals(peer.lastSeen, manager.lastSeen(peer.serviceName))
 
         discovery.emit(LanDiscoveryEvent.Removed(peer.serviceName))
-        advanceUntilIdle()
+        scope.runCurrent()
 
         assertTrue(manager.currentPeers().isEmpty())
         assertNull(manager.lastSeen(peer.serviceName))
 
         manager.stop()
+        scope.runCurrent()
+        scope.cancel()
     }
 
     @Test
@@ -65,19 +82,27 @@ class TransportManagerTest {
         val discovery = FakeDiscoverySource()
         val registration = FakeRegistrationController()
         val clock = MutableClock()
-        val manager = TransportManager(discovery, registration, this, clock)
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO
+        )
 
         manager.start(defaultConfig())
-        advanceUntilIdle()
+        scope.runCurrent()
 
         val stalePeer = peer("stale", clock.instant())
         discovery.emit(LanDiscoveryEvent.Added(stalePeer))
-        advanceUntilIdle()
+        scope.runCurrent()
 
         clock.advance(Duration.ofMinutes(3))
         val freshPeer = peer("fresh", clock.instant())
         discovery.emit(LanDiscoveryEvent.Added(freshPeer))
-        advanceUntilIdle()
+        scope.runCurrent()
 
         clock.advance(Duration.ofMinutes(4))
 
@@ -86,6 +111,44 @@ class TransportManagerTest {
         assertEquals(listOf(freshPeer), manager.currentPeers())
 
         manager.stop()
+        scope.runCurrent()
+        scope.cancel()
+    }
+
+    @Test
+    fun automaticPruneRemovesPeersAfterInterval() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ofSeconds(30),
+            staleThreshold = Duration.ofSeconds(60)
+        )
+
+        manager.start(defaultConfig())
+        scope.runCurrent()
+
+        val peer = peer("peer-auto", clock.instant())
+        discovery.emit(LanDiscoveryEvent.Added(peer))
+        scope.runCurrent()
+
+        assertEquals(listOf(peer), manager.currentPeers())
+
+        clock.advance(Duration.ofSeconds(61))
+        scope.advanceTimeBy(Duration.ofSeconds(30).toMillis())
+        scope.runCurrent()
+
+        assertTrue(manager.currentPeers().isEmpty())
+
+        manager.stop()
+        scope.runCurrent()
+        scope.cancel()
     }
 
     @Test
@@ -93,13 +156,21 @@ class TransportManagerTest {
         val discovery = FakeDiscoverySource()
         val registration = FakeRegistrationController()
         val clock = MutableClock()
-        val manager = TransportManager(discovery, registration, this, clock)
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO
+        )
 
         manager.start(defaultConfig())
-        advanceUntilIdle()
+        scope.runCurrent()
 
         discovery.emit(LanDiscoveryEvent.Added(peer("peer", clock.instant())))
-        advanceUntilIdle()
+        scope.runCurrent()
         assertFalse(manager.currentPeers().isEmpty())
 
         manager.stop()
@@ -107,21 +178,27 @@ class TransportManagerTest {
         assertTrue(manager.currentPeers().isEmpty())
         assertFalse(manager.isAdvertising.value)
         assertTrue(registration.stopped)
+
+        scope.runCurrent()
+        scope.cancel()
     }
 
     @Test
     fun updateAdvertisementRestartsRegistration() = runTest {
         val discovery = FakeDiscoverySource()
         val registration = FakeRegistrationController()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
         val manager = TransportManager(
             discoverySource = discovery,
             registrationController = registration,
-            scope = this,
-            clock = MutableClock()
+            scope = scope,
+            clock = MutableClock(),
+            pruneInterval = Duration.ZERO
         )
 
         manager.start(defaultConfig())
-        advanceUntilIdle()
+        scope.runCurrent()
 
         manager.updateAdvertisement(port = 9000, fingerprint = "updated")
 
@@ -131,6 +208,351 @@ class TransportManagerTest {
         assertEquals("updated", config.fingerprint)
 
         manager.stop()
+        scope.runCurrent()
+        scope.cancel()
+    }
+
+    @Test
+    fun connectPrefersLanWhenSuccessful() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        val state = manager.connect(
+            lanDialer = { LanDialResult.Success },
+            cloudDialer = { error("cloud should not be called") },
+            peerServiceName = "peer"
+        )
+
+        assertEquals(ConnectionState.ConnectedLan, state)
+        assertTrue(analytics.recorded.isEmpty())
+        assertEquals(ActiveTransport.LAN, manager.lastSuccessfulTransport("peer"))
+    }
+
+    @Test
+    fun connectFallsBackAfterTimeout() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        var cloudAttempts = 0
+        val result = async {
+            manager.connect(
+                lanDialer = {
+                    delay(Duration.ofSeconds(5).toMillis())
+                    LanDialResult.Success
+                },
+                cloudDialer = {
+                    cloudAttempts += 1
+                    true
+                },
+                fallbackTimeout = Duration.ofSeconds(3),
+                peerServiceName = "peer"
+            )
+        }
+
+        advanceTimeBy(Duration.ofSeconds(5).toMillis())
+        runCurrent()
+
+        assertEquals(ConnectionState.ConnectedCloud, result.await())
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.Fallback
+        assertEquals(FallbackReason.LanTimeout, event.reason)
+        assertEquals(1, cloudAttempts)
+        assertEquals(ActiveTransport.CLOUD, manager.lastSuccessfulTransport("peer"))
+    }
+
+    @Test
+    fun connectRecordsLanFailureReason() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        val state = manager.connect(
+            lanDialer = {
+                LanDialResult.Failure(FallbackReason.LanRejected, IllegalStateException("bad handshake"))
+            },
+            cloudDialer = { true },
+            peerServiceName = "peer"
+        )
+
+        assertEquals(ConnectionState.ConnectedCloud, state)
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.Fallback
+        assertEquals(FallbackReason.LanRejected, event.reason)
+        assertEquals("bad handshake", event.metadata["error"])
+        assertEquals(ActiveTransport.CLOUD, manager.lastSuccessfulTransport("peer"))
+    }
+
+    @Test
+    fun connectHandlesLanExceptionAndFallsBack() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        val state = manager.connect(
+            lanDialer = { throw IllegalStateException("socket error") },
+            cloudDialer = { true },
+            peerServiceName = "peer"
+        )
+
+        assertEquals(ConnectionState.ConnectedCloud, state)
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.Fallback
+        assertEquals(FallbackReason.Unknown, event.reason)
+        assertEquals("socket error", event.metadata["error"])
+        assertEquals(ActiveTransport.CLOUD, manager.lastSuccessfulTransport("peer"))
+    }
+
+    @Test
+    fun waitForBackoffPreservesPendingSignals() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = this,
+            clock = MutableClock(),
+            pruneInterval = Duration.ZERO
+        )
+
+        val manualField = TransportManager::class.java.getDeclaredField("manualRetryRequested").apply {
+            isAccessible = true
+        }
+        val networkField = TransportManager::class.java.getDeclaredField("networkChangeDetected").apply {
+            isAccessible = true
+        }
+        val waitFunction = TransportManager::class.declaredFunctions.first { it.name == "waitForBackoff" }.apply {
+            isAccessible = true
+        }
+
+        val manual = manualField.get(manager) as AtomicBoolean
+        val network = networkField.get(manager) as AtomicBoolean
+
+        manual.set(true)
+        network.set(true)
+
+        val result = waitFunction.callSuspend(manager, Duration.ofSeconds(1)) as Boolean
+
+        assertTrue(result)
+        assertFalse(manual.get())
+        assertTrue(network.get())
+    }
+
+    @Test
+    fun connectReturnsErrorWhenCloudFails() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val analytics = RecordingAnalytics()
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO,
+            analytics = analytics
+        )
+
+        val state = manager.connect(
+            lanDialer = { LanDialResult.Failure(FallbackReason.LanNotSupported, null) },
+            cloudDialer = { false },
+            peerServiceName = "peer"
+        )
+
+        assertEquals(ConnectionState.Error, state)
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.Fallback
+        assertEquals(FallbackReason.LanNotSupported, event.reason)
+        assertNull(manager.lastSuccessfulTransport("peer"))
+    }
+
+    @Test
+    fun supervisorReconnectsAfterHeartbeatFailure() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO
+        )
+
+        var lanAttempts = 0
+        var heartbeatCount = 0
+        manager.startConnectionSupervisor(
+            peerServiceName = "peer",
+            lanDialer = {
+                lanAttempts += 1
+                LanDialResult.Success
+            },
+            cloudDialer = { true },
+            sendHeartbeat = {
+                heartbeatCount += 1
+                heartbeatCount < 2
+            },
+            awaitAck = { true },
+            networkChanges = emptyFlow(),
+            config = ConnectionSupervisorConfig(
+                fallbackTimeout = Duration.ofSeconds(1),
+                heartbeatInterval = Duration.ofSeconds(5),
+                ackTimeout = Duration.ofSeconds(1),
+                initialBackoff = Duration.ofSeconds(1),
+                maxBackoff = Duration.ofSeconds(5),
+                jitterRatio = 0.0,
+                maxAttempts = 5
+            )
+        )
+
+        scope.advanceTimeBy(Duration.ofSeconds(5).toMillis())
+        scope.runCurrent()
+        scope.advanceTimeBy(Duration.ofSeconds(5).toMillis())
+        scope.runCurrent()
+        scope.advanceTimeBy(Duration.ofSeconds(1).toMillis())
+        scope.runCurrent()
+
+        assertTrue(lanAttempts >= 2)
+        assertEquals(ActiveTransport.LAN, manager.lastSuccessfulTransport("peer"))
+
+        manager.stopConnectionSupervisor()
+        scope.runCurrent()
+        scope.cancel()
+    }
+
+    @Test
+    fun manualRetryTriggersReconnectWithoutWaitingBackoff() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO
+        )
+
+        var attempts = 0
+        manager.startConnectionSupervisor(
+            peerServiceName = "peer",
+            lanDialer = {
+                attempts += 1
+                if (attempts == 1) {
+                    LanDialResult.Failure(FallbackReason.LanTimeout, null)
+                } else {
+                    LanDialResult.Success
+                }
+            },
+            cloudDialer = { false },
+            sendHeartbeat = { true },
+            awaitAck = { true },
+            networkChanges = emptyFlow(),
+            config = ConnectionSupervisorConfig(
+                fallbackTimeout = Duration.ofSeconds(1),
+                heartbeatInterval = Duration.ofSeconds(10),
+                ackTimeout = Duration.ofSeconds(1),
+                initialBackoff = Duration.ofSeconds(5),
+                maxBackoff = Duration.ofSeconds(10),
+                jitterRatio = 0.0,
+                maxAttempts = 3
+            )
+        )
+
+        scope.advanceTimeBy(Duration.ofSeconds(1).toMillis())
+        scope.runCurrent()
+        manager.requestReconnect()
+        scope.advanceTimeBy(Duration.ofSeconds(10).toMillis())
+        scope.runCurrent()
+        scope.advanceTimeBy(Duration.ofSeconds(1).toMillis())
+        scope.runCurrent()
+
+        assertEquals(ActiveTransport.LAN, manager.lastSuccessfulTransport("peer"))
+
+        manager.stopConnectionSupervisor()
+        scope.runCurrent()
+        scope.cancel()
+    }
+
+    @Test
+    fun shutdownExecutesFlushCallback() = runTest {
+        val discovery = FakeDiscoverySource()
+        val registration = FakeRegistrationController()
+        val clock = MutableClock()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val manager = TransportManager(
+            discoverySource = discovery,
+            registrationController = registration,
+            scope = scope,
+            clock = clock,
+            pruneInterval = Duration.ZERO
+        )
+
+        var flushed = false
+        manager.startConnectionSupervisor(
+            peerServiceName = "peer",
+            lanDialer = { LanDialResult.Success },
+            cloudDialer = { true },
+            sendHeartbeat = { true },
+            awaitAck = { true }
+        )
+
+        manager.shutdown {
+            flushed = true
+        }
+
+        assertTrue(flushed)
+        assertEquals(ConnectionState.Idle, manager.connectionState.value)
+        scope.runCurrent()
+        scope.cancel()
     }
 
     private fun defaultConfig() = LanRegistrationConfig(
@@ -151,12 +573,14 @@ class TransportManagerTest {
     )
 
     private class FakeDiscoverySource : LanDiscoverySource {
-        private val events = MutableSharedFlow<LanDiscoveryEvent>()
+        private val events = MutableSharedFlow<LanDiscoveryEvent>(replay = 0, extraBufferCapacity = Int.MAX_VALUE)
 
         override fun discover(serviceType: String): Flow<LanDiscoveryEvent> = events
 
         suspend fun emit(event: LanDiscoveryEvent) {
-            events.emit(event)
+            if (!events.tryEmit(event)) {
+                events.emit(event)
+            }
         }
     }
 
@@ -189,6 +613,18 @@ class TransportManagerTest {
 
         fun advance(duration: Duration) {
             current = current.plus(duration)
+        }
+    }
+
+    private class RecordingAnalytics : TransportAnalytics {
+        private val _recorded = mutableListOf<TransportAnalyticsEvent>()
+        val recorded: List<TransportAnalyticsEvent>
+            get() = _recorded
+
+        override val events: MutableSharedFlow<TransportAnalyticsEvent> = MutableSharedFlow()
+
+        override fun record(event: TransportAnalyticsEvent) {
+            _recorded += event
         }
     }
 }

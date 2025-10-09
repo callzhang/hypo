@@ -285,15 +285,15 @@ func showNotification(for item: ClipboardItem) {
 #### 4.1.5 LAN Discovery & Advertising
 
 - **BonjourBrowser** (`Utilities/BonjourBrowser.swift`): Actor-backed wrapper around `NetServiceBrowser` that normalizes discovery callbacks into an `AsyncStream<LanDiscoveryEvent>`. Each `DiscoveredPeer` carries resolved host, port, TXT metadata (including `fingerprint_sha256`), and the `lastSeen` timestamp. The browser supports explicit stale pruning (`prunePeers`) and is unit-tested with driver doubles in `BonjourBrowserTests`.
-- **TransportManager Integration** (`Services/TransportManager.swift`): The manager now persists LAN sightings via `UserDefaultsLanDiscoveryCache`, auto-starts discovery/advertising on foreground using `ApplicationLifecycleObserver`, and exposes `lanDiscoveredPeers()` plus a diagnostics string for `hypo://debug/lan`. Deep links are surfaced through SwiftUI's `.onOpenURL`, logging active registrations alongside publisher state.
+- **TransportManager Integration** (`Services/TransportManager.swift`): The manager now persists LAN sightings via `UserDefaultsLanDiscoveryCache`, auto-starts discovery/advertising on foreground using `ApplicationLifecycleObserver`, and exposes `lanDiscoveredPeers()` plus a diagnostics string for `hypo://debug/lan`. Deep links are surfaced through SwiftUI's `.onOpenURL`, logging active registrations alongside publisher state. A background prune task runs every 60 s (configurable) to drop peers not seen in the last 5 minutes and refresh the cached roster.
 - **BonjourPublisher** (`Utilities/BonjourPublisher.swift`): Publishes `_hypo._tcp` with TXT payload `{ version, fingerprint_sha256, protocols }`, tracks the currently advertised endpoint, and restarts advertising when configuration changes (e.g., port update). Diagnostics reuse this metadata so operators can validate fingerprints during support sessions.
 - **Testing**: `TransportManagerLanTests` validate that discovery events update persisted timestamps, diagnostics include discovered peers, and lifecycle hooks stop advertising on suspend.
 
 #### 4.1.6 LAN WebSocket Client
 
-- **Transport Pipeline**: `LanTransport` composes certificate pinning (SHA-256 fingerprint fetched from pairing metadata), TLS configuration with ALPN `hypo/1`, and a `URLSessionWebSocketTask` send/receive loop using `AsyncStream` bridging.
-- **Timeouts**: LAN dial attempts are cancelled after 3 s; success resets the transport manager state to `ConnectedLan`. Idle watchdog closes sockets after 60 s of inactivity while leaving heartbeat timers running.
-- **Metrics**: Each connection records handshake duration, first-message latency, and disconnect reason; results feed into `TelemetryClient` for ingestion and status reporting.
+- **Transport Pipeline**: `LanWebSocketTransport` wraps `URLSessionWebSocketTask` behind the shared `SyncTransport` protocol. The client pins the SHA-256 fingerprint advertised in the Bonjour TXT record, frames JSON envelopes with a 4-byte length prefix via `TransportFrameCodec`, and restarts its receive loop after each payload.
+- **Timeouts**: Dial attempts still cancel after 3 s; once connected the configurable idle watchdog (30 s default) tears down sockets when no LAN traffic is observed.
+- **Metrics**: Every connection records handshake duration, first-message latency, idle timeout events, and disconnect reasons which feed into `TelemetryClient` and status reporting.
 
 ### 4.2 Android Client
 
@@ -319,10 +319,14 @@ android/
 │   │   │   │   ├── CryptoService.kt
 │   │   │   ├── transport/
 │   │   │   │   ├── TransportManager.kt
-│   │   │   │   └── lan/
-│   │   │   │       ├── LanDiscoveryRepository.kt
-│   │   │   │       ├── LanRegistrationManager.kt
-│   │   │   │       └── LanModels.kt
+│   │   │   │   ├── lan/
+│   │   │   │   │   ├── LanDiscoveryRepository.kt
+│   │   │   │   │   ├── LanRegistrationManager.kt
+│   │   │   │   │   └── LanModels.kt
+│   │   │   │   └── ws/
+│   │   │   │       ├── LanWebSocketClient.kt
+│   │   │   │       ├── TransportFrameCodec.kt
+│   │   │   │       └── TlsWebSocketConfig.kt
 │   │   ├── res/
 │   │   ├── AndroidManifest.xml
 ├── build.gradle.kts
@@ -382,7 +386,7 @@ interface ClipboardDao {
 
 - **LanDiscoveryRepository** (`transport/lan/LanDiscoveryRepository.kt`): Bridges `NsdManager` callbacks into a `callbackFlow<LanDiscoveryEvent>` while acquiring a scoped multicast lock. Network-change events are injectable (default implementation listens for Wi-Fi broadcasts) so tests can drive deterministic restarts without Robolectric, and the repository guards `discoverServices` restarts with a `Mutex` to avoid overlapping NSD calls.
 - **LanRegistrationManager** (`transport/lan/LanRegistrationManager.kt`): Publishes `_hypo._tcp` with TXT payload `{ fingerprint_sha256, version, protocols }`, listens for Wi-Fi connectivity changes, and re-registers using exponential backoff (1 s, 2 s, 4 s… capped at 5 minutes). Backoff attempts reset after successful registration.
-- **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. Helpers surface last-seen timestamps and prune stale peers, ensuring telemetry and UI layers can render an accurate LAN roster.
+- **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. Helpers surface last-seen timestamps and prune stale peers, with a coroutine-driven maintenance loop pruning entries unseen for 5 minutes (default) to keep telemetry/UI aligned with active LAN peers.
 - **OEM Notes**: HyperOS throttles multicast after ~15 minutes of screen-off time. The repository exposes lock lifecycle hooks so the service can prompt users to re-open the app, and the registration manager schedules immediate retries when connectivity resumes to mitigate OEM suppression.
 
 #### 4.2.5 Android WebSocket Client
@@ -390,6 +394,13 @@ interface ClipboardDao {
 - **OkHttp Integration**: `OkHttpClient` configured with `CertificatePinner` keyed to the relay fingerprint and LAN fingerprint when available. Coroutine-based `Channel` ensures backpressure while sending messages.
 - **Fallback Orchestration**: `TransportManager` races LAN connection vs. a 3 s timeout before instantiating a relay `WebSocket`. Cloud attempts use jittered exponential backoff, persisting the last successful transport in `DataStore` for heuristics.
 - **Instrumentation**: `MetricsReporter` logs handshake and first payload durations (`transport_handshake_ms`, `transport_first_payload_ms`) with transport label `lan` or `cloud` for downstream analytics.
+- **Relay Client Abstraction**: `RelayWebSocketClient` reuses the LAN TLS implementation but sources its endpoint, fingerprint, and telemetry headers from Gradle-provided `BuildConfig` constants (`RELAY_WS_URL`, `RELAY_CERT_FINGERPRINT`, `RELAY_ENVIRONMENT`). Unit tests exercise pinning-failure analytics to confirm the cloud environment label is surfaced correctly.
+
+#### 4.2.6 macOS Cloud Relay Transport
+
+- **Configuration Defaults**: `CloudRelayDefaults.staging()` materialises a `CloudRelayConfiguration` with the Fly.io staging endpoint (`wss://hypo-relay-staging.fly.dev/ws`), the current bundle version header, and the staged SHA-256 fingerprint (`3f5d8b2a…f7089`).
+- **Transport Wrapper**: `CloudRelayTransport` composes the existing `LanWebSocketTransport` while forcing the environment label to `cloud`, giving analytics and metrics a consistent view of fallback events without duplicating handshake logic.
+- **Testing**: `CloudRelayTransportTests` mirror the LAN suite with stub `URLSessionWebSocketTask`s to verify send-path delegation and configuration wiring, ensuring the wrapper stays aligned with the LAN implementation.
 
 ### 4.3 Backend Relay
 
@@ -458,9 +469,11 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 
 #### 4.3.4 Cloud Relay Enhancements
 
-- **Staging Deployment**: Relay packaged via Docker and deployed to Fly.io. `fly.toml` defines auto-scaling (min=1, max=3) and binds Redis through the `redis` add-on. Secrets (`RELAY_HMAC_KEY`, `CERT_FINGERPRINT`) managed through Fly secrets and rotated monthly.
+- **Staging Deployment**: Relay packaged via Docker and deployed to Fly.io. `backend/fly.toml` defines auto-scaling (min=1, max=3) and binds Redis through the `redis` add-on. Secrets (`RELAY_HMAC_KEY`, `CERT_FINGERPRINT`, `STAGING_API_TOKEN`) managed through Fly secrets and rotated monthly. The staging relay is available at `wss://hypo-relay-staging.fly.dev/ws` (credentials tracked in 1Password shared vault) for macOS and Android smoke tests.
 - **Pairing Support**: Adds `/pairing/code` and `/pairing/claim` endpoints secured with HMAC header `X-Hypo-Signature`. Pairing codes stored in Redis with 60 s TTL and replay protection counters.
-- **Observability**: Structured logs via `tracing` include connection IDs, transport path (`lan`, `relay`), and latency histograms exported to Prometheus. Alerts trigger when relay error rate exceeds 1% over 5 min.
+- **Client Fallback Orchestration**: Android and macOS `TransportManager` instances race LAN dial attempts against a 3 s timeout before instantiating the relay transport. Fallback reason codes (`lan_timeout`, `lan_rejected`, `lan_not_supported`) are emitted through the shared `TransportAnalytics` stream for telemetry dashboards.
+- **Certificate Pinning**: `backend/scripts/cert_fingerprint.sh` extracts SHA-256 fingerprints from the Fly-issued certificate chain. Clients load the pinned hash and record a `transport_pinning_failure` analytics event when TLS verification fails (environment + host metadata captured).
+- **Observability**: Structured logs via `tracing` include connection IDs, transport path (`lan`, `relay`), latency histograms exported to Prometheus, and fallback reason counts. Alerts trigger when relay error rate exceeds 1% over 5 min or when pinning failures exceed 10/min.
 
 ---
 
@@ -474,8 +487,9 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 ### 5.2 Integration Tests
 - **E2E Encryption**: Encrypt on one platform, decrypt on other
 - **Transport Fallback**: Simulate LAN unavailable, verify cloud fallback
+- **Cloud Telemetry**: Assert fallback reason codes propagate to the analytics sinks and that cloud handshake/first-payload metrics are written to `tests/transport/cloud_metrics.json`.
 - **LAN Discovery Harness**: Simulate multicast announcements and ensure discovery emits add/remove events and prunes stale entries after 10 s.
-- **Latency Instrumentation**: Assert handshake timers produce metrics for `transport_handshake_ms` and `transport_first_payload_ms` across LAN and cloud paths.
+- **Latency Instrumentation**: Assert the `TransportMetricsRecorder` hooks on macOS (`LanWebSocketTransport`) and Android (`LanWebSocketClient`) emit `transport_handshake_ms` and `transport_first_payload_ms` samples, and persist the aggregation to `tests/transport/lan_loopback_metrics.json`.
 - **De-duplication**: Send same content twice, verify single sync
 
 ### 5.3 Manual Test Cases
@@ -484,7 +498,7 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 3. Disconnect Wi-Fi → verify cloud fallback works
 4. Toggle airplane mode to confirm automatic LAN re-registration and fallback recovery
 5. Device pairing via QR code
-6. Run LAN latency capture script and validate telemetry upload
+6. Run LAN latency capture script and validate telemetry upload (see `docs/testing/lan_manual.md`)
 7. Clipboard history search
 8. Notification display with preview
 
@@ -510,11 +524,11 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 
 ### 6.3 Backend Deployment
 - **Platform**: Fly.io (staging) with optional Railway fallback for load tests
-- **Configuration**: `fly.toml` checked into `backend/infra/` defines regions (`iad`, `sjc`), auto-scaling (min=1, max=3), health checks (`/healthz` every 15 s), and Redis attachment `hypo-redis`.
-- **Release Flow**: GitHub Actions pipeline builds Docker image, runs `cargo test`, executes integration suite, and deploys tagged images to Fly with release annotations. Rollbacks executed via `fly deploy --image` referencing previous digest.
-- **Secrets Management**: Use `fly secrets set RELAY_HMAC_KEY=... CERT_FINGERPRINT=...` per environment; rotate monthly and update client fingerprints.
-- **Monitoring**: Prometheus scraping via Fly metrics exporter, Grafana dashboard for connection counts, latency percentiles, and error ratios (<0.5% target).
-- **Logging**: Structured logs via `tracing` crate shipped to Loki for retention (14 days) with alerts when pairing/code endpoints exceed 5% failure rate.
+- **Configuration**: `backend/fly.toml` defines regions (`iad`, `sjc`), auto-scaling (min=1, max=3), TCP and HTTP health checks, and mounts the managed Redis volume (`[[mounts]] source = "redis"`).
+- **Release Flow**: `.github/workflows/backend-deploy.yml` builds the Docker image, runs `cargo test --locked`, pushes to `registry.fly.io/hypo-relay-staging`, and deploys on `main` merges. Rollbacks executed via `fly deploy --image` referencing previous digest.
+- **Secrets Management**: Use `fly secrets set RELAY_HMAC_KEY=... CERT_FINGERPRINT=...` per environment; rotate monthly using the fingerprint script and update client fingerprints through remote config.
+- **Monitoring**: Prometheus scraping via Fly metrics exporter, Grafana dashboard for connection counts, latency percentiles (LAN vs relay), and error ratios (<0.5% target). Fallback reason counters are exposed via `/metrics` for alerting.
+- **Logging**: Structured logs via `tracing` crate shipped to Loki for retention (14 days) with alerts when pairing/code endpoints exceed 5% failure rate or when pinning failures spike.
 
 ### 6.4 CI/CD
 - **macOS**: Xcode Cloud or GitHub Actions with macOS runners

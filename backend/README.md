@@ -121,6 +121,39 @@ Server will start on `http://localhost:8080`
 
 ---
 
+## Deployment
+
+1. Authenticate with Fly.io and create the application:
+
+   ```bash
+   flyctl auth login
+   flyctl apps create hypo-relay-staging
+   ```
+
+2. Populate staging secrets and Redis attachment:
+
+   ```bash
+   flyctl secrets set RELAY_HMAC_KEY=... CERT_FINGERPRINT=...
+   flyctl volumes create redis --size 1
+   ```
+
+3. Deploy via GitHub Actions (`.github/workflows/backend-deploy.yml`) or manually:
+
+   ```bash
+   cargo test --manifest-path backend/Cargo.toml
+   flyctl deploy --config backend/fly.toml --remote-only
+   ```
+
+4. Regenerate TLS fingerprints when certificates rotate:
+
+   ```bash
+   ./backend/scripts/cert_fingerprint.sh certs/hypo-relay-staging.pem
+   ```
+
+Staging endpoint: `wss://hypo-relay-staging.fly.dev/ws` (see internal vault for credentials).
+
+---
+
 ## API Endpoints
 
 ### WebSocket Connection

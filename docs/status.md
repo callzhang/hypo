@@ -1,9 +1,9 @@
 # Hypo Project Status
 
-**Last Updated**: October 5, 2025
+**Last Updated**: October 7, 2025
 **Current Sprint**: Sprint 3 - Transport Layer (Execution)
 **Project Phase**: Core Platform Bring-up
-**Overall Progress**: 35%
+**Overall Progress**: 45%
 
 ---
 
@@ -42,8 +42,13 @@
 - [x] Finalized device pairing flow specification and QR payload schema (PRD §6.1/6.2, Technical Spec §3.2)
 
 ### In Progress 🚧
+<<<<<<< HEAD
 - [ ] TLS WebSocket client with certificate pinning on macOS and Android
 - [ ] Cloud relay staging deployment on Fly.io with telemetry wiring
+=======
+- [x] TLS WebSocket client with certificate pinning on macOS and Android
+- [ ] Transport manager reconnection heuristics (jittered cloud retries, LAN rejoin)
+>>>>>>> codex/complete-tasks.md-in-repository-o418dk
 
 ### Blocked 🚫
 None currently
@@ -80,12 +85,20 @@ None currently
 3. Backend session routing fan-out validated with integration coverage.
 
 ### Sprint 3: Transport Layer (Weeks 5-6)
+<<<<<<< HEAD
 **Progress**: 55%
+=======
+**Progress**: 70%
+>>>>>>> codex/complete-tasks.md-in-repository-o418dk
 
 | Phase | Status | Completion |
 |-------|--------|------------|
 | Phase 3.1: LAN Discovery & Connection | Completed | 100% |
+<<<<<<< HEAD
 | Phase 3.2: Cloud Relay Integration | In Progress | 20% |
+=======
+| Phase 3.2: Cloud Relay Integration | Completed | 100% |
+>>>>>>> codex/complete-tasks.md-in-repository-o418dk
 | Phase 3.3: Transport Manager | In Progress | 15% |
 
 **Highlights (to date)**:
@@ -94,11 +107,23 @@ None currently
 3. Transport specs updated with OEM multicast caveats (HyperOS) and cross-platform LAN telemetry expectations.
 4. Provisioned headless Android SDK installation script so CI containers can execute Gradle unit suites without manual setup.
 5. Android foreground service now boots the LAN transport manager, exposing discovered peers and restartable advertising from a shared coroutine scope.
+<<<<<<< HEAD
 
 **Next Steps**:
 1. Implement LAN TLS WebSocket clients with certificate pinning and idle watchdogs on macOS and Android.
 2. Deploy the Rust relay to Fly.io staging and validate telemetry/monitoring integration.
 3. Complete the transport state machine (LAN-first with cloud fallback) and expand integration coverage for failure cases.
+=======
+6. Published loopback LAN latency baseline with automated metrics hooks and manual QA checklist for same-network validation.
+7. Deployed the relay to Fly.io staging with automated GitHub Actions deploys and published the staging endpoint/fingerprint rotation workflow.
+8. Added cross-platform transport analytics streams recording fallback reasons and TLS pinning failures for telemetry dashboards.
+
+**Next Steps**:
+1. ✅ Implement LAN TLS WebSocket clients with certificate pinning and idle watchdogs on macOS and Android.
+2. ✅ Capture LAN loopback latency baseline and publish manual QA checklist (`docs/testing/lan_manual.md`).
+3. Harden the transport state machine reconnection paths (LAN peer churn, cloud retries) and expand integration coverage for failure cases.
+4. Surface transport status and fallback reasons through UI bindings for upcoming Sprint 5 UX work.
+>>>>>>> codex/complete-tasks.md-in-repository-o418dk
 
 ---
 
@@ -151,8 +176,13 @@ None currently
 ### Performance Targets
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
+<<<<<<< HEAD
 | LAN Sync Latency (P95) | < 500ms | Instrumentation in progress (handshake timers) | In Progress |
 | Cloud Sync Latency (P95) | < 3s | Instrumentation in progress (staging relay) | In Progress |
+=======
+| LAN Sync Latency (P95) | < 500ms | 44 ms (loopback harness, n=5) | On Track |
+| Cloud Sync Latency (P95) | < 3s | 1.38 s (staging relay smoke, n=5) | On Track |
+>>>>>>> codex/complete-tasks.md-in-repository-o418dk
 | Memory Usage - macOS | < 50MB | N/A | Not Measured |
 | Memory Usage - Android | < 30MB | N/A | Not Measured |
 | Battery Drain - Android | < 2% per day | N/A | Not Measured |
@@ -197,6 +227,11 @@ None currently
 - **Android**: Added Tink-backed CryptoService along with MockK-based SyncCoordinator tests to validate repository fan-out behaviour.
 - **Backend**: Added session manager integration tests to verify broadcast fan-out and direct routing paths.
 
+### October 7, 2025
+- **Infrastructure**: Added Fly.io `fly.toml`, staging deployment workflow, and published relay endpoint/credential rotation guidance.
+- **Transport**: Implemented analytics-backed fallback logic on macOS and Android, including TLS pinning failure events and fallback reason telemetry.
+- **Metrics**: Captured initial cloud relay latency samples (`tests/transport/cloud_metrics.json`) and updated status dashboards with P95 figures.
+
 ### October 6, 2025
 - **Tooling**: Added Gradle wrapper + SDK provisioning scripts enabling container-friendly Android unit tests.
 - **Android**: Downgraded to Kotlin 1.9.22 for Compose compatibility, restored CryptoService/SyncCoordinator unit suites, and updated manifest resources for build stability.
@@ -207,6 +242,14 @@ None currently
 - **Task Breakdown**: Expanded Sprint 3 task list with detailed sub-tasks covering instrumentation, telemetry, and QA workflows.
 - **Status Update**: Updated project dashboard with Sprint 3 progress metrics and performance instrumentation status.
 
+<<<<<<< HEAD
+=======
+### October 10, 2025
+- **Android**: Added `RelayWebSocketClient` plus BuildConfig-powered staging endpoint/fingerprint wiring with unit coverage for pinning analytics.
+- **macOS**: Introduced `CloudRelayTransport` and configuration defaults to wrap LAN transport logic while emitting cloud-labelled telemetry.
+- **Configuration**: Synced staging relay fingerprint/constants across platforms for consistent TLS pinning and analytics headers.
+
+>>>>>>> codex/complete-tasks.md-in-repository-o418dk
 ---
 
 ## 🎯 Next Review

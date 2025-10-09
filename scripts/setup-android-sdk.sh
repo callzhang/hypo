@@ -38,7 +38,12 @@ declare -a packages=(
   "${ANDROID_PLATFORM_TOOLS}"
 )
 
-yes | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" "${packages[@]}"
+if ! yes | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" "${packages[@]}"; then
+  status=$?
+  if [[ ${status} -ne 0 && ${status} -ne 141 ]]; then
+    exit "${status}"
+  fi
+fi
 
 echo "Android SDK installed at ${SDK_ROOT}"
 

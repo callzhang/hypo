@@ -25,4 +25,15 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(items.first?.content, .text("Item 4"))
         XCTAssertEqual(items.last?.content, .text("Item 2"))
     }
+
+    func testEntryLookupByIdentifierReturnsMatchingEntry() async {
+        let store = HistoryStore(maxEntries: 5)
+        let expected = ClipboardEntry(originDeviceId: "macos", content: .text("Lookup"))
+        _ = await store.insert(expected)
+
+        let result = await store.entry(withID: expected.id)
+
+        XCTAssertEqual(result?.id, expected.id)
+        XCTAssertEqual(result?.content, expected.content)
+    }
 }

@@ -222,9 +222,9 @@ Last Updated: October 3, 2025
 - [x] Unit tests for Home, History, and Settings view models plus settings persistence
 
 ### Phase 5.3: Notifications
-- [ ] macOS: Request notification permissions
-- [ ] macOS: Implement rich notifications with thumbnails
-- [ ] macOS: Notification actions (Copy Again, Delete)
+- [x] macOS: Request notification permissions
+- [x] macOS: Implement rich notifications with thumbnails
+- [x] macOS: Notification actions (Copy Again, Delete)
 - [x] Android: Create notification channel
 - [x] Android: Rich notification with preview
 - [x] Android: Notification actions

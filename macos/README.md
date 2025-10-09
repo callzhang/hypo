@@ -70,22 +70,35 @@ HypoApp/
 
 ```bash
 cd macos
-open Hypo.xcodeproj
+open HypoApp.xcworkspace
 ```
+
+This workspace bundles the Swift package targets that power the menu bar UI, Core Data model, and test bundles. Opening the workspace ensures Xcode resolves the SwiftUI previews and shared package dependencies that drive the UI.
 
 ### 2. Configure Signing
 
-1. Select `Hypo` target in Xcode
-2. Go to **Signing & Capabilities**
-3. Select your development team
+1. Select the **HypoApp** scheme in the toolbar and the `Hypo` target in the Project navigator.
+2. Go to **Signing & Capabilities**.
+3. Choose your development team and keep the bundle identifier `com.hypo.app` (or update it to one registered under your team).
 4. Enable the following capabilities:
-   - **App Sandbox** (with network access)
-   - **Keychain Sharing** (group: `com.hypo.shared`)
-   - **User Notifications**
+   - **App Sandbox** → enable network client access so the UI can reach the sync transports.
+   - **Keychain Sharing** → add group `com.hypo.shared` so pairing keys persist.
+   - **User Notifications** → required for rich incoming clipboard alerts.
 
-### 3. Build and Run
+### 3. Pick the UI target
 
-Press `⌘R` or click the **Run** button in Xcode.
+The workspace provides dedicated schemes for the SwiftUI menu bar experience:
+
+| Scheme | What it builds | Notes |
+| --- | --- | --- |
+| `HypoApp` | The production menu bar app UI | Use for manual runs and distribution builds. |
+| `HypoAppPreviews` | Lightweight target for SwiftUI previews | Use when iterating on view code; runs preview canvas only. |
+
+Select the scheme that matches your workflow before building so Xcode launches the correct UI target.
+
+### 4. Build and Run
+
+Press `⌘R` or click **Run**. Xcode launches the menu bar UI; click the Hypo icon in the status bar to expand the SwiftUI interface. For UI-only development you can run SwiftUI previews with `⌘Option+P` inside a view file.
 
 ---
 

@@ -10,11 +10,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -32,10 +35,12 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
-fun HistoryRoute(viewModel: HistoryViewModel) {
+fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     HistoryScreen(
         items = state.items,
+        query = state.query,
+        onQueryChange = viewModel::onQueryChange,
         onClearHistory = viewModel::clearHistory
     )
 }
@@ -43,6 +48,8 @@ fun HistoryRoute(viewModel: HistoryViewModel) {
 @Composable
 fun HistoryScreen(
     items: List<ClipboardItem>,
+    query: String,
+    onQueryChange: (String) -> Unit,
     onClearHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -66,6 +73,15 @@ fun HistoryScreen(
                 Text(text = stringResource(id = R.string.clear_history))
             }
         }
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null) },
+            placeholder = { Text(text = stringResource(id = R.string.history_search_hint)) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
 
         if (items.isEmpty()) {
             EmptyHistory()

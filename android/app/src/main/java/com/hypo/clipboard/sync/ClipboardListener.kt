@@ -18,19 +18,24 @@ class ClipboardListener(
 
     private var lastSignature: String? = null
     private var job: Job? = null
+    private var isListening: Boolean = false
 
     fun start() {
+        if (isListening) return
         clipboardManager.addPrimaryClipChangedListener(this)
         clipboardManager.primaryClip?.let { clip ->
             process(clip)
         }
+        isListening = true
     }
 
     fun stop() {
+        if (!isListening) return
         clipboardManager.removePrimaryClipChangedListener(this)
         job?.cancel()
         job = null
-        lastSignature = null
+        isListening = false
+
     }
 
     override fun onPrimaryClipChanged() {

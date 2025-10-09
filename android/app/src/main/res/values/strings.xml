@@ -7,6 +7,8 @@
     <string name="service_notification_text">Syncing clipboard with macOS</string>
     <string name="service_notification_channel_name">Clipboard Sync</string>
     <string name="service_notification_channel_description">Persistent notification for clipboard synchronization</string>
+    <string name="service_notification_status_active">Syncing clipboard</string>
+    <string name="service_notification_status_paused">Sync paused</string>
 
     <!-- Actions -->
     <string name="action_pause">Pause</string>
@@ -40,8 +42,13 @@
     <string name="settings_auto_delete_description">Automatically delete items older than X days</string>
     <string name="settings_devices">Paired Devices</string>
     <string name="settings_add_device">Add Device</string>
+    <string name="settings_devices_empty">No paired devices discovered yet.</string>
     <string name="settings_battery">Battery Optimization</string>
     <string name="settings_battery_description">Disable battery optimization for reliable background sync</string>
+    <string name="settings_battery_optimize_button">Open Settings</string>
+    <string name="settings_history_limit_value">Storing up to %1$d items</string>
+    <string name="settings_auto_delete_value">Auto delete after %1$d days</string>
+    <string name="settings_auto_delete_never">Never delete automatically</string>
 
     <!-- Pairing Screen -->
     <string name="pairing_title">Pair Device</string>

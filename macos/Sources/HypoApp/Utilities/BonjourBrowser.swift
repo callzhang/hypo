@@ -203,7 +203,7 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
 
     private func emitResolved(for service: NetService) {
         guard let host = service.hostName else { return }
-        let txt = NetService.dictionary(fromTXTRecord: service.txtRecordData ?? Data())
+        let txt = NetService.dictionary(fromTXTRecord: service.txtRecordData() ?? Data())
         var metadata: [String: String] = [:]
         for (key, value) in txt {
             metadata[key] = String(data: value, encoding: .utf8) ?? ""

@@ -95,7 +95,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     @Published public private(set) var encryptionKeySummary: String
 
     private let store: HistoryStore
-    private let transportManager: TransportManager
+    private let transportManager: TransportManager?
     private let defaults: UserDefaults
     private var loadTask: Task<Void, Never>?
 #if canImport(os)
@@ -112,13 +112,13 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 
     public init(
         store: HistoryStore = HistoryStore(),
-        transportManager: TransportManager = TransportManager(provider: DefaultTransportProvider()),
+        transportManager: TransportManager? = nil,
         defaults: UserDefaults = .standard
     ) {
         self.store = store
         self.transportManager = transportManager
         self.defaults = defaults
-        self.transportPreference = transportManager.currentPreference()
+        self.transportPreference = transportManager?.currentPreference() ?? .lanFirst
         self.allowsCloudFallback = defaults.object(forKey: DefaultsKey.allowsCloudFallback) as? Bool ?? true
         self.autoDeleteAfterHours = defaults.object(forKey: DefaultsKey.autoDeleteHours) as? Int ?? 0
         if let rawAppearance = defaults.string(forKey: DefaultsKey.appearance),
@@ -145,7 +145,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func start() async {
-        await transportManager.ensureLanDiscoveryActive()
+        await transportManager?.ensureLanDiscoveryActive()
         loadTask?.cancel()
         loadTask = Task { [store] in
             async let snapshotTask = store.all()
@@ -161,7 +161,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func handleDeepLink(_ url: URL) async {
-        guard let report = transportManager.handleDeepLink(url) else { return }
+        guard let transportManager = transportManager,
+              let report = transportManager.handleDeepLink(url) else { return }
 #if canImport(os)
         logger.info("\n\(report, privacy: .public)")
 #else
@@ -223,7 +224,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func updateTransportPreference(_ preference: TransportPreference) {
-        transportManager.update(preference: preference)
+        transportManager?.update(preference: preference)
         transportPreference = preference
     }
 

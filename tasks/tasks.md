@@ -219,6 +219,7 @@ Last Updated: October 3, 2025
   - [x] History retention settings
 - [x] Material 3 dynamic color support
 - [x] Implement foreground service notification with actions *(basic persistent notification in place; add quick actions)*
+- [x] Unit tests for Home, History, and Settings view models plus settings persistence
 
 ### Phase 5.3: Notifications
 - [ ] macOS: Request notification permissions

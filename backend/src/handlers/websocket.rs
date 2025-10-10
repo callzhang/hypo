@@ -226,6 +226,8 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use tokio::time::{timeout, Duration};
+    use uuid::Uuid;
 
     #[actix_rt::test]
     async fn register_key_control_message_stores_key() {
@@ -238,6 +240,86 @@ mod tests {
         handle_control_message("device-1", &payload, &store).await;
 
         assert!(store.is_registered("device-1").await);
+    }
+
+    fn base_message(payload: serde_json::Value) -> String {
+        json!({
+            "id": Uuid::new_v4(),
+            "timestamp": "2025-01-01T00:00:00Z",
+            "version": "1.0",
+            "type": "clipboard",
+            "payload": payload
+        })
+        .to_string()
+    }
+
+    fn encryption_block() -> serde_json::Value {
+        json!({
+            "nonce": BASE64.encode([5u8; 12]),
+            "tag": BASE64.encode([6u8; 16])
+        })
+    }
+
+    #[actix_rt::test]
+    async fn handle_text_message_broadcasts_without_target() {
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let key_store = crate::services::device_key_store::DeviceKeyStore::new();
+
+        let mut sender_rx = sessions.register("sender".into()).await;
+        let mut receiver_rx = sessions.register("receiver".into()).await;
+
+        let payload = json!({
+            "data": BASE64.encode(b"clipboard"),
+            "encryption": encryption_block()
+        });
+
+        let message = base_message(payload);
+
+        handle_text_message("sender", &message, &sessions, &key_store)
+            .await
+            .expect("message handled");
+
+        let forwarded = timeout(Duration::from_millis(50), receiver_rx.recv())
+            .await
+            .expect("receiver should get broadcast")
+            .expect("channel open");
+        assert_eq!(forwarded, message);
+
+        assert!(sender_rx.try_recv().is_err(), "sender should not receive broadcast");
+    }
+
+    #[actix_rt::test]
+    async fn handle_text_message_routes_direct_targets() {
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let key_store = crate::services::device_key_store::DeviceKeyStore::new();
+
+        let mut sender_rx = sessions.register("sender".into()).await;
+        let mut receiver_rx = sessions.register("receiver".into()).await;
+        let mut other_rx = sessions.register("other".into()).await;
+
+        let payload = json!({
+            "data": BASE64.encode(b"clipboard"),
+            "target": "receiver",
+            "encryption": encryption_block()
+        });
+
+        let message = base_message(payload);
+
+        handle_text_message("sender", &message, &sessions, &key_store)
+            .await
+            .expect("message handled");
+
+        let forwarded = timeout(Duration::from_millis(50), receiver_rx.recv())
+            .await
+            .expect("receiver should get direct message")
+            .expect("channel open");
+        assert_eq!(forwarded, message);
+
+        assert!(sender_rx.try_recv().is_err(), "sender should not receive direct message");
+        assert!(
+            other_rx.try_recv().is_err(),
+            "non-target should not receive direct message"
+        );
     }
 
     #[test]

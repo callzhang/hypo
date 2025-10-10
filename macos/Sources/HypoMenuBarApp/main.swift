@@ -16,7 +16,6 @@ struct HypoMenuBarApp: App {
         .menuBarExtraStyle(.window)
     }
 }
-#endif
 
 // MARK: - ViewModel
 @MainActor
@@ -264,4 +263,11 @@ enum ClipboardContent: Codable {
 }
 
 
+#else
+@main
+struct HypoMenuBarAppStub {
+    static func main() {
+        fatalError("HypoMenuBarApp is only available on macOS.")
+    }
+}
 #endif

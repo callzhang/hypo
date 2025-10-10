@@ -250,7 +250,7 @@ Last Updated: October 3, 2025
 - [x] macOS: Send public key with pairing code
 - [x] Android: Retrieve public key with pairing code
 - [x] Complete ECDH exchange via relay
-- [ ] Security audit of pairing flow
+- [x] Security audit of pairing flow
 
 ---
 

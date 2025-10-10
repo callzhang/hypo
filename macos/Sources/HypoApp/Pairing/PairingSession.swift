@@ -150,11 +150,7 @@ public final class PairingSession: @unchecked Sendable {
             signature: signature
         )
 
-        guard let qrImage = generateQRCodeImage(from: signedPayload) else {
-            state = .failed("Unable to render QR code")
-            return
-        }
-
+        let qrImage = generateQRCodeImage(from: signedPayload)
         state = .awaitingChallenge(payload: signedPayload, image: qrImage)
     }
 

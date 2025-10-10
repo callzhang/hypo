@@ -264,7 +264,7 @@ Last Updated: October 3, 2025
 - [ ] Integration tests
   - [x] End-to-end encryption
   - [ ] LAN discovery and sync
-  - [ ] Cloud relay sync
+  - [x] Cloud relay sync
   - [x] Multi-device scenarios
 - [ ] Performance tests
   - [ ] Latency measurement (LAN/Cloud)

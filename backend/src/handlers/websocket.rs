@@ -236,6 +236,7 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::aead;
     use serde_json::json;
     use tokio::time::{timeout, Duration};
     use uuid::Uuid;
@@ -253,6 +254,47 @@ mod tests {
         assert!(store.is_registered("device-1").await);
     }
 
+    #[actix_rt::test]
+    async fn register_key_control_message_rejects_bad_base64() {
+        let store = crate::services::device_key_store::DeviceKeyStore::new();
+        let payload = json!({
+            "action": "register_key",
+            "symmetric_key": "not-base64!!"
+        });
+
+        handle_control_message("device-err", &payload, &store).await;
+
+        assert!(!store.is_registered("device-err").await);
+    }
+
+    #[actix_rt::test]
+    async fn register_key_control_message_rejects_wrong_length() {
+        let store = crate::services::device_key_store::DeviceKeyStore::new();
+        let payload = json!({
+            "action": "register_key",
+            "symmetric_key": BASE64.encode([0u8; 8])
+        });
+
+        handle_control_message("device-short", &payload, &store).await;
+
+        assert!(!store.is_registered("device-short").await);
+    }
+
+    #[actix_rt::test]
+    async fn deregister_key_control_message_removes_key() {
+        let store = crate::services::device_key_store::DeviceKeyStore::new();
+        store.store("device-1".into(), vec![1; 32]).await;
+        assert!(store.is_registered("device-1").await);
+
+        let payload = json!({
+            "action": "deregister_key"
+        });
+
+        handle_control_message("device-1", &payload, &store).await;
+
+        assert!(!store.is_registered("device-1").await);
+    }
+
     fn base_message(payload: serde_json::Value) -> String {
         json!({
             "id": Uuid::new_v4(),
@@ -268,6 +310,13 @@ mod tests {
         json!({
             "nonce": BASE64.encode([5u8; 12]),
             "tag": BASE64.encode([6u8; 16])
+        })
+    }
+
+    fn encryption_block_from(result: &aead::EncryptionResult) -> serde_json::Value {
+        json!({
+            "nonce": BASE64.encode(result.nonce),
+            "tag": BASE64.encode(result.tag)
         })
     }
 
@@ -381,6 +430,83 @@ mod tests {
                 .is_err(),
             "messages missing encryption should be dropped"
         );
+    }
+
+    #[actix_rt::test]
+    async fn handle_text_message_drops_on_invalid_data_encoding() {
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let key_store = crate::services::device_key_store::DeviceKeyStore::new();
+
+        let mut receiver_rx = sessions.register("receiver".into()).await;
+
+        let payload = json!({
+            "data": "not-base64!!",
+            "encryption": encryption_block()
+        });
+
+        let message = base_message(payload);
+
+        handle_text_message("sender", &message, &sessions, &key_store)
+            .await
+            .expect("invalid payload should be ignored");
+
+        assert!(
+            timeout(Duration::from_millis(50), receiver_rx.recv())
+                .await
+                .is_err(),
+            "invalid data should not be forwarded"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn handle_text_message_returns_error_when_target_missing() {
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let key_store = crate::services::device_key_store::DeviceKeyStore::new();
+
+        let payload = json!({
+            "data": BASE64.encode(b"clipboard"),
+            "target": "ghost",
+            "encryption": encryption_block()
+        });
+
+        let message = base_message(payload);
+
+        let err = handle_text_message("sender", &message, &sessions, &key_store)
+            .await
+            .expect_err("missing target should return error");
+        assert!(matches!(err, SessionError::DeviceNotConnected));
+    }
+
+    #[actix_rt::test]
+    async fn encrypted_payload_relays_to_other_devices() {
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let key_store = crate::services::device_key_store::DeviceKeyStore::new();
+
+        let mut sender_rx = sessions.register("sender".into()).await;
+        let mut receiver_rx = sessions.register("receiver".into()).await;
+
+        let key = [9u8; 32];
+        let aad = br#"{"type":"clipboard"}"#;
+        let encrypted = aead::encrypt(&key, b"hello", aad).expect("encrypt payload");
+
+        let payload = json!({
+            "data": BASE64.encode(&encrypted.ciphertext),
+            "encryption": encryption_block_from(&encrypted)
+        });
+
+        let message = base_message(payload);
+
+        handle_text_message("sender", &message, &sessions, &key_store)
+            .await
+            .expect("message handled");
+
+        let forwarded = timeout(Duration::from_millis(50), receiver_rx.recv())
+            .await
+            .expect("receiver should get broadcast")
+            .expect("channel open");
+        assert_eq!(forwarded, message);
+
+        assert!(sender_rx.try_recv().is_err());
     }
 
     #[test]

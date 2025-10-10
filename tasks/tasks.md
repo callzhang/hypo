@@ -265,7 +265,7 @@ Last Updated: October 3, 2025
   - [x] End-to-end encryption
   - [ ] LAN discovery and sync
   - [ ] Cloud relay sync
-  - [ ] Multi-device scenarios
+  - [x] Multi-device scenarios
 - [ ] Performance tests
   - [ ] Latency measurement (LAN/Cloud)
   - [x] Throughput test (100 clips)

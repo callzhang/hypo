@@ -69,13 +69,9 @@ pub async fn websocket_handler(
         while let Some(Ok(msg)) = msg_stream.recv().await {
             match msg {
                 Message::Text(text) => {
-                    if let Err(err) = handle_text_message(
-                        &reader_device_id,
-                        &text,
-                        &reader_sessions,
-                        &key_store,
-                    )
-                    .await
+                    if let Err(err) =
+                        handle_text_message(&reader_device_id, &text, &reader_sessions, &key_store)
+                            .await
                     {
                         error!(
                             "Failed to handle message from {}: {:?}",
@@ -170,7 +166,10 @@ async fn handle_control_message(
                     info!("Registered symmetric key for device {}", sender_id);
                 }
                 Ok(_) => {
-                    warn!("Key registration rejected for {}: invalid key length", sender_id);
+                    warn!(
+                        "Key registration rejected for {}: invalid key length",
+                        sender_id
+                    );
                 }
                 Err(err) => {
                     warn!("Failed to decode symmetric key for {}: {}", sender_id, err);
@@ -204,12 +203,24 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
     BASE64
         .decode(nonce.as_bytes())
         .map_err(|_| "invalid nonce encoding")
-        .and_then(|decoded| if decoded.len() == 12 { Ok(()) } else { Err("nonce must be 12 bytes") })?;
+        .and_then(|decoded| {
+            if decoded.len() == 12 {
+                Ok(())
+            } else {
+                Err("nonce must be 12 bytes")
+            }
+        })?;
 
     BASE64
         .decode(tag.as_bytes())
         .map_err(|_| "invalid tag encoding")
-        .and_then(|decoded| if decoded.len() == 16 { Ok(()) } else { Err("tag must be 16 bytes") })?;
+        .and_then(|decoded| {
+            if decoded.len() == 16 {
+                Ok(())
+            } else {
+                Err("tag must be 16 bytes")
+            }
+        })?;
 
     let data = payload
         .get("data")
@@ -285,7 +296,10 @@ mod tests {
             .expect("channel open");
         assert_eq!(forwarded, message);
 
-        assert!(sender_rx.try_recv().is_err(), "sender should not receive broadcast");
+        assert!(
+            sender_rx.try_recv().is_err(),
+            "sender should not receive broadcast"
+        );
     }
 
     #[actix_rt::test]
@@ -315,10 +329,57 @@ mod tests {
             .expect("channel open");
         assert_eq!(forwarded, message);
 
-        assert!(sender_rx.try_recv().is_err(), "sender should not receive direct message");
+        assert!(
+            sender_rx.try_recv().is_err(),
+            "sender should not receive direct message"
+        );
         assert!(
             other_rx.try_recv().is_err(),
             "non-target should not receive direct message"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn handle_text_message_rejects_invalid_json() {
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let key_store = crate::services::device_key_store::DeviceKeyStore::new();
+
+        let mut receiver_rx = sessions.register("receiver".into()).await;
+
+        handle_text_message("sender", "not-json", &sessions, &key_store)
+            .await
+            .expect("invalid payload should be ignored");
+
+        assert!(
+            timeout(Duration::from_millis(50), receiver_rx.recv())
+                .await
+                .is_err(),
+            "no message should be forwarded"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn handle_text_message_requires_encryption_block() {
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let key_store = crate::services::device_key_store::DeviceKeyStore::new();
+
+        let mut receiver_rx = sessions.register("receiver".into()).await;
+
+        let payload = json!({
+            "data": BASE64.encode(b"clipboard")
+        });
+
+        let message = base_message(payload);
+
+        handle_text_message("sender", &message, &sessions, &key_store)
+            .await
+            .expect("message handled");
+
+        assert!(
+            timeout(Duration::from_millis(50), receiver_rx.recv())
+                .await
+                .is_err(),
+            "messages missing encryption should be dropped"
         );
     }
 

@@ -260,15 +260,15 @@ Last Updated: October 3, 2025
 - [ ] Write unit tests (80% coverage target)
   - [ ] macOS: Clipboard monitoring, encryption, transport
   - [ ] Android: Clipboard listening, repository, sync
-  - [ ] Backend: Routing, rate limiting
+  - [x] Backend: Routing, rate limiting
 - [ ] Integration tests
-  - [ ] End-to-end encryption
+  - [x] End-to-end encryption
   - [ ] LAN discovery and sync
-  - [ ] Cloud relay sync
-  - [ ] Multi-device scenarios
+  - [x] Cloud relay sync
+  - [x] Multi-device scenarios
 - [ ] Performance tests
   - [ ] Latency measurement (LAN/Cloud)
-  - [ ] Throughput test (100 clips)
+  - [x] Throughput test (100 clips)
   - [ ] Memory profiling
   - [ ] Battery drain test (Android, 24h)
 - [ ] Security tests

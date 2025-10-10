@@ -392,56 +392,248 @@ private struct SettingsSectionView: View {
 private struct PairDeviceSheet: View {
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @Binding var isPresented: Bool
-    @State private var deviceName: String = ""
-    @State private var selectedPlatform: DevicePlatform = .android
+    @StateObject private var pairingViewModel: PairingViewModel
+    @StateObject private var remoteViewModel: RemotePairingViewModel
+    @State private var pairingMode: PairingMode = .qr
+    @State private var challengeInput: String = ""
+    @State private var hasStarted = false
+
+    init(viewModel: ClipboardHistoryViewModel, isPresented: Binding<Bool>) {
+        self._viewModel = ObservedObject(initialValue: viewModel)
+        self._isPresented = isPresented
+        _pairingViewModel = StateObject(wrappedValue: viewModel.makePairingViewModel())
+        _remoteViewModel = StateObject(wrappedValue: viewModel.makeRemotePairingViewModel())
+    }
+
+    private enum PairingMode: Int {
+        case qr
+        case remote
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Pair New Device")
                 .font(.title2.bold())
 
-            TextField("Device name", text: $deviceName)
-                .textFieldStyle(.roundedBorder)
-
-            Picker("Platform", selection: $selectedPlatform) {
-                ForEach(DevicePlatform.allCases) { platform in
-                    Text(platform.displayName).tag(platform)
-                }
+            Picker("Pairing method", selection: $pairingMode) {
+                Text("QR Code").tag(PairingMode.qr)
+                Text("Remote Code").tag(PairingMode.remote)
             }
             .pickerStyle(.segmented)
 
-            Spacer()
+            statusSection
+
+            content
 
             HStack {
-                Button("Cancel") { isPresented = false }
+                Button("Close") { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Pair") {
-                    let trimmedName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    viewModel.pairDevice(name: trimmedName, platform: selectedPlatform.displayName)
-                    isPresented = false
+                if isComplete {
+                    Button("Done") { isPresented = false }
+                        .keyboardShortcut(.defaultAction)
                 }
-                .disabled(deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(24)
-        .frame(width: 360, height: 240)
-    }
-}
-
-private enum DevicePlatform: String, CaseIterable, Identifiable {
-    case android
-    case macos
-    case windows
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .android: return "Android"
-        case .macos: return "macOS"
-        case .windows: return "Windows"
+        .frame(width: 420, height: 480)
+        .onAppear { startIfNeeded() }
+        .onChange(of: pairingMode) { _ in
+            startIfNeeded(force: true)
+        }
+        .onDisappear {
+            remoteViewModel.reset()
         }
     }
+
+    @ViewBuilder
+    private var statusSection: some View {
+        switch pairingMode {
+        case .qr:
+            Text(pairingViewModel.statusMessage)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        case .remote:
+            Text(remoteViewModel.statusMessage)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            if let countdown = remoteViewModel.countdownText {
+                Text(countdown)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch pairingMode {
+        case .qr:
+            qrContent
+        case .remote:
+            remoteContent
+        }
+    }
+
+    private var isComplete: Bool {
+        switch pairingMode {
+        case .qr:
+            if case .completed = pairingViewModel.state { return true }
+        case .remote:
+            if case .completed = remoteViewModel.state { return true }
+        }
+        return false
+    }
+
+    @ViewBuilder
+    private var qrContent: some View {
+        switch pairingViewModel.state {
+        case .loading:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        case .showing(let image, let payload):
+            VStack(spacing: 12) {
+                if let image {
+                    Image(nsImage: image)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 260, maxHeight: 260)
+                        .padding(12)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .shadow(radius: 6)
+                } else {
+                    ProgressView()
+                }
+                Text("QR payload")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ScrollView {
+                    Text(payload)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(8)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .cornerRadius(8)
+                }
+                .frame(maxHeight: 120)
+                Divider()
+                Text("Paste challenge JSON from Android to continue")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $challengeInput)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(height: 100)
+                    .border(Color(nsColor: .separatorColor))
+                HStack {
+                    Spacer()
+                    Button("Process Challenge") {
+                        pairingViewModel.processChallenge(json: challengeInput)
+                    }
+                    .disabled(challengeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                if let ack = pairingViewModel.ackJSON {
+                    Divider()
+                    Text("Send acknowledgement back to Android")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ScrollView {
+                        Text(ack)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .background(Color(nsColor: .textBackgroundColor))
+                            .cornerRadius(8)
+                    }
+                    .frame(maxHeight: 120)
+                }
+            }
+        case .awaitingHandshake:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        case .completed:
+            successView
+        case .failed(let message):
+            failureView(message: message)
+        }
+    }
+
+    @ViewBuilder
+    private var remoteContent: some View {
+        switch remoteViewModel.state {
+        case .idle, .requestingCode:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        case .displaying(let code, _), .awaitingChallenge(let code, _):
+            VStack(spacing: 16) {
+                Text("Pairing Code")
+                    .font(.headline)
+                Text(code)
+                    .font(.system(size: 48, weight: .bold, design: .monospaced))
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .cornerRadius(12)
+                Text("Enter this code on your Android device")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        case .completing:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        case .completed:
+            successView
+        case .failed(let message):
+            failureView(message: message)
+        }
+    }
+
+    @ViewBuilder
+    private var successView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.green)
+            Text("Pairing complete")
+                .font(.title3)
+                .bold()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    @ViewBuilder
+    private func failureView(message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "xmark.octagon.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.red)
+            Text(message)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    private func startIfNeeded(force: Bool = false) {
+        let params = viewModel.pairingParameters()
+        switch pairingMode {
+        case .qr:
+            remoteViewModel.reset()
+            if force || !hasStarted {
+                challengeInput = ""
+                pairingViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)
+            }
+        case .remote:
+            if force {
+                challengeInput = ""
+            }
+            if force || !hasStarted {
+                remoteViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)
+            }
+        }
+        hasStarted = true
+    }
 }
+
 #endif

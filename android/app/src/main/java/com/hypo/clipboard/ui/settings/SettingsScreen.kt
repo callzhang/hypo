@@ -41,6 +41,7 @@ import com.hypo.clipboard.transport.lan.DiscoveredPeer
 @Composable
 fun SettingsRoute(
     onOpenBatterySettings: () -> Unit,
+    onStartPairing: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -50,7 +51,8 @@ fun SettingsRoute(
         onCloudSyncChanged = viewModel::onCloudSyncChanged,
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
         onAutoDeleteDaysChanged = viewModel::onAutoDeleteDaysChanged,
-        onOpenBatterySettings = onOpenBatterySettings
+        onOpenBatterySettings = onOpenBatterySettings,
+        onStartPairing = onStartPairing
     )
 }
 
@@ -62,6 +64,7 @@ fun SettingsScreen(
     onHistoryLimitChanged: (Int) -> Unit,
     onAutoDeleteDaysChanged: (Int) -> Unit,
     onOpenBatterySettings: () -> Unit,
+    onStartPairing: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Scaffold(
@@ -99,7 +102,7 @@ fun SettingsScreen(
             }
 
             item {
-                DevicesSection(peers = state.discoveredPeers)
+                DevicesSection(peers = state.discoveredPeers, onStartPairing = onStartPairing)
             }
         }
     }
@@ -231,7 +234,7 @@ private fun BatterySection(onOpenBatterySettings: () -> Unit) {
 }
 
 @Composable
-private fun DevicesSection(peers: List<DiscoveredPeer>) {
+private fun DevicesSection(peers: List<DiscoveredPeer>, onStartPairing: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(imageVector = Icons.Filled.Devices, contentDescription = null)
@@ -254,6 +257,9 @@ private fun DevicesSection(peers: List<DiscoveredPeer>) {
                     DeviceRow(peer)
                 }
             }
+        }
+        Button(onClick = onStartPairing) {
+            Text(text = stringResource(id = R.string.pairing_scan_qr))
         }
     }
 }

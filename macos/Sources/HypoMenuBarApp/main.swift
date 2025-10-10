@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import AppKit
 
@@ -15,6 +16,7 @@ struct HypoMenuBarApp: App {
         .menuBarExtraStyle(.window)
     }
 }
+#endif
 
 // MARK: - ViewModel
 @MainActor
@@ -262,3 +264,4 @@ enum ClipboardContent: Codable {
 }
 
 
+#endif

@@ -36,6 +36,7 @@ import com.hypo.clipboard.transport.ws.RelayWebSocketClient
 import com.hypo.clipboard.transport.ws.TlsWebSocketConfig
 import com.hypo.clipboard.transport.ws.TransportFrameCodec
 import com.hypo.clipboard.transport.ws.WebSocketConnector
+import okhttp3.OkHttpClient
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -86,6 +87,10 @@ object AppModule {
     @Singleton
     fun provideCryptoService(nonceGenerator: NonceGenerator): CryptoService =
         CryptoService(nonceGenerator)
+
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(): OkHttpClient = OkHttpClient.Builder().build()
 
     @Provides
     @Singleton

@@ -234,21 +234,22 @@ Last Updated: October 3, 2025
 ## Sprint 6: Device Pairing (Weeks 11-12)
 
 ### Phase 6.1: QR Code Pairing
-- [ ] macOS: Generate QR code with pairing data
-- [ ] macOS: Display QR in pairing view
-- [ ] Android: Implement QR scanner (ML Kit)
-- [ ] Android: Parse QR data, extract public key
-- [ ] Implement ECDH key exchange
-- [ ] Challenge-response authentication
-- [ ] Store shared key in Keychain/EncryptedSharedPreferences
-- [ ] UI feedback for pairing success/failure
+- [x] macOS: Generate QR code with pairing data
+- [x] macOS: Display QR in pairing view
+- [x] Android: Implement QR scanner (ML Kit)
+- [x] Android: Parse QR data, extract public key
+- [x] Implement ECDH key exchange
+- [x] Challenge-response authentication
+- [x] Store shared key in Keychain/EncryptedSharedPreferences
+- [x] UI feedback for pairing success/failure
+- [x] macOS: Unit tests for pairing failure paths (expired QR, stale challenge, tampering)
 
 ### Phase 6.2: Remote Pairing
-- [ ] Generate 6-digit pairing code
-- [ ] Backend: Implement pairing code storage (60s TTL)
-- [ ] macOS: Send public key with pairing code
-- [ ] Android: Retrieve public key with pairing code
-- [ ] Complete ECDH exchange via relay
+- [x] Generate 6-digit pairing code
+- [x] Backend: Implement pairing code storage (60s TTL)
+- [x] macOS: Send public key with pairing code
+- [x] Android: Retrieve public key with pairing code
+- [x] Complete ECDH exchange via relay
 - [ ] Security audit of pairing flow
 
 ---

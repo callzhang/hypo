@@ -1,3 +1,3 @@
-pub mod websocket;
 pub mod health;
-
+pub mod pairing;
+pub mod websocket;

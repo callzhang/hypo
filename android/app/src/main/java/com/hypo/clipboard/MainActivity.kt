@@ -27,6 +27,7 @@ import com.hypo.clipboard.ui.history.HistoryRoute
 import com.hypo.clipboard.ui.home.HomeRoute
 import com.hypo.clipboard.ui.settings.SettingsRoute
 import com.hypo.clipboard.ui.theme.HypoTheme
+import com.hypo.clipboard.pairing.PairingRoute
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -80,7 +81,13 @@ class MainActivity : ComponentActivity() {
                             HistoryRoute()
                         }
                         composable(AppDestination.Settings.route) {
-                            SettingsRoute(onOpenBatterySettings = ::openBatterySettings)
+                            SettingsRoute(
+                                onOpenBatterySettings = ::openBatterySettings,
+                                onStartPairing = { navController.navigate("pairing") }
+                            )
+                        }
+                        composable("pairing") {
+                            PairingRoute(onBack = { navController.popBackStack() })
                         }
                     }
                 }

@@ -1,6 +1,7 @@
 package com.hypo.clipboard.sync
 
 import android.content.Context
+import android.os.Build
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.UUID
 import javax.inject.Inject
@@ -17,6 +18,16 @@ class DeviceIdentity @Inject constructor(
 
     val deviceId: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         prefs.getString(KEY_DEVICE_ID, null) ?: generateAndPersist()
+    }
+
+    val deviceName: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        val manufacturer = Build.MANUFACTURER.takeIf { it.isNotBlank() }?.replaceFirstChar(Char::uppercaseChar)
+        val model = Build.MODEL
+        if (manufacturer == null || model.startsWith(manufacturer)) {
+            model
+        } else {
+            "$manufacturer $model"
+        }
     }
 
     private fun generateAndPersist(): String {

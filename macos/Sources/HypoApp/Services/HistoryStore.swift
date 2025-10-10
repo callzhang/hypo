@@ -108,6 +108,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 #if canImport(os)
     private let logger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
 #endif
+    private let deviceIdentity: DeviceIdentityProviding
 
     private enum DefaultsKey {
         static let allowsCloudFallback = "allow_cloud_fallback"
@@ -120,14 +121,13 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     public init(
         store: HistoryStore = HistoryStore(),
         transportManager: TransportManager? = nil,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        deviceIdentity: DeviceIdentityProviding = DeviceIdentity()
     ) {
         self.store = store
         self.transportManager = transportManager
         self.defaults = defaults
-#if canImport(UserNotifications)
-        self.notificationController = ClipboardNotificationController.shared
-#endif
+        self.deviceIdentity = deviceIdentity
         self.transportPreference = transportManager?.currentPreference() ?? .lanFirst
         self.allowsCloudFallback = defaults.object(forKey: DefaultsKey.allowsCloudFallback) as? Bool ?? true
         self.autoDeleteAfterHours = defaults.object(forKey: DefaultsKey.autoDeleteHours) as? Int ?? 0
@@ -272,6 +272,33 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         pairedDevices.sort { $0.lastSeen > $1.lastSeen }
         persistPairedDevices()
+    }
+
+    public func makePairingViewModel() -> PairingViewModel {
+        PairingViewModel(identity: deviceIdentity) { [weak self] device in
+            self?.registerPairedDevice(device)
+        }
+    }
+
+    public func makeRemotePairingViewModel() -> RemotePairingViewModel {
+        RemotePairingViewModel(identity: deviceIdentity) { [weak self] device in
+            self?.registerPairedDevice(device)
+        }
+    }
+
+    public func pairingParameters() -> (service: String, port: Int, relayHint: URL?) {
+        let config = transportManager?.currentLanConfiguration()
+        let domain = config?.domain ?? "local."
+        let serviceType = config?.serviceType ?? "_hypo._tcp."
+        let serviceName = config?.serviceName ?? ProcessInfo.processInfo.hostName
+        let port = config?.port ?? 7010
+        let service = "\(serviceName).\(serviceType)\(domain)"
+
+        let relayConfig = CloudRelayDefaults.staging()
+        var relayComponents = URLComponents(url: relayConfig.url, resolvingAgainstBaseURL: false)
+        if relayComponents?.scheme == "wss" { relayComponents?.scheme = "https" }
+        let relayHint = relayComponents?.url
+        return (service: service, port: port, relayHint: relayHint)
     }
 
     public func pairDevice(name: String, platform: String) {

@@ -1,10 +1,16 @@
 use actix_web::middleware::Logger;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use hypo_relay::{
-    handlers::{health::health_check, websocket::websocket_handler},
+    handlers::{
+        health::health_check,
+        pairing::{
+            claim_pairing_code, create_pairing_code, poll_ack, poll_challenge, submit_ack,
+            submit_challenge,
+        },
+        websocket::websocket_handler,
+    },
     services::{
-        device_key_store::DeviceKeyStore,
-        redis_client::RedisClient,
+        device_key_store::DeviceKeyStore, redis_client::RedisClient,
         session_manager::SessionManager,
     },
     AppState,
@@ -54,6 +60,15 @@ async fn main() -> std::io::Result<()> {
             .route("/ws", web::get().to(websocket_handler))
             .route("/health", web::get().to(health_check))
             .route("/metrics", web::get().to(metrics_handler))
+            .service(
+                web::scope("/pairing")
+                    .route("/code", web::post().to(create_pairing_code))
+                    .route("/claim", web::post().to(claim_pairing_code))
+                    .route("/code/{code}/challenge", web::post().to(submit_challenge))
+                    .route("/code/{code}/challenge", web::get().to(poll_challenge))
+                    .route("/code/{code}/ack", web::post().to(submit_ack))
+                    .route("/code/{code}/ack", web::get().to(poll_ack)),
+            )
     })
     .bind((host.as_str(), port))?
     .run()

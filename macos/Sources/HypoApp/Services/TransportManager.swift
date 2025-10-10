@@ -108,6 +108,14 @@ public final class TransportManager {
         lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
     }
 
+    public func currentLanConfiguration() -> BonjourPublisher.Configuration {
+        lanConfiguration
+    }
+
+    public func currentLanEndpoint() -> LanEndpoint? {
+        publisher.currentEndpoint
+    }
+
     public func lastSeenTimestamp(for serviceName: String) -> Date? {
         lastSeen[serviceName]
     }

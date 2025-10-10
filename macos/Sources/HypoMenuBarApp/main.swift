@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import AppKit
 
@@ -262,3 +263,11 @@ enum ClipboardContent: Codable {
 }
 
 
+#else
+@main
+struct HypoMenuBarAppStub {
+    static func main() {
+        fatalError("HypoMenuBarApp is only available on macOS.")
+    }
+}
+#endif

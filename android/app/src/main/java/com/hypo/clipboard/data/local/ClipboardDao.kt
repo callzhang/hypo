@@ -33,7 +33,7 @@ interface ClipboardDao {
     fun observeByDevice(deviceId: String, limit: Int = 100): Flow<List<ClipboardEntity>>
 
     @Query("SELECT * FROM clipboard_items WHERE type = :type ORDER BY created_at DESC LIMIT :limit")
-    fun observeByType(type: com.hypo.clipboard.domain.model.ClipboardType, limit: Int = 100): Flow<List<ClipboardEntity>>
+    fun observeByType(type: String, limit: Int = 100): Flow<List<ClipboardEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: ClipboardEntity)

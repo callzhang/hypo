@@ -12,12 +12,13 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
@@ -30,12 +31,12 @@ class SettingsViewModelTest {
 
     @BeforeTest
     fun setUp() {
-        setMain(dispatcher)
+        Dispatchers.setMain(dispatcher)
     }
 
     @AfterTest
     fun tearDown() {
-        resetMain()
+        Dispatchers.resetMain()
     }
 
     @Test

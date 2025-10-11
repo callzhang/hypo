@@ -11,11 +11,12 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HistoryViewModelTest {
@@ -25,12 +26,12 @@ class HistoryViewModelTest {
 
     @BeforeTest
     fun setUp() {
-        setMain(dispatcher)
+        Dispatchers.setMain(dispatcher)
     }
 
     @AfterTest
     fun tearDown() {
-        resetMain()
+        Dispatchers.resetMain()
     }
 
     @Test
@@ -72,7 +73,7 @@ class HistoryViewModelTest {
 
     private fun item(id: String, preview: String) = ClipboardItem(
         id = id,
-        type = ClipboardType.Text,
+                type = ClipboardType.TEXT,
         content = preview,
         preview = preview,
         metadata = null,

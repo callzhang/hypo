@@ -28,9 +28,9 @@ class SettingsRepositoryImplTest {
     fun setUp() {
         tempDir = Files.createTempDirectory("settings-repo-test")
         scope = TestScope(StandardTestDispatcher())
-        val dataStore = PreferenceDataStoreFactory.createWithPath(
+        val dataStore = PreferenceDataStoreFactory.create(
             scope = scope,
-            produceFile = { tempDir / "settings.preferences_pb" }
+            produceFile = { (tempDir / "settings.preferences_pb").toFile() }
         )
         repository = SettingsRepositoryImpl(dataStore)
     }

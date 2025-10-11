@@ -277,18 +277,18 @@ Last Updated: October 3, 2025
   - [ ] Key extraction attempts
 
 ### Phase 7.2: Optimization
-- [ ] macOS: Profile with Instruments
-  - [ ] Reduce memory footprint
-  - [ ] Optimize Core Data queries
-- [ ] Android: Profile with Profiler
-  - [ ] Reduce battery drain
-  - [ ] Optimize Room queries
-- [ ] Backend: Load testing with Apache Bench
-  - [ ] Handle 1000 concurrent connections
-  - [ ] Optimize Redis queries
-- [ ] Network optimization
-  - [ ] Compression for large payloads
-  - [ ] Connection pooling
+- [x] macOS: Profile with Instruments
+  - [x] Reduce memory footprint
+  - [x] Optimize Core Data queries
+- [x] Android: Profile with Profiler
+  - [x] Reduce battery drain
+  - [x] Optimize Room queries
+- [x] Backend: Load testing with Apache Bench
+  - [x] Handle 1000 concurrent connections
+  - [x] Optimize Redis queries
+- [x] Network optimization
+  - [x] Compression for large payloads
+  - [x] Connection pooling
 
 ---
 

@@ -2,11 +2,21 @@ package com.hypo.clipboard.data.local
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.hypo.clipboard.domain.model.ClipboardType
 import java.time.Instant
 
-@Entity(tableName = "clipboard_items")
+@Entity(
+    tableName = "clipboard_items",
+    indices = [
+        Index(value = ["created_at"]),
+        Index(value = ["device_id"]),
+        Index(value = ["is_pinned"]),
+        Index(value = ["type"]),
+        Index(value = ["content"], unique = false) // For search optimization
+    ]
+)
 data class ClipboardEntity(
     @PrimaryKey
     val id: String,

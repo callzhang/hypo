@@ -10,13 +10,15 @@ use hypo_relay::{
         websocket::websocket_handler,
     },
     services::{
-        device_key_store::DeviceKeyStore, redis_client::RedisClient,
+        device_key_store::DeviceKeyStore, 
+        redis_client::RedisClient,
         session_manager::SessionManager,
+        metrics::{initialize_metrics, get_metrics},
     },
     AppState,
 };
 use std::time::Instant;
-use tracing::info;
+use tracing::{info, error};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -39,6 +41,11 @@ async fn main() -> std::io::Result<()> {
 
     info!("Starting Hypo Relay Server");
     info!("Connecting to Redis at {}", redis_url);
+
+    // Initialize metrics
+    if let Err(e) = initialize_metrics().await {
+        error!("Failed to initialize metrics: {}", e);
+    }
 
     let redis_client = RedisClient::new(&redis_url)
         .await
@@ -70,11 +77,29 @@ async fn main() -> std::io::Result<()> {
                     .route("/code/{code}/ack", web::get().to(poll_ack)),
             )
     })
+    .workers(4) // Optimize for concurrent connections
+    .keep_alive(std::time::Duration::from_secs(30))
+    .client_request_timeout(std::time::Duration::from_secs(5)) // 5 second timeout
     .bind((host.as_str(), port))?
     .run()
     .await
 }
 
 async fn metrics_handler() -> HttpResponse {
-    HttpResponse::Ok().body("# Metrics endpoint - coming soon\n")
+    match get_metrics().await {
+        Some(metrics) => {
+            let stats = metrics.get_stats().await;
+            let mut output = String::new();
+            for (key, value) in stats {
+                output.push_str(&format!("# HELP {} {}\n", key, key));
+                output.push_str(&format!("# TYPE {} gauge\n", key));
+                output.push_str(&format!("{} {}\n", key, value));
+            }
+            HttpResponse::Ok()
+                .content_type("text/plain; version=0.0.4; charset=utf-8")
+                .body(output)
+        }
+        None => HttpResponse::ServiceUnavailable()
+            .body("Metrics not initialized")
+    }
 }

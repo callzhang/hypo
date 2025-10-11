@@ -1,9 +1,10 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rand::Rng;
-use redis::{aio::ConnectionManager, Client};
+use redis::{aio::ConnectionManager, AsyncCommands, Client};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tracing::{debug, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PairingCodeError {
@@ -93,47 +94,132 @@ impl PairingCodeEntry {
 #[derive(Clone)]
 pub struct RedisClient {
     manager: ConnectionManager,
+    pool: Option<deadpool_redis::Pool>,
+}
+
+// Helper enum for connection handling
+enum Either<L, R> {
+    Left(L),
+    Right(R),
+}
+
+async fn create_redis_pool(redis_url: &str) -> Result<deadpool_redis::Pool> {
+    use deadpool_redis::{Config, Runtime};
+    
+    let cfg = Config::from_url(redis_url);
+    let pool = cfg.create_pool(Some(Runtime::Tokio1))?;
+    Ok(pool)
 }
 
 impl RedisClient {
     pub async fn new(redis_url: &str) -> Result<Self> {
         let client = Client::open(redis_url)?;
         let manager = ConnectionManager::new(client).await?;
-        Ok(Self { manager })
+        
+        // Also create a connection pool for high-concurrency operations
+        let pool = create_redis_pool(redis_url).await.ok();
+        if pool.is_some() {
+            debug!("Redis connection pool created successfully");
+        } else {
+            warn!("Failed to create Redis connection pool, falling back to single connection");
+        }
+        
+        Ok(Self { manager, pool })
+    }
+
+    /// Get a connection from the pool if available, otherwise use the manager
+    async fn get_connection(&self) -> Result<Either<deadpool_redis::Connection, &ConnectionManager>> {
+        if let Some(pool) = &self.pool {
+            match pool.get().await {
+                Ok(conn) => Ok(Either::Left(conn)),
+                Err(_) => {
+                    warn!("Failed to get connection from pool, using manager");
+                    Ok(Either::Right(&self.manager))
+                }
+            }
+        } else {
+            Ok(Either::Right(&self.manager))
+        }
+    }
+
+    pub async fn register_device_batch(&mut self, registrations: &[(String, String)]) -> Result<()> {
+        use redis::Pipeline;
+        
+        debug!("Registering {} devices in batch", registrations.len());
+        
+        let mut pipe = Pipeline::new();
+        for (device_id, connection_id) in registrations {
+            // device:<uuid> -> connection_id (TTL: 1 hour)
+            pipe.set_ex(format!("device:{}", device_id), connection_id, 3600);
+            // conn:<connection_id> -> device_id (TTL: 1 hour)
+            pipe.set_ex(format!("conn:{}", connection_id), device_id, 3600);
+        }
+        
+        let _: () = pipe.query_async(&mut self.manager).await?;
+        Ok(())
     }
 
     pub async fn register_device(&mut self, device_id: &str, connection_id: &str) -> Result<()> {
-        use redis::AsyncCommands;
+        use redis::Pipeline;
 
-        // device:<uuid> -> connection_id (TTL: 1 hour)
-        self.manager
-            .set_ex::<_, _, ()>(format!("device:{}", device_id), connection_id, 3600)
-            .await?;
+        debug!("Registering device {} with connection {}", device_id, connection_id);
 
-        // conn:<connection_id> -> device_id (TTL: 1 hour)
-        self.manager
-            .set_ex::<_, _, ()>(format!("conn:{}", connection_id), device_id, 3600)
-            .await?;
-
+        // Use pipeline for atomic registration
+        let mut pipe = Pipeline::new();
+        pipe.set_ex(format!("device:{}", device_id), connection_id, 3600)
+            .set_ex(format!("conn:{}", connection_id), device_id, 3600);
+        
+        let _: () = pipe.query_async(&mut self.manager).await?;
         Ok(())
     }
 
     pub async fn unregister_device(&mut self, device_id: &str) -> Result<()> {
-        use redis::AsyncCommands;
+        use redis::{AsyncCommands, Pipeline};
+
+        debug!("Unregistering device {}", device_id);
 
         // Get connection ID first
         let conn_id: Option<String> = self.manager.get(format!("device:{}", device_id)).await?;
 
         if let Some(conn_id) = conn_id {
-            // Delete both mappings
-            self.manager
-                .del::<_, ()>(format!("device:{}", device_id))
-                .await?;
-            self.manager
-                .del::<_, ()>(format!("conn:{}", conn_id))
-                .await?;
+            // Use pipeline for atomic cleanup
+            let mut pipe = Pipeline::new();
+            pipe.del(format!("device:{}", device_id))
+                .del(format!("conn:{}", conn_id));
+            
+            let _: () = pipe.query_async(&mut self.manager).await?;
         }
 
+        Ok(())
+    }
+
+    pub async fn unregister_devices_batch(&mut self, device_ids: &[String]) -> Result<()> {
+        use redis::{AsyncCommands, Pipeline};
+
+        if device_ids.is_empty() {
+            return Ok(());
+        }
+
+        debug!("Batch unregistering {} devices", device_ids.len());
+
+        // Get all connection IDs first
+        let mut pipe = Pipeline::new();
+        for device_id in device_ids {
+            pipe.get(format!("device:{}", device_id));
+        }
+        
+        let conn_ids: Vec<Option<String>> = pipe.query_async(&mut self.manager).await?;
+
+        // Delete all mappings
+        let mut delete_pipe = Pipeline::new();
+        for (device_id, conn_id) in device_ids.iter().zip(conn_ids.iter()) {
+            delete_pipe.del(format!("device:{}", device_id));
+            if let Some(conn_id) = conn_id {
+                delete_pipe.del(format!("conn:{}", conn_id));
+            }
+        }
+        
+        let _: () = delete_pipe.query_async(&mut self.manager).await?;
         Ok(())
     }
 

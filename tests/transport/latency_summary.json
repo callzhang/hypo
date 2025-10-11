@@ -1,0 +1,23 @@
+{
+  "timestamp": 1760142311.9609666,
+  "lan": {
+    "handshake": {
+      "median": 42.0,
+      "p95": 44.2
+    },
+    "round_trip": {
+      "median": 15.0,
+      "p95": 16.2
+    }
+  },
+  "cloud": {
+    "handshake": {
+      "p50": 820,
+      "p95": 1240
+    },
+    "first_payload": {
+      "p50": 910,
+      "p95": 1380
+    }
+  }
+}

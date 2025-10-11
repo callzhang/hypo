@@ -14,12 +14,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
@@ -32,12 +33,12 @@ class HomeViewModelTest {
 
     @BeforeTest
     fun setUp() {
-        setMain(dispatcher)
+        Dispatchers.setMain(dispatcher)
     }
 
     @AfterTest
     fun tearDown() {
-        resetMain()
+        Dispatchers.resetMain()
     }
 
     @Test
@@ -75,7 +76,7 @@ class HomeViewModelTest {
 
     private fun item(id: String, preview: String) = ClipboardItem(
         id = id,
-        type = ClipboardType.Text,
+                type = ClipboardType.TEXT,
         content = preview.lowercase(),
         preview = preview,
         metadata = null,

@@ -21,6 +21,7 @@ Hypo enables seamless clipboard synchronization between your Xiaomi/HyperOS devi
 - **🕒 Clipboard History**: Search and restore past clipboard items (macOS)
 - **🔔 Rich Notifications**: Preview content before pasting
 - **🎨 Native UI**: SwiftUI on macOS, Material 3 on Android
+- **🔋 Battery Optimized**: Auto-idles WebSocket when screen is off (Android)
 
 ---
 

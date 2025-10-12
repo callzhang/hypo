@@ -7,8 +7,10 @@ import android.app.Service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.hypo.clipboard.R
@@ -43,6 +45,8 @@ class ClipboardSyncService : Service() {
     private var notificationJob: Job? = null
     private var latestPreview: String? = null
     private var isPaused: Boolean = false
+    private var isScreenOff: Boolean = false
+    private lateinit var screenStateReceiver: ScreenStateReceiver
 
     override fun onCreate() {
         super.onCreate()
@@ -64,10 +68,12 @@ class ClipboardSyncService : Service() {
         transportManager.start(buildLanRegistrationConfig())
         listener.start()
         observeLatestItem()
+        registerScreenStateReceiver()
     }
 
     override fun onDestroy() {
         notificationJob?.cancel()
+        unregisterScreenStateReceiver()
         listener.stop()
         syncCoordinator.stop()
         transportManager.stop()
@@ -183,6 +189,43 @@ class ClipboardSyncService : Service() {
         )
     }
 
+    private fun registerScreenStateReceiver() {
+        screenStateReceiver = ScreenStateReceiver(
+            onScreenOff = { handleScreenOff() },
+            onScreenOn = { handleScreenOn() }
+        )
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        registerReceiver(screenStateReceiver, filter)
+        Log.d(TAG, "Screen state receiver registered for battery optimization")
+    }
+
+    private fun unregisterScreenStateReceiver() {
+        runCatching {
+            unregisterReceiver(screenStateReceiver)
+            Log.d(TAG, "Screen state receiver unregistered")
+        }
+    }
+
+    private fun handleScreenOff() {
+        if (isScreenOff) return
+        isScreenOff = true
+        Log.d(TAG, "Screen OFF - idling WebSocket connections to save battery")
+        // Transport Manager will let idle timeout trigger faster
+        // WebSocket watchdog will close idle connections
+        transportManager.stopConnectionSupervisor()
+    }
+
+    private fun handleScreenOn() {
+        if (!isScreenOff) return
+        isScreenOff = false
+        Log.d(TAG, "Screen ON - resuming WebSocket connections")
+        // Restart transport will reconnect when needed
+        transportManager.start(buildLanRegistrationConfig())
+    }
+
     private fun buildLanRegistrationConfig(): LanRegistrationConfig {
         val version = runCatching {
             val packageInfo = packageManager.getPackageInfo(packageName, 0)
@@ -199,6 +242,7 @@ class ClipboardSyncService : Service() {
     }
 
     companion object {
+        private const val TAG = "ClipboardSyncService"
         private const val CHANNEL_ID = "clipboard-sync"
         private const val NOTIFICATION_ID = 42
         private const val DEFAULT_VERSION = "1.0.0"

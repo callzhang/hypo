@@ -1,13 +1,13 @@
 # Hypo Project Status
 
-**Last Updated**: October 11, 2025
+**Last Updated**: October 12, 2025
 **Current Sprint**: Sprint 8 - Polish & Deployment (In Progress)  
-**Project Phase**: Polish & Deployment - Documentation Complete
-**Overall Progress**: 85%
+**Project Phase**: Polish & Deployment - All Platforms Building Successfully
+**Overall Progress**: 92%
 
 ---
 
-## 🎯 Current Milestone: Performance Optimization Completion
+## 🎯 Current Milestone: Build System Completion & Testing
 
 ### Completed ✅
 - [x] Project inception and PRD analysis
@@ -23,6 +23,7 @@
 - [x] Initialized backend Rust project structure
 - [x] Initialized Android project structure with Gradle
 - [x] Bootstrapped macOS Swift package + SwiftUI menu bar shell
+- [x] Fixed macOS Swift compilation errors and build system *(Oct 12, 2025)*
 - [x] Implemented Android foreground sync service, Room persistence, and Compose history UI
 - [x] Added Redis-backed WebSocket session manager with expanded tests
 - [x] Wired Swift Package into reusable Xcode workspace (`macos/HypoApp.xcworkspace`)
@@ -51,15 +52,16 @@
   - [x] Memory profiling system for runtime optimization insights
 
 ### Next Steps 📋
-- [ ] Complete Sprint 8 critical bug fixes (Android compilation)
+- [x] Complete Sprint 8 critical bug fixes (Android compilation) ✅
+- [x] Fix macOS Swift compilation errors ✅ *(Oct 12, 2025)*
+- [ ] Install and test debug APK on physical Android device
 - [ ] Implement error handling improvements
 - [ ] Set up production deployment configuration
 - [ ] Prepare beta testing recruitment
 - [ ] Finalize release candidate builds
 
 ### Blocked 🚫
-- Android compilation issues preventing unit test execution
-- macOS Swift environment not available in current container
+- None (all critical compilation issues resolved)
 
 ---
 
@@ -93,20 +95,12 @@
 3. Backend session routing fan-out validated with integration coverage.
 
 ### Sprint 3: Transport Layer (Weeks 5-6)
-<<<<<<< HEAD
-**Progress**: 55%
-=======
 **Progress**: 70%
->>>>>>> codex/complete-tasks.md-in-repository-o418dk
 
 | Phase | Status | Completion |
 |-------|--------|------------|
 | Phase 3.1: LAN Discovery & Connection | Completed | 100% |
-<<<<<<< HEAD
-| Phase 3.2: Cloud Relay Integration | In Progress | 20% |
-=======
 | Phase 3.2: Cloud Relay Integration | Completed | 100% |
->>>>>>> codex/complete-tasks.md-in-repository-o418dk
 | Phase 3.3: Transport Manager | In Progress | 15% |
 
 **Highlights (to date)**:
@@ -115,13 +109,6 @@
 3. Transport specs updated with OEM multicast caveats (HyperOS) and cross-platform LAN telemetry expectations.
 4. Provisioned headless Android SDK installation script so CI containers can execute Gradle unit suites without manual setup.
 5. Android foreground service now boots the LAN transport manager, exposing discovered peers and restartable advertising from a shared coroutine scope.
-<<<<<<< HEAD
-
-**Next Steps**:
-1. Implement LAN TLS WebSocket clients with certificate pinning and idle watchdogs on macOS and Android.
-2. Deploy the Rust relay to Fly.io staging and validate telemetry/monitoring integration.
-3. Complete the transport state machine (LAN-first with cloud fallback) and expand integration coverage for failure cases.
-=======
 6. Published loopback LAN latency baseline with automated metrics hooks and manual QA checklist for same-network validation.
 7. Deployed the relay to Fly.io staging with automated GitHub Actions deploys and published the staging endpoint/fingerprint rotation workflow.
 8. Added cross-platform transport analytics streams recording fallback reasons and TLS pinning failures for telemetry dashboards.
@@ -131,7 +118,6 @@
 2. ✅ Capture LAN loopback latency baseline and publish manual QA checklist (`docs/testing/lan_manual.md`).
 3. Harden the transport state machine reconnection paths (LAN peer churn, cloud retries) and expand integration coverage for failure cases.
 4. Surface transport status and fallback reasons through UI bindings for upcoming Sprint 5 UX work.
->>>>>>> codex/complete-tasks.md-in-repository-o418dk
 
 ---
 
@@ -257,7 +243,20 @@
 - **macOS**: Introduced `CloudRelayTransport` and configuration defaults to wrap LAN transport logic while emitting cloud-labelled telemetry.
 - **Configuration**: Synced staging relay fingerprint/constants across platforms for consistent TLS pinning and analytics headers.
 
->>>>>>> codex/complete-tasks.md-in-repository-o418dk
+### October 12, 2025
+- **Android Build Resolution** ✅: Fixed all compilation issues and successfully built debug APK
+  - Added missing androidx.paging:paging-compose and androidx.paging:paging-runtime dependencies for PagingSource
+  - Fixed Room DAO pruning query to satisfy strict verification (keeps pinned/history entries)
+  - Added DI bindings for kotlinx.serialization.json.Json and java.time.Clock to complete Hilt graph
+  - Corrected timing helpers and Compose opt-in annotations across BatteryOptimizer, PairingScreen, HomeScreen, SettingsScreen
+  - Simplified PairingRelayClient URL normalization to avoid HttpUrl builder failures
+  - **Milestone**: `./android/gradlew assembleDebug` now completes successfully
+- **Development Environment Setup** ✅: Established reproducible Android build environment
+  - Installed and configured OpenJDK 17 via Homebrew
+  - Provisioned Android SDK via automated script (scripts/setup-android-sdk.sh)
+  - Configured Gradle with local GRADLE_USER_HOME for dependency caching
+  - Documented environment variables for shell profile integration
+- **Artifacts**: Debug APK ready at `android/app/build/outputs/apk/debug/app-debug.apk`
 ---
 
 ## 🎯 Next Review

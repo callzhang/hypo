@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Sprint 8: Polish & Deployment (In Progress) - October 11, 2025
+### Sprint 8: Polish & Deployment (In Progress) - October 12, 2025
 
 #### Added
 - **Comprehensive User Documentation**: Created complete user guide with installation, usage, and troubleshooting sections
@@ -24,6 +24,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Technical debt identification and resolution roadmap
 
 #### Fixed
+- **Android Build Resolution** ✅: Fixed all P0 compilation issues blocking APK generation
+  - Added missing Paging library dependencies (androidx.paging:paging-compose, paging-runtime)
+  - Resolved Room DAO query verification errors in pruning logic  
+  - Added DI bindings for Json serializer and Clock to complete Hilt dependency graph
+
+- **macOS Build Resolution** ✅: Fixed all Swift compilation errors blocking macOS app builds *(Oct 12, 2025)*
+  - Resolved duplicate ClipboardEntry extension conflicts between MemoryProfiler and OptimizedHistoryStore
+  - Fixed property initialization order issues in HistoryStore and PairingViewModel
+  - Fixed Ed25519 keychain constant availability for macOS compatibility (kSecAttrKeyTypeEd25519)
+  - Updated ClipboardContent property names to match actual model (fileName vs name)
+  - Made WebSocketConnectionPool.lastUsed mutable to allow connection state updates
+  - Added @retroactive attribute to Sendable conformance for UNUserNotificationCenter
+  - Fixed ambiguous webSocketTask call in WebSocketConnectionPool
+  - Simplified HypoMenuBarApp entry point and made it public
+  - Updated .gitignore to exclude build artifacts (.gradle/, *.app/)
+  - Removed binary files from version control
+  - **Result**: App builds successfully with `swift build -c release` and runs as menu bar application
+  - Fixed Compose opt-in annotations and imports across UI modules (BatteryOptimizer, PairingScreen, HomeScreen, SettingsScreen)
+  - Simplified PairingRelayClient URL normalization to prevent HttpUrl builder exceptions
+  - **Result**: `./android/gradlew assembleDebug` completes successfully; APK at `android/app/build/outputs/apk/debug/app-debug.apk`
+
 - **Backend Code Quality**: Cleaned up compilation warnings and unused code
   - Removed unused Redis client pool field and methods
   - Cleaned up unused import statements
@@ -31,14 +52,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Improved code maintainability
 
 #### Changed  
-- **Project Status**: Updated status tracking to reflect Sprint 8 progress
+- **Project Status**: Updated status tracking to reflect Sprint 8 progress (90% complete)
 - **Documentation Structure**: Reorganized docs for better user experience
+- **Development Environment**: Established reproducible Android build toolchain
+  - Installed OpenJDK 17 via Homebrew with shell profile configuration
+  - Provisioned Android SDK via scripts/setup-android-sdk.sh
+  - Configured Gradle with local GRADLE_USER_HOME for caching
 
-#### Technical Debt Identified
-- Android Room KSP processor compilation issues (blocking)
-- macOS Swift environment configuration requirements  
+#### Technical Debt Resolved
+- ✅ Android Room KSP processor compilation issues (RESOLVED Oct 12)
+- ✅ Android Gradle build configuration (RESOLVED Oct 12)  
+- ✅ Android DI graph completion (RESOLVED Oct 12)
+
+#### Technical Debt Remaining
+- macOS Swift environment configuration requirements (non-blocking)
 - Missing error handling improvements in UI layers
 - Production deployment configuration needed
+- Physical device testing of Android APK
 
 ---
 

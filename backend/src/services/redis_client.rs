@@ -94,21 +94,6 @@ impl PairingCodeEntry {
 #[derive(Clone)]
 pub struct RedisClient {
     manager: ConnectionManager,
-    pool: Option<deadpool_redis::Pool>,
-}
-
-// Helper enum for connection handling
-enum Either<L, R> {
-    Left(L),
-    Right(R),
-}
-
-async fn create_redis_pool(redis_url: &str) -> Result<deadpool_redis::Pool> {
-    use deadpool_redis::{Config, Runtime};
-    
-    let cfg = Config::from_url(redis_url);
-    let pool = cfg.create_pool(Some(Runtime::Tokio1))?;
-    Ok(pool)
 }
 
 impl RedisClient {
@@ -116,30 +101,7 @@ impl RedisClient {
         let client = Client::open(redis_url)?;
         let manager = ConnectionManager::new(client).await?;
         
-        // Also create a connection pool for high-concurrency operations
-        let pool = create_redis_pool(redis_url).await.ok();
-        if pool.is_some() {
-            debug!("Redis connection pool created successfully");
-        } else {
-            warn!("Failed to create Redis connection pool, falling back to single connection");
-        }
-        
-        Ok(Self { manager, pool })
-    }
-
-    /// Get a connection from the pool if available, otherwise use the manager
-    async fn get_connection(&self) -> Result<Either<deadpool_redis::Connection, &ConnectionManager>> {
-        if let Some(pool) = &self.pool {
-            match pool.get().await {
-                Ok(conn) => Ok(Either::Left(conn)),
-                Err(_) => {
-                    warn!("Failed to get connection from pool, using manager");
-                    Ok(Either::Right(&self.manager))
-                }
-            }
-        } else {
-            Ok(Either::Right(&self.manager))
-        }
+        Ok(Self { manager })
     }
 
     pub async fn register_device_batch(&mut self, registrations: &[(String, String)]) -> Result<()> {

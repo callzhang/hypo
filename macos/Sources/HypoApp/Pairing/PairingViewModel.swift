@@ -33,11 +33,11 @@ public final class PairingViewModel: ObservableObject {
         self.identity = identity
         self.session = sessionFactory(identity.deviceId)
         self.onDevicePaired = onDevicePaired
-        self.session.delegate = self
         self.encoder = JSONEncoder()
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
+        self.session.delegate = self
     }
 
     public func start(service: String, port: Int, relayHint: URL?) {

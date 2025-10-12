@@ -4,12 +4,14 @@ import SwiftUI
 import AppKit
 #endif
 
-struct HypoMenuBarApp: App {
+public struct HypoMenuBarApp: App {
     @StateObject private var viewModel = ClipboardHistoryViewModel()
     @State private var monitor: ClipboardMonitor?
 
-    var body: some Scene {
-        MenuBarExtra("Hypo", systemImage: "rectangle.portrait.on.rectangle") {
+    public init() {}
+
+    public var body: some Scene {
+        MenuBarExtra("📋", systemImage: "doc.on.clipboard.fill") {
             MenuBarContentView(viewModel: viewModel)
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)

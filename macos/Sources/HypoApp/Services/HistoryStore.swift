@@ -149,6 +149,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             self.pairedDevices = decoded.sorted { $0.lastSeen > $1.lastSeen }
         }
 #if canImport(UserNotifications)
+        self.notificationController = ClipboardNotificationController()
         self.notificationController?.configure(handler: self)
 #endif
     }

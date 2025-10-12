@@ -63,7 +63,7 @@ public actor MemoryProfiler {
         monitoringTask?.cancel()
         monitoringTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.captureSnapshot()
+                _ = await self?.captureSnapshot()
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
             }
         }
@@ -281,26 +281,4 @@ private extension DateFormatter {
     }()
 }
 
-// Extend ClipboardEntry for memory footprint calculation (if not already defined)
-extension ClipboardEntry {
-    var estimatedMemoryFootprint: Int {
-        var size = 0
-        
-        // UUID (16 bytes) + Date (8 bytes) + Bool (1 byte)
-        size += 25
-        
-        // Content estimation
-        switch content {
-        case .text(let text):
-            size += text.utf8.count
-        case .link(let url):
-            size += url.absoluteString.utf8.count
-        case .image(let data):
-            size += data.count
-        case .file(let metadata):
-            size += metadata.name.utf8.count + (metadata.path?.utf8.count ?? 0)
-        }
-        
-        return size
-    }
-}
+// Extension removed - defined in OptimizedHistoryStore.swift to avoid redeclaration

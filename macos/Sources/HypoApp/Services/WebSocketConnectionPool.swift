@@ -10,7 +10,7 @@ public actor WebSocketConnectionPool {
         let id: UUID
         let webSocket: URLSessionWebSocketTask
         let endpoint: Endpoint
-        let lastUsed: Date
+        var lastUsed: Date
         var isActive: Bool
         var messageCount: Int
         
@@ -61,7 +61,7 @@ public actor WebSocketConnectionPool {
         self.idleTimeout = idleTimeout
         self.maxMessageCount = maxMessageCount
         
-        startCleanupTask()
+        Task { await startCleanupTask() }
     }
     
     deinit {
@@ -188,7 +188,7 @@ public actor WebSocketConnectionPool {
         request.timeoutInterval = connectionTimeout
         
         let session = URLSession.shared
-        let webSocket = session.webSocketTask(with: request)
+        let webSocket = (session as URLSession).webSocketTask(with: request) as URLSessionWebSocketTask
         
         let connection = PooledConnection(webSocket: webSocket, endpoint: endpoint)
         activeConnections[connection.id] = connection

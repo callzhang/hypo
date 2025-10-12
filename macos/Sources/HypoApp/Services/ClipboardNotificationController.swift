@@ -171,6 +171,6 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
     }
 }
 
-extension UNUserNotificationCenter: @unchecked Sendable {}
+extension UNUserNotificationCenter: @retroactive @unchecked Sendable {}
 
 #endif

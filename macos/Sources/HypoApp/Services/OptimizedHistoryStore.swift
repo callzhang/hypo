@@ -203,8 +203,8 @@ extension ClipboardEntry {
     var estimatedMemoryFootprint: Int {
         var size = 0
         
-        // UUID (16 bytes) + Date (8 bytes) + Bool (1 byte)
-        size += 25
+        // UUID (16 bytes) + Date (8 bytes) + Bool (1 byte) + String (originDeviceId)
+        size += 25 + originDeviceId.utf8.count
         
         // Content estimation
         switch content {
@@ -212,10 +212,10 @@ extension ClipboardEntry {
             size += text.utf8.count
         case .link(let url):
             size += url.absoluteString.utf8.count
-        case .image(let data):
-            size += data.count
+        case .image(let metadata):
+            size += metadata.byteSize + (metadata.thumbnail?.count ?? 0)
         case .file(let metadata):
-            size += metadata.name.utf8.count + (metadata.path?.utf8.count ?? 0)
+            size += metadata.fileName.utf8.count + metadata.byteSize
         }
         
         return size
@@ -232,7 +232,7 @@ extension ClipboardContent {
         case .image:
             return "image"
         case .file(let metadata):
-            return metadata.name
+            return metadata.fileName
         }
     }
 }

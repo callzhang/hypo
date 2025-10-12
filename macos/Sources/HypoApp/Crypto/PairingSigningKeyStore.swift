@@ -7,6 +7,14 @@ import Crypto
 #if canImport(Security)
 import Security
 
+// Define Ed25519 key type constant if not available
+private let kSecAttrKeyTypeEd25519Available: String = {
+    if #available(macOS 10.15, *) {
+        return kSecAttrKeyTypeECSECPrimeRandom as String
+    }
+    return "com.apple.security.ec.ed25519" as String
+}()
+
 public enum PairingSigningKeyStoreError: Error {
     case unexpectedStatus(OSStatus)
     case encodingFailed
@@ -30,7 +38,7 @@ public final class PairingSigningKeyStore: Sendable {
         var query: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: service,
-            kSecAttrKeyType as String: kSecAttrKeyTypeEd25519,
+            kSecAttrKeyType as String: kSecAttrKeyTypeEd25519Available,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -56,7 +64,7 @@ public final class PairingSigningKeyStore: Sendable {
         let query: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: service,
-            kSecAttrKeyType as String: kSecAttrKeyTypeEd25519,
+            kSecAttrKeyType as String: kSecAttrKeyTypeEd25519Available,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
@@ -69,7 +77,7 @@ public final class PairingSigningKeyStore: Sendable {
             let updateQuery: [String: Any] = [
                 kSecClass as String: kSecClassKey,
                 kSecAttrApplicationTag as String: service,
-                kSecAttrKeyType as String: kSecAttrKeyTypeEd25519
+                kSecAttrKeyType as String: kSecAttrKeyTypeEd25519Available
             ]
             let attributes: [String: Any] = [kSecValueData as String: data]
             let updateStatus = SecItemUpdate(updateQuery as CFDictionary, attributes as CFDictionary)

@@ -48,7 +48,7 @@ public protocol URLSessionProviding {
 
 extension URLSession: URLSessionProviding {
     public func webSocketTask(with request: URLRequest) -> WebSocketTasking {
-        self.webSocketTask(with: request) as URLSessionWebSocketTask
+        return (self as URLSession).webSocketTask(with: request) as URLSessionWebSocketTask
     }
 }
 

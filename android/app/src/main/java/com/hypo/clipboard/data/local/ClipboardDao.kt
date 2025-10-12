@@ -59,12 +59,14 @@ interface ClipboardDao {
     @Query("""
         DELETE FROM clipboard_items 
         WHERE id NOT IN (
-            SELECT id FROM clipboard_items 
-            WHERE is_pinned = 1 
-            UNION 
-            SELECT id FROM clipboard_items 
-            ORDER BY created_at DESC 
-            LIMIT :keepCount
+            SELECT id FROM clipboard_items
+            WHERE is_pinned = 1
+            UNION
+            SELECT id FROM (
+                SELECT id FROM clipboard_items
+                ORDER BY created_at DESC
+                LIMIT :keepCount
+            )
         )
     """)
     suspend fun trimToSize(keepCount: Int)

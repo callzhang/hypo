@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Detailed troubleshooting guide with platform-specific solutions
   - FAQ section and comprehensive support information
 
+- **Android Build Documentation** ✅: Comprehensive build and installation guide
+  - Detailed prerequisites setup (Java 17, Android SDK)
+  - Step-by-step build instructions (command-line and Android Studio)
+  - Device installation guide with adb commands
+  - Xiaomi/HyperOS specific setup instructions (USB installation, battery optimization, autostart)
+  - Troubleshooting section covering common build and runtime issues
+  - Automated build script (`scripts/build-android.sh`) for one-command builds
+  - Updated README.md with quick-start instructions
+  - See `android/README.md` for complete documentation
+
 - **Sprint 8 Analysis Documentation**: 
   - Complete bug report with P0/P1/P2 issue categorization
   - Progress tracking and completion metrics
@@ -38,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added @retroactive attribute to Sendable conformance for UNUserNotificationCenter
   - Fixed ambiguous webSocketTask call in WebSocketConnectionPool
   - Simplified HypoMenuBarApp entry point and made it public
+
+#### Deployed
+- **Backend Server to Fly.io Production** ✅: Successfully deployed production-ready backend *(Oct 12, 2025)*
+  - Installed and configured Fly.io CLI (flyctl) for deployment automation
+  - Updated Dockerfile to use Rust 1.83 (required for latest dependency versions)
+  - Configured embedded Redis in container for session management (no external service needed)
+  - Deployed to production environment: https://hypo.fly.dev/
+  - Health checks passing on 2 machines in iad (Ashburn, VA) region
+  - WebSocket endpoint ready at wss://hypo.fly.dev/ws
+  - Configured HTTP/HTTPS endpoints (ports 80/443) with automatic TLS
+  - Zero-downtime deployment with automated health monitoring
+  - Updated fly.toml with correct build context and Redis configuration
   - Updated .gitignore to exclude build artifacts (.gradle/, *.app/)
   - Removed binary files from version control
   - **Result**: App builds successfully with `swift build -c release` and runs as menu bar application

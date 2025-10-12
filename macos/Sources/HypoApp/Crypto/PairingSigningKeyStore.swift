@@ -7,14 +7,6 @@ import Crypto
 #if canImport(Security)
 import Security
 
-// Define Ed25519 key type constant if not available
-private let kSecAttrKeyTypeEd25519Available: String = {
-    if #available(macOS 10.15, *) {
-        return kSecAttrKeyTypeECSECPrimeRandom as String
-    }
-    return "com.apple.security.ec.ed25519" as String
-}()
-
 public enum PairingSigningKeyStoreError: Error {
     case unexpectedStatus(OSStatus)
     case encodingFailed
@@ -22,6 +14,7 @@ public enum PairingSigningKeyStoreError: Error {
 
 public final class PairingSigningKeyStore: Sendable {
     private let service = "com.hypo.clipboard.signing"
+    private let account = "pairing-key"
 
     public init() {}
 
@@ -35,10 +28,11 @@ public final class PairingSigningKeyStore: Sendable {
     }
 
     public func load() throws -> Curve25519.Signing.PrivateKey? {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: service,
-            kSecAttrKeyType as String: kSecAttrKeyTypeEd25519Available,
+        // Store as generic password data instead of cryptographic key
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -61,10 +55,12 @@ public final class PairingSigningKeyStore: Sendable {
 
     public func save(_ key: Curve25519.Signing.PrivateKey) throws {
         let data = key.rawRepresentation
+        
+        // Store as generic password data instead of cryptographic key
         let query: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: service,
-            kSecAttrKeyType as String: kSecAttrKeyTypeEd25519Available,
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
@@ -74,10 +70,11 @@ public final class PairingSigningKeyStore: Sendable {
         case errSecSuccess:
             return
         case errSecDuplicateItem:
+            // Update existing item
             let updateQuery: [String: Any] = [
-                kSecClass as String: kSecClassKey,
-                kSecAttrApplicationTag as String: service,
-                kSecAttrKeyType as String: kSecAttrKeyTypeEd25519Available
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account
             ]
             let attributes: [String: Any] = [kSecValueData as String: data]
             let updateStatus = SecItemUpdate(updateQuery as CFDictionary, attributes as CFDictionary)

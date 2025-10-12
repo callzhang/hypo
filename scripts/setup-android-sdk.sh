@@ -6,7 +6,7 @@ ANDROID_PLATFORM="platforms;android-34"
 ANDROID_BUILD_TOOLS="build-tools;34.0.0"
 ANDROID_PLATFORM_TOOLS="platform-tools"
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 SDK_ROOT=${ANDROID_SDK_ROOT:-${REPO_ROOT}/.android-sdk}
 CMDLINE_DIR="${SDK_ROOT}/cmdline-tools/latest"
@@ -39,9 +39,9 @@ declare -a packages=(
 )
 
 if ! yes | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" "${packages[@]}"; then
-  status=$?
-  if [[ ${status} -ne 0 && ${status} -ne 141 ]]; then
-    exit "${status}"
+  exit_code=$?
+  if [[ ${exit_code} -ne 0 && ${exit_code} -ne 141 ]]; then
+    exit "${exit_code}"
   fi
 fi
 

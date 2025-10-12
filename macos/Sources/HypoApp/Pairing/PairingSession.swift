@@ -129,6 +129,7 @@ public final class PairingSession: @unchecked Sendable {
         let payload = PairingPayload(
             macDeviceId: identity,
             macPublicKey: keyAgreementKey.publicKey.rawRepresentation,
+            macSigningPublicKey: signingKey.publicKey.rawRepresentation,
             service: configuration.service,
             port: configuration.port,
             relayHint: configuration.relayHint,
@@ -142,6 +143,7 @@ public final class PairingSession: @unchecked Sendable {
             version: payload.version,
             macDeviceId: payload.macDeviceId,
             macPublicKey: payload.macPublicKey,
+            macSigningPublicKey: payload.macSigningPublicKey,
             service: payload.service,
             port: payload.port,
             relayHint: payload.relayHint,
@@ -160,6 +162,7 @@ public final class PairingSession: @unchecked Sendable {
         }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(payload)
         return String(decoding: data, as: UTF8.self)
     }
@@ -228,6 +231,7 @@ public final class PairingSession: @unchecked Sendable {
     private func signPayload(_ payload: PairingPayload, signingKey: Curve25519.Signing.PrivateKey) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
         var payloadCopy = payload
         payloadCopy.signature = Data()
         let data = try encoder.encode(payloadCopy)
@@ -237,6 +241,7 @@ public final class PairingSession: @unchecked Sendable {
     private func generateQRCodeImage(from payload: PairingPayload) -> PairingQRCodeImage? {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(payload) else { return nil }
         #if canImport(CoreImage)
         if let filter = CIFilter(name: "CIQRCodeGenerator") {

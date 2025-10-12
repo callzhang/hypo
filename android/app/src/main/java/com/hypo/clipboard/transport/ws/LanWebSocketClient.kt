@@ -54,7 +54,8 @@ class OkHttpWebSocketConnector @Inject constructor(
 
     init {
         val baseClient = okHttpClient ?: OkHttpClient()
-        val url = config.url.toHttpUrl()
+        val normalizedUrl = normalizeWebSocketUrl(config.url)
+        val url = normalizedUrl.toHttpUrl()
         val builder = baseClient.newBuilder()
         config.fingerprintSha256?.let { hex ->
             val pin = hexToPin(hex)
@@ -77,6 +78,15 @@ class OkHttpWebSocketConnector @Inject constructor(
 
     companion object {
         fun hexToPin(hex: String): String = fingerprintToPin(hex)
+
+        private fun normalizeWebSocketUrl(rawUrl: String): String {
+            val trimmed = rawUrl.trim()
+            return when {
+                trimmed.startsWith("wss://", ignoreCase = true) -> "https://" + trimmed.substring(6)
+                trimmed.startsWith("ws://", ignoreCase = true) -> "http://" + trimmed.substring(5)
+                else -> trimmed
+            }
+        }
     }
 }
 

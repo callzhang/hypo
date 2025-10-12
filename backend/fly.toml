@@ -1,23 +1,20 @@
-app = "hypo-relay-staging"
+app = "hypo"
 primary_region = "iad"
 kill_signal = "SIGINT"
 kill_timeout = 5
 
 [build]
-  image = "registry.fly.io/hypo-relay-staging:latest"
+  dockerfile = "Dockerfile"
+  build-dir = "backend"
 
 [env]
   RUST_LOG = "info"
   SERVER_HOST = "0.0.0.0"
   SERVER_PORT = "8080"
-  REDIS_URL = "${REDIS_URL}"
+  REDIS_URL = "redis://127.0.0.1:6379"
   MAX_CONNECTIONS = "2000"
   RATE_LIMIT_PER_MIN = "120"
   MESSAGE_SIZE_LIMIT = "2097152"
-
-[[mounts]]
-  source = "redis"
-  destination = "/data"
 
 [[services]]
   protocol = "tcp"

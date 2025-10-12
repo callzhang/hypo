@@ -28,6 +28,8 @@ class LanDiscoveryRepository(
 ): LanDiscoverySource {
     private val applicationContext = context.applicationContext
     private val discoveryMutex = Mutex()
+    @Volatile
+    private var isDiscoveryActive = false
 
     override fun discover(serviceType: String): Flow<LanDiscoveryEvent> = callbackFlow {
         val multicastLock = (multicastLockFactory ?: { createMulticastLock() }).invoke().also { it.acquire() }
@@ -68,24 +70,57 @@ class LanDiscoveryRepository(
             }
         }
 
-        launch { restartDiscovery(serviceType, listener) }
+        startDiscovery(serviceType, listener)
 
         awaitClose {
             networkJob.cancel()
-            runCatching { nsdManager.stopServiceDiscovery(listener) }
+            stopDiscovery(listener)
             if (multicastLock.isHeld) {
                 multicastLock.release()
             }
         }
     }.flowOn(dispatcher)
 
+    private suspend fun startDiscovery(
+        serviceType: String,
+        listener: NsdManager.DiscoveryListener
+    ) {
+        discoveryMutex.withLock {
+            if (!isDiscoveryActive) {
+                runCatching {
+                    nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener)
+                    isDiscoveryActive = true
+                }
+            }
+        }
+    }
+
+    private fun stopDiscovery(listener: NsdManager.DiscoveryListener) {
+        if (isDiscoveryActive) {
+            runCatching {
+                nsdManager.stopServiceDiscovery(listener)
+                isDiscoveryActive = false
+            }
+        }
+    }
+
     private suspend fun restartDiscovery(
         serviceType: String,
         listener: NsdManager.DiscoveryListener
     ) {
         discoveryMutex.withLock {
-            runCatching { nsdManager.stopServiceDiscovery(listener) }
-            nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener)
+            if (isDiscoveryActive) {
+                runCatching {
+                    nsdManager.stopServiceDiscovery(listener)
+                    isDiscoveryActive = false
+                }
+                // Small delay to let Android NsdManager clean up the listener
+                kotlinx.coroutines.delay(100)
+            }
+            runCatching {
+                nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener)
+                isDiscoveryActive = true
+            }
         }
     }
 

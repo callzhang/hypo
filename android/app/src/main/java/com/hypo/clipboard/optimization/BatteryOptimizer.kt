@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -84,8 +85,8 @@ class BatteryOptimizer @Inject constructor(
     
     fun getClipboardMonitorInterval(): Duration {
         return when (_optimizationLevel.value) {
-            OptimizationLevel.PERFORMANCE -> 100.seconds.inWholeMilliseconds.let { Duration.milliseconds(it) }
-            OptimizationLevel.BALANCED -> 500.seconds.inWholeMilliseconds.let { Duration.milliseconds(it) }
+            OptimizationLevel.PERFORMANCE -> 100.milliseconds
+            OptimizationLevel.BALANCED -> 500.milliseconds
             OptimizationLevel.CONSERVATIVE -> 2.seconds
             OptimizationLevel.AGGRESSIVE -> 5.seconds
         }

@@ -24,19 +24,11 @@ class PairingRelayClient @Inject constructor(
     private val json: Json = Json { ignoreUnknownKeys = true }
 ) {
     private val baseUrl: HttpUrl = BuildConfig.RELAY_WS_URL
-        .replaceFirst(prefix = "wss://", replacement = "https://")
-        .replaceFirst(prefix = "ws://", replacement = "http://")
+        .replaceFirst("wss://", "https://")
+        .replaceFirst("ws://", "http://")
+        .removeSuffix("/ws")
+        .let { url -> if (url.endsWith("/")) url else "$url/" }
         .toHttpUrl()
-        .newBuilder()
-        .apply {
-            if (encodedPath().endsWith("/ws")) {
-                encodedPath(encodedPath().removeSuffix("/ws"))
-            }
-            if (encodedPath().isEmpty()) {
-                encodedPath("/")
-            }
-        }
-        .build()
 
     suspend fun claimPairingCode(
         code: String,

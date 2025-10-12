@@ -10,6 +10,7 @@ data class PairingPayload(
     @SerialName("ver") val version: String,
     @SerialName("mac_device_id") val macDeviceId: String,
     @SerialName("mac_pub_key") val macPublicKey: String,
+    @SerialName("mac_signing_pub_key") val macSigningPublicKey: String,
     val service: String,
     val port: Int,
     @SerialName("relay_hint") val relayHint: String? = null,

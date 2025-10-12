@@ -27,13 +27,13 @@ Hypo enables seamless clipboard synchronization between your Xiaomi/HyperOS devi
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐         LAN (mDNS)         ┌──────────────────┐
+┌─────────────────┐         LAN (mDNS)           ┌──────────────────┐
 │   macOS Client  │◄────────────────────────────►│ Android Client   │
-│   (Swift/SwiftUI)│                              │ (Kotlin/Compose) │
+│  (Swift/SwiftUI)│                              │ (Kotlin/Compose) │
 └────────┬────────┘                              └────────┬─────────┘
          │                                                │
-         │           Cloud Fallback (WebSocket)          │
-         └────────────────────┬─────────────────────────┘
+         │           Cloud Fallback (WebSocket)           │
+         └────────────────────┬───────────────────────────┘
                               │
                     ┌─────────▼──────────┐
                     │  Backend Relay     │
@@ -108,21 +108,48 @@ xed HypoApp.xcworkspace  # or: open HypoApp.xcworkspace
 
 ### Android Client
 
+**Quick Start (Automated Build):**
+
 ```bash
-# Navigate to Android project
-cd android
+# 1. Install prerequisites
+brew install openjdk@17
 
-# Build debug APK
-./gradlew assembleDebug
+# 2. Set up Android SDK (one-time setup)
+./scripts/setup-android-sdk.sh
 
-# Install on connected device
-adb install app/build/outputs/apk/debug/app-debug.apk
+# 3. Build APK (automated script handles environment)
+./scripts/build-android.sh
+
+# 4. Install on connected device
+$ANDROID_SDK_ROOT/platform-tools/adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+**Manual Build (Advanced):**
+
+```bash
+# Configure environment
+export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+export ANDROID_SDK_ROOT="$(pwd)/.android-sdk"
+export GRADLE_USER_HOME="$(pwd)/.gradle"
+
+# Build
+cd android
+./gradlew assembleDebug --stacktrace
+```
+
+**Output**: `android/app/build/outputs/apk/debug/app-debug.apk` (~41MB)
+
 **Requirements**:
-- Android Studio Hedgehog or later
-- Android SDK 26+ (API 26)
-- Kotlin 1.9.22 toolchain (Gradle wrapper 8.7; wrapper JAR is downloaded on demand)
+- **Java**: OpenJDK 17
+- **Android SDK**: API 34 (via setup script or Android Studio)
+- **Kotlin**: 1.9.22 (via Gradle wrapper 8.7)
+- **Build Time**: ~4-6 seconds (incremental), ~15 seconds (clean)
+
+**📖 Detailed Instructions**: See [`android/README.md`](android/README.md) for:
+- Complete build instructions
+- Xiaomi/HyperOS device setup
+- Troubleshooting common issues
+- Development tips
 
 > **Note:** The repository omits the binary `gradle-wrapper.jar` in favour of a
 > base64-encoded copy. The provided `gradlew` scripts reconstruct the official

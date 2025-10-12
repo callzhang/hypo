@@ -107,33 +107,124 @@ app/src/main/
 
 ## Getting Started
 
-### 1. Clone and Open
+### Prerequisites
+
+1. **Java Development Kit 17**
+   ```bash
+   # macOS (Homebrew)
+   brew install openjdk@17
+   
+   # Add to ~/.zshrc or ~/.bash_profile
+   export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
+   export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+   
+   # Verify
+   java -version  # Should show version 17
+   ```
+
+2. **Android SDK** (if not using Android Studio)
+   ```bash
+   # Run the automated setup script from project root
+   ./scripts/setup-android-sdk.sh
+   
+   # This installs SDK to .android-sdk/ directory
+   # Add to your shell profile:
+   export ANDROID_SDK_ROOT="/path/to/hypo/.android-sdk"
+   ```
+
+3. **Gradle User Home** (optional, for reproducible builds)
+   ```bash
+   # Add to shell profile for consistent dependency caching
+   export GRADLE_USER_HOME="/path/to/hypo/.gradle"
+   ```
+
+### Building from Source
+
+#### Option 1: Command Line (Recommended for CI/CD)
 
 ```bash
+# Navigate to project root
+cd /path/to/hypo
+
+# Set environment variables
+export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+export ANDROID_SDK_ROOT="/path/to/hypo/.android-sdk"
+export GRADLE_USER_HOME="/path/to/hypo/.gradle"
+
+# Build debug APK
 cd android
-./gradlew build
+./gradlew assembleDebug --stacktrace
+
+# APK will be at: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Open in Android Studio:
-```bash
-studio .
-```
+**Build Output:**
+- **Debug APK**: `app/build/outputs/apk/debug/app-debug.apk` (~41MB)
+- **SHA-256**: Run `shasum -a 256 app-debug.apk` to verify
 
-### 2. Configure
+#### Option 2: Android Studio
 
-Create `local.properties` if not exists:
-```properties
-sdk.dir=/Users/yourname/Library/Android/sdk
-```
+1. **Open Project**
+   ```bash
+   # Open android/ directory in Android Studio
+   studio android
+   ```
 
-### 3. Build and Run
+2. **Configure SDK**
+   - Android Studio will prompt to download missing SDK components
+   - Or manually: Settings → Appearance & Behavior → System Settings → Android SDK
 
-```bash
-./gradlew assembleDebug
-adb install app/build/outputs/apk/debug/app-debug.apk
-```
+3. **Build & Run**
+   - **Build > Make Project** (Cmd+F9)
+   - **Run > Run 'app'** (Shift+F10) - requires connected device/emulator
 
-Or in Android Studio: **Run > Run 'app'** (Shift+F10)
+### Installing on Device
+
+#### Prerequisites
+- Android device with **USB Debugging enabled**
+  - Settings → About Phone → Tap "Build Number" 7 times
+  - Settings → Developer Options → Enable "USB Debugging"
+
+#### Installation Steps
+
+1. **Connect Device via USB**
+   ```bash
+   # Verify device is connected
+   $ANDROID_SDK_ROOT/platform-tools/adb devices
+   # Should show your device in "device" state
+   ```
+
+2. **Install APK**
+   ```bash
+   $ANDROID_SDK_ROOT/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+   
+   The `-r` flag allows reinstalling with updated code.
+
+3. **Grant Permissions (First Launch)**
+   - **Notifications**: Required for sync status updates
+   - **Camera**: Required for QR code pairing
+
+#### Xiaomi/HyperOS Specific Setup
+
+Xiaomi devices have additional security restrictions:
+
+1. **Enable "Install via USB"**
+   - Settings → Additional Settings → Developer Options
+   - Enable **"Install via USB"** (may require internet connection)
+
+2. **Disable Battery Optimization**
+   - Settings → Apps → Manage Apps → Hypo
+   - Battery Saver → **No restrictions**
+
+3. **Enable Autostart**
+   - Settings → Apps → Manage Apps → Hypo
+   - Enable **Autostart**
+   - Enable **Run in background**
+
+4. **Wi-Fi Multicast (for LAN sync)**
+   - The app requests `CHANGE_WIFI_MULTICAST_STATE` permission automatically
+   - Required for local network device discovery
 
 ---
 
@@ -451,6 +542,98 @@ keytool -genkey -v -keystore hypo-release.jks -keyalg RSA -keysize 2048 -validit
 
 ---
 
+## Troubleshooting
+
+### Build Issues
+
+#### "command not found: java"
+```bash
+# Ensure Java 17 is installed and in PATH
+brew install openjdk@17
+export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+export PATH="$JAVA_HOME/bin:$PATH"
+```
+
+#### "SDK location not found"
+```bash
+# Set ANDROID_SDK_ROOT environment variable
+export ANDROID_SDK_ROOT="/path/to/hypo/.android-sdk"
+
+# Or create android/local.properties:
+sdk.dir=/path/to/android/sdk
+```
+
+#### "Cannot resolve symbol R" or missing generated code
+```bash
+# Clean and rebuild
+./gradlew clean
+./gradlew assembleDebug
+```
+
+#### KSP/Hilt compilation errors
+```bash
+# Ensure Room and Hilt annotation processors run
+./gradlew clean
+./gradlew kspDebugKotlin
+./gradlew assembleDebug
+```
+
+### Runtime Crashes
+
+#### "SecurityException: CHANGE_WIFI_MULTICAST_STATE"
+**Fixed in v0.2.0+**. Ensure you have the latest code with this permission in `AndroidManifest.xml`:
+```xml
+<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+<uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+```
+
+#### "IllegalArgumentException: listener already in use"
+**Fixed in v0.2.0+**. The NSD discovery listener lifecycle has been improved to properly stop before restart.
+
+#### App crashes on launch with Hilt errors
+Ensure all dependencies are correctly wired in `di/AppModule.kt`. Missing `@Provides` or `@Binds` can cause crashes.
+
+### Installation Issues
+
+#### "adb: command not found"
+```bash
+# Use full path to adb
+$ANDROID_SDK_ROOT/platform-tools/adb devices
+```
+
+#### "error: device unauthorized"
+- Check your phone screen for USB debugging authorization dialog
+- Tap "Allow" and check "Always allow from this computer"
+
+#### "INSTALL_FAILED_USER_RESTRICTED"
+**Xiaomi/HyperOS only**: Enable "Install via USB" in Developer Options.
+
+#### App won't stay running in background
+**Xiaomi/HyperOS**: Disable battery optimization and enable Autostart (see Xiaomi/HyperOS Setup section).
+
+### Monitoring Logs
+
+```bash
+# View all logs
+$ANDROID_SDK_ROOT/platform-tools/adb logcat
+
+# Filter for Hypo app only
+$ANDROID_SDK_ROOT/platform-tools/adb logcat -v time "*:E" | grep -E "clipboard|Hypo"
+
+# Clear logs before testing
+$ANDROID_SDK_ROOT/platform-tools/adb logcat -c
+```
+
+### Development Tips
+
+1. **Incremental Builds**: Gradle caches aggressively. Only changed files recompile.
+2. **Clean Builds**: If weird errors appear, try `./gradlew clean`.
+3. **Dependency Updates**: Check `libs.versions.toml` or `build.gradle.kts` for latest versions.
+4. **Network Issues**: Ensure device and macOS are on same Wi-Fi network for LAN sync.
+5. **USB Debugging**: Some USB-C cables are charge-only. Use a data cable.
+
+---
+
 ## Roadmap
 
 - [ ] Support multi-device sync (>2 devices)
@@ -461,6 +644,18 @@ keytool -genkey -v -keystore hypo-release.jks -keyalg RSA -keysize 2048 -validit
 
 ---
 
-**Status**: In Development  
-**Last Updated**: October 1, 2025
+## Contributing
+
+When submitting PRs:
+
+1. **Format Code**: Android Studio → Code → Reformat Code (Cmd+Option+L)
+2. **Run Tests**: `./gradlew test` should pass
+3. **Lint**: `./gradlew lint` should have no errors
+4. **Update Docs**: If you change APIs or add features
+
+---
+
+**Status**: Alpha Development - Sprint 8 (90% Complete)  
+**Last Updated**: October 12, 2025  
+**Tested On**: Xiaomi 15 Pro (HyperOS), Pixel 7 (Android 14)
 

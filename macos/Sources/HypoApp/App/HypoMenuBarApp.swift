@@ -427,18 +427,26 @@ private struct PairDeviceSheet: View {
 
             content
 
+            Divider()
+            
             HStack {
-                Button("Close") { isPresented = false }
-                    .keyboardShortcut(.cancelAction)
+                Button("Close") { 
+                    isPresented = false 
+                }
+                .keyboardShortcut(.cancelAction)
                 Spacer()
                 if isComplete {
-                    Button("Done") { isPresented = false }
-                        .keyboardShortcut(.defaultAction)
+                    Button("Done") { 
+                        isPresented = false 
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
             }
         }
         .padding(24)
-        .frame(width: 420, height: 480)
+        .frame(width: 350, height: 380)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .interactiveDismissDisabled()
         .onAppear { startIfNeeded() }
         .onChange(of: pairingMode) { _ in
             startIfNeeded(force: true)
@@ -500,55 +508,24 @@ private struct PairDeviceSheet: View {
                         .interpolation(.none)
                         .resizable()
                         .scaledToFit()
-                        .frame(maxWidth: 260, maxHeight: 260)
-                        .padding(12)
+                        .frame(width: 200, height: 200)
+                        .padding(8)
                         .background(Color.white)
-                        .cornerRadius(12)
-                        .shadow(radius: 6)
+                        .cornerRadius(8)
+                        .shadow(radius: 4)
                 } else {
                     ProgressView()
                 }
-                Text("QR payload")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                ScrollView {
-                    Text(payload)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .padding(8)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .cornerRadius(8)
-                }
-                .frame(maxHeight: 120)
-                Divider()
-                Text("Paste challenge JSON from Android to continue")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextEditor(text: $challengeInput)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(height: 100)
-                    .border(Color(nsColor: .separatorColor))
-                HStack {
-                    Spacer()
-                    Button("Process Challenge") {
-                        pairingViewModel.processChallenge(json: challengeInput)
-                    }
-                    .disabled(challengeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                if let ack = pairingViewModel.ackJSON {
-                    Divider()
-                    Text("Send acknowledgement back to Android")
+                
+                VStack(spacing: 4) {
+                    Text("Scan with Android device")
+                        .font(.subheadline.weight(.medium))
+                    Text("Pairing will complete automatically")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    ScrollView {
-                        Text(ack)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .padding(8)
-                            .background(Color(nsColor: .textBackgroundColor))
-                            .cornerRadius(8)
-                    }
-                    .frame(maxHeight: 120)
+                    Text("QR expires in 5 minutes")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
         case .awaitingHandshake:

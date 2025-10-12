@@ -54,9 +54,9 @@
 ### Next Steps 📋
 - [x] Complete Sprint 8 critical bug fixes (Android compilation) ✅
 - [x] Fix macOS Swift compilation errors ✅ *(Oct 12, 2025)*
+- [x] Deploy backend server to Fly.io staging ✅ *(Oct 12, 2025)*
 - [ ] Install and test debug APK on physical Android device
 - [ ] Implement error handling improvements
-- [ ] Set up production deployment configuration
 - [ ] Prepare beta testing recruitment
 - [ ] Finalize release candidate builds
 
@@ -257,6 +257,14 @@
   - Configured Gradle with local GRADLE_USER_HOME for dependency caching
   - Documented environment variables for shell profile integration
 - **Artifacts**: Debug APK ready at `android/app/build/outputs/apk/debug/app-debug.apk`
+- **Backend Deployment** ✅: Successfully deployed backend server to Fly.io production
+  - Installed and configured Fly.io CLI (flyctl)
+  - Updated Dockerfile to use Rust 1.83 (required for current dependencies)
+  - Configured embedded Redis in container for session management
+  - Deployed to production environment: https://hypo.fly.dev/
+  - Health checks passing on 2 machines in iad region
+  - WebSocket endpoint ready at wss://hypo.fly.dev/ws
+  - **Status**: Live and operational with 0ms downtime deployment
 ---
 
 ## 🎯 Next Review
@@ -271,7 +279,7 @@
 ### Development Environment Status
 - **macOS Development**: Requires macOS 26+ with Xcode 15+
 - **Android Development**: Any platform with Android Studio Hedgehog+
-- **Backend Development**: Any platform with Rust 1.75+
+- **Backend Development**: Any platform with Rust 1.83+ (required for current dependencies)
 
 ### Team Composition
 - **Current**: Solo development (autonomous principal engineer)

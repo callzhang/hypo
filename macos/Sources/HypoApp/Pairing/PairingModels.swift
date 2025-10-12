@@ -4,6 +4,7 @@ public struct PairingPayload: Codable, Equatable {
     public let version: String
     public let macDeviceId: UUID
     public let macPublicKey: Data
+    public let macSigningPublicKey: Data
     public let service: String
     public let port: Int
     public let relayHint: URL?
@@ -15,6 +16,7 @@ public struct PairingPayload: Codable, Equatable {
         version: String = "1",
         macDeviceId: UUID,
         macPublicKey: Data,
+        macSigningPublicKey: Data,
         service: String,
         port: Int,
         relayHint: URL?,
@@ -25,6 +27,7 @@ public struct PairingPayload: Codable, Equatable {
         self.version = version
         self.macDeviceId = macDeviceId
         self.macPublicKey = macPublicKey
+        self.macSigningPublicKey = macSigningPublicKey
         self.service = service
         self.port = port
         self.relayHint = relayHint
@@ -37,6 +40,7 @@ public struct PairingPayload: Codable, Equatable {
         case version = "ver"
         case macDeviceId = "mac_device_id"
         case macPublicKey = "mac_pub_key"
+        case macSigningPublicKey = "mac_signing_pub_key"
         case service
         case port
         case relayHint = "relay_hint"

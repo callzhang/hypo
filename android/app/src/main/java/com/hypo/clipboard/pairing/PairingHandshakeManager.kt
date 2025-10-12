@@ -1,6 +1,7 @@
 package com.hypo.clipboard.pairing
 
 import android.util.Base64
+import android.util.Log
 import com.google.crypto.tink.subtle.Ed25519Verify
 import com.google.crypto.tink.subtle.X25519
 import com.hypo.clipboard.crypto.CryptoService
@@ -25,16 +26,30 @@ class PairingHandshakeManager @Inject constructor(
     private val trustStore: PairingTrustStore,
     private val identity: DeviceIdentity,
     private val clock: Clock = Clock.systemUTC(),
-    private val json: Json = Json { ignoreUnknownKeys = true }
+    private val json: Json = Json { 
+        ignoreUnknownKeys = true
+        encodeDefaults = false
+    }
 ) {
     suspend fun initiate(qrContent: String): PairingInitiationResult = withContext(Dispatchers.Default) {
         runCatching {
+            Log.d(TAG, "Pairing initiate: Parsing QR content (${qrContent.length} chars)")
             val payload = json.decodeFromString<PairingPayload>(qrContent)
+            Log.d(TAG, "Pairing initiate: Decoded payload - version=${payload.version}, macDeviceId=${payload.macDeviceId}")
+            Log.d(TAG, "Pairing initiate: macPublicKey length=${payload.macPublicKey.length}, macSigningPublicKey length=${payload.macSigningPublicKey.length}, signature length=${payload.signature.length}")
+            
             validatePayload(payload)
             val macPublicKey = Base64.decode(payload.macPublicKey, Base64.DEFAULT)
-            val signingKey = trustStore.publicKey(payload.macDeviceId)
-                ?: throw PairingException("Untrusted macOS device. Signature key missing.")
+            Log.d(TAG, "Pairing initiate: Decoded macPublicKey, ${macPublicKey.size} bytes")
+            
+            val signingKey = Base64.decode(payload.macSigningPublicKey, Base64.DEFAULT)
+            Log.d(TAG, "Pairing initiate: Decoded macSigningPublicKey, ${signingKey.size} bytes (expected 32 for Ed25519)")
+            
+            Log.d(TAG, "Pairing initiate: Starting signature verification...")
             verifySignature(payload, signingKey)
+            Log.d(TAG, "Pairing initiate: Signature verification SUCCESS")
+            // Store the signing key for future verification
+            trustStore.store(payload.macDeviceId, signingKey)
 
             val androidPrivateKey = X25519.generatePrivateKey()
             val androidPublicKey = X25519.publicFromPrivate(androidPrivateKey)
@@ -71,8 +86,13 @@ class PairingHandshakeManager @Inject constructor(
                 )
             )
         }.getOrElse { throwable ->
+            Log.e(TAG, "Pairing initiate FAILED: ${throwable.message}", throwable)
             PairingInitiationResult.Failure(throwable.message ?: "Unable to start pairing")
         }
+    }
+    
+    companion object {
+        private const val TAG = "PairingHandshake"
     }
 
     suspend fun initiateRemote(claim: PairingClaim, androidPrivateKey: ByteArray): PairingInitiationResult =
@@ -105,6 +125,7 @@ class PairingHandshakeManager @Inject constructor(
                     version = "1",
                     macDeviceId = claim.macDeviceId,
                     macPublicKey = claim.macPublicKey,
+                    macSigningPublicKey = "", // TODO: Add to PairingClaim when remote pairing supports signing
                     service = "",
                     port = 0,
                     relayHint = null,
@@ -168,15 +189,55 @@ class PairingHandshakeManager @Inject constructor(
     }
 
     private fun verifySignature(payload: PairingPayload, signingKey: ByteArray) {
-        val verifier = Ed25519Verify(signingKey)
-        val stripped = payload.copy(signature = "")
-        val encoded = json.encodeToString(stripped).toByteArray()
-        val signature = Base64.decode(payload.signature, Base64.DEFAULT)
+        Log.d(TAG, "verifySignature: Creating Ed25519 verifier with ${signingKey.size}-byte public key")
         try {
+            val verifier = Ed25519Verify(signingKey)
+            Log.d(TAG, "verifySignature: Ed25519 verifier created successfully")
+            
+            // Encode with sorted keys to match Swift's JSONEncoder.sortedKeys
+            val stripped = payload.copy(signature = "")
+            val encoded = encodeWithSortedKeys(stripped)
+            Log.d(TAG, "verifySignature: Encoded payload for verification: ${encoded.size} bytes")
+            Log.d(TAG, "verifySignature: Payload JSON: ${String(encoded)}")
+            
+            val signature = Base64.decode(payload.signature, Base64.DEFAULT)
+            Log.d(TAG, "verifySignature: Decoded signature: ${signature.size} bytes (expected 64 for Ed25519)")
+            
             verifier.verify(signature, encoded)
+            Log.d(TAG, "verifySignature: Signature verification PASSED")
         } catch (error: GeneralSecurityException) {
-            throw PairingException("Invalid QR signature")
+            Log.e(TAG, "verifySignature: Signature verification FAILED - ${error.javaClass.simpleName}: ${error.message}", error)
+            Log.e(TAG, "verifySignature: Signing key size=${signingKey.size}, payload.signature length=${payload.signature.length}")
+            throw PairingException("Invalid QR signature: ${error.message}")
+        } catch (error: Exception) {
+            Log.e(TAG, "verifySignature: Unexpected error - ${error.javaClass.simpleName}: ${error.message}", error)
+            throw PairingException("Signature verification error: ${error.message}")
         }
+    }
+
+    /**
+     * Encode PairingPayload with sorted keys to match Swift's JSONEncoder.sortedKeys behavior.
+     * This ensures signature verification works correctly across platforms.
+     */
+    private fun encodeWithSortedKeys(payload: PairingPayload): ByteArray {
+        val sortedMap = sortedMapOf<String, Any?>()
+        sortedMap["expires_at"] = payload.expiresAt
+        sortedMap["issued_at"] = payload.issuedAt
+        sortedMap["mac_device_id"] = payload.macDeviceId
+        sortedMap["mac_pub_key"] = payload.macPublicKey
+        sortedMap["mac_signing_pub_key"] = payload.macSigningPublicKey
+        sortedMap["port"] = payload.port
+        if (payload.relayHint != null) {
+            sortedMap["relay_hint"] = payload.relayHint
+        }
+        sortedMap["service"] = payload.service
+        sortedMap["signature"] = payload.signature
+        sortedMap["ver"] = payload.version
+        
+        // Use org.json.JSONObject which maintains insertion order
+        val jsonObject = org.json.JSONObject()
+        sortedMap.forEach { (key, value) -> jsonObject.put(key, value) }
+        return jsonObject.toString().toByteArray()
     }
 
     private suspend fun CryptoService.encrypt(

@@ -1,5 +1,6 @@
 package com.hypo.clipboard.sync
 
+import android.util.Log
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
 import kotlinx.coroutines.CoroutineScope
@@ -21,11 +22,17 @@ class SyncCoordinator @Inject constructor(
     private val targets = MutableStateFlow<Set<String>>(emptySet())
 
     fun start(scope: CoroutineScope) {
-        if (job != null) return
+        if (job != null) {
+            Log.i(TAG, "⚠️  SyncCoordinator already started")
+            return
+        }
+        Log.i(TAG, "🚀 SyncCoordinator STARTING...")
         val channel = Channel<ClipboardEvent>(Channel.BUFFERED)
         eventChannel = channel
         job = scope.launch {
+            Log.i(TAG, "✅ SyncCoordinator event loop RUNNING, waiting for events...")
             for (event in channel) {
+                Log.i(TAG, "📨 Received clipboard event! Type: ${event.type}, id: ${event.id}")
                 val item = ClipboardItem(
                     id = event.id,
                     type = event.type,
@@ -36,9 +43,12 @@ class SyncCoordinator @Inject constructor(
                     createdAt = event.createdAt,
                     isPinned = false
                 )
+                Log.i(TAG, "💾 Upserting item to repository...")
                 repository.upsert(item)
+                Log.i(TAG, "✅ Item saved to database!")
 
                 targets.value.forEach { target ->
+                    Log.i(TAG, "📤 Syncing to target: $target")
                     runCatching { syncEngine.sendClipboard(item, target) }
                 }
             }
@@ -53,10 +63,16 @@ class SyncCoordinator @Inject constructor(
     }
 
     suspend fun onClipboardEvent(event: ClipboardEvent) {
+        Log.i(TAG, "📬 onClipboardEvent called! Sending to channel...")
         eventChannel?.send(event)
+        Log.i(TAG, "✅ Event sent to channel successfully")
     }
 
     fun setTargetDevices(deviceIds: Set<String>) {
         targets.value = deviceIds
+    }
+
+    companion object {
+        private const val TAG = "SyncCoordinator"
     }
 }

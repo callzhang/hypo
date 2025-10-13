@@ -5,10 +5,22 @@ import AppKit
 #endif
 
 public struct HypoMenuBarApp: App {
-    @StateObject private var viewModel = ClipboardHistoryViewModel()
+    @StateObject private var viewModel: ClipboardHistoryViewModel
     @State private var monitor: ClipboardMonitor?
 
-    public init() {}
+    public init() {
+        // Create WebSocket server and transport infrastructure
+        let server = LanWebSocketServer()
+        let provider = DefaultTransportProvider(server: server)
+        let transportManager = TransportManager(
+            provider: provider,
+            webSocketServer: server
+        )
+        
+        _viewModel = StateObject(wrappedValue: ClipboardHistoryViewModel(
+            transportManager: transportManager
+        ))
+    }
 
     public var body: some Scene {
         MenuBarExtra("📋", systemImage: "doc.on.clipboard.fill") {

@@ -41,6 +41,7 @@ class ClipboardSyncService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var listener: ClipboardListener
+    private lateinit var poller: com.hypo.clipboard.sync.ClipboardPoller
     private lateinit var notificationManager: NotificationManagerCompat
     private var notificationJob: Job? = null
     private var latestPreview: String? = null
@@ -50,31 +51,54 @@ class ClipboardSyncService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.i("ClipboardSyncService", "🚀🚀🚀 SERVICE onCreate() CALLED! Starting initialization...")
         notificationManager = NotificationManagerCompat.from(this)
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
+        android.util.Log.i("ClipboardSyncService", "✅ Service started foreground with notification")
 
         val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val parser = ClipboardParser(contentResolver)
+        val clipboardCallback: suspend (com.hypo.clipboard.sync.ClipboardEvent) -> Unit = { event ->
+            syncCoordinator.onClipboardEvent(event)
+        }
+        
         listener = ClipboardListener(
             clipboardManager = clipboardManager,
-            parser = ClipboardParser(contentResolver),
-            onClipboardChanged = { event ->
-                syncCoordinator.onClipboardEvent(event)
-            },
+            parser = parser,
+            onClipboardChanged = clipboardCallback,
             scope = scope
         )
+        
+        // Add poller as fallback for MIUI and other devices where listener doesn't work
+        poller = com.hypo.clipboard.sync.ClipboardPoller(
+            clipboardManager = clipboardManager,
+            parser = parser,
+            onClipboardChanged = clipboardCallback,
+            scope = scope,
+            pollIntervalMs = 2000L // Poll every 2 seconds
+        )
 
+        android.util.Log.i("ClipboardSyncService", "🎯 Starting sync coordinator...")
         syncCoordinator.start(scope)
+        android.util.Log.i("ClipboardSyncService", "🌐 Starting transport manager...")
         transportManager.start(buildLanRegistrationConfig())
+        android.util.Log.i("ClipboardSyncService", "📋 Starting clipboard listener...")
         listener.start()
+        android.util.Log.i("ClipboardSyncService", "🔄 Starting clipboard poller (fallback for MIUI)...")
+        poller.start()
+        android.util.Log.i("ClipboardSyncService", "👀 Observing latest item...")
         observeLatestItem()
+        android.util.Log.i("ClipboardSyncService", "📱 Registering screen state receiver...")
         registerScreenStateReceiver()
+        android.util.Log.i("ClipboardSyncService", "✅✅✅ SERVICE FULLY INITIALIZED AND READY!")
     }
 
     override fun onDestroy() {
         notificationJob?.cancel()
         unregisterScreenStateReceiver()
         listener.stop()
+        poller.stop()
         syncCoordinator.stop()
         transportManager.stop()
         scope.coroutineContext.cancelChildren()

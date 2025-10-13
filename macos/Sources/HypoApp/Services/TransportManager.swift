@@ -5,6 +5,9 @@ import Combine
 #if canImport(AppKit)
 import AppKit
 #endif
+#if canImport(os)
+import os
+#endif
 
 @MainActor
 public final class TransportManager {
@@ -18,10 +21,12 @@ public final class TransportManager {
     private let dateProvider: () -> Date
     private let analytics: TransportAnalytics
     private var lanConfiguration: BonjourPublisher.Configuration
+    private let webSocketServer: LanWebSocketServer
 
     private var discoveryTask: Task<Void, Never>?
     private var pruneTask: Task<Void, Never>?
     private var isAdvertising = false
+    private var isServerRunning = false
     private var lanPeers: [String: DiscoveredPeer] = [:]
     private var lastSeen: [String: Date]
 #if canImport(Combine)
@@ -52,7 +57,8 @@ public final class TransportManager {
         pruneInterval: TimeInterval = 60,
         stalePeerInterval: TimeInterval = 300,
         dateProvider: @escaping () -> Date = Date.init,
-        analytics: TransportAnalytics = NoopTransportAnalytics()
+        analytics: TransportAnalytics = NoopTransportAnalytics(),
+        webSocketServer: LanWebSocketServer
     ) {
         self.provider = provider
         self.preferenceStorage = preferenceStorage
@@ -65,6 +71,10 @@ public final class TransportManager {
         self.analytics = analytics
         self.lanConfiguration = lanConfiguration ?? TransportManager.defaultLanConfiguration()
         self.lastSeen = discoveryCache.load()
+        self.webSocketServer = webSocketServer
+        
+        // Set up WebSocket server delegate
+        webSocketServer.delegate = self
 
         #if canImport(AppKit)
         lifecycleObserver = ApplicationLifecycleObserver(
@@ -78,6 +88,13 @@ public final class TransportManager {
                 Task { await self?.shutdownLanServices() }
             }
         )
+        // Start LAN services immediately (menu bar apps don't trigger didBecomeActive on launch)
+        Task {
+            let logPath = "/tmp/hypo_debug.log"
+            try? "🔷 [TransportManager] Init: Starting activation task\n".appendToFile(path: logPath)
+            await activateLanServices()
+            try? "🔷 [TransportManager] Init: Activation task completed\n".appendToFile(path: logPath)
+        }
         #else
         Task { await activateLanServices() }
         #endif
@@ -213,9 +230,29 @@ public final class TransportManager {
     }
 
     private func activateLanServices() async {
+        let msg = "🔵 [TransportManager] activateLanServices called, port=\(lanConfiguration.port), isServerRunning=\(isServerRunning)\n"
+        try? msg.appendToFile(path: "/tmp/hypo_debug.log")
         if !isAdvertising, lanConfiguration.port > 0 {
             publisher.start(with: lanConfiguration)
             isAdvertising = true
+            try? "🟢 [TransportManager] Bonjour publisher started\n".appendToFile(path: "/tmp/hypo_debug.log")
+        }
+        
+        // Start WebSocket server
+        try? "🟡 [TransportManager] About to check server: isServerRunning=\(isServerRunning), port=\(lanConfiguration.port)\n".appendToFile(path: "/tmp/hypo_debug.log")
+        if !isServerRunning, lanConfiguration.port > 0 {
+            try? "🟡 [TransportManager] Attempting to start WebSocket server...\n".appendToFile(path: "/tmp/hypo_debug.log")
+            do {
+                try webSocketServer.start(port: lanConfiguration.port)
+                isServerRunning = true
+                try? "✅ [TransportManager] WebSocket server started successfully!\n".appendToFile(path: "/tmp/hypo_debug.log")
+            } catch {
+                try? "❌ [TransportManager] Failed to start WebSocket server: \(error.localizedDescription)\n".appendToFile(path: "/tmp/hypo_debug.log")
+                #if canImport(os)
+                let serverLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
+                serverLogger.error("Failed to start WebSocket server: \(error.localizedDescription)")
+                #endif
+            }
         }
 
         guard discoveryTask == nil else { return }
@@ -238,6 +275,10 @@ public final class TransportManager {
         if isAdvertising {
             publisher.stop()
             isAdvertising = false
+        }
+        if isServerRunning {
+            webSocketServer.stop()
+            isServerRunning = false
         }
     }
 
@@ -556,12 +597,24 @@ public final class TransportManager {
     private static func defaultLanConfiguration() -> BonjourPublisher.Configuration {
         let hostName = ProcessInfo.processInfo.hostName
         let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        
+        // Generate or load device ID from UserDefaults
+        let defaults = UserDefaults.standard
+        let deviceId: String
+        if let existing = defaults.string(forKey: "com.hypo.deviceId") {
+            deviceId = existing
+        } else {
+            deviceId = UUID().uuidString
+            defaults.set(deviceId, forKey: "com.hypo.deviceId")
+        }
+        
         return BonjourPublisher.Configuration(
             serviceName: hostName,
             port: 7010,
             version: bundleVersion,
             fingerprint: "uninitialized",
-            protocols: ["ws+tls"]
+            protocols: ["ws+tls"],
+            deviceId: deviceId
         )
     }
 }
@@ -713,3 +766,45 @@ private final class ApplicationLifecycleObserver {
     }
 }
 #endif
+
+// MARK: - LanWebSocketServerDelegate
+
+extension TransportManager: LanWebSocketServerDelegate {
+    nonisolated public func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {
+        // For auto-discovery pairing, we should show a system notification
+        // asking the user to approve the pairing request
+        // For now, log it
+        #if canImport(os)
+        let pairingLogger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
+        pairingLogger.info("Received pairing challenge from: \(challenge.androidDeviceName)")
+        #endif
+        
+        // TODO: Show user notification/dialog to approve pairing
+        // For now, this would need to be handled by a PairingViewModel
+        // that listens for these events
+    }
+    
+    nonisolated public func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {
+        // Forward clipboard data to the transport for processing
+        #if canImport(os)
+        let syncLogger = Logger(subsystem: "com.hypo.clipboard", category: "sync")
+        syncLogger.info("Received clipboard data from connection: \(connection.uuidString)")
+        #endif
+        
+        // TODO: Process incoming clipboard data through SyncEngine
+    }
+    
+    nonisolated public func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID) {
+        #if canImport(os)
+        let connLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
+        connLogger.info("WebSocket connection established: \(id.uuidString)")
+        #endif
+    }
+    
+    nonisolated public func server(_ server: LanWebSocketServer, didCloseConnection id: UUID) {
+        #if canImport(os)
+        let closeLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
+        closeLogger.info("WebSocket connection closed: \(id.uuidString)")
+        #endif
+    }
+}

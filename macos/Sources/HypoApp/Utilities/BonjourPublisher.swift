@@ -18,6 +18,9 @@ public final class BonjourPublisher: BonjourPublishing {
         public let version: String
         public let fingerprint: String
         public let protocols: [String]
+        public let deviceId: String?
+        public let publicKey: String?
+        public let signingPublicKey: String?
 
         public init(
             domain: String = "local.",
@@ -26,7 +29,10 @@ public final class BonjourPublisher: BonjourPublishing {
             port: Int,
             version: String,
             fingerprint: String,
-            protocols: [String]
+            protocols: [String],
+            deviceId: String? = nil,
+            publicKey: String? = nil,
+            signingPublicKey: String? = nil
         ) {
             self.domain = domain
             self.serviceType = serviceType
@@ -35,6 +41,9 @@ public final class BonjourPublisher: BonjourPublishing {
             self.version = version
             self.fingerprint = fingerprint
             self.protocols = protocols
+            self.deviceId = deviceId
+            self.publicKey = publicKey
+            self.signingPublicKey = signingPublicKey
         }
 
         public var txtRecord: [String: String] {
@@ -43,6 +52,18 @@ public final class BonjourPublisher: BonjourPublishing {
                 "protocols": protocols.joined(separator: ",")
             ]
             record["fingerprint_sha256"] = fingerprint
+            
+            // Add pairing information for LAN auto-discovery
+            if let deviceId = deviceId {
+                record["device_id"] = deviceId
+            }
+            if let publicKey = publicKey {
+                record["pub_key"] = publicKey
+            }
+            if let signingPublicKey = signingPublicKey {
+                record["signing_pub_key"] = signingPublicKey
+            }
+            
             return record
         }
     }

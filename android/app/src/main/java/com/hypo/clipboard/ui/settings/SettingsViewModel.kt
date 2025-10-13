@@ -58,6 +58,12 @@ class SettingsViewModel @Inject constructor(
     fun onAutoDeleteDaysChanged(days: Int) {
         viewModelScope.launch { settingsRepository.setAutoDeleteDays(days) }
     }
+    
+    fun removeDevice(peer: DiscoveredPeer) {
+        viewModelScope.launch {
+            transportManager.removePeer(peer.serviceName)
+        }
+    }
 }
 
 data class SettingsUiState(

@@ -150,6 +150,7 @@ class TransportManager(
         }
         return removed
     }
+    
 
     suspend fun connect(
         lanDialer: suspend () -> LanDialResult,
@@ -263,7 +264,7 @@ class TransportManager(
         }
     }
 
-    private fun removePeer(serviceName: String) {
+    fun removePeer(serviceName: String) {
         synchronized(stateLock) {
             val removed = peersByService.remove(serviceName)
             if (removed != null) {

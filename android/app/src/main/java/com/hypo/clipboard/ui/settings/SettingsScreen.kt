@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -53,7 +55,8 @@ fun SettingsRoute(
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
         onAutoDeleteDaysChanged = viewModel::onAutoDeleteDaysChanged,
         onOpenBatterySettings = onOpenBatterySettings,
-        onStartPairing = onStartPairing
+        onStartPairing = onStartPairing,
+        onRemoveDevice = viewModel::removeDevice
     )
 }
 
@@ -67,6 +70,7 @@ fun SettingsScreen(
     onAutoDeleteDaysChanged: (Int) -> Unit,
     onOpenBatterySettings: () -> Unit,
     onStartPairing: () -> Unit,
+    onRemoveDevice: (DiscoveredPeer) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Scaffold(
@@ -104,7 +108,11 @@ fun SettingsScreen(
             }
 
             item {
-                DevicesSection(peers = state.discoveredPeers, onStartPairing = onStartPairing)
+                DevicesSection(
+                    peers = state.discoveredPeers,
+                    onStartPairing = onStartPairing,
+                    onRemoveDevice = onRemoveDevice
+                )
             }
         }
     }
@@ -236,7 +244,11 @@ private fun BatterySection(onOpenBatterySettings: () -> Unit) {
 }
 
 @Composable
-private fun DevicesSection(peers: List<DiscoveredPeer>, onStartPairing: () -> Unit) {
+private fun DevicesSection(
+    peers: List<DiscoveredPeer>,
+    onStartPairing: () -> Unit,
+    onRemoveDevice: (DiscoveredPeer) -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(imageVector = Icons.Filled.Devices, contentDescription = null)
@@ -256,7 +268,7 @@ private fun DevicesSection(peers: List<DiscoveredPeer>, onStartPairing: () -> Un
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 peers.forEach { peer ->
-                    DeviceRow(peer)
+                    DeviceRow(peer = peer, onRemove = { onRemoveDevice(peer) })
                 }
             }
         }
@@ -267,18 +279,36 @@ private fun DevicesSection(peers: List<DiscoveredPeer>, onStartPairing: () -> Un
 }
 
 @Composable
-private fun DeviceRow(peer: DiscoveredPeer) {
+private fun DeviceRow(peer: DiscoveredPeer, onRemove: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(text = peer.serviceName, style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = "${peer.host}:${peer.port}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(text = peer.serviceName, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "${peer.host}:${peer.port}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = onRemove) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "Remove device",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }

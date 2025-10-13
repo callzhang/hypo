@@ -139,6 +139,15 @@ private fun ClipboardCard(item: ClipboardItem) {
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.weight(1f))
+                // Device indicator
+                val deviceLabel = item.deviceId.take(8)
+                val isLocal = item.metadata?.get("isLocal") == "true"
+                Text(
+                    text = if (isLocal) "📱 This device" else "💻 $deviceLabel",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
                 Text(
                     text = formatter.format(item.createdAt.atZone(ZoneId.systemDefault())),
                     style = MaterialTheme.typography.bodySmall,

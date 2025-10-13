@@ -36,7 +36,7 @@ class RelayWebSocketClientTest {
         val clock = FrozenClock(Instant.parse("2025-10-08T12:00:00Z"))
         val client = RelayWebSocketClient(
             config = TlsWebSocketConfig(
-                url = "wss://hypo-relay-staging.fly.dev/ws",
+                url = "wss://hypo.fly.dev/ws",
                 fingerprintSha256 = "abcd",
                 environment = "cloud"
             ),
@@ -55,7 +55,7 @@ class RelayWebSocketClientTest {
 
         val event = analytics.recorded.single() as TransportAnalyticsEvent.PinningFailure
         assertEquals("cloud", event.environment)
-        assertEquals("hypo-relay-staging.fly.dev", event.host)
+        assertEquals("hypo.fly.dev", event.host)
         assertEquals("pin mismatch", event.message)
         assertEquals(clock.instant(), event.occurredAt)
     }
@@ -89,7 +89,7 @@ class RelayWebSocketClientTest {
 
     private class FakeWebSocket : WebSocket {
         private val request = Request.Builder()
-            .url("https://hypo-relay-staging.fly.dev/ws")
+            .url("https://hypo.fly.dev/ws")
             .build()
 
         override fun request(): Request = request

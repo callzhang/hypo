@@ -2,7 +2,7 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
-## [Sprint 9] - 2025-10-12 - LAN Auto-Discovery (In Progress)
+## [Sprint 9] - 2025-10-12 - LAN Auto-Discovery ✅ COMPLETE
 
 ### Added (macOS)
 - **LanWebSocketServer**: Network.framework WebSocket server listening on port 7010
@@ -23,10 +23,28 @@ All notable changes to the Hypo project will be documented in this file.
 - macOS now capable of receiving WebSocket connections from Android
 - Fixed QR code signature verification by adding sorted JSON keys
 
-### In Progress
-- Android auto-discovery pairing UI
-- Android tap-to-pair flow implementation
-- End-to-end testing of LAN-first clipboard sync
+### Added (Android)
+- **LanPairingViewModel**: State management for auto-discovery pairing
+  - Uses existing LanDiscoverySource for mDNS device discovery
+  - Manages pairing flow: Discovering → DevicesFound → Pairing → Success/Error
+  - Integrates with PairingHandshakeManager for secure handshake
+- **Auto-Discovery UI**: Three-tab interface (LAN | QR | Code)
+  - AutoDiscoveryContent composable displays discovered macOS devices
+  - DeviceCard shows device name, IP:port, and security status (🔒 Secured)
+  - Real-time device discovery with automatic list updates
+  - Tap-to-pair interaction initiates WebSocket connection
+- **PairingMode.AutoDiscovery**: Set as default pairing mode for best UX
+
+### Changed (Android)
+- Default pairing mode changed from QR to AutoDiscovery
+- PairingScreen now supports three modes with tab navigation
+- Fixed imports for DeviceKeyStore and DeviceIdentity
+- Build Status: ✅ Compiles successfully, APK at `android/app/build/outputs/apk/debug/app-debug.apk`
+
+### Ready for Testing
+- End-to-end LAN pairing flow (Android discovers macOS via mDNS)
+- Tap-to-pair initiates encrypted handshake over WebSocket
+- Bidirectional clipboard sync over LAN
 
 ### Technical Details
 - Uses Network.framework for production-ready WebSocket server

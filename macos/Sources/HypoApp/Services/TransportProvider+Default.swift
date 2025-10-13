@@ -1,10 +1,23 @@
 import Foundation
 
-public struct DefaultTransportProvider: TransportProvider {
-    public init() {}
+@MainActor
+public final class DefaultTransportProvider: TransportProvider {
+    private let server: LanWebSocketServer
+    private let lanTransport: LanSyncTransport
+    
+    public init(server: LanWebSocketServer) {
+        self.server = server
+        self.lanTransport = LanSyncTransport(server: server)
+    }
 
     public func preferredTransport(for preference: TransportPreference) -> SyncTransport {
-        NoopSyncTransport(preference: preference)
+        switch preference {
+        case .lanFirst:
+            return lanTransport
+        case .cloudOnly:
+            // TODO: Implement CloudRelayTransport when cloud fallback is needed
+            return lanTransport
+        }
     }
 }
 

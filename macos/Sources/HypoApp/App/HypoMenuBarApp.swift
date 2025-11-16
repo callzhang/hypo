@@ -9,15 +9,20 @@ public struct HypoMenuBarApp: App {
     @State private var monitor: ClipboardMonitor?
 
     public init() {
-        // Create WebSocket server and transport infrastructure
+        // Create shared dependencies
+        let historyStore = HistoryStore()
         let server = LanWebSocketServer()
         let provider = DefaultTransportProvider(server: server)
+        
+        // Create transport manager with history store for incoming clipboard handling
         let transportManager = TransportManager(
             provider: provider,
-            webSocketServer: server
+            webSocketServer: server,
+            historyStore: historyStore
         )
         
         _viewModel = StateObject(wrappedValue: ClipboardHistoryViewModel(
+            store: historyStore,
             transportManager: transportManager
         ))
     }
@@ -39,7 +44,11 @@ public struct HypoMenuBarApp: App {
 
     private func setupMonitor() {
         guard monitor == nil else { return }
-        let monitor = ClipboardMonitor()
+        let deviceIdentity = DeviceIdentity()
+        let monitor = ClipboardMonitor(
+            deviceId: deviceIdentity.deviceId,
+            deviceName: deviceIdentity.deviceName
+        )
         monitor.delegate = viewModel
         monitor.start()
         self.monitor = monitor

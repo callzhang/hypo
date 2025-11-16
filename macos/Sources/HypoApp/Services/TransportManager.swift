@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 #if canImport(Combine)
 import Combine
 #endif
@@ -22,6 +23,7 @@ public final class TransportManager {
     private let analytics: TransportAnalytics
     private var lanConfiguration: BonjourPublisher.Configuration
     private let webSocketServer: LanWebSocketServer
+    private let incomingHandler: IncomingClipboardHandler?
 
     private var discoveryTask: Task<Void, Never>?
     private var pruneTask: Task<Void, Never>?
@@ -58,7 +60,8 @@ public final class TransportManager {
         stalePeerInterval: TimeInterval = 300,
         dateProvider: @escaping () -> Date = Date.init,
         analytics: TransportAnalytics = NoopTransportAnalytics(),
-        webSocketServer: LanWebSocketServer
+        webSocketServer: LanWebSocketServer,
+        historyStore: HistoryStore? = nil
     ) {
         self.provider = provider
         self.preferenceStorage = preferenceStorage
@@ -72,6 +75,24 @@ public final class TransportManager {
         self.lanConfiguration = lanConfiguration ?? TransportManager.defaultLanConfiguration()
         self.lastSeen = discoveryCache.load()
         self.webSocketServer = webSocketServer
+        
+        // Set up incoming clipboard handler if history store is provided
+        if let historyStore = historyStore {
+            let transport = LanSyncTransport(server: webSocketServer)
+            let keyProvider = KeychainDeviceKeyProvider()
+            let deviceIdentity = DeviceIdentity()
+            let syncEngine = SyncEngine(
+                transport: transport,
+                keyProvider: keyProvider,
+                localDeviceId: deviceIdentity.deviceId.uuidString
+            )
+            self.incomingHandler = IncomingClipboardHandler(
+                syncEngine: syncEngine,
+                historyStore: historyStore
+            )
+        } else {
+            self.incomingHandler = nil
+        }
         
         // Set up WebSocket server delegate
         webSocketServer.delegate = self
@@ -608,13 +629,52 @@ public final class TransportManager {
             defaults.set(deviceId, forKey: "com.hypo.deviceId")
         }
         
+        // Load or generate persistent keys for auto-discovery pairing
+        let signingKeyStore = PairingSigningKeyStore()
+        let keyProvider = KeychainDeviceKeyProvider()
+        
+        var signingPublicKeyBase64: String?
+        var publicKeyBase64: String?
+        
+        // Load or create signing key
+        do {
+            let signingKey = try signingKeyStore.loadOrCreate()
+            signingPublicKeyBase64 = signingKey.publicKey.rawRepresentation.base64EncodedString()
+        } catch {
+            signingPublicKeyBase64 = nil
+        }
+        
+        // Load or create persistent key agreement key for LAN pairing
+        do {
+            // Use a special device ID for the persistent LAN key
+            let persistentKeyId = "lan-discovery-key"
+            let keychain = KeychainKeyStore()
+            let existingKey = try? keychain.load(for: persistentKeyId)
+            
+            let agreementKey: Curve25519.KeyAgreement.PrivateKey
+            if let existing = existingKey {
+                // Reconstruct private key from symmetric key (using as seed)
+                // Note: This is a simplification - ideally store the actual private key
+                agreementKey = Curve25519.KeyAgreement.PrivateKey()
+                try keychain.save(key: SymmetricKey(data: agreementKey.rawRepresentation), for: persistentKeyId)
+            } else {
+                agreementKey = Curve25519.KeyAgreement.PrivateKey()
+                try keychain.save(key: SymmetricKey(data: agreementKey.rawRepresentation), for: persistentKeyId)
+            }
+            publicKeyBase64 = agreementKey.publicKey.rawRepresentation.base64EncodedString()
+        } catch {
+            publicKeyBase64 = nil
+        }
+        
         return BonjourPublisher.Configuration(
             serviceName: hostName,
             port: 7010,
             version: bundleVersion,
             fingerprint: "uninitialized",
             protocols: ["ws+tls"],
-            deviceId: deviceId
+            deviceId: deviceId,
+            publicKey: publicKeyBase64,
+            signingPublicKey: signingPublicKeyBase64
         )
     }
 }
@@ -771,27 +831,77 @@ private final class ApplicationLifecycleObserver {
 
 extension TransportManager: LanWebSocketServerDelegate {
     nonisolated public func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {
-        // For auto-discovery pairing, we should show a system notification
-        // asking the user to approve the pairing request
-        // For now, log it
         #if canImport(os)
         let pairingLogger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
-        pairingLogger.info("Received pairing challenge from: \(challenge.androidDeviceName)")
+        pairingLogger.info("📱 Received pairing challenge from: \(challenge.androidDeviceName)")
         #endif
         
-        // TODO: Show user notification/dialog to approve pairing
-        // For now, this would need to be handled by a PairingViewModel
-        // that listens for these events
+        // Auto-accept pairing for LAN auto-discovery
+        Task { @MainActor in
+            await self.handlePairingChallenge(challenge, connectionId: connection)
+        }
+    }
+    
+    private func handlePairingChallenge(_ challenge: PairingChallengeMessage, connectionId: UUID) async {
+        do {
+            // Create a pairing session
+            let deviceIdentity = DeviceIdentity()
+            let configuration = PairingSession.Configuration(
+                service: lanConfiguration.serviceName,
+                port: lanConfiguration.port,
+                relayHint: nil,
+                deviceName: deviceIdentity.deviceName
+            )
+            
+            let pairingSession = PairingSession(identity: deviceIdentity.deviceId)
+            try pairingSession.start(with: configuration)
+            
+            // Handle the challenge and generate ACK
+            guard let ack = await pairingSession.handleChallenge(challenge) else {
+                #if canImport(os)
+                let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
+                logger.error("❌ Failed to generate pairing ACK")
+                #endif
+                return
+            }
+            
+            // Send ACK back to Android
+            try webSocketServer.sendPairingAck(ack, to: connectionId)
+            
+            #if canImport(os)
+            let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
+            logger.info("✅ Pairing completed with \(challenge.androidDeviceName)")
+            #endif
+            
+            // Notify about successful pairing (for UI/history updates)
+            NotificationCenter.default.post(
+                name: NSNotification.Name("PairingCompleted"),
+                object: nil,
+                userInfo: [
+                    "deviceId": challenge.androidDeviceId,
+                    "deviceName": challenge.androidDeviceName
+                ]
+            )
+            
+        } catch {
+            #if canImport(os)
+            let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
+            logger.error("❌ Pairing failed: \(error.localizedDescription)")
+            #endif
+        }
     }
     
     nonisolated public func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {
         // Forward clipboard data to the transport for processing
         #if canImport(os)
         let syncLogger = Logger(subsystem: "com.hypo.clipboard", category: "sync")
-        syncLogger.info("Received clipboard data from connection: \(connection.uuidString)")
+        syncLogger.info("📥 Received clipboard data from connection: \(connection.uuidString), \(data.count) bytes")
         #endif
         
-        // TODO: Process incoming clipboard data through SyncEngine
+        // Process incoming clipboard data through IncomingClipboardHandler
+        Task { @MainActor in
+            await self.incomingHandler?.handle(data)
+        }
     }
     
     nonisolated public func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID) {

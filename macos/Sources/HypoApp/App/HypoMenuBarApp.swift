@@ -30,7 +30,7 @@ public struct HypoMenuBarApp: App {
     public var body: some Scene {
         MenuBarExtra("📋", systemImage: "doc.on.clipboard.fill") {
             MenuBarContentView(viewModel: viewModel)
-                .frame(width: 360, height: 480)
+                .frame(width: 520, height: 650)
                 .environmentObject(viewModel)
                 .preferredColorScheme(viewModel.appearancePreference.colorScheme)
                 .task { await viewModel.start() }

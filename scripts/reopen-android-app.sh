@@ -40,18 +40,21 @@ fi
 
 echo -e "${YELLOW}Opening Hypo app...${NC}"
 
+# Use debug package name for debug builds
+PACKAGE_NAME="com.hypo.clipboard.debug"
+
 # Try multiple methods to open the app (suppress errors to try all methods)
-if "$ADB" shell am start -n com.hypo.clipboard/.MainActivity >/dev/null 2>&1; then
+if "$ADB" shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" >/dev/null 2>&1; then
     echo -e "${GREEN}✅ App opened successfully${NC}"
     exit 0
 fi
 
-if "$ADB" shell am start -a android.intent.action.MAIN -n com.hypo.clipboard/.MainActivity >/dev/null 2>&1; then
+if "$ADB" shell am start -a android.intent.action.MAIN -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" >/dev/null 2>&1; then
     echo -e "${GREEN}✅ App opened successfully${NC}"
     exit 0
 fi
 
-if "$ADB" shell monkey -p com.hypo.clipboard -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; then
+if "$ADB" shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; then
     echo -e "${GREEN}✅ App opened successfully${NC}"
     exit 0
 fi

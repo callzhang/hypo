@@ -8,6 +8,7 @@ import com.hypo.clipboard.transport.ActiveTransport
 import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
 import com.hypo.clipboard.ui.components.DeviceConnectionStatus
+import com.hypo.clipboard.sync.SyncCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.delay
@@ -24,7 +25,8 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val transportManager: TransportManager,
     private val deviceKeyStore: com.hypo.clipboard.sync.DeviceKeyStore,
-    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
+    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient,
+    private val syncCoordinator: SyncCoordinator
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -191,6 +193,7 @@ class SettingsViewModel @Inject constructor(
             }
             // Forget the paired device (clears transport status and device name)
             transportManager.forgetPairedDevice(deviceId)
+            syncCoordinator.removeTargetDevice(deviceId)
             // Delete the encryption key
             runCatching { deviceKeyStore.deleteKey(deviceId) }
             android.util.Log.d("SettingsViewModel", "✅ Device removed: $deviceId")

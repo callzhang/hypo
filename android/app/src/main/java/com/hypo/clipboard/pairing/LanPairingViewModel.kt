@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hypo.clipboard.sync.DeviceKeyStore
 import com.hypo.clipboard.sync.DeviceIdentity
+import com.hypo.clipboard.sync.SyncCoordinator
 import com.hypo.clipboard.transport.ActiveTransport
 import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
@@ -44,7 +45,8 @@ class LanPairingViewModel @Inject constructor(
     private val pairingHandshakeManager: PairingHandshakeManager,
     private val deviceKeyStore: DeviceKeyStore,
     private val identity: DeviceIdentity,
-    private val transportManager: com.hypo.clipboard.transport.TransportManager
+    private val transportManager: com.hypo.clipboard.transport.TransportManager,
+    private val syncCoordinator: SyncCoordinator
 ) : ViewModel() {
     
     private val _state = MutableStateFlow<LanPairingUiState>(LanPairingUiState.Discovering)
@@ -217,21 +219,36 @@ class LanPairingViewModel @Inject constructor(
                         
                         when (completionResult) {
                             is PairingCompletionResult.Success -> {
-                                Log.d(TAG, "✅ Pairing handshake completed! Key saved for device: ${completionResult.macDeviceId}")
+                                val deviceId = completionResult.macDeviceId ?: device.attributes["device_id"] ?: device.serviceName
+                                val deviceName = completionResult.macDeviceName ?: device.serviceName
+                                
+                                Log.d(TAG, "✅ Pairing handshake completed! Key saved for device: $deviceId")
+                                
+                                // Step 1: Verify key was saved (Issue 2b checklist)
+                                Log.d(TAG, "🔑 Verifying key was saved for device: $deviceId")
+                                val savedKey = deviceKeyStore.loadKey(deviceId)
+                                if (savedKey != null) {
+                                    Log.d(TAG, "✅ Key exists in store: ${savedKey.size} bytes")
+                                } else {
+                                    Log.e(TAG, "❌ Key missing from store! Available keys: ${deviceKeyStore.getAllDeviceIds()}")
+                                }
                                 
                                 // Add to transport manager
                                 transportManager.addPeer(device)
                                 
                                 // Mark device as connected since we just established a WebSocket connection during pairing
-                                // The deviceId is the macDeviceId from the ACK, or fallback to serviceName
-                                val deviceId = completionResult.macDeviceId ?: device.attributes["device_id"] ?: device.serviceName
                                 transportManager.markDeviceConnected(deviceId, ActiveTransport.LAN)
                                 
                                 // Store device name for display when device is offline
-                                val deviceName = completionResult.macDeviceName ?: device.serviceName
                                 transportManager.persistDeviceName(deviceId, deviceName)
                                 
                                 Log.d(TAG, "Marked device $deviceId as connected via LAN, name=$deviceName")
+                                
+                                // Step 2: Ensure sync targets include this device
+                                Log.d(TAG, "🎯 Registering device as manual sync target...")
+                                syncCoordinator.addTargetDevice(deviceId)
+                                val targets = syncCoordinator.targets.value
+                                Log.d(TAG, "✅ Target devices now: $targets (count: ${targets.size})")
                                 
                                 _state.value = LanPairingUiState.Success(device.serviceName)
                                 Log.d(TAG, "Pairing completed successfully with ${device.serviceName}")
@@ -298,4 +315,3 @@ class LanPairingViewModel @Inject constructor(
         wsClient = null
     }
 }
-

@@ -1,9 +1,12 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
+    id("io.sentry.android.gradle")
 }
 
 android {
@@ -76,6 +79,31 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+// Sentry configuration
+// Load .env file if it exists
+val envFile = rootProject.file("../.env")
+val envProperties = Properties()
+if (envFile.exists()) {
+    envFile.inputStream().use { envProperties.load(it) }
+}
+
+sentry {
+    // Generates a source bundle and uploads your source code to Sentry
+    // This enables source context, allowing you to see your source
+    // code as part of your stack traces in Sentry
+    includeSourceContext = true
+    
+    org = "stardust-dm"
+    projectName = "clipboard"
+    // Try environment variable first, then .env file, then empty string
+    authToken = System.getenv("SENTRY_AUTH_TOKEN") 
+        ?: envProperties.getProperty("SENTRY_AUTH_TOKEN", "")
+    
+    // Automatically upload ProGuard/R8 mapping files
+    uploadNativeSymbols = true
+    includeNativeSources = true
 }
 
 androidComponents {
@@ -152,6 +180,9 @@ dependencies {
 
     // Coil (Image Loading)
     implementation("io.coil-kt:coil-compose:2.5.0")
+
+    // Sentry (Crash Reporting)
+    implementation("io.sentry:sentry-android:7.5.0")
 
     // Testing
     testImplementation(kotlin("test"))

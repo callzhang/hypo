@@ -12,8 +12,11 @@ import java.time.Instant
 
 @Dao
 interface ClipboardDao {
+    @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC")
+    fun observe(): Flow<List<ClipboardEntity>>
+    
     @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC LIMIT :limit")
-    fun observe(limit: Int = 200): Flow<List<ClipboardEntity>>
+    fun observeWithLimit(limit: Int = 200): Flow<List<ClipboardEntity>>
 
     @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC")
     fun observePaged(): PagingSource<Int, ClipboardEntity>

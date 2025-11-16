@@ -23,6 +23,7 @@ import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.LanRegistrationConfig
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -261,18 +263,23 @@ class ClipboardSyncService : Service() {
     private fun ensureClipboardPermissionAndStartListener() {
         clipboardPermissionJob?.cancel()
         clipboardPermissionJob = scope.launch {
+            Log.i(TAG, "🔍 Starting clipboard permission check loop...")
             while (isActive) {
                 val allowed = clipboardAccessChecker.canReadClipboard()
                 awaitingClipboardPermission = !allowed
+                Log.d(TAG, "📋 Clipboard permission status: allowed=$allowed, awaiting=$awaitingClipboardPermission")
                 updateNotification()
                 if (allowed) {
+                    Log.i(TAG, "✅ Clipboard permission granted! Starting ClipboardListener...")
                     listener.start()
+                    Log.i(TAG, "✅ ClipboardListener started successfully")
                     return@launch
                 } else {
-                    Log.w(TAG, "Clipboard access denied. Waiting for user consent…")
+                    Log.w(TAG, "⚠️ Clipboard access denied. Waiting for user consent… (will retry in 5s)")
                     delay(5_000)
                 }
             }
+            Log.w(TAG, "⚠️ Clipboard permission check loop ended (scope cancelled)")
         }
     }
 

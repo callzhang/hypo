@@ -1,5 +1,8 @@
 package com.hypo.clipboard.ui.history
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,14 +11,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -128,6 +135,8 @@ private fun EmptyHistory() {
 
 @Composable
 private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
+    val context = LocalContext.current
+    val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val formatter = DateTimeFormatter.ofPattern("MMM d, HH:mm")
     val isLocal = item.deviceId == currentDeviceId
     
@@ -141,6 +150,16 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
         item.deviceId.contains("imac", ignoreCase = true) ||
         !item.deviceId.startsWith("android-") -> "macOS"
         else -> item.deviceId.take(10) // Show partial ID as fallback
+    }
+    
+    val copyToClipboard: () -> Unit = {
+        try {
+            val clip = ClipData.newPlainText("Hypo Clipboard", item.content)
+            clipboardManager.setPrimaryClip(clip)
+            android.util.Log.d("HistoryScreen", "✅ Copied to clipboard: ${item.preview.take(30)}")
+        } catch (e: Exception) {
+            android.util.Log.e("HistoryScreen", "❌ Failed to copy to clipboard: ${e.message}", e)
+        }
     }
     
     Card(
@@ -164,6 +183,17 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
                 )
+                // Copy button
+                IconButton(
+                    onClick = copyToClipboard,
+                    modifier = Modifier.width(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy to clipboard",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
                 // Timestamp
                 Text(
                     text = formatter.format(item.createdAt.atZone(ZoneId.systemDefault())),

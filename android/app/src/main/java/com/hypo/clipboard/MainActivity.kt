@@ -1,6 +1,7 @@
 package com.hypo.clipboard
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -8,7 +9,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -24,7 +24,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.hypo.clipboard.service.ClipboardSyncService
 import com.hypo.clipboard.ui.history.HistoryRoute
-import com.hypo.clipboard.ui.home.HomeRoute
 import com.hypo.clipboard.ui.settings.SettingsRoute
 import com.hypo.clipboard.ui.theme.HypoTheme
 import com.hypo.clipboard.pairing.PairingRoute
@@ -34,14 +33,21 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        startService(Intent(this, ClipboardSyncService::class.java))
+        
+        // Use startForegroundService for foreground services (required on Android 8.0+)
+        val serviceIntent = Intent(this, ClipboardSyncService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
 
         setContent {
             HypoTheme {
                 val navController = rememberNavController()
-                val destinations = listOf(AppDestination.Home, AppDestination.History, AppDestination.Settings)
+                val destinations = listOf(AppDestination.History, AppDestination.Settings)
                 val backStackEntry by navController.currentBackStackEntryAsState()
-                val currentRoute = backStackEntry?.destination?.route ?: AppDestination.Home.route
+                val currentRoute = backStackEntry?.destination?.route ?: AppDestination.History.route
 
                 Scaffold(
                     bottomBar = {
@@ -52,7 +58,7 @@ class MainActivity : ComponentActivity() {
                                     onClick = {
                                         if (currentRoute != destination.route) {
                                             navController.navigate(destination.route) {
-                                                popUpTo(AppDestination.Home.route)
+                                                popUpTo(AppDestination.History.route)
                                                 launchSingleTop = true
                                             }
                                         }
@@ -68,15 +74,9 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,
-                        startDestination = AppDestination.Home.route,
+                        startDestination = AppDestination.History.route,
                         modifier = Modifier.padding(innerPadding)
                     ) {
-                        composable(AppDestination.Home.route) {
-                            HomeRoute(
-                                onViewHistory = { navController.navigate(AppDestination.History.route) },
-                                onOpenSettings = { navController.navigate(AppDestination.Settings.route) }
-                            )
-                        }
                         composable(AppDestination.History.route) {
                             HistoryRoute()
                         }
@@ -107,7 +107,6 @@ private sealed class AppDestination(
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
     @androidx.annotation.StringRes val labelRes: Int
 ) {
-    data object Home : AppDestination("home", Icons.Filled.Home, R.string.home_title)
     data object History : AppDestination("history", Icons.Filled.History, R.string.history_title)
     data object Settings : AppDestination("settings", Icons.Filled.Settings, R.string.settings_title)
 }

@@ -30,15 +30,42 @@ class ClipboardParser(
 ) {
 
     fun parse(clipData: ClipData): ClipboardEvent? {
-        if (clipData.itemCount == 0) return null
-        val description = clipData.description
-        for (index in 0 until clipData.itemCount) {
-            val item = clipData.getItemAt(index)
-            parseFromUri(description, item)?.let { return it }
-            parseLink(item)?.let { return it }
-            parseText(item)?.let { return it }
+        return try {
+            if (clipData.itemCount == 0) return null
+            val description = clipData.description
+            for (index in 0 until clipData.itemCount) {
+                val item = clipData.getItemAt(index)
+                try {
+                    parseFromUri(description, item)?.let { return it }
+                } catch (e: SecurityException) {
+                    // Android 10+ may block clipboard access in background
+                    android.util.Log.d("ClipboardParser", "🔒 parseFromUri: Clipboard access blocked: ${e.message}")
+                } catch (e: Exception) {
+                    android.util.Log.w("ClipboardParser", "⚠️ Error in parseFromUri: ${e.message}", e)
+                }
+                try {
+                    parseLink(item)?.let { return it }
+                } catch (e: SecurityException) {
+                    android.util.Log.d("ClipboardParser", "🔒 parseLink: Clipboard access blocked: ${e.message}")
+                } catch (e: Exception) {
+                    android.util.Log.w("ClipboardParser", "⚠️ Error in parseLink: ${e.message}", e)
+                }
+                try {
+                    parseText(item)?.let { return it }
+                } catch (e: SecurityException) {
+                    android.util.Log.d("ClipboardParser", "🔒 parseText: Clipboard access blocked: ${e.message}")
+                } catch (e: Exception) {
+                    android.util.Log.w("ClipboardParser", "⚠️ Error in parseText: ${e.message}", e)
+                }
+            }
+            null
+        } catch (e: SecurityException) {
+            android.util.Log.d("ClipboardParser", "🔒 parse: Clipboard access blocked: ${e.message}")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("ClipboardParser", "❌ Error in parse: ${e.message}", e)
+            null
         }
-        return null
     }
 
     private fun parseFromUri(description: ClipDescription, item: ClipData.Item): ClipboardEvent? {
@@ -56,7 +83,15 @@ class ClipboardParser(
     }
 
     private fun parseText(item: ClipData.Item): ClipboardEvent? {
-        val rawText = item.coerceToText(null)?.toString()?.trim() ?: return null
+        val rawText = try {
+            item.coerceToText(null)?.toString()?.trim()
+        } catch (e: SecurityException) {
+            // Android 10+ may block clipboard access in background
+            return null
+        } catch (e: Exception) {
+            // Other exceptions (e.g., RemoteException) can occur
+            return null
+        } ?: return null
         if (rawText.isEmpty()) return null
         if (Patterns.WEB_URL.matcher(rawText).matches()) {
             return buildLinkEvent(rawText)
@@ -113,8 +148,9 @@ class ClipboardParser(
     }
 
     private fun parseImage(uri: Uri, mimeType: String?): ClipboardEvent? {
-        val bytes = readBytes(uri) ?: return null
-        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        return try {
+            val bytes = readBytes(uri) ?: return null
+            var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
         val width = bitmap.width
         val height = bitmap.height
 
@@ -159,32 +195,47 @@ class ClipboardParser(
             metadata = metadata,
             createdAt = Instant.now()
         )
+        } catch (e: SecurityException) {
+            android.util.Log.d("ClipboardParser", "🔒 parseImage: Clipboard access blocked: ${e.message}")
+            null
+        } catch (e: Exception) {
+            android.util.Log.w("ClipboardParser", "⚠️ Error in parseImage: ${e.message}", e)
+            null
+        }
     }
 
     private fun parseFile(uri: Uri, mimeTypeOverride: String?): ClipboardEvent? {
-        val metadata = queryMetadata(uri)
-        val size = metadata?.size ?: 0L
-        if (size <= 0L || size > MAX_ATTACHMENT_BYTES) return null
-        val bytes = readBytes(uri) ?: return null
-        if (bytes.size > MAX_ATTACHMENT_BYTES) return null
-        val base64 = base64Encoder.encodeToString(bytes)
-        val mimeType = mimeTypeOverride ?: metadata?.mimeType ?: "application/octet-stream"
-        val filename = metadata?.displayName ?: uri.lastPathSegment ?: "file"
-        val meta = mapOf(
-            "size" to bytes.size.toString(),
-            "hash" to sha256Hex(bytes),
-            "mime_type" to mimeType,
-            "filename" to filename
-        )
-        val preview = "$filename (${formatBytes(bytes.size)})"
-        return ClipboardEvent(
-            id = newEventId(),
-            type = ClipboardType.FILE,
-            content = base64,
-            preview = preview,
-            metadata = meta,
-            createdAt = Instant.now()
-        )
+        return try {
+            val metadata = queryMetadata(uri)
+            val size = metadata?.size ?: 0L
+            if (size <= 0L || size > MAX_ATTACHMENT_BYTES) return null
+            val bytes = readBytes(uri) ?: return null
+            if (bytes.size > MAX_ATTACHMENT_BYTES) return null
+            val base64 = base64Encoder.encodeToString(bytes)
+            val mimeType = mimeTypeOverride ?: metadata?.mimeType ?: "application/octet-stream"
+            val filename = metadata?.displayName ?: uri.lastPathSegment ?: "file"
+            val meta = mapOf(
+                "size" to bytes.size.toString(),
+                "hash" to sha256Hex(bytes),
+                "mime_type" to mimeType,
+                "filename" to filename
+            )
+            val preview = "$filename (${formatBytes(bytes.size)})"
+            return ClipboardEvent(
+                id = newEventId(),
+                type = ClipboardType.FILE,
+                content = base64,
+                preview = preview,
+                metadata = meta,
+                createdAt = Instant.now()
+            )
+        } catch (e: SecurityException) {
+            android.util.Log.d("ClipboardParser", "🔒 parseFile: Clipboard access blocked: ${e.message}")
+            null
+        } catch (e: Exception) {
+            android.util.Log.w("ClipboardParser", "⚠️ Error in parseFile: ${e.message}", e)
+            null
+        }
     }
 
     private fun resolveMimeType(description: ClipDescription, uri: Uri): String? {

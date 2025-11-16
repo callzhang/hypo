@@ -4,6 +4,9 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+    plugins {
+        id("io.sentry.android.gradle") version "4.0.0"
+    }
 }
 
 dependencyResolutionManagement {

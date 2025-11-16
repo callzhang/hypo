@@ -39,8 +39,21 @@ class SyncEngine @Inject constructor(
     }
 
     suspend fun sendClipboard(item: ClipboardItem, targetDeviceId: String): SyncEnvelope {
+        // Step 3: Verify keys loaded for sync (Issue 2b checklist)
+        android.util.Log.d("SyncEngine", "🔑 Loading key for device: $targetDeviceId")
         val key = keyStore.loadKey(targetDeviceId)
-            ?: throw SyncEngineException.MissingKey(targetDeviceId)
+        if (key == null) {
+            android.util.Log.e("SyncEngine", "❌ No key found for $targetDeviceId")
+            val availableKeys = try {
+                keyStore.getAllDeviceIds()
+            } catch (e: Exception) {
+                emptyList<String>()
+            }
+            android.util.Log.d("SyncEngine", "📋 Available keys: $availableKeys")
+            throw SyncEngineException.MissingKey(targetDeviceId)
+        } else {
+            android.util.Log.d("SyncEngine", "✅ Key loaded: ${key.size} bytes")
+        }
 
         val dataBase64 = when (item.type) {
             ClipboardType.TEXT, ClipboardType.LINK ->

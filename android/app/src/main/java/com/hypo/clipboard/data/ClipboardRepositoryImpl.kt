@@ -5,6 +5,7 @@ import com.hypo.clipboard.data.local.ClipboardEntity
 import com.hypo.clipboard.domain.model.ClipboardItem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import android.util.Log
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -14,11 +15,20 @@ class ClipboardRepositoryImpl @Inject constructor(
     private val dao: ClipboardDao
 ) : ClipboardRepository {
 
-    override fun observeHistory(limit: Int): Flow<List<ClipboardItem>> =
-        dao.observe(limit).map { list -> list.map { it.toDomain() } }
+    override fun observeHistory(limit: Int): Flow<List<ClipboardItem>> {
+        Log.d("ClipboardRepository", "📋 observeHistory called with limit=$limit")
+        // Use observe() without LIMIT to ensure Room Flow emits on all changes
+        // Filtering will be done in ViewModel
+        return dao.observe().map { list ->
+            Log.d("ClipboardRepository", "📋 Flow emitted: ${list.size} items (before limit)")
+            list.map { it.toDomain() }
+        }
+    }
 
     override suspend fun upsert(item: ClipboardItem) {
+        Log.d("ClipboardRepository", "💾 Upserting item: id=${item.id.take(20)}..., type=${item.type}, preview=${item.preview.take(30)}")
         dao.upsert(item.toEntity())
+        Log.d("ClipboardRepository", "✅ Item upserted to database")
     }
 
     override suspend fun delete(id: String) {

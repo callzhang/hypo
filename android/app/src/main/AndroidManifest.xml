@@ -10,7 +10,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- <uses-permission android:name="android.permission.CAMERA" /> -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Features -->
@@ -29,6 +29,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Hypo"
         tools:targetApi="34">
+
+        <!-- Sentry DSN configuration -->
+        <meta-data
+            android:name="io.sentry.dsn"
+            android:value="https://65a630888bf49a147b5db985abec69f4@o4508254593875968.ingest.us.sentry.io/4510377103261696"
+            tools:node="merge" />
 
         <!-- Main Activity -->
         <activity
@@ -51,4 +57,3 @@
     </application>
 
 </manifest>
-

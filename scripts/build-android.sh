@@ -73,6 +73,14 @@ echo "   GRADLE_USER_HOME: $GRADLE_USER_HOME"
 echo ""
 
 # Build
+# Load .env file if it exists
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    echo -e "${YELLOW}Loading .env file...${NC}"
+    set -a  # automatically export all variables
+    source "$PROJECT_ROOT/.env"
+    set +a  # stop automatically exporting
+fi
+
 echo -e "${YELLOW}Building Android APK...${NC}"
 cd "$PROJECT_ROOT/android"
 
@@ -112,9 +120,11 @@ if [ -f "$APK_PATH" ]; then
                     "$PROJECT_ROOT/scripts/reopen-android-app.sh" 2>/dev/null || echo -e "${YELLOW}⚠️  Could not auto-open app. Please open manually.${NC}"
                 else
                     # Fallback: try direct adb commands
+                    # Use debug package name for debug builds
+                    PACKAGE_NAME="com.hypo.clipboard.debug"
                     echo -e "${YELLOW}Opening Hypo app...${NC}"
-                    "$ADB" shell am start -n com.hypo.clipboard/.MainActivity 2>/dev/null || \
-                    "$ADB" shell monkey -p com.hypo.clipboard -c android.intent.category.LAUNCHER 1 2>/dev/null || \
+                    "$ADB" shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" 2>/dev/null || \
+                    "$ADB" shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 2>/dev/null || \
                     echo -e "${YELLOW}⚠️  Could not auto-open app. Please open manually.${NC}"
                 fi
             else

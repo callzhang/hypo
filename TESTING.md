@@ -45,7 +45,12 @@ All logs are stored in `/tmp/hypo_test_logs/`:
 ```bash
 cd macos
 swift build -c release
-.build/release/HypoMenuBar &
+
+# Update the app bundle
+cp .build/release/HypoMenuBar HypoApp.app/Contents/MacOS/HypoMenuBar
+
+# Launch the app
+open HypoApp.app
 ```
 
 #### Android
@@ -332,7 +337,7 @@ Minimal verification that sync is working:
 
 ```bash
 # 1. Start apps
-cd macos && .build/release/HypoMenuBar &
+open macos/HypoApp.app
 # Android app should already be running
 
 # 2. Test basic sync

@@ -132,11 +132,18 @@ build_macos() {
         log_info "Code changed, rebuilding macOS app..."
         cd "$MACOS_DIR"
         
+        # Build the Swift package
         swift build -c release 2>&1 | tee "$LOG_DIR/macos_build.log"
         
         if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
+            # Copy the built executable to the app bundle
+            log_info "Updating HypoApp.app bundle..."
+            mkdir -p "$MACOS_DIR/HypoApp.app/Contents/MacOS"
+            cp ".build/release/HypoMenuBar" "$MACOS_DIR/HypoApp.app/Contents/MacOS/HypoMenuBar"
+            chmod +x "$MACOS_DIR/HypoApp.app/Contents/MacOS/HypoMenuBar"
+            
             mark_built "$MACOS_DIR"
-            log_success "macOS app built successfully"
+            log_success "macOS app built and HypoApp.app updated successfully"
             return 0
         else
             log_error "macOS build failed"
@@ -237,24 +244,37 @@ start_macos_app() {
     
     # Kill existing instance
     pkill -f "HypoMenuBar" 2>/dev/null || true
+    killall "HypoApp" 2>/dev/null || true
     sleep 1
     
     # Clear log
     > "$MACOS_LOG"
     
-    # Start app with logging
-    "$MACOS_DIR/.build/release/HypoMenuBar" > "$MACOS_LOG" 2>&1 &
-    MACOS_PID=$!
-    
-    # Wait for app to start
-    sleep 3
-    
-    if ps -p $MACOS_PID > /dev/null; then
-        log_success "macOS app started (PID: $MACOS_PID)"
-        return 0
+    # Start app bundle with logging
+    if [[ -d "$MACOS_DIR/HypoApp.app" ]]; then
+        log_info "Launching HypoApp.app bundle..."
+        open "$MACOS_DIR/HypoApp.app" 2>&1 | tee -a "$MACOS_LOG"
+        
+        # Wait for app to start and capture its PID
+        sleep 3
+        
+        MACOS_PID=$(pgrep -f "HypoApp.app" | head -n 1)
+        
+        if [[ -n "$MACOS_PID" ]] && ps -p $MACOS_PID > /dev/null; then
+            log_success "macOS HypoApp.app started (PID: $MACOS_PID)"
+            
+            # Start log capture from system logs
+            log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug > "$MACOS_LOG" 2>&1 &
+            MACOS_LOG_PID=$!
+            log_info "Started log capture (PID: $MACOS_LOG_PID)"
+            
+            return 0
+        else
+            log_error "macOS app failed to start"
+            return 1
+        fi
     else
-        log_error "macOS app failed to start"
-        tail -n 20 "$MACOS_LOG"
+        log_error "HypoApp.app bundle not found at $MACOS_DIR/HypoApp.app"
         return 1
     fi
 }
@@ -262,6 +282,14 @@ start_macos_app() {
 stop_macos_app() {
     log_info "Stopping macOS app..."
     pkill -f "HypoMenuBar" 2>/dev/null || true
+    killall "HypoApp" 2>/dev/null || true
+    osascript -e 'quit app "HypoApp"' 2>/dev/null || true
+    
+    # Stop log capture if running
+    if [[ -n "$MACOS_LOG_PID" ]]; then
+        kill $MACOS_LOG_PID 2>/dev/null || true
+    fi
+    
     sleep 1
 }
 
@@ -519,8 +547,8 @@ main() {
     log_section "Phase 7: Cleanup"
     stop_android_log
     
-    log_info "Leaving macOS app running for manual testing..."
-    log_info "To stop: pkill -f HypoMenuBar"
+    log_info "Leaving macOS HypoApp.app running for manual testing..."
+    log_info "To stop: killall HypoApp  (or click Quit from menu bar)"
     
     # Summary
     log_section "Test Summary"

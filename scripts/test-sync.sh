@@ -25,6 +25,8 @@ BACKEND_LOG="$LOG_DIR/backend.log"
 TEST_TEXT_MACOS="Test sync from macOS - $(date +%s)"
 TEST_TEXT_ANDROID="Test sync from Android - $(date +%s)"
 WAIT_SYNC_TIMEOUT=10
+SCRIPT_TIMEOUT=300  # 5 minutes total script timeout
+LOG_STREAM_TIMEOUT=60  # 1 minute for log stream commands
 
 # Tracking
 TESTS_RUN=0
@@ -97,6 +99,32 @@ check_file_changed() {
 mark_built() {
     local dir=$1
     touch "$dir/.last_test_build"
+}
+
+# Timeout wrapper function (works on macOS without timeout command)
+run_with_timeout() {
+    local timeout=$1
+    shift
+    local cmd="$@"
+    
+    # Run command in background
+    eval "$cmd" &
+    local cmd_pid=$!
+    
+    # Wait for command or timeout
+    local elapsed=0
+    while kill -0 $cmd_pid 2>/dev/null; do
+        sleep 0.5
+        elapsed=$((elapsed + 1))
+        if [[ $elapsed -ge $timeout ]]; then
+            kill $cmd_pid 2>/dev/null || true
+            wait $cmd_pid 2>/dev/null
+            return 124  # Timeout exit code
+        fi
+    done
+    
+    wait $cmd_pid
+    return $?
 }
 
 wait_for_log_pattern() {
@@ -277,10 +305,21 @@ start_macos_app() {
         if [[ -n "$MACOS_PID" ]] && ps -p $MACOS_PID > /dev/null; then
             log_success "macOS HypoApp.app started (PID: $MACOS_PID)"
             
-            # Start log capture from system logs
-            log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug > "$MACOS_LOG" 2>&1 &
+            # Start log capture from system logs (with timeout protection)
+            (
+                log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug > "$MACOS_LOG" 2>&1
+            ) &
             MACOS_LOG_PID=$!
-            log_info "Started log capture (PID: $MACOS_LOG_PID)"
+            log_info "Started log capture (PID: $MACOS_LOG_PID, will timeout after ${LOG_STREAM_TIMEOUT}s)"
+            
+            # Set up timeout kill for log stream
+            (
+                sleep $LOG_STREAM_TIMEOUT
+                if kill -0 $MACOS_LOG_PID 2>/dev/null; then
+                    log_warning "Log stream timeout, killing process..."
+                    kill $MACOS_LOG_PID 2>/dev/null || true
+                fi
+            ) &
             
             return 0
         else
@@ -312,26 +351,43 @@ start_android_log() {
     
     export ANDROID_SDK_ROOT="$PROJECT_ROOT/.android-sdk"
     
+    # Check if device is connected
+    if ! "$ANDROID_SDK_ROOT/platform-tools/adb" devices | grep -q "device$"; then
+        log_warning "No Android device connected, skipping log capture"
+        return 1
+    fi
+    
     # Clear logcat
     "$ANDROID_SDK_ROOT/platform-tools/adb" logcat -c
     
     # Clear log file
     > "$ANDROID_LOG"
     
-    # Start logging in background
-    "$ANDROID_SDK_ROOT/platform-tools/adb" logcat -v time \
-        "ClipboardSyncService:*" \
-        "SyncCoordinator:*" \
-        "SyncEngine:*" \
-        "TransportManager:*" \
-        "LanDiscovery:*" \
-        "PairingHandshake:*" \
-        "*:S" > "$ANDROID_LOG" 2>&1 &
+    # Start logging in background (with timeout protection)
+    (
+        "$ANDROID_SDK_ROOT/platform-tools/adb" logcat -v time \
+            "ClipboardSyncService:*" \
+            "SyncCoordinator:*" \
+            "SyncEngine:*" \
+            "TransportManager:*" \
+            "LanDiscovery:*" \
+            "PairingHandshake:*" \
+            "*:S" > "$ANDROID_LOG" 2>&1
+    ) &
     
     ANDROID_LOG_PID=$!
     sleep 1
     
-    log_success "Android logging started (PID: $ANDROID_LOG_PID)"
+    # Set up timeout kill for adb logcat
+    (
+        sleep $LOG_STREAM_TIMEOUT
+        if kill -0 $ANDROID_LOG_PID 2>/dev/null; then
+            log_warning "ADB logcat timeout, killing process..."
+            kill $ANDROID_LOG_PID 2>/dev/null || true
+        fi
+    ) &
+    
+    log_success "Android logging started (PID: $ANDROID_LOG_PID, will timeout after ${LOG_STREAM_TIMEOUT}s)"
 }
 
 stop_android_log() {
@@ -511,9 +567,19 @@ test_history_storage() {
 # ============================================================================
 
 main() {
+    # Set overall script timeout
+    (
+        sleep $SCRIPT_TIMEOUT
+        log_error "Script timeout after ${SCRIPT_TIMEOUT}s, exiting..."
+        kill $$ 2>/dev/null || true
+        exit 124
+    ) &
+    SCRIPT_TIMEOUT_PID=$!
+    
     log_section "🧪 Hypo Sync Testing Suite"
     log_info "Project: $PROJECT_ROOT"
     log_info "Logs: $LOG_DIR"
+    log_info "Script timeout: ${SCRIPT_TIMEOUT}s"
     echo ""
     
     # Phase 1: Build & Deploy
@@ -572,6 +638,9 @@ main() {
     echo -e "${RED}Tests Failed: ${NC}$TESTS_FAILED"
     echo ""
     
+    # Kill script timeout watcher
+    kill $SCRIPT_TIMEOUT_PID 2>/dev/null || true
+    
     if [[ $TESTS_FAILED -eq 0 ]]; then
         log_success "All tests passed! 🎉"
         echo ""
@@ -592,7 +661,7 @@ main() {
 }
 
 # Handle Ctrl+C
-trap 'log_warning "Interrupted"; stop_android_log; stop_macos_app; exit 130' INT TERM
+trap 'log_warning "Interrupted"; stop_android_log; stop_macos_app; kill $SCRIPT_TIMEOUT_PID 2>/dev/null || true; exit 130' INT TERM
 
 # Run main function
 main "$@"

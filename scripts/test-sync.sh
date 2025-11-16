@@ -170,18 +170,20 @@ build_android() {
         
         # Try build first
         ./gradlew assembleDebug 2>&1 | tee "$LOG_DIR/android_build.log"
+        BUILD_EXIT_CODE=${PIPESTATUS[0]}
         
-        if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+        if [[ $BUILD_EXIT_CODE -ne 0 ]]; then
             # Check for duplicate class errors (Hilt annotation processor issue)
             if grep -q "is defined multiple times\|duplicate class" "$LOG_DIR/android_build.log"; then
                 log_warning "Duplicate class error detected, cleaning build..."
                 ./gradlew clean 2>&1 | tee -a "$LOG_DIR/android_build.log"
                 log_info "Rebuilding after clean..."
                 ./gradlew assembleDebug 2>&1 | tee -a "$LOG_DIR/android_build.log"
+                BUILD_EXIT_CODE=${PIPESTATUS[0]}
             fi
         fi
         
-        if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
+        if [[ $BUILD_EXIT_CODE -eq 0 ]]; then
             mark_built "$ANDROID_DIR"
             
             # Install on device if connected

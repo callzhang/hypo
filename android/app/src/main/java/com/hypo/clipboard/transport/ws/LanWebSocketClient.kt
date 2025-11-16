@@ -27,6 +27,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 import okhttp3.CertificatePinner
 import java.net.URI
@@ -57,12 +58,17 @@ class OkHttpWebSocketConnector @Inject constructor(
         val normalizedUrl = normalizeWebSocketUrl(config.url)
         val url = normalizedUrl.toHttpUrl()
         val builder = baseClient.newBuilder()
-        config.fingerprintSha256?.let { hex ->
-            val pin = hexToPin(hex)
-            val pinner = CertificatePinner.Builder()
-                .add(url.host, "sha256/$pin")
-                .build()
-            builder.certificatePinner(pinner)
+        config.fingerprintSha256?.takeIf { it.isNotBlank() }?.let { hex ->
+            try {
+                val pin = hexToPin(hex)
+                val pinner = CertificatePinner.Builder()
+                    .add(url.host, "sha256/$pin")
+                    .build()
+                builder.certificatePinner(pinner)
+            } catch (e: IllegalArgumentException) {
+                // Invalid fingerprint format - log and skip pinning
+                android.util.Log.w("OkHttpWebSocketConnector", "Invalid fingerprint format: ${e.message}, skipping certificate pinning")
+            }
         }
         client = builder.build()
         val requestBuilder = Request.Builder().url(url)
@@ -110,10 +116,62 @@ class LanWebSocketClient @Inject constructor(
     private val pendingLock = Any()
     private val pendingRoundTrips = mutableMapOf<String, Instant>()
     private val pendingTtl = Duration.ofMillis(max(0L, config.roundTripTimeoutMillis))
+    private var onIncomingClipboard: ((SyncEnvelope) -> Unit)? = null
+    private var onPairingAck: ((String) -> Unit)? = null  // ACK as JSON string
+    @Volatile private var connectionSignal = CompletableDeferred<Unit>()
+    
+    fun setIncomingClipboardHandler(handler: (SyncEnvelope) -> Unit) {
+        onIncomingClipboard = handler
+    }
+    
+    fun setPairingAckHandler(handler: (String) -> Unit) {
+        onPairingAck = handler
+    }
+    
+    /**
+     * Check if the WebSocket is currently connected.
+     * This is used to determine connection status in the UI.
+     */
+    fun isConnected(): Boolean {
+        return mutex.tryLock().let { locked ->
+            try {
+                webSocket != null && !isClosed.get()
+            } finally {
+                if (locked) mutex.unlock()
+            }
+        }
+    }
 
     override suspend fun send(envelope: SyncEnvelope) {
         ensureConnection()
         sendQueue.send(envelope)
+    }
+    
+    /**
+     * Send raw JSON data (for pairing messages that need to be detected by macOS)
+     */
+    suspend fun sendRawJson(jsonData: ByteArray) {
+        android.util.Log.d("LanWebSocketClient", "sendRawJson: Starting, connectionSignal.isCompleted=${connectionSignal.isCompleted}")
+        ensureConnection()
+        android.util.Log.d("LanWebSocketClient", "sendRawJson: ensureConnection called, waiting for connection...")
+        
+        // Wait for connection to be established (with timeout) - let timeout propagate
+        android.util.Log.d("LanWebSocketClient", "sendRawJson: Waiting for connection (timeout: 10s)")
+        withTimeout(10_000) { // 10 second timeout
+            connectionSignal.await()
+            android.util.Log.d("LanWebSocketClient", "sendRawJson: Connection established!")
+        }
+        
+        mutex.withLock {
+            val socket = webSocket ?: throw IllegalStateException("WebSocket not connected")
+            android.util.Log.d("LanWebSocketClient", "sendRawJson: Sending ${jsonData.size} bytes")
+            val sent = socket.send(of(*jsonData))
+            if (!sent) {
+                throw IOException("websocket send failed")
+            }
+            touch()
+            android.util.Log.d("LanWebSocketClient", "sendRawJson: Data sent successfully")
+        }
     }
 
     suspend fun close() {
@@ -135,6 +193,10 @@ class LanWebSocketClient @Inject constructor(
     private suspend fun ensureConnection() {
         mutex.withLock {
             if (connectionJob == null || connectionJob?.isActive != true) {
+                // Reset connection signal for new connection attempt
+                if (connectionSignal.isCompleted) {
+                    connectionSignal = CompletableDeferred()
+                }
                 val job = scope.launch {
                     try {
                         runConnectionLoop()
@@ -157,6 +219,7 @@ class LanWebSocketClient @Inject constructor(
             val closedSignal = CompletableDeferred<Unit>()
             val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    android.util.Log.d("LanWebSocketClient", "onOpen: WebSocket connection established!")
                     scope.launch {
                         mutex.withLock {
                             this@LanWebSocketClient.webSocket = webSocket
@@ -169,11 +232,24 @@ class LanWebSocketClient @Inject constructor(
                             metricsRecorder.recordHandshake(duration, clock.instant())
                         }
                         handshakeStarted = null
+                        
+                        // Signal that connection is established
+                        if (!connectionSignal.isCompleted) {
+                            android.util.Log.d("LanWebSocketClient", "onOpen: Completing connectionSignal")
+                            connectionSignal.complete(Unit)
+                        } else {
+                            android.util.Log.w("LanWebSocketClient", "onOpen: connectionSignal already completed")
+                        }
                     }
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     touch()
+                    // Check if this is a pairing ACK (text message)
+                    if (text.contains("\"challenge_id\"") && text.contains("\"mac_device_id\"")) {
+                        onPairingAck?.invoke(text)
+                        return
+                    }
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
@@ -189,11 +265,22 @@ class LanWebSocketClient @Inject constructor(
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    android.util.Log.e("LanWebSocketClient", "onFailure: WebSocket connection failed: ${t.message}", t)
+                    android.util.Log.e("LanWebSocketClient", "onFailure: Exception type: ${t.javaClass.name}", t)
+                    android.util.Log.e("LanWebSocketClient", "onFailure: Response: ${response?.code} ${response?.message}")
+                    if (response != null) {
+                        android.util.Log.e("LanWebSocketClient", "onFailure: Response body: ${response.body?.string()}")
+                    }
+                    // Complete connectionSignal with exception so sendRawJson can see the error
+                    if (!connectionSignal.isCompleted) {
+                        connectionSignal.completeExceptionally(t)
+                    }
                     if (!closedSignal.isCompleted) {
                         closedSignal.complete(Unit)
                     }
                     shutdownSocket(webSocket)
                     handshakeStarted = null
+                    // Re-throw to propagate error
                     if (t is SSLPeerUnverifiedException) {
                         val host = config.url.toHttpUrlOrNull()?.host
                             ?: runCatching { URI(config.url).host }.getOrNull()
@@ -211,7 +298,9 @@ class LanWebSocketClient @Inject constructor(
             }
 
             handshakeStarted = clock.instant()
+            android.util.Log.d("LanWebSocketClient", "runConnectionLoop: Connecting to ${config.url}")
             val socket = connector.connect(listener)
+            android.util.Log.d("LanWebSocketClient", "runConnectionLoop: Socket created, waiting for connection...")
 
             try {
                 loop@ while (true) {
@@ -307,6 +396,16 @@ class LanWebSocketClient @Inject constructor(
 
     private fun handleIncoming(bytes: ByteString) {
         val now = clock.instant()
+        
+        // Try to detect if this is a pairing ACK message (JSON with challenge_id and mac_device_id)
+        val messageString = bytes.utf8()
+        if (messageString.contains("\"challenge_id\"") && messageString.contains("\"mac_device_id\"")) {
+            // This looks like a pairing ACK, route it to pairing handler
+            onPairingAck?.invoke(messageString)
+            return
+        }
+        
+        // Otherwise, treat as clipboard envelope
         val envelope = try {
             frameCodec.decode(bytes.toByteArray())
         } catch (_: Exception) {
@@ -321,6 +420,11 @@ class LanWebSocketClient @Inject constructor(
         if (started != null) {
             val duration = Duration.between(started, now)
             metricsRecorder.recordRoundTrip(envelope.id, duration)
+        }
+        
+        // Handle incoming clipboard messages
+        if (envelope.type == com.hypo.clipboard.sync.MessageType.CLIPBOARD) {
+            onIncomingClipboard?.invoke(envelope)
         }
     }
 

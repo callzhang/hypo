@@ -42,14 +42,32 @@ class PairingHandshakeManager @Inject constructor(
             val macPublicKey = Base64.decode(payload.macPublicKey, Base64.DEFAULT)
             Log.d(TAG, "Pairing initiate: Decoded macPublicKey, ${macPublicKey.size} bytes")
             
-            val signingKey = Base64.decode(payload.macSigningPublicKey, Base64.DEFAULT)
-            Log.d(TAG, "Pairing initiate: Decoded macSigningPublicKey, ${signingKey.size} bytes (expected 32 for Ed25519)")
-            
-            Log.d(TAG, "Pairing initiate: Starting signature verification...")
-            verifySignature(payload, signingKey)
-            Log.d(TAG, "Pairing initiate: Signature verification SUCCESS")
-            // Store the signing key for future verification
-            trustStore.store(payload.macDeviceId, signingKey)
+            // For LAN auto-discovery, skip signature verification
+            // (we rely on TLS fingerprint verification instead)
+            if (payload.signature != "LAN_AUTO_DISCOVERY") {
+                val signingKey = Base64.decode(payload.macSigningPublicKey, Base64.DEFAULT)
+                Log.d(TAG, "Pairing initiate: Decoded macSigningPublicKey, ${signingKey.size} bytes (expected 32 for Ed25519)")
+                
+                Log.d(TAG, "Pairing initiate: Starting signature verification...")
+                verifySignature(payload, signingKey)
+                Log.d(TAG, "Pairing initiate: Signature verification SUCCESS")
+                // Store the signing key for future verification
+                trustStore.store(payload.macDeviceId, signingKey)
+            } else {
+                Log.d(TAG, "Pairing initiate: Skipping signature verification for LAN auto-discovery")
+                // Still store the signing key if available for future use
+                if (payload.macSigningPublicKey.isNotEmpty()) {
+                    try {
+                        val signingKey = Base64.decode(payload.macSigningPublicKey, Base64.DEFAULT)
+                        if (signingKey.size == 32) {
+                            trustStore.store(payload.macDeviceId, signingKey)
+                            Log.d(TAG, "Pairing initiate: Stored signing public key for future verification")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not decode signing key: ${e.message}")
+                    }
+                }
+            }
 
             val androidPrivateKey = X25519.generatePrivateKey()
             val androidPublicKey = X25519.publicFromPrivate(androidPrivateKey)

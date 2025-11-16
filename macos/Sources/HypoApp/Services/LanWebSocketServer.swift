@@ -1,5 +1,10 @@
 import Foundation
 import Network
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 #if canImport(os)
 import os
 #endif
@@ -19,14 +24,27 @@ public protocol LanWebSocketServerDelegate: AnyObject {
 
 @MainActor
 public final class LanWebSocketServer {
+    private final class ConnectionContext: @unchecked Sendable {
+        let connection: NWConnection
+        var buffer = Data()
+        var upgraded = false
+
+        init(connection: NWConnection) {
+            self.connection = connection
+        }
+    }
+
     private var listener: NWListener?
-    private var connections: [UUID: NWConnection] = [:]
+    private var connections: [UUID: ConnectionContext] = [:]
     private var connectionMetadata: [UUID: ConnectionMetadata] = [:]
     public weak var delegate: LanWebSocketServerDelegate?
     
     #if canImport(os)
     private let logger = Logger(subsystem: "com.hypo.clipboard", category: "lan-server")
     #endif
+    
+    private let handshakeDelimiter = Data("\r\n\r\n".utf8)
+    private let websocketGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
     
     private struct ConnectionMetadata {
         let deviceId: String?
@@ -42,11 +60,11 @@ public final class LanWebSocketServer {
         #endif
         
         let parameters = NWParameters.tcp
-        let wsOptions = NWProtocolWebSocket.Options()
-        wsOptions.autoReplyPing = true
-        parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
         parameters.allowLocalEndpointReuse = true
         parameters.acceptLocalOnly = false  // Allow connections from LAN
+        
+        // Enable additional logging
+        print("🔧 [LanWebSocketServer] Listener configured for manual WebSocket handling (raw TCP)")
         
         do {
             listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: UInt16(port)))
@@ -58,8 +76,17 @@ public final class LanWebSocketServer {
         }
         
         listener?.newConnectionHandler = { [weak self] connection in
-            Task { @MainActor in
-                self?.handleNewConnection(connection)
+            print("🔔 [LanWebSocketServer] newConnectionHandler called!")
+            print("🔔 [LanWebSocketServer] Connection endpoint: \(connection.currentPath?.localEndpoint ?? connection.endpoint)")
+            print("🔔 [LanWebSocketServer] Connection state: \(connection.state)")
+            // Don't wrap in Task - handleNewConnection is already @MainActor
+            // But we need to ensure we're on the main actor
+            DispatchQueue.main.async {
+                print("🔔 [LanWebSocketServer] On main queue, calling handleNewConnection...")
+                Task { @MainActor in
+                    print("🔔 [LanWebSocketServer] Inside Task, calling handleNewConnection...")
+                    self?.handleNewConnection(connection)
+                }
             }
         }
         
@@ -69,7 +96,9 @@ public final class LanWebSocketServer {
             }
         }
         
+        print("🚀 [LanWebSocketServer] Starting listener on port \(port)...")
         listener?.start(queue: .main)
+        print("🚀 [LanWebSocketServer] Listener.start() called, waiting for connections...")
     }
     
     public func stop() {
@@ -80,8 +109,8 @@ public final class LanWebSocketServer {
         listener?.cancel()
         listener = nil
         
-        for (id, connection) in connections {
-            connection.cancel()
+        for (id, context) in connections {
+            context.connection.cancel()
             delegate?.server(self, didCloseConnection: id)
         }
         connections.removeAll()
@@ -89,22 +118,18 @@ public final class LanWebSocketServer {
     }
     
     public func send(_ data: Data, to connectionId: UUID) throws {
-        guard let connection = connections[connectionId] else {
+        guard let context = connections[connectionId], context.upgraded else {
             throw NSError(domain: "LanWebSocketServer", code: -1, userInfo: [
                 NSLocalizedDescriptionKey: "Connection not found"
             ])
         }
-        
-        let metadata = NWProtocolWebSocket.Metadata(opcode: .binary)
-        let context = NWConnection.ContentContext(identifier: "send", metadata: [metadata])
-        
-        connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { error in
-            if let error = error {
+        sendFrame(payload: data, opcode: 0x2, context: context) { error in
+            if let error {
                 #if canImport(os)
                 self.logger.error("Send error: \(error.localizedDescription)")
                 #endif
             }
-        })
+        }
     }
     
     public func sendToAll(_ data: Data) {
@@ -123,65 +148,386 @@ public final class LanWebSocketServer {
         encoder.dateEncodingStrategy = .iso8601
         
         let data = try encoder.encode(ack)
-        try send(data, to: connectionId)
         
         #if canImport(os)
-        logger.info("Sent pairing ACK to connection: \(connectionId.uuidString)")
+        if let jsonString = String(data: data, encoding: .utf8) {
+            logger.info("📤 Sending pairing ACK JSON: \(jsonString)")
+        }
+        logger.info("📤 Sending pairing ACK (\(data.count) bytes) to connection: \(connectionId.uuidString)")
         #endif
+        
+        // Send as text frame (not binary) so Android can parse it as JSON string
+        guard let context = connections[connectionId], context.upgraded else {
+            throw NSError(domain: "LanWebSocketServer", code: -1, userInfo: [
+                NSLocalizedDescriptionKey: "Connection not found"
+            ])
+        }
+        sendFrame(payload: data, opcode: 0x1, context: context) { error in
+            if let error {
+                #if canImport(os)
+                self.logger.error("❌ ACK send error: \(error.localizedDescription)")
+                #endif
+            } else {
+                #if canImport(os)
+                self.logger.info("✅ Pairing ACK sent successfully")
+                #endif
+            }
+        }
+    }
+
+    private func sendFrame(payload: Data, opcode: UInt8, context: ConnectionContext, completion: @escaping (Error?) -> Void) {
+        var frame = Data()
+        var firstByte: UInt8 = 0x80 // FIN = 1
+        firstByte |= (opcode & 0x0F)
+        frame.append(firstByte)
+        let length = payload.count
+        if length <= 125 {
+            frame.append(UInt8(length))
+        } else if length <= 0xFFFF {
+            frame.append(126)
+            var value = UInt16(length).bigEndian
+            withUnsafeBytes(of: &value) { frame.append(contentsOf: $0) }
+        } else {
+            frame.append(127)
+            var value = UInt64(length).bigEndian
+            withUnsafeBytes(of: &value) { frame.append(contentsOf: $0) }
+        }
+        frame.append(payload)
+        context.connection.send(content: frame, completion: .contentProcessed { error in
+            completion(error)
+        })
     }
     
     private func handleNewConnection(_ connection: NWConnection) {
+        print("🔌 [LanWebSocketServer] handleNewConnection called!")
         let id = UUID()
-        connections[id] = connection
+        let context = ConnectionContext(connection: connection)
+        connections[id] = context
         connectionMetadata[id] = ConnectionMetadata(deviceId: nil, connectedAt: Date())
         
         #if canImport(os)
-        logger.info("New connection: \(id.uuidString)")
+        logger.info("🔌 New WebSocket connection accepted: \(id.uuidString)")
         #endif
+        print("🔌 [LanWebSocketServer] New connection: \(id.uuidString)")
+        print("🔌 [LanWebSocketServer] Total active connections: \(connections.count)")
         
         connection.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
-                self?.handleConnectionState(state, for: id)
+                guard let self = self else {
+                    print("⚠️ [LanWebSocketServer] Self is nil in stateUpdateHandler")
+                    return
+                }
+                switch state {
+                case .ready:
+                    #if canImport(os)
+                    self.logger.info("✅ Connection ready: \(id.uuidString)")
+                    #endif
+                    print("✅ [LanWebSocketServer] Connection ready: \(id.uuidString) - performing manual WebSocket handshake")
+                    self.beginHandshake(for: id)
+                case .failed(let error):
+                    #if canImport(os)
+                    self.logger.error("Connection failed: \(error.localizedDescription)")
+                    #endif
+                    print("❌ [LanWebSocketServer] Connection failed: \(error.localizedDescription)")
+                    self.closeConnection(id)
+                case .cancelled:
+                    print("🔌 [LanWebSocketServer] Connection cancelled: \(id.uuidString)")
+                    self.closeConnection(id)
+                case .waiting(let error):
+                    print("⏳ [LanWebSocketServer] Connection waiting: \(id.uuidString), error: \(error.localizedDescription)")
+                default:
+                    print("🟡 [LanWebSocketServer] Connection state: \(String(describing: state)) for \(id.uuidString)")
+                    break
+                }
             }
         }
         
+        print("🔌 [LanWebSocketServer] Calling connection.start() for \(id.uuidString)")
         connection.start(queue: .main)
-        receiveMessage(from: connection, id: id)
-        
-        delegate?.server(self, didAcceptConnection: id)
     }
-    
-    private func receiveMessage(from connection: NWConnection, id: UUID) {
-        connection.receiveMessage { [weak self] content, context, isComplete, error in
+
+    private func beginHandshake(for connectionId: UUID) {
+        guard let context = connections[connectionId] else { return }
+        receiveHandshakeChunk(for: connectionId, context: context)
+    }
+
+    private func receiveHandshakeChunk(for connectionId: UUID, context: ConnectionContext) {
+        context.connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, isComplete, error in
             Task { @MainActor in
-                guard let self = self else { return }
-                
+                guard let self else { return }
+                guard let context = self.connections[connectionId] else { return }
                 if let error = error {
                     #if canImport(os)
-                    self.logger.error("Receive error: \(error.localizedDescription)")
+                    self.logger.error("Handshake receive error: \(error.localizedDescription)")
                     #endif
-                    self.closeConnection(id)
+                    self.closeConnection(connectionId)
                     return
                 }
-                
-                if let content = content, !content.isEmpty {
-                    self.handleReceivedData(content, from: id)
+                if let data, !data.isEmpty {
+                    context.buffer.append(data)
+                    if self.processHandshakeBuffer(for: connectionId, context: context) {
+                        return
+                    }
                 }
-                
-                // Continue receiving
-                if self.connections[id] != nil {
-                    self.receiveMessage(from: connection, id: id)
+                if isComplete {
+                    self.closeConnection(connectionId)
+                    return
                 }
+                self.receiveHandshakeChunk(for: connectionId, context: context)
+            }
+        }
+    }
+
+    private func processHandshakeBuffer(for connectionId: UUID, context: ConnectionContext) -> Bool {
+        guard let headerRange = context.buffer.range(of: handshakeDelimiter) else {
+            return false
+        }
+        let headerData = context.buffer.subdata(in: 0..<headerRange.upperBound)
+        let remaining = context.buffer[headerRange.upperBound...]
+        context.buffer = Data(remaining)
+        guard let request = String(data: headerData, encoding: .utf8) else {
+            sendHTTPError(status: "400 Bad Request", connectionId: connectionId, context: context)
+            return true
+        }
+        let lines = request.components(separatedBy: "\r\n").filter { !$0.isEmpty }
+        guard
+            let requestLine = lines.first,
+            requestLine.hasPrefix("GET")
+        else {
+            sendHTTPError(status: "400 Bad Request", connectionId: connectionId, context: context)
+            return true
+        }
+        var headers: [String: String] = [:]
+        for line in lines.dropFirst() {
+            guard let separator = line.firstIndex(of: ":") else { continue }
+            let name = line[..<separator].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            headers[name] = value
+        }
+        guard
+            headers["upgrade"]?.lowercased().contains("websocket") == true,
+            headers["connection"]?.lowercased().contains("upgrade") == true,
+            let key = headers["sec-websocket-key"]
+        else {
+            sendHTTPError(status: "400 Bad Request", connectionId: connectionId, context: context)
+            return true
+        }
+        let response = handshakeResponse(for: key)
+        context.connection.send(content: response, completion: .contentProcessed { [weak self] error in
+            Task { @MainActor in
+                guard let self else { return }
+                if let error {
+                    #if canImport(os)
+                    self.logger.error("Handshake send error: \(error.localizedDescription)")
+                    #endif
+                    self.closeConnection(connectionId)
+                    return
+                }
+                context.upgraded = true
+                #if canImport(os)
+                self.logger.info("✅ Manual WebSocket handshake completed for \(connectionId.uuidString)")
+                #endif
+                self.delegate?.server(self, didAcceptConnection: connectionId)
+                self.processFrameBuffer(for: connectionId, context: context)
+                self.receiveFrameChunk(for: connectionId, context: context)
+            }
+        })
+        return true
+    }
+
+    private func receiveFrameChunk(for connectionId: UUID, context: ConnectionContext) {
+        context.connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
+            Task { @MainActor in
+                guard let self else { return }
+                guard let context = self.connections[connectionId] else { return }
+                if let error = error {
+                    #if canImport(os)
+                    self.logger.error("Frame receive error: \(error.localizedDescription)")
+                    #endif
+                    self.closeConnection(connectionId)
+                    return
+                }
+                if let data, !data.isEmpty {
+                    context.buffer.append(data)
+                    self.processFrameBuffer(for: connectionId, context: context)
+                }
+                if isComplete {
+                    self.closeConnection(connectionId)
+                    return
+                }
+                self.receiveFrameChunk(for: connectionId, context: context)
+            }
+        }
+    }
+
+    private func processFrameBuffer(for connectionId: UUID, context: ConnectionContext) {
+        guard context.upgraded else { return }
+        while true {
+            guard context.buffer.count >= 2 else { return }
+            let firstByte = context.buffer[0]
+            let secondByte = context.buffer[1]
+            let isFinal = (firstByte & 0x80) != 0
+            let opcode = firstByte & 0x0F
+            let isMasked = (secondByte & 0x80) != 0
+            var offset = 2
+            var payloadLength = Int(secondByte & 0x7F)
+            if payloadLength == 126 {
+                guard context.buffer.count >= offset + 2 else { return }
+                payloadLength = Int(readUInt16(from: context.buffer, offset: offset))
+                offset += 2
+            } else if payloadLength == 127 {
+                guard context.buffer.count >= offset + 8 else { return }
+                payloadLength = Int(readUInt64(from: context.buffer, offset: offset))
+                offset += 8
+            }
+            let maskLength = isMasked ? 4 : 0
+            guard context.buffer.count >= offset + maskLength + payloadLength else { return }
+            var payload = context.buffer.subdata(in: offset + maskLength ..< offset + maskLength + payloadLength)
+            if isMasked {
+                let maskStart = offset
+                let maskBytes = Array(context.buffer[maskStart..<maskStart + 4])
+                unmask(&payload, with: maskBytes)
+            }
+            let total = offset + maskLength + payloadLength
+            context.buffer.removeFirst(total)
+            handleFrame(opcode: opcode, isFinal: isFinal, payload: payload, connectionId: connectionId, context: context)
+        }
+    }
+
+    private func handleFrame(opcode: UInt8, isFinal: Bool, payload: Data, connectionId: UUID, context: ConnectionContext) {
+        guard isFinal else {
+            print("⚠️ [LanWebSocketServer] Fragmented frames are not supported")
+            return
+        }
+        switch opcode {
+        case 0x1, 0x2:
+            handleReceivedData(payload, from: connectionId)
+        case 0x8:
+            print("🔌 [LanWebSocketServer] Close frame received from \(connectionId.uuidString)")
+            closeConnection(connectionId)
+        case 0x9:
+            sendFrame(payload: payload, opcode: 0xA, context: context) { _ in }
+        case 0xA:
+            // Pong - ignore
+            break
+        default:
+            print("⚠️ [LanWebSocketServer] Unsupported opcode \(opcode)")
+        }
+    }
+
+    private func handshakeResponse(for clientKey: String) -> Data {
+        let acceptSource = clientKey + websocketGUID
+        let digest = Insecure.SHA1.hash(data: Data(acceptSource.utf8))
+        let acceptValue = Data(digest).base64EncodedString()
+        let responseLines = [
+            "HTTP/1.1 101 Switching Protocols",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            "Sec-WebSocket-Accept: \(acceptValue)",
+            "",
+            ""
+        ]
+        return Data(responseLines.joined(separator: "\r\n").utf8)
+    }
+
+    private func sendHTTPError(status: String, connectionId: UUID, context: ConnectionContext) {
+        let response = "HTTP/1.1 \(status)\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+        context.connection.send(content: Data(response.utf8), completion: .contentProcessed { [weak self] _ in
+            Task { @MainActor in
+                self?.closeConnection(connectionId)
+            }
+        })
+    }
+
+    private func readUInt16(from data: Data, offset: Int) -> UInt16 {
+        let high = UInt16(data[offset]) << 8
+        let low = UInt16(data[offset + 1])
+        return high | low
+    }
+
+    private func readUInt64(from data: Data, offset: Int) -> UInt64 {
+        var value: UInt64 = 0
+        for index in 0..<8 {
+            value = (value << 8) | UInt64(data[offset + index])
+        }
+        return value
+    }
+
+    private func unmask(_ payload: inout Data, with mask: [UInt8]) {
+        guard mask.count == 4 else { return }
+        let count = payload.count
+        payload.withUnsafeMutableBytes { bytes in
+            guard let buffer = bytes.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            for index in 0..<count {
+                buffer[index] ^= mask[index % 4]
             }
         }
     }
     
     private func handleReceivedData(_ data: Data, from connectionId: UUID) {
+        #if canImport(os)
+        logger.info("📨 Received data: \(data.count) bytes from connection \(connectionId.uuidString)")
+        #endif
         let messageType = detectMessageType(data)
+        
+        #if canImport(os)
+        logger.info("📋 Detected message type: \(String(describing: messageType))")
+        #endif
         
         switch messageType {
         case .pairing:
-            handlePairingMessage(data, from: connectionId)
+            // Log JSON before attempting decode
+            #if canImport(os)
+            if let jsonString = String(data: data, encoding: .utf8) {
+                logger.info("🔍 Attempting to decode pairing message: \(jsonString)")
+            }
+            #endif
+            do {
+                try handlePairingMessage(data, from: connectionId)
+            } catch let decodingError as DecodingError {
+                #if canImport(os)
+                logger.error("❌ Decoding error: \(decodingError.localizedDescription)")
+                switch decodingError {
+                case .dataCorrupted(let context):
+                    logger.error("   Data corrupted: \(context.debugDescription)")
+                    logger.error("   Coding path: \(context.codingPath.map { $0.stringValue })")
+                case .keyNotFound(let key, let context):
+                    logger.error("   Key not found: \(key.stringValue)")
+                    logger.error("   Coding path: \(context.codingPath.map { $0.stringValue })")
+                case .typeMismatch(let type, let context):
+                    logger.error("   Type mismatch: expected \(type), at path: \(context.codingPath.map { $0.stringValue })")
+                case .valueNotFound(let type, let context):
+                    logger.error("   Value not found: \(type), at path: \(context.codingPath.map { $0.stringValue })")
+                @unknown default:
+                    logger.error("   Unknown decoding error")
+                }
+                // Log the raw JSON for debugging
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    logger.error("   Raw JSON: \(jsonString)")
+                }
+                #endif
+                // Log error but don't crash - return instead
+                print("❌ ERROR: Pairing message decoding failed: \(decodingError)")
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    print("   Raw JSON: \(jsonString)")
+                }
+                // Don't crash - just return and log the error
+                return
+            } catch {
+                #if canImport(os)
+                logger.error("❌ Failed to handle pairing message: \(error.localizedDescription)")
+                logger.error("   Error type: \(String(describing: type(of: error)))")
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    logger.error("   Raw JSON: \(jsonString)")
+                }
+                #endif
+                print("❌ ERROR: Pairing message handling failed: \(error)")
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    print("   Raw JSON: \(jsonString)")
+                }
+                // Don't crash - just return and log the error
+                return
+            }
         case .clipboard:
             delegate?.server(self, didReceiveClipboardData: data, from: connectionId)
         case .unknown:
@@ -194,11 +540,36 @@ public final class LanWebSocketServer {
     private func detectMessageType(_ data: Data) -> WebSocketMessageType {
         // Try to decode as JSON to peek at the structure
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            #if canImport(os)
+            if let jsonString = String(data: data, encoding: .utf8) {
+                logger.error("⚠️ Failed to parse JSON: \(jsonString)")
+            }
+            #endif
             return .unknown
         }
         
-        // Pairing messages have challenge_id
+        #if canImport(os)
+        // Log the raw JSON for debugging
+        if let jsonString = String(data: data, encoding: .utf8) {
+            logger.info("📥 Received JSON: \(jsonString)")
+        }
+        logger.info("📋 JSON keys: \(Array(json.keys).sorted().joined(separator: ", "))")
+        #endif
+        
+        // Pairing messages have android_device_id and android_pub_key (even if challenge_id is missing)
+        // Check for pairing-specific fields
+        if json["android_device_id"] != nil && json["android_pub_key"] != nil {
+            #if canImport(os)
+            logger.info("✅ Detected pairing message (has android_device_id and android_pub_key)")
+            #endif
+            return .pairing
+        }
+        
+        // Also check for challenge_id if present
         if json["challenge_id"] != nil {
+            #if canImport(os)
+            logger.info("✅ Detected pairing message (has challenge_id)")
+            #endif
             return .pairing
         }
         
@@ -207,62 +578,75 @@ public final class LanWebSocketServer {
             return .clipboard
         }
         
+        #if canImport(os)
+        logger.warning("⚠️ Unknown message type - no pairing or clipboard fields detected")
+        #endif
         return .unknown
     }
     
-    private func handlePairingMessage(_ data: Data, from connectionId: UUID) {
+    private func handlePairingMessage(_ data: Data, from connectionId: UUID) throws {
+        #if canImport(os)
+        logger.info("📥 Received pairing message: \(data.count) bytes from \(connectionId.uuidString)")
+        if let jsonString = String(data: data, encoding: .utf8) {
+            logger.info("📥 Raw JSON (full): \(jsonString)")
+            // Also try to parse as dictionary to see what keys are present
+            if let jsonDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                logger.info("📥 JSON keys found: \(Array(jsonDict.keys).sorted().joined(separator: ", "))")
+                for (key, value) in jsonDict {
+                    if let strValue = value as? String {
+                        logger.info("📥   \(key): \(strValue.prefix(50))...")
+                    } else {
+                        logger.info("📥   \(key): \(type(of: value))")
+                    }
+                }
+            }
+        }
+        #endif
+        
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Don't use convertFromSnakeCase - CodingKeys already specify snake_case names
         decoder.dateDecodingStrategy = .iso8601
         
-        do {
-            let challenge = try decoder.decode(PairingChallengeMessage.self, from: data)
-            #if canImport(os)
-            logger.info("Received pairing challenge from device: \(challenge.androidDeviceName)")
-            #endif
-            delegate?.server(self, didReceivePairingChallenge: challenge, from: connectionId)
-        } catch {
-            #if canImport(os)
-            logger.error("Failed to decode pairing message: \(error.localizedDescription)")
-            #endif
-        }
+        // Let decode errors propagate
+        let challenge = try decoder.decode(PairingChallengeMessage.self, from: data)
+        #if canImport(os)
+        logger.info("✅ Decoded pairing challenge from device: \(challenge.androidDeviceName)")
+        #endif
+        delegate?.server(self, didReceivePairingChallenge: challenge, from: connectionId)
     }
     
     private func handleListenerState(_ state: NWListener.State) {
-        #if canImport(os)
         switch state {
         case .ready:
+            #if canImport(os)
             logger.info("WebSocket server ready")
+            #endif
+            print("✅ [LanWebSocketServer] Server is ready and listening")
         case .failed(let error):
+            #if canImport(os)
             logger.error("WebSocket server failed: \(error.localizedDescription)")
+            #endif
+            print("❌ [LanWebSocketServer] Server failed: \(error.localizedDescription)")
         case .cancelled:
+            #if canImport(os)
             logger.info("WebSocket server cancelled")
+            #endif
+            print("🔌 [LanWebSocketServer] Server cancelled")
+        case .waiting(let error):
+            print("⏳ [LanWebSocketServer] Server waiting: \(error.localizedDescription)")
         default:
+            #if canImport(os)
             logger.debug("WebSocket server state: \(String(describing: state))")
+            #endif
+            print("🟡 [LanWebSocketServer] Server state: \(String(describing: state))")
         }
-        #endif
     }
     
-    private func handleConnectionState(_ state: NWConnection.State, for id: UUID) {
-        switch state {
-        case .ready:
-            #if canImport(os)
-            logger.info("Connection ready: \(id.uuidString)")
-            #endif
-        case .failed(let error):
-            #if canImport(os)
-            logger.error("Connection failed: \(error.localizedDescription)")
-            #endif
-            closeConnection(id)
-        case .cancelled:
-            closeConnection(id)
-        default:
-            break
-        }
-    }
+    // Connection state is now handled in handleNewConnection's stateUpdateHandler
+    // This method is kept for backward compatibility but may not be called
     
     private func closeConnection(_ id: UUID) {
-        connections[id]?.cancel()
+        connections[id]?.connection.cancel()
         connections.removeValue(forKey: id)
         connectionMetadata.removeValue(forKey: id)
         delegate?.server(self, didCloseConnection: id)
@@ -272,4 +656,3 @@ public final class LanWebSocketServer {
         #endif
     }
 }
-

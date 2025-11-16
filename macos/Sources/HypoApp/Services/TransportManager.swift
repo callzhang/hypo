@@ -40,6 +40,7 @@ public final class TransportManager {
     private var connectionSupervisorTask: Task<Void, Never>?
     private var manualRetryRequested = false
     private var networkChangeRequested = false
+    private static let lanPairingKeyIdentifier = "lan-discovery-key"
 
 #if canImport(Combine)
     public var connectionStatePublisher: Published<ConnectionState>.Publisher { $connectionState }
@@ -646,23 +647,13 @@ public final class TransportManager {
         
         // Load or create persistent key agreement key for LAN pairing
         do {
-            // Use a special device ID for the persistent LAN key
-            let persistentKeyId = "lan-discovery-key"
-            let keychain = KeychainKeyStore()
-            let existingKey = try? keychain.load(for: persistentKeyId)
-            
-            let agreementKey: Curve25519.KeyAgreement.PrivateKey
-            if let existing = existingKey {
-                // Reconstruct private key from symmetric key (using as seed)
-                // Note: This is a simplification - ideally store the actual private key
-                agreementKey = Curve25519.KeyAgreement.PrivateKey()
-                try keychain.save(key: SymmetricKey(data: agreementKey.rawRepresentation), for: persistentKeyId)
-            } else {
-                agreementKey = Curve25519.KeyAgreement.PrivateKey()
-                try keychain.save(key: SymmetricKey(data: agreementKey.rawRepresentation), for: persistentKeyId)
-            }
+            let agreementKey = try loadOrCreateLanPairingKey()
             publicKeyBase64 = agreementKey.publicKey.rawRepresentation.base64EncodedString()
+            if let preview = publicKeyBase64?.prefix(16) {
+                print("🔑 [TransportManager] Bonjour config: Using public key \(preview)...")
+            }
         } catch {
+            print("❌ [TransportManager] Failed to load/create LAN pairing key for Bonjour: \(error)")
             publicKeyBase64 = nil
         }
         
@@ -676,6 +667,29 @@ public final class TransportManager {
             publicKey: publicKeyBase64,
             signingPublicKey: signingPublicKeyBase64
         )
+    }
+    private static func loadOrCreateLanPairingKey() throws -> Curve25519.KeyAgreement.PrivateKey {
+        let keychain = KeychainKeyStore()
+        if let stored = try keychain.load(for: lanPairingKeyIdentifier) {
+            let data = stored.withUnsafeBytes { Data($0) }
+            print("🔑 [TransportManager] Loading existing LAN pairing key from keychain (size: \(data.count) bytes)")
+            do {
+                let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data)
+                print("🔑 [TransportManager] Successfully loaded existing key, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
+                return key
+            } catch {
+                print("❌ [TransportManager] Failed to reconstruct key from keychain data: \(error)")
+                // If key reconstruction fails, delete the corrupted entry and create a new one
+                try? keychain.delete(for: lanPairingKeyIdentifier)
+                throw error
+            }
+        }
+
+        print("🔑 [TransportManager] Creating new LAN pairing key")
+        let key = Curve25519.KeyAgreement.PrivateKey()
+        try keychain.save(key: SymmetricKey(data: key.rawRepresentation), for: lanPairingKeyIdentifier)
+        print("🔑 [TransportManager] Saved new key to keychain, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
+        return key
     }
 }
 
@@ -843,6 +857,12 @@ extension TransportManager: LanWebSocketServerDelegate {
     }
     
     private func handlePairingChallenge(_ challenge: PairingChallengeMessage, connectionId: UUID) async {
+        // Remove try-catch to let errors propagate
+        #if canImport(os)
+        let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
+        logger.info("🔄 Processing pairing challenge from: \(challenge.androidDeviceName)")
+        #endif
+        
         do {
             // Create a pairing session
             let deviceIdentity = DeviceIdentity()
@@ -853,23 +873,40 @@ extension TransportManager: LanWebSocketServerDelegate {
                 deviceName: deviceIdentity.deviceName
             )
             
+            #if canImport(os)
+            logger.info("📝 Starting pairing session...")
+            #endif
+            print("🔑 [TransportManager] Loading LAN pairing key for challenge handling...")
+            let persistentKey = try Self.loadOrCreateLanPairingKey()
+            print("🔑 [TransportManager] Loaded key, public key: \(persistentKey.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
             let pairingSession = PairingSession(identity: deviceIdentity.deviceId)
-            try pairingSession.start(with: configuration)
+            try pairingSession.start(with: configuration, keyAgreementKey: persistentKey)
+            print("🔑 [TransportManager] Pairing session started with persistent key")
             
-            // Handle the challenge and generate ACK
+            #if canImport(os)
+            logger.info("🔐 Handling challenge to generate ACK...")
+            #endif
+            // Handle the challenge and generate ACK - let errors propagate
             guard let ack = await pairingSession.handleChallenge(challenge) else {
                 #if canImport(os)
-                let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
-                logger.error("❌ Failed to generate pairing ACK")
+                logger.error("❌ Failed to generate pairing ACK - handleChallenge returned nil")
                 #endif
+                print("❌ [TransportManager] Failed to generate pairing ACK - handleChallenge returned nil")
                 return
             }
             
-            // Send ACK back to Android
+            #if canImport(os)
+            logger.info("✅ Generated ACK with challengeId: \(ack.challengeId.uuidString)")
+            #endif
+            print("✅ [TransportManager] Generated ACK with challengeId: \(ack.challengeId.uuidString)")
+            
+            #if canImport(os)
+            logger.info("📤 Sending ACK to Android device...")
+            #endif
+            // Send ACK back to Android - let errors propagate
             try webSocketServer.sendPairingAck(ack, to: connectionId)
             
             #if canImport(os)
-            let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
             logger.info("✅ Pairing completed with \(challenge.androidDeviceName)")
             #endif
             
@@ -882,12 +919,16 @@ extension TransportManager: LanWebSocketServerDelegate {
                     "deviceName": challenge.androidDeviceName
                 ]
             )
-            
         } catch {
             #if canImport(os)
             let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
-            logger.error("❌ Pairing failed: \(error.localizedDescription)")
+            logger.error("❌ Pairing failed with error: \(error.localizedDescription)")
+            logger.error("❌ Error type: \(String(describing: type(of: error)))")
+            logger.error("❌ Error details: \(error)")
             #endif
+            // Log error but don't crash - just return
+            print("❌ Pairing failed: \(error)")
+            return
         }
     }
     

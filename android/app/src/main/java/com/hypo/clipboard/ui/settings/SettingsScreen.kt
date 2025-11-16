@@ -40,6 +40,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.hypo.clipboard.R
 import com.hypo.clipboard.data.settings.UserSettings
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
+import com.hypo.clipboard.ui.components.DeviceConnectionStatus
+import com.hypo.clipboard.ui.components.DeviceStatusBadge
 
 @Composable
 fun SettingsRoute(
@@ -110,6 +112,7 @@ fun SettingsScreen(
             item {
                 DevicesSection(
                     peers = state.discoveredPeers,
+                    deviceStatuses = state.deviceStatuses,
                     onStartPairing = onStartPairing,
                     onRemoveDevice = onRemoveDevice
                 )
@@ -246,6 +249,7 @@ private fun BatterySection(onOpenBatterySettings: () -> Unit) {
 @Composable
 private fun DevicesSection(
     peers: List<DiscoveredPeer>,
+    deviceStatuses: Map<String, DeviceConnectionStatus>,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit
 ) {
@@ -268,7 +272,12 @@ private fun DevicesSection(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 peers.forEach { peer ->
-                    DeviceRow(peer = peer, onRemove = { onRemoveDevice(peer) })
+                    val status = deviceStatuses[peer.serviceName] ?: DeviceConnectionStatus.Disconnected
+                    DeviceRow(
+                        peer = peer,
+                        status = status,
+                        onRemove = { onRemoveDevice(peer) }
+                    )
                 }
             }
         }
@@ -279,7 +288,11 @@ private fun DevicesSection(
 }
 
 @Composable
-private fun DeviceRow(peer: DiscoveredPeer, onRemove: () -> Unit) {
+private fun DeviceRow(
+    peer: DiscoveredPeer,
+    status: DeviceConnectionStatus,
+    onRemove: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -295,7 +308,16 @@ private fun DeviceRow(peer: DiscoveredPeer, onRemove: () -> Unit) {
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(text = peer.serviceName, style = MaterialTheme.typography.titleMedium)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = peer.serviceName,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    DeviceStatusBadge(status = status)
+                }
                 Text(
                     text = "${peer.host}:${peer.port}",
                     style = MaterialTheme.typography.labelMedium,

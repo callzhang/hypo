@@ -1,12 +1,5 @@
 package com.hypo.clipboard.pairing
 
-import android.Manifest
-import android.util.Size
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -45,49 +38,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberPermissionState
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
-import java.util.concurrent.Executors
 
 @Composable
 fun PairingRoute(
     onBack: () -> Unit,
-    qrViewModel: PairingViewModel = hiltViewModel(),
     remoteViewModel: RemotePairingViewModel = hiltViewModel(),
     lanViewModel: LanPairingViewModel = hiltViewModel()
 ) {
-    val qrState by qrViewModel.state.collectAsStateWithLifecycle()
     val remoteState by remoteViewModel.state.collectAsStateWithLifecycle()
     val lanState by lanViewModel.state.collectAsStateWithLifecycle()
     var mode by rememberSaveable { mutableStateOf(PairingMode.AutoDiscovery) }
 
     LaunchedEffect(mode) {
         when (mode) {
-            PairingMode.Qr -> {
-                remoteViewModel.reset()
-                lanViewModel.reset()
-            }
             PairingMode.Remote -> {
-                qrViewModel.reset()
                 lanViewModel.reset()
             }
             PairingMode.AutoDiscovery -> {
-                qrViewModel.reset()
                 remoteViewModel.reset()
             }
         }
@@ -96,13 +68,9 @@ fun PairingRoute(
     PairingScreen(
         mode = mode,
         onModeChange = { mode = it },
-        qrState = qrState,
         remoteState = remoteState,
         lanState = lanState,
         onBack = onBack,
-        onQrScanned = qrViewModel::onQrDetected,
-        onAckSubmitted = qrViewModel::submitAck,
-        onQrReset = qrViewModel::reset,
         onRemoteCodeChanged = remoteViewModel::onCodeChanged,
         onRemoteSubmit = remoteViewModel::submitCode,
         onRemoteReset = remoteViewModel::reset,
@@ -111,18 +79,14 @@ fun PairingRoute(
     )
 }
 
-@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PairingScreen(
     mode: PairingMode,
     onModeChange: (PairingMode) -> Unit,
-    qrState: PairingUiState,
     remoteState: RemotePairingUiState,
     lanState: LanPairingUiState,
     onBack: () -> Unit,
-    onQrScanned: (String) -> Unit,
-    onAckSubmitted: (String) -> Unit,
-    onQrReset: () -> Unit,
     onRemoteCodeChanged: (String) -> Unit,
     onRemoteSubmit: () -> Unit,
     onRemoteReset: () -> Unit,
@@ -130,13 +94,6 @@ fun PairingScreen(
     onLanReset: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
-
-    LaunchedEffect(Unit) {
-        if (!cameraPermissionState.status.isGranted) {
-            cameraPermissionState.launchPermissionRequest()
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -167,30 +124,6 @@ fun PairingScreen(
                         onReset = onLanReset
                     )
                 }
-                PairingMode.Qr -> {
-                    Text(text = qrState.status, style = MaterialTheme.typography.titleMedium)
-                    when (qrState.phase) {
-                        PairingPhase.Scanning, PairingPhase.Processing -> {
-                            if (cameraPermissionState.status.isGranted) {
-                                BarcodeScannerView(onQrScanned = onQrScanned)
-                            } else {
-                                PermissionRequiredView(onRequest = cameraPermissionState::launchPermissionRequest)
-                            }
-                        }
-                        PairingPhase.ChallengeReady -> {
-                            ChallengeView(state = qrState, onAckSubmitted = onAckSubmitted)
-                        }
-                        PairingPhase.AwaitingAck -> {
-                            Text(text = "Waiting for acknowledgement…", style = MaterialTheme.typography.bodyLarge)
-                        }
-                        PairingPhase.Completed -> {
-                            SuccessView(onReset = onQrReset)
-                        }
-                        PairingPhase.Error -> {
-                            ErrorView(message = qrState.error ?: "Unknown error", onReset = onQrReset)
-                        }
-                    }
-                }
                 PairingMode.Remote -> {
                     RemotePairingView(
                         state = remoteState,
@@ -204,7 +137,7 @@ fun PairingScreen(
     }
 }
 
-enum class PairingMode { Qr, Remote, AutoDiscovery }
+enum class PairingMode { Remote, AutoDiscovery }
 
 @Composable
 private fun ModeToggle(mode: PairingMode, onModeChange: (PairingMode) -> Unit) {
@@ -213,11 +146,6 @@ private fun ModeToggle(mode: PairingMode, onModeChange: (PairingMode) -> Unit) {
             label = "LAN",
             selected = mode == PairingMode.AutoDiscovery,
             onClick = { onModeChange(PairingMode.AutoDiscovery) }
-        )
-        ModeButton(
-            label = "QR",
-            selected = mode == PairingMode.Qr,
-            onClick = { onModeChange(PairingMode.Qr) }
         )
         ModeButton(
             label = "Code",
@@ -236,135 +164,6 @@ private fun ModeButton(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun BarcodeScannerView(onQrScanned: (String) -> Unit) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val previewViewState = remember { mutableStateOf<PreviewView?>(null) }
-    val hasProcessed = remember { mutableStateOf(false) }
-
-    AndroidView(factory = { ctx ->
-        val previewView = PreviewView(ctx)
-        previewViewState.value = previewView
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val preview = androidx.camera.core.Preview.Builder()
-                .build()
-                .also { it.setSurfaceProvider(previewView.surfaceProvider) }
-            val analysis = ImageAnalysis.Builder()
-                .setTargetResolution(Size(1280, 720))
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-            val scanner = BarcodeScanning.getClient(
-                BarcodeScannerOptions.Builder()
-                    .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                    .build()
-            )
-            val executor = Executors.newSingleThreadExecutor()
-            analysis.setAnalyzer(executor) { imageProxy ->
-                processFrame(scanner, imageProxy, hasProcessed, onQrScanned)
-            }
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                CameraSelector.DEFAULT_BACK_CAMERA,
-                preview,
-                analysis
-            )
-        }, ContextCompat.getMainExecutor(ctx))
-        previewView
-    }, modifier = Modifier
-        .fillMaxWidth()
-        .height(320.dp)
-        .background(Color.Black))
-}
-
-private fun processFrame(
-    scanner: com.google.mlkit.vision.barcode.BarcodeScanner,
-    imageProxy: ImageProxy,
-    hasProcessed: MutableState<Boolean>,
-    onQrScanned: (String) -> Unit
-) {
-    if (hasProcessed.value) {
-        imageProxy.close()
-        return
-    }
-    val mediaImage = imageProxy.image
-    if (mediaImage != null) {
-        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-        scanner.process(image)
-            .addOnSuccessListener { barcodes ->
-                val qr = barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT || it.rawValue != null }
-                val value = qr?.rawValue
-                if (value != null) {
-                    hasProcessed.value = true
-                    onQrScanned(value)
-                }
-            }
-            .addOnCompleteListener {
-                imageProxy.close()
-            }
-    } else {
-        imageProxy.close()
-    }
-}
-
-@Composable
-private fun PermissionRequiredView(onRequest: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Icon(imageVector = Icons.Filled.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-        Text(text = "Camera permission is required to scan QR codes.")
-        Button(onClick = onRequest) { Text(text = "Grant Permission") }
-    }
-}
-
-@Composable
-private fun ChallengeView(state: PairingUiState, onAckSubmitted: (String) -> Unit) {
-    val scrollState = rememberScrollState()
-    val ackInput = remember { mutableStateOf("") }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text(text = "Challenge JSON", style = MaterialTheme.typography.labelLarge)
-        OutlinedTextField(
-            value = state.challengeJson.orEmpty(),
-            onValueChange = {},
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            readOnly = true
-        )
-        state.relayHint?.let { hint ->
-            Text(text = "Relay hint: $hint", style = MaterialTheme.typography.bodySmall)
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Paste acknowledgement JSON when macOS responds", style = MaterialTheme.typography.bodyMedium)
-        OutlinedTextField(
-            value = ackInput.value,
-            onValueChange = { ackInput.value = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(160.dp),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
-        )
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Button(onClick = { onAckSubmitted(ackInput.value) }, enabled = ackInput.value.isNotBlank()) {
-                Text(text = "Submit Ack")
-            }
-        }
-    }
-}
 
 @Composable
 private fun RemotePairingView(

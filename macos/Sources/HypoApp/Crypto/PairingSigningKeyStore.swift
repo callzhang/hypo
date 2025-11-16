@@ -62,7 +62,7 @@ public final class PairingSigningKeyStore: Sendable {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -76,7 +76,10 @@ public final class PairingSigningKeyStore: Sendable {
                 kSecAttrService as String: service,
                 kSecAttrAccount as String: account
             ]
-            let attributes: [String: Any] = [kSecValueData as String: data]
+            let attributes: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ]
             let updateStatus = SecItemUpdate(updateQuery as CFDictionary, attributes as CFDictionary)
             guard updateStatus == errSecSuccess else {
                 throw PairingSigningKeyStoreError.unexpectedStatus(updateStatus)

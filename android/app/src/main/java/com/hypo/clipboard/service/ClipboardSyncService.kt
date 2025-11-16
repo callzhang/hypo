@@ -29,6 +29,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.delay
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -38,15 +39,19 @@ class ClipboardSyncService : Service() {
     @Inject lateinit var transportManager: TransportManager
     @Inject lateinit var deviceIdentity: DeviceIdentity
     @Inject lateinit var repository: ClipboardRepository
+    @Inject lateinit var incomingClipboardHandler: com.hypo.clipboard.sync.IncomingClipboardHandler
+    @Inject lateinit var lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
+    @Inject lateinit var clipboardAccessChecker: com.hypo.clipboard.sync.ClipboardAccessChecker
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var listener: ClipboardListener
-    private lateinit var poller: com.hypo.clipboard.sync.ClipboardPoller
     private lateinit var notificationManager: NotificationManagerCompat
     private var notificationJob: Job? = null
+    private var clipboardPermissionJob: Job? = null
     private var latestPreview: String? = null
     private var isPaused: Boolean = false
     private var isScreenOff: Boolean = false
+    private var awaitingClipboardPermission: Boolean = false
     private lateinit var screenStateReceiver: ScreenStateReceiver
 
     override fun onCreate() {
@@ -69,24 +74,17 @@ class ClipboardSyncService : Service() {
             onClipboardChanged = clipboardCallback,
             scope = scope
         )
-        
-        // Add poller as fallback for MIUI and other devices where listener doesn't work
-        poller = com.hypo.clipboard.sync.ClipboardPoller(
-            clipboardManager = clipboardManager,
-            parser = parser,
-            onClipboardChanged = clipboardCallback,
-            scope = scope,
-            pollIntervalMs = 2000L // Poll every 2 seconds
-        )
 
         android.util.Log.i("ClipboardSyncService", "🎯 Starting sync coordinator...")
         syncCoordinator.start(scope)
         android.util.Log.i("ClipboardSyncService", "🌐 Starting transport manager...")
         transportManager.start(buildLanRegistrationConfig())
+        android.util.Log.i("ClipboardSyncService", "📥 Setting up incoming clipboard handler...")
+        lanWebSocketClient.setIncomingClipboardHandler { envelope ->
+            incomingClipboardHandler.handle(envelope)
+        }
         android.util.Log.i("ClipboardSyncService", "📋 Starting clipboard listener...")
-        listener.start()
-        android.util.Log.i("ClipboardSyncService", "🔄 Starting clipboard poller (fallback for MIUI)...")
-        poller.start()
+        ensureClipboardPermissionAndStartListener()
         android.util.Log.i("ClipboardSyncService", "👀 Observing latest item...")
         observeLatestItem()
         android.util.Log.i("ClipboardSyncService", "📱 Registering screen state receiver...")
@@ -98,8 +96,8 @@ class ClipboardSyncService : Service() {
         notificationJob?.cancel()
         unregisterScreenStateReceiver()
         listener.stop()
-        poller.stop()
         syncCoordinator.stop()
+        clipboardPermissionJob?.cancel()
         transportManager.stop()
         scope.coroutineContext.cancelChildren()
         super.onDestroy()
@@ -109,6 +107,7 @@ class ClipboardSyncService : Service() {
         when (intent?.action) {
             ACTION_PAUSE -> pauseListener()
             ACTION_RESUME -> resumeListener()
+            ACTION_OPEN_CLIPBOARD_SETTINGS -> openClipboardSettings()
             ACTION_STOP -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -134,12 +133,15 @@ class ClipboardSyncService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val statusText = if (isPaused) {
-            getString(R.string.service_notification_status_paused)
-        } else {
-            getString(R.string.service_notification_status_active)
+        val statusText = when {
+            awaitingClipboardPermission -> getString(R.string.service_notification_status_permission)
+            isPaused -> getString(R.string.service_notification_status_paused)
+            else -> getString(R.string.service_notification_status_active)
         }
-        val previewText = latestPreview ?: getString(R.string.service_notification_text)
+        val previewText = when {
+            awaitingClipboardPermission -> getString(R.string.service_notification_permission_body)
+            else -> latestPreview ?: getString(R.string.service_notification_text)
+        }
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.service_notification_title))
@@ -153,7 +155,13 @@ class ClipboardSyncService : Service() {
                     .setSummaryText(statusText)
             )
 
-        if (isPaused) {
+        if (awaitingClipboardPermission) {
+            builder.addAction(
+                R.drawable.ic_notification,
+                getString(R.string.action_grant_clipboard_access),
+                pendingIntentForAction(ACTION_OPEN_CLIPBOARD_SETTINGS)
+            )
+        } else if (isPaused) {
             builder.addAction(
                 R.drawable.ic_notification,
                 getString(R.string.action_resume),
@@ -198,7 +206,7 @@ class ClipboardSyncService : Service() {
 
     private fun resumeListener() {
         if (!isPaused) return
-        listener.start()
+        ensureClipboardPermissionAndStartListener()
         isPaused = false
         updateNotification()
     }
@@ -250,6 +258,32 @@ class ClipboardSyncService : Service() {
         transportManager.start(buildLanRegistrationConfig())
     }
 
+    private fun ensureClipboardPermissionAndStartListener() {
+        clipboardPermissionJob?.cancel()
+        clipboardPermissionJob = scope.launch {
+            while (isActive) {
+                val allowed = clipboardAccessChecker.canReadClipboard()
+                awaitingClipboardPermission = !allowed
+                updateNotification()
+                if (allowed) {
+                    listener.start()
+                    return@launch
+                } else {
+                    Log.w(TAG, "Clipboard access denied. Waiting for user consent…")
+                    delay(5_000)
+                }
+            }
+        }
+    }
+
+    private fun openClipboardSettings() {
+        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = android.net.Uri.fromParts("package", packageName, null)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { startActivity(intent) }
+    }
+
     private fun buildLanRegistrationConfig(): LanRegistrationConfig {
         val version = runCatching {
             val packageInfo = packageManager.getPackageInfo(packageName, 0)
@@ -272,6 +306,7 @@ class ClipboardSyncService : Service() {
         private const val DEFAULT_VERSION = "1.0.0"
         private const val ACTION_PAUSE = "com.hypo.clipboard.action.PAUSE"
         private const val ACTION_RESUME = "com.hypo.clipboard.action.RESUME"
+        private const val ACTION_OPEN_CLIPBOARD_SETTINGS = "com.hypo.clipboard.action.OPEN_CLIPBOARD_SETTINGS"
         private const val ACTION_STOP = "com.hypo.clipboard.action.STOP"
     }
 }

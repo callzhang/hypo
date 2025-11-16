@@ -218,19 +218,21 @@ Google Play Store → Search "Hypo Clipboard" → Install
 
 ## 🔄 Device Pairing
 
-### Method 1: QR Code Pairing (Same Network)
+### Method 1: LAN Auto-Discovery Pairing (Same Network)
 
 **Prerequisites**: Both devices on same Wi-Fi network
 
-1. **Generate QR Code (macOS)**
+1. **Start Pairing (macOS)**
    ```
-   Menu Bar Icon → Pair Device → Generate QR Code
+   Menu Bar Icon → Pair Device
+   (macOS will automatically advertise itself on the network)
    ```
 
-2. **Scan Code (Android)**
+2. **Pair Device (Android)**
    ```
-   Open Hypo → Pair Device → Scan QR Code
-   → Point camera at macOS screen
+   Open Hypo → Pair Device → Select "LAN" tab
+   → Wait for macOS device to appear
+   → Tap on the device to pair
    ```
 
 3. **Verify Connection**

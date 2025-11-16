@@ -9,6 +9,7 @@ data class ClipboardItem(
     val preview: String,
     val metadata: Map<String, String>?,
     val deviceId: String,
+    val deviceName: String? = null,
     val createdAt: Instant,
     val isPinned: Boolean
 )

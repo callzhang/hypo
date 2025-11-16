@@ -118,7 +118,7 @@ class LanDiscoveryRepository(
                 kotlinx.coroutines.delay(100)
             }
             runCatching {
-                nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener)
+            nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener)
                 isDiscoveryActive = true
             }
         }

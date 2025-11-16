@@ -1,5 +1,7 @@
 package com.hypo.clipboard.transport
 
+import android.content.Context
+import android.content.SharedPreferences
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
 import com.hypo.clipboard.transport.lan.LanDiscoveryEvent
 import com.hypo.clipboard.transport.lan.LanDiscoverySource
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
 import kotlin.random.Random
@@ -31,6 +34,7 @@ import kotlin.collections.buildMap
 class TransportManager(
     private val discoverySource: LanDiscoverySource,
     private val registrationController: LanRegistrationController,
+    private val context: Context? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val clock: Clock = Clock.systemUTC(),
     private val pruneInterval: Duration = Duration.ofMinutes(1),
@@ -45,7 +49,91 @@ class TransportManager(
     private val _lastSeen = MutableStateFlow<Map<String, Instant>>(emptyMap())
     private val _isAdvertising = MutableStateFlow(false)
     private val _connectionState = MutableStateFlow(ConnectionState.Idle)
-    private val _lastSuccessfulTransport = MutableStateFlow<Map<String, ActiveTransport>>(emptyMap())
+    private val prefs: SharedPreferences? = context?.getSharedPreferences("transport_status", Context.MODE_PRIVATE)
+    private val _lastSuccessfulTransport = MutableStateFlow<Map<String, ActiveTransport>>(loadPersistedTransportStatus())
+    
+    private fun loadPersistedTransportStatus(): Map<String, ActiveTransport> {
+        if (prefs == null) {
+            android.util.Log.w("TransportManager", "⚠️ No SharedPreferences available, cannot load persisted transport status")
+            return emptyMap()
+        }
+        val allEntries = prefs.all
+        val result = mutableMapOf<String, ActiveTransport>()
+        android.util.Log.d("TransportManager", "📦 Loading persisted transport status from SharedPreferences (${allEntries.size} entries)")
+        for ((key, value) in allEntries) {
+            if (key.startsWith("transport_")) {
+                val deviceId = key.removePrefix("transport_")
+                val transportName = value as? String ?: continue
+                val transport = try {
+                    ActiveTransport.valueOf(transportName)
+                } catch (e: IllegalArgumentException) {
+                    android.util.Log.w("TransportManager", "⚠️ Invalid transport name: $transportName for device: $deviceId")
+                    continue
+                }
+                result[deviceId] = transport
+                android.util.Log.d("TransportManager", "✅ Loaded persisted status: device=$deviceId, transport=$transport")
+            }
+        }
+        android.util.Log.d("TransportManager", "📦 Loaded ${result.size} persisted transport status entries")
+        return result
+    }
+    
+    private fun persistTransportStatus(deviceId: String, transport: ActiveTransport) {
+        if (prefs == null) {
+            android.util.Log.w("TransportManager", "⚠️ No SharedPreferences available, cannot persist transport status for device: $deviceId")
+            return
+        }
+        android.util.Log.d("TransportManager", "💾 Persisting transport status: device=$deviceId, transport=$transport")
+        val key = "transport_$deviceId"
+        try {
+            val editor = prefs?.edit()
+            if (editor == null) {
+                android.util.Log.e("TransportManager", "❌ Failed to get SharedPreferences editor")
+                return
+            }
+            editor.putString(key, transport.name)
+            val success = editor.commit()
+            if (success) {
+                android.util.Log.d("TransportManager", "✅ Transport status persisted successfully: key=$key, value=${transport.name}")
+                // Verify it was saved immediately
+                val saved = prefs?.getString(key, null)
+                android.util.Log.d("TransportManager", "🔍 Verification: saved value=$saved")
+                // Also verify all entries
+                val allEntries = prefs?.all
+                android.util.Log.d("TransportManager", "🔍 All SharedPreferences entries: ${allEntries?.keys}")
+                // Update the StateFlow to ensure it reflects the persisted value
+                _lastSuccessfulTransport.update { current ->
+                    val updated = HashMap(current)
+                    updated[deviceId] = transport
+                    updated
+                }
+            } else {
+                android.util.Log.e("TransportManager", "❌ commit() returned false for key=$key")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("TransportManager", "❌ Exception persisting transport status: ${e.message}", e)
+        }
+    }
+    
+    fun persistDeviceName(deviceId: String, deviceName: String) {
+        if (prefs == null) {
+            android.util.Log.w("TransportManager", "⚠️ No SharedPreferences available, cannot persist device name for device: $deviceId")
+            return
+        }
+        val key = "device_name_$deviceId"
+        prefs?.edit()?.putString(key, deviceName)?.commit()
+        android.util.Log.d("TransportManager", "💾 Persisted device name: device=$deviceId, name=$deviceName")
+    }
+    
+    fun getDeviceName(deviceId: String): String? {
+        if (prefs == null) return null
+        val key = "device_name_$deviceId"
+        return prefs?.getString(key, null)
+    }
+    
+    private fun clearPersistedTransportStatus(deviceId: String) {
+        prefs?.edit()?.remove("transport_$deviceId")?.apply()
+    }
 
     private var discoveryJob: Job? = null
     private var pruneJob: Job? = null
@@ -256,7 +344,7 @@ class TransportManager(
         }
     }
 
-    private fun addPeer(peer: DiscoveredPeer) {
+    fun addPeer(peer: DiscoveredPeer) {
         synchronized(stateLock) {
             peersByService[peer.serviceName] = peer
             lastSeenByService[peer.serviceName] = peer.lastSeen
@@ -272,6 +360,18 @@ class TransportManager(
                 publishStateLocked()
             }
         }
+    }
+
+    fun forgetPairedDevice(deviceId: String) {
+        clearPersistedTransportStatus(deviceId)
+        // Also clear device name
+        prefs?.edit()?.remove("device_name_$deviceId")?.apply()
+        _lastSuccessfulTransport.update { current ->
+            val updated = HashMap(current)
+            updated.remove(deviceId)
+            updated
+        }
+        android.util.Log.d("TransportManager", "🗑️ Forgot paired device: $deviceId")
     }
 
     private fun publishStateLocked() {
@@ -432,11 +532,22 @@ class TransportManager(
 
     private fun updateLastSuccessfulTransport(peer: String?, transport: ActiveTransport) {
         if (peer == null) return
+        persistTransportStatus(peer, transport)
         _lastSuccessfulTransport.update { current ->
             val updated = HashMap(current)
             updated[peer] = transport
             updated
         }
+    }
+    
+    /**
+     * Mark a device as successfully connected via a specific transport.
+     * This is useful after pairing when a WebSocket connection is already established.
+     */
+    fun markDeviceConnected(deviceId: String, transport: ActiveTransport) {
+        android.util.Log.d("TransportManager", "🔵 markDeviceConnected called: deviceId=$deviceId, transport=$transport")
+        updateLastSuccessfulTransport(deviceId, transport)
+        android.util.Log.d("TransportManager", "🔵 markDeviceConnected completed")
     }
 
     companion object {

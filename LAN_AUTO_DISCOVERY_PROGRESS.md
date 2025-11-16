@@ -46,68 +46,41 @@
 
 ## 🚧 Remaining Work
 
-### 7. Android Auto-Discovery UI (Not Started)
+### 7. Android Auto-Discovery UI (In Progress)
 **File:** `android/app/src/main/java/com/hypo/clipboard/pairing/PairingScreen.kt`
 
-**What's Needed:**
-- Add third pairing mode: `PairingMode.AutoDiscovery`
-- Display list of discovered macOS devices via mDNS
-- Show device names from Bonjour service announcements
-- "Tap to Pair" buttons for each discovered device
+**What’s Next:**
+- The route already defaults to `PairingMode.AutoDiscovery`; polish the UI by surfacing loading/empty states for `LanPairingUiState.Discovering`, error messaging, and a manual refresh/“try again” affordance.
+- Render Bonjour metadata that macOS publishes (device name, host, fingerprint) in the cards so users can confirm they are pairing the right Mac.
+- Add lightweight `LazyColumn` diffing so the list doesn’t jump when NSD emits updates; consider stable keys based on `serviceName`.
+- Ensure the toggle resets state without cancelling discovery on rotations (verify `LanPairingViewModel.reset()` behaviour).
 
-**Code Structure:**
-```kotlin
-enum class PairingMode {
-    Qr,           // Existing QR scan mode
-    Remote,       // Existing remote code mode
-    AutoDiscovery // NEW: LAN device discovery
-}
+### 8. Android Tap-to-Pair Flow (Pending Implementation)
+**File:** `android/app/src/main/java/com/hypo/clipboard/pairing/LanPairingViewModel.kt`
 
-@Composable
-fun AutoDiscoveryContent(
-    discoveredDevices: List<DiscoveredPeer>,
-    onDeviceTap: (DiscoveredPeer) -> Unit
-) {
-    LazyColumn {
-        items(discoveredDevices) { device ->
-            DeviceCard(
-                name = device.serviceName,
-                host = device.host,
-                port = device.port,
-                onClick = { onDeviceTap(device) }
-            )
-        }
-    }
-}
-```
-
-### 8. Android Tap-to-Pair Flow (Not Started)
-**File:** `android/app/src/main/java/com/hypo/clipboard/pairing/LanPairingViewModel.kt` (NEW)
-
-**What's Needed:**
-- Create new ViewModel for LAN pairing
-- Use existing `LanDiscoveryRepository` for device discovery
-- On device tap:
-  1. Create `LanWebSocketClient` with device URL
-  2. Send `PairingChallengeMessage` (existing model)
-  3. Receive `PairingAckMessage` from macOS
-  4. Complete pairing via `PairingHandshakeManager`
+**What’s Needed:**
+- Replace the placeholder delay/success path with a real handshake:
+  1. Build a QR-equivalent payload from `DiscoveredPeer.attributes` (`device_id`, `pub_key`, `signing_pub_key`, optional `relay_hint`) using `createQrPayloadFromDevice`.
+  2. Call `PairingHandshakeManager.initiate(payloadJson)` to obtain the `PairingChallengeMessage` and session state.
+  3. Instantiate a real `LanWebSocketClient` (inject a connector instead of `NotImplementedError`) and send the encoded challenge frame.
+  4. Await the macOS `PairingAckMessage`, pass it to `PairingHandshakeManager.complete`, and persist the derived key via `DeviceKeyStore`.
+- Validate the Bonjour fingerprint before trusting the connection (`TlsWebSocketConfig.fingerprintSha256`).
+- Emit transitional states (`Pairing`, `Success`, `Error`) based on the coroutine outcome and resume discovery on failure.
 
 **Integration Points:**
-- `LanDiscoveryRepository` (✅ already exists)
-- `LanWebSocketClient` (✅ already exists)
-- `PairingHandshakeManager` (✅ already exists)
-- Just need to wire them together!
+- `LanDiscoveryRepository` (✅ discovery events in place)
+- `LanWebSocketClient` / `TlsWebSocketConfig` (needs wiring)
+- `PairingHandshakeManager` + `PairingTrustStore` (ensures signature validation)
+- `DeviceIdentity` / `DeviceKeyStore` (persist shared key)
 
-### 9. macOS Pairing Approval UI (Optional Enhancement)
-**Current Behavior:**
-- macOS logs pairing challenges to console
-- No user approval dialog yet
+### 9. macOS Pairing Approval & ACK Response (Required)
+**Files:** `macos/Sources/HypoApp/Services/TransportManager.swift`, `macos/Sources/HypoApp/Pairing/PairingSession.swift`
 
-**Future Enhancement:**
-- Show system notification: "Android device 'Pixel 7' wants to pair"
-- Allow/Deny buttons
-- Integrate with existing `PairingSession.handleChallenge()`
+**What’s Needed:**
+- Move beyond logging in `LanWebSocketServerDelegate.server(_:didReceivePairingChallenge:)`; hand challenges to a UI surface (notification/dialog) or auto-accept in debug builds.
+- Invoke `PairingSession.handleChallenge` to generate the `PairingAckMessage` and send it back via `LanWebSocketServer.sendPairingAck`.
+- Record paired device metadata (so Bonjour TXT values stay in sync) and update any trust-store bookkeeping.
+- Optionally gate approvals behind a dedicated ViewModel so the menu bar app can show pending requests.
 
 ---
 
@@ -129,16 +102,22 @@ fun AutoDiscoveryContent(
 - [ ] Can tap device to initiate pairing
 
 ### Phase 3: Pairing Handshake
-- [ ] Android sends pairing challenge
-- [ ] macOS receives and logs challenge
-- [ ] macOS sends pairing ACK
-- [ ] Android receives ACK and completes pairing
+- [ ] Android builds QR-equivalent payload and sends pairing challenge
+- [ ] macOS surfaces challenge UI and issues ACK via `sendPairingAck`
+- [ ] Android receives ACK, calls `PairingHandshakeManager.complete`, and persists keys
+- [ ] Fingerprint validation rejects mismatched devices
 
 ### Phase 4: Clipboard Sync
 - [ ] Copy text on Android → appears on macOS
 - [ ] Copy text on macOS → appears on Android
 - [ ] Verify encryption/decryption works
 - [ ] Check message routing through WebSocket
+
+### Phase 5: Automated Coverage
+- [ ] Add unit tests for `LanPairingViewModel` state transitions (discovery add/remove, handshake success/failure)
+- [ ] Extend `LanDiscoveryRepositoryTest` to cover attribute parsing for pairing metadata
+- [ ] Add integration test (instrumented or JVM with fake WebSocket) covering the handshake round-trip
+- [ ] Add macOS unit/UI test for handling incoming pairing challenges (if possible with TestHost)
 
 ---
 
@@ -155,9 +134,9 @@ fun AutoDiscoveryContent(
 ## 🎯 Next Steps
 
 ### Immediate (Required for MVP):
-1. Implement Android auto-discovery UI (2-3 hours)
-2. Wire Android tap-to-pair flow (1-2 hours)
-3. End-to-end testing (1 hour)
+1. Polish Android auto-discovery UI and state handling (2-3 hours)
+2. Implement LAN handshake (Android challenge send + macOS ACK response) and persist trust (2-3 hours)
+3. Run end-to-end transport + pairing verification (1 hour)
 
 ### Future Enhancements:
 1. macOS pairing approval dialog
@@ -177,4 +156,3 @@ fun AutoDiscoveryContent(
 - ⏳ End-to-End Testing (0%)
 
 **Estimated Time to Complete:** 4-6 hours
-

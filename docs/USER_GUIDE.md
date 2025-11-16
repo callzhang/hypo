@@ -116,16 +116,17 @@ Hypo is a secure, real-time clipboard synchronization app that seamlessly connec
 
 2. **Device Pairing** (Choose One Method)
 
-   **Option A: QR Code Pairing (Recommended for LAN)**
-   1. On macOS: Click menu bar → "Pair Device" → "Generate QR Code"
-   2. On Android: Tap "Pair Device" → "Scan QR Code"
-   3. Scan the QR code with your Android device
-   4. Pairing completes automatically
+   **Option A: LAN Auto-Discovery (Recommended for same network)**
+   1. On macOS: Ensure Hypo is running (menu bar icon visible)
+   2. On Android: Tap "Pair Device" → Select "LAN" tab
+   3. Wait for your macOS device to appear in the list
+   4. Tap on the device to pair
+   5. Pairing completes automatically
 
-   **Option B: Remote Pairing (For different networks)**
-   1. On macOS: Click menu bar → "Pair Device" → "Remote Pairing"
-   2. Note the 6-digit pairing code
-   3. On Android: Tap "Pair Device" → "Enter Code"
+   **Option B: Code Pairing (For different networks or when LAN discovery fails)**
+   1. On macOS: Click menu bar → "Pair Device"
+   2. Note the 6-digit pairing code displayed
+   3. On Android: Tap "Pair Device" → Select "Code" tab
    4. Enter the 6-digit code
    5. Pairing completes via cloud relay
 

@@ -30,7 +30,7 @@ public struct HypoMenuBarApp: App {
     public var body: some Scene {
         MenuBarExtra("📋", systemImage: "doc.on.clipboard.fill") {
             MenuBarContentView(viewModel: viewModel)
-                .frame(width: 520, height: 650)
+                .frame(width: 360, height: 480)
                 .environmentObject(viewModel)
                 .preferredColorScheme(viewModel.appearancePreference.colorScheme)
                 .task { await viewModel.start() }
@@ -83,8 +83,6 @@ private struct MenuBarContentView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            LatestClipboardView(entry: viewModel.latestItem, viewModel: viewModel)
-
             Picker("Section", selection: $selectedSection) {
                 ForEach(MenuSection.allCases) { section in
                     Label(section.title, systemImage: section.icon).tag(section)
@@ -288,116 +286,119 @@ private struct SettingsSectionView: View {
     @State private var isPresentingPairing = false
 
     var body: some View {
-        Form {
-            Section("Connection") {
-                Toggle(isOn: Binding(
-                    get: { viewModel.transportPreference == .lanFirst },
-                    set: { viewModel.updateTransportPreference($0 ? .lanFirst : .cloudOnly) }
-                )) {
-                    Text("Prefer local network connections")
-                }
-                Toggle("Allow cloud relay fallback", isOn: Binding(
-                    get: { viewModel.allowsCloudFallback },
-                    set: { viewModel.setAllowsCloudFallback($0) }
-                ))
-            }
-
-            Section("History") {
-                Slider(value: Binding(
-                    get: { Double(viewModel.historyLimit) },
-                    set: { viewModel.updateHistoryLimit(Int($0)) }
-                ), in: 20...500, step: 10) {
-                    Text("History size")
-                }
-                HStack {
-                    Text("Current limit")
-                    Spacer()
-                    Text("\(viewModel.historyLimit)")
-                }
-                Toggle("Auto-delete after a delay", isOn: Binding(
-                    get: { viewModel.autoDeleteAfterHours > 0 },
-                    set: { newValue in
-                        let hours = newValue ? max(viewModel.autoDeleteAfterHours, 6) : 0
-                        viewModel.setAutoDelete(hours: hours)
+        ScrollView {
+            Form {
+                Section("Connection") {
+                    Toggle(isOn: Binding(
+                        get: { viewModel.transportPreference == .lanFirst },
+                        set: { viewModel.updateTransportPreference($0 ? .lanFirst : .cloudOnly) }
+                    )) {
+                        Text("Prefer local network connections")
                     }
-                ))
-                if viewModel.autoDeleteAfterHours > 0 {
-                    Stepper(value: Binding(
-                        get: { viewModel.autoDeleteAfterHours },
-                        set: { viewModel.setAutoDelete(hours: $0) }
-                    ), in: 1...72, step: 1) {
-                        Text("Delete after \(viewModel.autoDeleteAfterHours) hour(s)")
-                    }
+                    Toggle("Allow cloud relay fallback", isOn: Binding(
+                        get: { viewModel.allowsCloudFallback },
+                        set: { viewModel.setAllowsCloudFallback($0) }
+                    ))
                 }
-            }
 
-            Section("Appearance") {
-                Picker("Theme", selection: Binding(
-                    get: { viewModel.appearancePreference },
-                    set: { viewModel.updateAppearance($0) }
-                )) {
-                    ForEach(ClipboardHistoryViewModel.AppearancePreference.allCases) { appearance in
-                        Text(appearanceTitle(for: appearance)).tag(appearance)
+                Section("History") {
+                    Slider(value: Binding(
+                        get: { Double(viewModel.historyLimit) },
+                        set: { viewModel.updateHistoryLimit(Int($0)) }
+                    ), in: 20...500, step: 10) {
+                        Text("History size")
                     }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            Section("Security") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Current encryption key")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text(viewModel.encryptionKeySummary)
-                        .font(.system(.body, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .contextMenu {
-                            Button("Copy") { viewModel.copyEncryptionKeyToPasteboard() }
-                            Button("Regenerate", role: .destructive) { viewModel.regenerateEncryptionKey() }
+                    HStack {
+                        Text("Current limit")
+                        Spacer()
+                        Text("\(viewModel.historyLimit)")
+                    }
+                    Toggle("Auto-delete after a delay", isOn: Binding(
+                        get: { viewModel.autoDeleteAfterHours > 0 },
+                        set: { newValue in
+                            let hours = newValue ? max(viewModel.autoDeleteAfterHours, 6) : 0
+                            viewModel.setAutoDelete(hours: hours)
                         }
-                }
-                HStack {
-                    Button("Copy key") { viewModel.copyEncryptionKeyToPasteboard() }
-                    Button("Regenerate key", role: .destructive) { viewModel.regenerateEncryptionKey() }
-                }
-            }
-
-            Section("Paired devices") {
-                if viewModel.pairedDevices.isEmpty {
-                    Text("No devices paired yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.pairedDevices) { device in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(device.name)
-                                Text(device.platform)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("Last seen \(device.lastSeen.formatted(date: .omitted, time: .shortened))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Circle()
-                                .fill(device.isOnline ? Color.green : Color.gray)
-                                .frame(width: 10, height: 10)
-                                .accessibilityLabel(device.isOnline ? "Online" : "Offline")
-                            Button(role: .destructive) {
-                                viewModel.removePairedDevice(device)
-                            } label: {
-                                Image(systemName: "minus.circle")
-                            }
-                            .buttonStyle(.plain)
-                            .help("Remove device")
+                    ))
+                    if viewModel.autoDeleteAfterHours > 0 {
+                        Stepper(value: Binding(
+                            get: { viewModel.autoDeleteAfterHours },
+                            set: { viewModel.setAutoDelete(hours: $0) }
+                        ), in: 1...72, step: 1) {
+                            Text("Delete after \(viewModel.autoDeleteAfterHours) hour(s)")
                         }
                     }
                 }
-                Button("Pair new device") { isPresentingPairing = true }
+
+                Section("Appearance") {
+                    Picker("Theme", selection: Binding(
+                        get: { viewModel.appearancePreference },
+                        set: { viewModel.updateAppearance($0) }
+                    )) {
+                        ForEach(ClipboardHistoryViewModel.AppearancePreference.allCases) { appearance in
+                            Text(appearanceTitle(for: appearance)).tag(appearance)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section("Security") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Current encryption key")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(viewModel.encryptionKeySummary)
+                            .font(.system(.body, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .contextMenu {
+                                Button("Copy") { viewModel.copyEncryptionKeyToPasteboard() }
+                                Button("Regenerate", role: .destructive) { viewModel.regenerateEncryptionKey() }
+                            }
+                    }
+                    HStack {
+                        Button("Copy key") { viewModel.copyEncryptionKeyToPasteboard() }
+                        Button("Regenerate key", role: .destructive) { viewModel.regenerateEncryptionKey() }
+                    }
+                }
+
+                Section("Paired devices") {
+                    if viewModel.pairedDevices.isEmpty {
+                        Text("No devices paired yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.pairedDevices) { device in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(device.name)
+                                    Text(device.platform)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("Last seen \(device.lastSeen.formatted(date: .omitted, time: .shortened))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Circle()
+                                    .fill(device.isOnline ? Color.green : Color.gray)
+                                    .frame(width: 10, height: 10)
+                                    .accessibilityLabel(device.isOnline ? "Online" : "Offline")
+                                Button(role: .destructive) {
+                                    viewModel.removePairedDevice(device)
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove device")
+                            }
+                        }
+                    }
+                    Button("Pair new device") { isPresentingPairing = true }
+                }
             }
+            .scrollContentBackground(.hidden)
+            .formStyle(.grouped)
         }
-        .scrollContentBackground(.hidden)
         .sheet(isPresented: $isPresentingPairing) {
             PairDeviceSheet(viewModel: viewModel, isPresented: $isPresentingPairing)
         }
@@ -415,34 +416,19 @@ private struct SettingsSectionView: View {
 private struct PairDeviceSheet: View {
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @Binding var isPresented: Bool
-    @StateObject private var pairingViewModel: PairingViewModel
     @StateObject private var remoteViewModel: RemotePairingViewModel
-    @State private var pairingMode: PairingMode = .qr
-    @State private var challengeInput: String = ""
     @State private var hasStarted = false
 
     init(viewModel: ClipboardHistoryViewModel, isPresented: Binding<Bool>) {
         self._viewModel = ObservedObject(initialValue: viewModel)
         self._isPresented = isPresented
-        _pairingViewModel = StateObject(wrappedValue: viewModel.makePairingViewModel())
         _remoteViewModel = StateObject(wrappedValue: viewModel.makeRemotePairingViewModel())
-    }
-
-    private enum PairingMode: Int {
-        case qr
-        case remote
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Pair New Device")
                 .font(.title2.bold())
-
-            Picker("Pairing method", selection: $pairingMode) {
-                Text("QR Code").tag(PairingMode.qr)
-                Text("Remote Code").tag(PairingMode.remote)
-            }
-            .pickerStyle(.segmented)
 
             statusSection
 
@@ -469,9 +455,6 @@ private struct PairDeviceSheet: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .interactiveDismissDisabled()
         .onAppear { startIfNeeded() }
-        .onChange(of: pairingMode) { _ in
-            startIfNeeded(force: true)
-        }
         .onDisappear {
             remoteViewModel.reset()
         }
@@ -479,84 +462,24 @@ private struct PairDeviceSheet: View {
 
     @ViewBuilder
     private var statusSection: some View {
-        switch pairingMode {
-        case .qr:
-            Text(pairingViewModel.statusMessage)
-                .font(.callout)
+        Text(remoteViewModel.statusMessage)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        if let countdown = remoteViewModel.countdownText {
+            Text(countdown)
+                .font(.caption)
                 .foregroundStyle(.secondary)
-        case .remote:
-            Text(remoteViewModel.statusMessage)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            if let countdown = remoteViewModel.countdownText {
-                Text(countdown)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        switch pairingMode {
-        case .qr:
-            qrContent
-        case .remote:
-            remoteContent
-        }
+        remoteContent
     }
 
     private var isComplete: Bool {
-        switch pairingMode {
-        case .qr:
-            if case .completed = pairingViewModel.state { return true }
-        case .remote:
-            if case .completed = remoteViewModel.state { return true }
-        }
+        if case .completed = remoteViewModel.state { return true }
         return false
-    }
-
-    @ViewBuilder
-    private var qrContent: some View {
-        switch pairingViewModel.state {
-        case .loading:
-            ProgressView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        case .showing(let image, let payload):
-            VStack(spacing: 12) {
-                if let image {
-                    Image(nsImage: image)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 200, height: 200)
-                        .padding(8)
-                        .background(Color.white)
-                        .cornerRadius(8)
-                        .shadow(radius: 4)
-                } else {
-                    ProgressView()
-                }
-                
-                VStack(spacing: 4) {
-                    Text("Scan with Android device")
-                        .font(.subheadline.weight(.medium))
-                    Text("Pairing will complete automatically")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("QR expires in 5 minutes")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        case .awaitingHandshake:
-            ProgressView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        case .completed:
-            successView
-        case .failed(let message):
-            failureView(message: message)
-        }
     }
 
     @ViewBuilder
@@ -617,20 +540,8 @@ private struct PairDeviceSheet: View {
 
     private func startIfNeeded(force: Bool = false) {
         let params = viewModel.pairingParameters()
-        switch pairingMode {
-        case .qr:
-            remoteViewModel.reset()
-            if force || !hasStarted {
-                challengeInput = ""
-                pairingViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)
-            }
-        case .remote:
-            if force {
-                challengeInput = ""
-            }
-            if force || !hasStarted {
-                remoteViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)
-            }
+        if force || !hasStarted {
+            remoteViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)
         }
         hasStarted = true
     }

@@ -26,13 +26,18 @@ public final class KeychainKeyStore: Sendable {
         let data = key.withUnsafeBytes { Data($0) }
         var query = baseQuery(for: deviceId)
         query[kSecValueData as String] = data
+        // Set accessibility to avoid password prompts - accessible after first unlock
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
         let status = SecItemAdd(query as CFDictionary, nil)
         switch status {
         case errSecSuccess:
             return
         case errSecDuplicateItem:
-            let attributes = [kSecValueData as String: data]
+            let attributes: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ]
             let updateStatus = SecItemUpdate(baseQuery(for: deviceId) as CFDictionary, attributes as CFDictionary)
             guard updateStatus == errSecSuccess else {
                 throw KeychainError.unexpectedStatus(updateStatus)

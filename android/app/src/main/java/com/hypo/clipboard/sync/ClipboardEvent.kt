@@ -9,7 +9,10 @@ data class ClipboardEvent(
     val content: String,
     val preview: String,
     val metadata: Map<String, String>,
-    val createdAt: Instant
+    val createdAt: Instant,
+    val sourceDeviceId: String? = null,
+    val sourceDeviceName: String? = null,
+    val skipBroadcast: Boolean = false
 )
 
 internal fun ClipboardEvent.signature(): String {

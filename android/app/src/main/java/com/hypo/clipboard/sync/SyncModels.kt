@@ -29,6 +29,7 @@ data class Payload(
     @SerialName("content_type") val contentType: ClipboardType,
     val ciphertext: String,
     @SerialName("device_id") val deviceId: String,
+    @SerialName("device_name") val deviceName: String? = null,
     val target: String? = null,
     val encryption: EncryptionMetadata
 )

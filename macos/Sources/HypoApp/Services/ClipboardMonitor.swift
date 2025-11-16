@@ -27,15 +27,21 @@ public final class ClipboardMonitor {
     private var timer: Timer?
     private let throttle: TokenBucket
     private let maxAttachmentSize = 1_048_576
+    private let deviceId: UUID
+    private let deviceName: String
     public weak var delegate: ClipboardMonitorDelegate?
 
     public init(
         pasteboard: PasteboardProviding = NSPasteboard.general,
-        throttle: TokenBucket = .clipboardThrottle()
+        throttle: TokenBucket = .clipboardThrottle(),
+        deviceId: UUID,
+        deviceName: String
     ) {
         self.pasteboard = pasteboard
         self.changeCount = pasteboard.changeCount
         self.throttle = throttle
+        self.deviceId = deviceId
+        self.deviceName = deviceName
     }
 
     deinit {
@@ -63,13 +69,13 @@ public final class ClipboardMonitor {
         guard let types = pasteboard.types else { return nil }
 
         if types.contains(.string), let string = pasteboard.string(forType: .string), !string.isEmpty {
-            let entry = ClipboardEntry(originDeviceId: "macos", content: .text(string))
+            let entry = ClipboardEntry(originDeviceId: deviceId.uuidString, originDeviceName: deviceName, content: .text(string))
             delegate?.clipboardMonitor(self, didCapture: entry)
             return entry
         }
 
         if types.contains(.URL), let urlString = pasteboard.string(forType: .URL), let url = URL(string: urlString) {
-            let entry = ClipboardEntry(originDeviceId: "macos", content: .link(url))
+            let entry = ClipboardEntry(originDeviceId: deviceId.uuidString, originDeviceName: deviceName, content: .link(url))
             delegate?.clipboardMonitor(self, didCapture: entry)
             return entry
         }
@@ -117,7 +123,7 @@ public final class ClipboardMonitor {
             data: compressedData,
             thumbnail: thumbnail
         )
-        return ClipboardEntry(originDeviceId: "macos", content: .image(metadata))
+        return ClipboardEntry(originDeviceId: deviceId.uuidString, originDeviceName: deviceName, content: .image(metadata))
     }
 
     private func captureFile(types: [NSPasteboard.PasteboardType]) -> ClipboardEntry? {
@@ -135,7 +141,7 @@ public final class ClipboardMonitor {
             url: fileURL,
             base64: data.base64EncodedString()
         )
-        return ClipboardEntry(originDeviceId: "macos", content: .file(metadata))
+        return ClipboardEntry(originDeviceId: deviceId.uuidString, originDeviceName: deviceName, content: .file(metadata))
     }
 }
 

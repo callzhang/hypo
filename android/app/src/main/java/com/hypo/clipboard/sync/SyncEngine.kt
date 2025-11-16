@@ -63,6 +63,7 @@ class SyncEngine @Inject constructor(
                 contentType = item.type,
                 ciphertext = encrypted.ciphertext.toBase64(),
                 deviceId = identity.deviceId,
+                deviceName = identity.deviceName,
                 target = targetDeviceId,
                 encryption = EncryptionMetadata(
                     nonce = encrypted.nonce.toBase64(),

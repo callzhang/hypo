@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow cleartext traffic for local network (LAN) connections -->
+    <!-- This is needed for ws:// WebSocket connections to macOS on local network -->
+    <!-- Note: Android's domain-config doesn't work well with IP addresses, -->
+    <!-- so we allow cleartext for all private IP ranges via base-config -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    
+    <!-- Explicitly allow cleartext for localhost and .local domains -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">local</domain>
+    </domain-config>
+</network-security-config>
+

@@ -36,6 +36,7 @@ class ClipboardRepositoryImpl @Inject constructor(
         preview = preview,
         metadata = metadata,
         deviceId = deviceId,
+        deviceName = deviceName,
         createdAt = createdAt,
         isPinned = isPinned
     )
@@ -47,6 +48,7 @@ class ClipboardRepositoryImpl @Inject constructor(
         preview = preview,
         metadata = metadata,
         deviceId = deviceId,
+        deviceName = deviceName,
         createdAt = createdAt,
         isPinned = isPinned
     )

@@ -17,12 +17,15 @@ import javax.inject.Inject
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
     private val repository: ClipboardRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val deviceIdentity: com.hypo.clipboard.sync.DeviceIdentity
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(HistoryUiState())
     val state: StateFlow<HistoryUiState> = _state.asStateFlow()
     private val searchQuery = MutableStateFlow("")
+    
+    val currentDeviceId: String get() = deviceIdentity.deviceId
 
     init {
         observeHistory()

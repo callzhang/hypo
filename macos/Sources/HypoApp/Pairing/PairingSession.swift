@@ -118,17 +118,20 @@ public final class PairingSession: @unchecked Sendable {
         self.jsonDecoder.dateDecodingStrategy = .iso8601
     }
 
-    public func start(with configuration: Configuration) throws {
+    public func start(
+        with configuration: Configuration,
+        keyAgreementKey: Curve25519.KeyAgreement.PrivateKey? = nil
+    ) throws {
         self.configuration = configuration
         let signingKey = try signingKeyStore.loadOrCreate()
-        let keyAgreementKey = Curve25519.KeyAgreement.PrivateKey()
-        self.ephemeralKey = keyAgreementKey
+        let agreementKey = keyAgreementKey ?? Curve25519.KeyAgreement.PrivateKey()
+        self.ephemeralKey = agreementKey
 
         let issuedAt = clock()
         let expiresAt = issuedAt.addingTimeInterval(configuration.qrValidity)
         let payload = PairingPayload(
             macDeviceId: identity,
-            macPublicKey: keyAgreementKey.publicKey.rawRepresentation,
+            macPublicKey: agreementKey.publicKey.rawRepresentation,
             macSigningPublicKey: signingKey.publicKey.rawRepresentation,
             service: configuration.service,
             port: configuration.port,
@@ -311,10 +314,12 @@ public final class PairingSession: @unchecked Sendable {
             issuedAt: clock()
         )
         let data = try jsonEncoder.encode(payload)
+        // Use lowercase UUID string to match Android's expectation (ack.macDeviceId.toByteArray())
+        let macDeviceIdString = identity.uuidString.lowercased()
         let encrypted = try await cryptoService.encrypt(
             plaintext: data,
             key: sharedKey,
-            aad: Data(identity.uuidString.utf8)
+            aad: Data(macDeviceIdString.utf8)
         )
         return PairingAckMessage(
             challengeId: challengeId,

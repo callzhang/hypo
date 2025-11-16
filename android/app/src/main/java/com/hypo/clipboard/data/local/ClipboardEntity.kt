@@ -30,6 +30,8 @@ data class ClipboardEntity(
     val metadata: Map<String, String>?,
     @ColumnInfo(name = "device_id")
     val deviceId: String,
+    @ColumnInfo(name = "device_name")
+    val deviceName: String? = null,
     @ColumnInfo(name = "created_at")
     val createdAt: Instant,
     @ColumnInfo(name = "is_pinned")

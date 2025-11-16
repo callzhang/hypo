@@ -45,4 +45,8 @@ class SecureKeyStore @Inject constructor(
             prefs.edit().remove(deviceId).commit()
         }
     }
+
+    override suspend fun getAllDeviceIds(): List<String> = withContext(Dispatchers.IO) {
+        prefs.all.keys.toList()
+    }
 }

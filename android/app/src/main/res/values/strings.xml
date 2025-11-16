@@ -9,10 +9,13 @@
     <string name="service_notification_channel_description">Persistent notification for clipboard synchronization</string>
     <string name="service_notification_status_active">Syncing clipboard</string>
     <string name="service_notification_status_paused">Sync paused</string>
+    <string name="service_notification_status_permission">Permission required</string>
+    <string name="service_notification_permission_body">Grant clipboard access so Hypo can sync in the background.</string>
 
     <!-- Actions -->
     <string name="action_pause">Pause</string>
     <string name="action_resume">Resume</string>
+    <string name="action_grant_clipboard_access">Grant access</string>
     <string name="action_stop">Stop</string>
 
     <!-- Home Screen -->
@@ -52,7 +55,7 @@
 
     <!-- Pairing Screen -->
     <string name="pairing_title">Pair Device</string>
-    <string name="pairing_scan_qr">Scan QR Code</string>
+    <string name="pairing_scan_qr">Pair New Device</string>
     <string name="pairing_enter_code">Or enter pairing code</string>
     <string name="pairing_code_hint">6-digit code</string>
     <string name="pairing_pair">Pair</string>
@@ -66,6 +69,12 @@
     <string name="status_lan">LAN</string>
     <string name="status_cloud">Cloud</string>
     <string name="status_offline">Offline</string>
+    
+    <!-- Device Status -->
+    <string name="device_status_lan">LAN</string>
+    <string name="device_status_cloud">Cloud</string>
+    <string name="device_status_disconnected">Offline</string>
+    <string name="device_status_failed">Failed</string>
 
     <!-- Content Types -->
     <string name="type_text">Text</string>

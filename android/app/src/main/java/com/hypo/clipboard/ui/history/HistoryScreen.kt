@@ -40,6 +40,7 @@ fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.
     HistoryScreen(
         items = state.items,
         query = state.query,
+        currentDeviceId = viewModel.currentDeviceId,
         onQueryChange = viewModel::onQueryChange,
         onClearHistory = viewModel::clearHistory
     )
@@ -49,6 +50,7 @@ fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.
 fun HistoryScreen(
     items: List<ClipboardItem>,
     query: String,
+    currentDeviceId: String,
     onQueryChange: (String) -> Unit,
     onClearHistory: () -> Unit,
     modifier: Modifier = Modifier
@@ -91,7 +93,7 @@ fun HistoryScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(items) { item ->
-                    ClipboardCard(item = item)
+                    ClipboardCard(item = item, currentDeviceId = currentDeviceId)
                 }
             }
         }
@@ -125,29 +127,44 @@ private fun EmptyHistory() {
 }
 
 @Composable
-private fun ClipboardCard(item: ClipboardItem) {
+private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
     val formatter = DateTimeFormatter.ofPattern("MMM d, HH:mm")
+    val isLocal = item.deviceId == currentDeviceId
+    
+    // Determine device name with better detection
+    // TODO: Complete sync handler to properly tag remote items with source device info
+    val deviceName = when {
+        item.deviceName != null && item.deviceName.isNotBlank() -> item.deviceName
+        isLocal -> "This device"
+        item.deviceId.startsWith("mac-") || 
+        item.deviceId.contains("macbook", ignoreCase = true) ||
+        item.deviceId.contains("imac", ignoreCase = true) ||
+        !item.deviceId.startsWith("android-") -> "macOS"
+        else -> item.deviceId.take(10) // Show partial ID as fallback
+    }
+    
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Type icon
                 Text(
-                    text = item.type.label,
+                    text = item.type.icon,
+                    style = MaterialTheme.typography.titleLarge
+                )
+                // Device name as title
+                Text(
+                    text = deviceName,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.weight(1f))
-                // Device indicator
-                val deviceLabel = item.deviceId.take(8)
-                val isLocal = item.metadata?.get("isLocal") == "true"
-                Text(
-                    text = if (isLocal) "📱 This device" else "💻 $deviceLabel",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(end = 8.dp)
-                )
+                // Timestamp
                 Text(
                     text = formatter.format(item.createdAt.atZone(ZoneId.systemDefault())),
                     style = MaterialTheme.typography.bodySmall,
@@ -162,10 +179,10 @@ private fun ClipboardCard(item: ClipboardItem) {
     }
 }
 
-private val ClipboardType.label: String
+private val ClipboardType.icon: String
     get() = when (this) {
-        ClipboardType.TEXT -> "Text"
-        ClipboardType.LINK -> "Link"
-        ClipboardType.IMAGE -> "Image"
-        ClipboardType.FILE -> "File"
+        ClipboardType.TEXT -> "📝"
+        ClipboardType.LINK -> "🔗"
+        ClipboardType.IMAGE -> "🖼️"
+        ClipboardType.FILE -> "📎"
     }

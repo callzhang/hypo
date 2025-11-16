@@ -57,7 +57,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): HypoDatabase =
-        Room.databaseBuilder(context, HypoDatabase::class.java, "hypo.db").build()
+        Room.databaseBuilder(context, HypoDatabase::class.java, "hypo.db")
+            .fallbackToDestructiveMigration()
+            .build()
 
     @Provides
     fun provideClipboardDao(database: HypoDatabase): ClipboardDao = database.clipboardDao()
@@ -159,12 +161,12 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideSyncTransport(
+    fun provideLanWebSocketClient(
         @Named("lan_ws_config") config: TlsWebSocketConfig,
         @Named("lan_ws_connector") connector: WebSocketConnector,
         frameCodec: TransportFrameCodec,
         analytics: TransportAnalytics
-    ): SyncTransport = LanWebSocketClient(
+    ): com.hypo.clipboard.transport.ws.LanWebSocketClient = com.hypo.clipboard.transport.ws.LanWebSocketClient(
         config,
         connector,
         frameCodec,
@@ -172,6 +174,12 @@ object AppModule {
         Clock.systemUTC(),
         analytics = analytics
     )
+    
+    @Provides
+    @Singleton
+    fun provideSyncTransport(
+        lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
+    ): SyncTransport = lanWebSocketClient
 
     @Provides
     @Singleton
@@ -224,8 +232,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideTransportManager(
+        @ApplicationContext context: Context,
         discoverySource: LanDiscoverySource,
         registrationController: LanRegistrationController,
         analytics: TransportAnalytics
-    ): TransportManager = TransportManager(discoverySource, registrationController, analytics = analytics)
+    ): TransportManager = TransportManager(discoverySource, registrationController, context = context, analytics = analytics)
 }

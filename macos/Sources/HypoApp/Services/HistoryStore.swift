@@ -152,10 +152,48 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         self.notificationController = ClipboardNotificationController()
         self.notificationController?.configure(handler: self)
 #endif
+        
+        // Listen for pairing completion notifications from TransportManager
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("PairingCompleted"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let userInfo = notification.userInfo,
+                  let deviceIdString = userInfo["deviceId"] as? String,
+                  let deviceId = UUID(uuidString: deviceIdString),
+                  let deviceName = userInfo["deviceName"] as? String else { return }
+            
+            Task { @MainActor in
+                await self?.handlePairingCompleted(deviceId: deviceId, deviceName: deviceName)
+            }
+        }
+    }
+    
+    private func handlePairingCompleted(deviceId: UUID, deviceName: String) async {
+        let device = PairedDevice(
+            id: deviceId,
+            name: deviceName,
+            platform: "Android",
+            lastSeen: Date(),
+            isOnline: true
+        )
+        
+        // Add if not already paired
+        if !pairedDevices.contains(where: { $0.id == deviceId }) {
+            pairedDevices.append(device)
+            pairedDevices.sort { $0.lastSeen > $1.lastSeen }
+            persistPairedDevices()
+            
+#if canImport(os)
+            logger.info("✅ Paired device added: \(deviceName)")
+#endif
+        }
     }
 
     deinit {
         loadTask?.cancel()
+        NotificationCenter.default.removeObserver(self)
     }
 
     public func start() async {
@@ -200,6 +238,59 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 #if canImport(UserNotifications)
         notificationController?.deliverNotification(for: entry)
 #endif
+        
+        // ✅ Auto-sync to paired devices
+        await syncToPairedDevices(entry)
+    }
+    
+    private func syncToPairedDevices(_ entry: ClipboardEntry) async {
+        guard !pairedDevices.isEmpty, let transportManager = transportManager else { return }
+        
+        // Convert clipboard entry to payload
+        let payload: ClipboardPayload
+        switch entry.content {
+        case .text(let text):
+            payload = ClipboardPayload(
+                contentType: .text,
+                data: Data(text.utf8),
+                metadata: ["device_id": entry.originDeviceId, "device_name": entry.originDeviceName ?? ""]
+            )
+        case .link(let url):
+            payload = ClipboardPayload(
+                contentType: .link,
+                data: Data(url.absoluteString.utf8),
+                metadata: ["device_id": entry.originDeviceId, "device_name": entry.originDeviceName ?? ""]
+            )
+        case .image, .file:
+            // Skip images/files for now (would need more complex handling)
+            return
+        }
+        
+        // Get sync engine with transport
+        let transport = transportManager.loadTransport()
+        let keyProvider = KeychainDeviceKeyProvider()
+        let syncEngine = SyncEngine(
+            transport: transport,
+            keyProvider: keyProvider,
+            localDeviceId: deviceIdentity.deviceId.uuidString
+        )
+        
+        // Ensure transport is connected
+        await syncEngine.establishConnection()
+        
+        // Send to each paired device
+        for device in pairedDevices {
+            do {
+                try await syncEngine.transmit(entry: entry, payload: payload, targetDeviceId: device.id.uuidString)
+#if canImport(os)
+                logger.info("✅ Synced clipboard to device: \(device.name, privacy: .public)")
+#endif
+            } catch {
+#if canImport(os)
+                logger.error("❌ Failed to sync to \(device.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+#endif
+            }
+        }
     }
 
     public func remove(id: UUID) async {
@@ -275,11 +366,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         persistPairedDevices()
     }
 
-    public func makePairingViewModel() -> PairingViewModel {
-        PairingViewModel(identity: deviceIdentity) { [weak self] device in
-            self?.registerPairedDevice(device)
-        }
-    }
 
     public func makeRemotePairingViewModel() -> RemotePairingViewModel {
         RemotePairingViewModel(identity: deviceIdentity) { [weak self] device in

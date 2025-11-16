@@ -4,6 +4,7 @@ public struct ClipboardEntry: Identifiable, Equatable, Codable {
     public let id: UUID
     public let timestamp: Date
     public let originDeviceId: String
+    public let originDeviceName: String?
     public let content: ClipboardContent
     public var isPinned: Bool
 
@@ -11,12 +12,14 @@ public struct ClipboardEntry: Identifiable, Equatable, Codable {
         id: UUID = UUID(),
         timestamp: Date = Date(),
         originDeviceId: String,
+        originDeviceName: String? = nil,
         content: ClipboardContent,
         isPinned: Bool = false
     ) {
         self.id = id
         self.timestamp = timestamp
         self.originDeviceId = originDeviceId
+        self.originDeviceName = originDeviceName
         self.content = content
         self.isPinned = isPinned
     }

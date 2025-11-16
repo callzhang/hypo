@@ -96,8 +96,39 @@ if [ -f "$APK_PATH" ]; then
     echo "   Size: $APK_SIZE"
     echo "   SHA-256: $APK_SHA"
     echo ""
-    echo "To install on connected device:"
-    echo "   \$ANDROID_SDK_ROOT/platform-tools/adb install -r android/$APK_PATH"
+    
+    # Auto-install and reopen app if device is connected
+    ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
+    if [ -f "$ADB" ]; then
+        DEVICE_CHECK=$("$ADB" devices 2>/dev/null | grep -q "device$" && echo "yes" || echo "no")
+        if [ "$DEVICE_CHECK" = "yes" ]; then
+            echo -e "${YELLOW}Installing on connected device...${NC}"
+            if "$ADB" install -r "$PROJECT_ROOT/android/$APK_PATH" 2>/dev/null; then
+                echo -e "${GREEN}✅ Installed successfully${NC}"
+                
+                # Reopen the app using the dedicated script
+                if [ -f "$PROJECT_ROOT/scripts/reopen-android-app.sh" ]; then
+                    echo -e "${YELLOW}Opening Hypo app...${NC}"
+                    "$PROJECT_ROOT/scripts/reopen-android-app.sh" 2>/dev/null || echo -e "${YELLOW}⚠️  Could not auto-open app. Please open manually.${NC}"
+                else
+                    # Fallback: try direct adb commands
+                    echo -e "${YELLOW}Opening Hypo app...${NC}"
+                    "$ADB" shell am start -n com.hypo.clipboard/.MainActivity 2>/dev/null || \
+                    "$ADB" shell monkey -p com.hypo.clipboard -c android.intent.category.LAUNCHER 1 2>/dev/null || \
+                    echo -e "${YELLOW}⚠️  Could not auto-open app. Please open manually.${NC}"
+                fi
+            else
+                echo -e "${RED}❌ Installation failed${NC}"
+                echo "   Try manually: $ADB install -r android/$APK_PATH"
+            fi
+        else
+            echo "To install on connected device:"
+            echo "   $ADB install -r android/$APK_PATH"
+        fi
+    else
+        echo "To install on connected device:"
+        echo "   \$ANDROID_SDK_ROOT/platform-tools/adb install -r android/$APK_PATH"
+    fi
 else
     echo -e "${RED}❌ Build failed - APK not found${NC}"
     exit 1

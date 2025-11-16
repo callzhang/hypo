@@ -30,6 +30,7 @@ public struct SyncEnvelope: Codable {
         public let contentType: ClipboardPayload.ContentType
         public let ciphertext: Data
         public let deviceId: String
+        public let deviceName: String?
         public let target: String?
         public let encryption: EncryptionMetadata
 
@@ -37,12 +38,14 @@ public struct SyncEnvelope: Codable {
             contentType: ClipboardPayload.ContentType,
             ciphertext: Data,
             deviceId: String,
+            deviceName: String? = nil,
             target: String?,
             encryption: EncryptionMetadata
         ) {
             self.contentType = contentType
             self.ciphertext = ciphertext
             self.deviceId = deviceId
+            self.deviceName = deviceName
             self.target = target
             self.encryption = encryption
         }
@@ -158,6 +161,7 @@ public final actor SyncEngine {
                 contentType: payload.contentType,
                 ciphertext: sealed.ciphertext,
                 deviceId: entry.originDeviceId,
+                deviceName: entry.originDeviceName,
                 target: targetDeviceId,
                 encryption: .init(nonce: sealed.nonce, tag: sealed.tag)
             )

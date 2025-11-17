@@ -10,7 +10,7 @@
     <string name="service_notification_status_active">Syncing clipboard</string>
     <string name="service_notification_status_paused">Sync paused</string>
     <string name="service_notification_status_permission">Permission required</string>
-    <string name="service_notification_permission_body">Grant clipboard access so Hypo can sync in the background.</string>
+    <string name="service_notification_permission_body">Enable \"Allow clipboard access\" in Settings → Apps → Hypo → Permissions to sync in background.</string>
 
     <!-- Actions -->
     <string name="action_pause">Pause</string>
@@ -49,6 +49,11 @@
     <string name="settings_battery">Battery Optimization</string>
     <string name="settings_battery_description">Disable battery optimization for reliable background sync</string>
     <string name="settings_battery_optimize_button">Open Settings</string>
+    <string name="settings_accessibility">Accessibility Service</string>
+    <string name="settings_accessibility_description">Enable accessibility service for background clipboard access on Android 10+</string>
+    <string name="settings_accessibility_status_enabled">Enabled</string>
+    <string name="settings_accessibility_status_disabled">Disabled</string>
+    <string name="settings_accessibility_open_button">Open Settings</string>
     <string name="settings_history_limit_value">Storing up to %1$d items</string>
     <string name="settings_auto_delete_value">Auto delete after %1$d days</string>
     <string name="settings_auto_delete_never">Never delete automatically</string>
@@ -92,4 +97,10 @@
     <string name="error_network">Network error. Please check your connection.</string>
     <string name="error_permission">Permission required</string>
     <string name="error_camera">Camera permission required for QR scanning</string>
+
+    <!-- Accessibility Service -->
+    <string name="accessibility_service_description">Hypo uses accessibility service to monitor clipboard changes in the background on Android 10+. This allows clipboard synchronization to work even when the app is not in focus. The service only monitors clipboard content and does not interact with other apps.</string>
+    <string name="accessibility_service_title">Hypo Clipboard Monitor</string>
+    <string name="accessibility_enable_prompt">Enable accessibility service for background clipboard access</string>
+    <string name="accessibility_enable_button">Open Accessibility Settings</string>
 </resources>

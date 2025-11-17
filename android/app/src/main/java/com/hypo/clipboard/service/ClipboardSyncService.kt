@@ -1,20 +1,28 @@
 package com.hypo.clipboard.service
 
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
+import android.view.accessibility.AccessibilityManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.hypo.clipboard.MainActivity
 import com.hypo.clipboard.R
 import com.hypo.clipboard.data.ClipboardRepository
+import com.hypo.clipboard.service.ClipboardAccessibilityService
 import com.hypo.clipboard.sync.ClipboardListener
 import com.hypo.clipboard.sync.ClipboardParser
 import com.hypo.clipboard.sync.DeviceIdentity
@@ -54,6 +62,8 @@ class ClipboardSyncService : Service() {
     private var isPaused: Boolean = false
     private var isScreenOff: Boolean = false
     private var awaitingClipboardPermission: Boolean = false
+    private var isAppInForeground: Boolean = false
+    private var isAccessibilityServiceEnabled: Boolean = false
     private lateinit var screenStateReceiver: ScreenStateReceiver
 
     override fun onCreate() {
@@ -61,8 +71,15 @@ class ClipboardSyncService : Service() {
         android.util.Log.i("ClipboardSyncService", "🚀🚀🚀 SERVICE onCreate() CALLED! Starting initialization...")
         notificationManager = NotificationManagerCompat.from(this)
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
-        android.util.Log.i("ClipboardSyncService", "✅ Service started foreground with notification")
+        
+        // Start foreground service immediately to keep app alive
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+        android.util.Log.i("ClipboardSyncService", "✅ Service started foreground with notification (keeps app alive for clipboard access)")
 
         val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         val parser = ClipboardParser(contentResolver)
@@ -91,6 +108,16 @@ class ClipboardSyncService : Service() {
         observeLatestItem()
         android.util.Log.i("ClipboardSyncService", "📱 Registering screen state receiver...")
         registerScreenStateReceiver()
+        
+        // Monitor app foreground state and accessibility service status
+        scope.launch {
+            while (isActive) {
+                checkAppForegroundState()
+                checkAccessibilityServiceStatus()
+                delay(2_000) // Check every 2 seconds
+            }
+        }
+        
         android.util.Log.i("ClipboardSyncService", "✅✅✅ SERVICE FULLY INITIALIZED AND READY!")
     }
 
@@ -110,6 +137,7 @@ class ClipboardSyncService : Service() {
             ACTION_PAUSE -> pauseListener()
             ACTION_RESUME -> resumeListener()
             ACTION_OPEN_CLIPBOARD_SETTINGS -> openClipboardSettings()
+            ACTION_OPEN_ACCESSIBILITY_SETTINGS -> openAccessibilitySettings()
             ACTION_STOP -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -129,6 +157,9 @@ class ClipboardSyncService : Service() {
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = getString(R.string.service_notification_channel_description)
+                setShowBadge(false)
+                enableLights(false)
+                enableVibration(false)
             }
             manager.createNotificationChannel(channel)
         }
@@ -138,56 +169,75 @@ class ClipboardSyncService : Service() {
         val statusText = when {
             awaitingClipboardPermission -> getString(R.string.service_notification_status_permission)
             isPaused -> getString(R.string.service_notification_status_paused)
+            !isAccessibilityServiceEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAppInForeground -> "Enable accessibility for background access"
+            !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> "Background (clipboard access limited)"
             else -> getString(R.string.service_notification_status_active)
         }
         val previewText = when {
             awaitingClipboardPermission -> getString(R.string.service_notification_permission_body)
+            !isAccessibilityServiceEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAppInForeground -> "Enable accessibility service in Settings → Accessibility → Hypo for background clipboard access"
+            !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAccessibilityServiceEnabled -> "App must be in foreground for clipboard access on Android 10+"
             else -> latestPreview ?: getString(R.string.service_notification_text)
         }
+
+        // Create intent to open app when notification is tapped
+        val contentIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.service_notification_title))
             .setContentText(previewText)
             .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(contentPendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setStyle(
                 NotificationCompat.BigTextStyle()
                     .bigText(previewText)
                     .setSummaryText(statusText)
             )
 
+        // Show action buttons based on state
         if (awaitingClipboardPermission) {
             builder.addAction(
                 R.drawable.ic_notification,
                 getString(R.string.action_grant_clipboard_access),
                 pendingIntentForAction(ACTION_OPEN_CLIPBOARD_SETTINGS)
             )
-        } else if (isPaused) {
+        } else if (!isAccessibilityServiceEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAppInForeground) {
+            // Show accessibility enable button when app is in background and accessibility is not enabled
             builder.addAction(
                 R.drawable.ic_notification,
-                getString(R.string.action_resume),
-                pendingIntentForAction(ACTION_RESUME)
-            )
-        } else {
-            builder.addAction(
-                R.drawable.ic_notification,
-                getString(R.string.action_pause),
-                pendingIntentForAction(ACTION_PAUSE)
+                getString(R.string.accessibility_enable_button),
+                pendingIntentForAction(ACTION_OPEN_ACCESSIBILITY_SETTINGS)
             )
         }
-
-        builder.addAction(
-            R.drawable.ic_notification,
-            getString(R.string.action_stop),
-            pendingIntentForAction(ACTION_STOP)
-        )
 
         return builder.build()
     }
 
     private fun updateNotification() {
-        notificationManager.notify(NOTIFICATION_ID, buildNotification())
+        try {
+            val notification = buildNotification()
+            notificationManager.notify(NOTIFICATION_ID, notification)
+            // Also update the foreground notification to ensure service stays alive
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            Log.d(TAG, "✅ Notification updated: status=$awaitingClipboardPermission, paused=$isPaused")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to update notification: ${e.message}", e)
+        }
     }
 
     private fun observeLatestItem() {
@@ -214,13 +264,49 @@ class ClipboardSyncService : Service() {
     }
 
     private fun pendingIntentForAction(action: String): PendingIntent {
-        val intent = Intent(this, ClipboardSyncService::class.java).setAction(action)
-        return PendingIntent.getService(
-            this,
-            action.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        // For accessibility settings, open directly instead of going through service
+        // This ensures it works even when service is already running
+        val intent = when (action) {
+            ACTION_OPEN_ACCESSIBILITY_SETTINGS -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                } else {
+                    Intent(Settings.ACTION_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                }
+            }
+            ACTION_OPEN_CLIPBOARD_SETTINGS -> {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = android.net.Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            else -> {
+                // For other actions, use service intent
+                Intent(this, ClipboardSyncService::class.java).setAction(action)
+            }
+        }
+        
+        return if (action == ACTION_OPEN_ACCESSIBILITY_SETTINGS || action == ACTION_OPEN_CLIPBOARD_SETTINGS) {
+            // Use getActivity for settings intents
+            PendingIntent.getActivity(
+                this,
+                action.hashCode(),
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else {
+            // Use getService for service actions
+            PendingIntent.getService(
+                this,
+                action.hashCode(),
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
     }
 
     private fun registerScreenStateReceiver() {
@@ -259,6 +345,62 @@ class ClipboardSyncService : Service() {
         // Restart transport will reconnect when needed
         transportManager.start(buildLanRegistrationConfig())
     }
+    
+    private fun checkAppForegroundState() {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return
+        val isForeground = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // Modern approach: check running app processes
+                val runningProcesses = activityManager.runningAppProcesses
+                val currentProcess = runningProcesses?.find { it.pid == android.os.Process.myPid() }
+                currentProcess?.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+            } else {
+                // Fallback for older Android versions
+                @Suppress("DEPRECATION")
+                val runningTasks = activityManager.getRunningTasks(1)
+                runningTasks.isNotEmpty() && runningTasks[0].topActivity?.packageName == packageName
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "⚠️ Failed to check foreground state: ${e.message}")
+            false
+        }
+        
+        if (isForeground != isAppInForeground) {
+            isAppInForeground = isForeground
+            val status = if (isForeground) "FOREGROUND" else "BACKGROUND"
+            Log.i(TAG, "📱 App state: $status")
+            if (!isForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAccessibilityServiceEnabled) {
+                Log.w(TAG, "⚠️ Clipboard access BLOCKED in background. Enable accessibility service for background access.")
+            }
+            updateNotification()
+        }
+    }
+    
+    private fun checkAccessibilityServiceStatus() {
+        val accessibilityManager = getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return
+        val enabledServices = accessibilityManager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        val serviceClassName = ClipboardAccessibilityService::class.java.name
+        val serviceName = ComponentName(packageName, serviceClassName)
+        
+        // Check if our accessibility service is enabled
+        val isEnabled = enabledServices.any { serviceInfo ->
+            val componentName = ComponentName(
+                serviceInfo.resolveInfo.serviceInfo.packageName,
+                serviceInfo.resolveInfo.serviceInfo.name
+            )
+            componentName == serviceName || serviceInfo.resolveInfo.serviceInfo.name == serviceClassName
+        }
+        
+        if (isEnabled != isAccessibilityServiceEnabled) {
+            isAccessibilityServiceEnabled = isEnabled
+            val status = if (isEnabled) "ENABLED" else "DISABLED"
+            Log.i(TAG, "♿ Accessibility service: $status (allows background clipboard access on Android 10+)")
+            if (isEnabled) {
+                Log.i(TAG, "✅ Background clipboard access is now available via accessibility service!")
+            }
+            updateNotification()
+        }
+    }
 
     private fun ensureClipboardPermissionAndStartListener() {
         clipboardPermissionJob?.cancel()
@@ -284,11 +426,75 @@ class ClipboardSyncService : Service() {
     }
 
     private fun openClipboardSettings() {
-        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = android.net.Uri.fromParts("package", packageName, null)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Try to open AppOps settings directly for clipboard permission
+        // This is more direct than opening general app settings
+        val intent = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10+: Try to open AppOps settings for clipboard
+                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = android.net.Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra("android.provider.extra.APP_PACKAGE", packageName)
+                }
+            } else {
+                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = android.net.Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to create settings intent: ${e.message}")
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.fromParts("package", packageName, null)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
         }
-        runCatching { startActivity(intent) }
+        
+        Log.i(TAG, "📱 Opening clipboard permission settings...")
+        runCatching { 
+            startActivity(intent)
+            Log.i(TAG, "✅ Settings activity started")
+        }.onFailure { e ->
+            Log.e(TAG, "❌ Failed to open settings: ${e.message}", e)
+        }
+    }
+    
+    private fun openAccessibilitySettings() {
+        val intent = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            } else {
+                // Fallback for older Android versions
+                Intent(Settings.ACTION_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to create accessibility settings intent: ${e.message}")
+            Intent(Settings.ACTION_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+        
+        Log.i(TAG, "♿ Opening accessibility settings...")
+        try {
+            startActivity(intent)
+            Log.i(TAG, "✅ Accessibility settings activity started")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to open accessibility settings: ${e.message}", e)
+            // Fallback: try opening general settings
+            try {
+                val fallbackIntent = Intent(Settings.ACTION_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(fallbackIntent)
+                Log.i(TAG, "✅ Opened general settings as fallback")
+            } catch (e2: Exception) {
+                Log.e(TAG, "❌ Failed to open fallback settings: ${e2.message}", e2)
+            }
+        }
     }
 
     private fun buildLanRegistrationConfig(): LanRegistrationConfig {
@@ -314,6 +520,7 @@ class ClipboardSyncService : Service() {
         private const val ACTION_PAUSE = "com.hypo.clipboard.action.PAUSE"
         private const val ACTION_RESUME = "com.hypo.clipboard.action.RESUME"
         private const val ACTION_OPEN_CLIPBOARD_SETTINGS = "com.hypo.clipboard.action.OPEN_CLIPBOARD_SETTINGS"
+        private const val ACTION_OPEN_ACCESSIBILITY_SETTINGS = "com.hypo.clipboard.action.OPEN_ACCESSIBILITY_SETTINGS"
         private const val ACTION_STOP = "com.hypo.clipboard.action.STOP"
     }
 }

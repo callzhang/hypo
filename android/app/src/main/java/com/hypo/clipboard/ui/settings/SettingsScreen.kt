@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -46,6 +47,7 @@ import com.hypo.clipboard.ui.components.DeviceStatusBadge
 @Composable
 fun SettingsRoute(
     onOpenBatterySettings: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     onStartPairing: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -57,6 +59,7 @@ fun SettingsRoute(
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
         onAutoDeleteDaysChanged = viewModel::onAutoDeleteDaysChanged,
         onOpenBatterySettings = onOpenBatterySettings,
+        onOpenAccessibilitySettings = onOpenAccessibilitySettings,
         onStartPairing = onStartPairing,
         onRemoveDevice = viewModel::removeDevice
     )
@@ -71,6 +74,7 @@ fun SettingsScreen(
     onHistoryLimitChanged: (Int) -> Unit,
     onAutoDeleteDaysChanged: (Int) -> Unit,
     onOpenBatterySettings: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit,
     modifier: Modifier = Modifier
@@ -107,6 +111,13 @@ fun SettingsScreen(
 
             item {
                 BatterySection(onOpenBatterySettings = onOpenBatterySettings)
+            }
+
+            item {
+                AccessibilitySection(
+                    isEnabled = state.isAccessibilityServiceEnabled,
+                    onOpenAccessibilitySettings = onOpenAccessibilitySettings
+                )
             }
 
             item {
@@ -241,6 +252,59 @@ private fun BatterySection(onOpenBatterySettings: () -> Unit) {
             )
             Button(onClick = onOpenBatterySettings, modifier = Modifier.align(Alignment.End)) {
                 Text(text = stringResource(id = R.string.settings_battery_optimize_button))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccessibilitySection(
+    isEnabled: Boolean,
+    onOpenAccessibilitySettings: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(imageVector = Icons.Filled.Accessibility, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(id = R.string.settings_accessibility),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                text = stringResource(id = R.string.settings_accessibility_description),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isEnabled) {
+                        stringResource(id = R.string.settings_accessibility_status_enabled)
+                    } else {
+                        stringResource(id = R.string.settings_accessibility_status_disabled)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isEnabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+                Button(onClick = onOpenAccessibilitySettings) {
+                    Text(text = stringResource(id = R.string.settings_accessibility_open_button))
+                }
             }
         }
     }

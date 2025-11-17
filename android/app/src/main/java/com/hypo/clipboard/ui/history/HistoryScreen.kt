@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -86,7 +87,7 @@ fun HistoryScreen(
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
-            leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null) },
+            leadingIcon = { Icon(imageVector = Icons.Filled.Search, contentDescription = null) },
             placeholder = { Text(text = stringResource(id = R.string.history_search_hint)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
@@ -136,7 +137,9 @@ private fun EmptyHistory() {
 @Composable
 private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
     val context = LocalContext.current
-    val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clipboardManager = remember {
+        context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    }
     val formatter = DateTimeFormatter.ofPattern("MMM d, HH:mm")
     val isLocal = item.deviceId == currentDeviceId
     
@@ -153,12 +156,26 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
     }
     
     val copyToClipboard: () -> Unit = {
-        try {
-            val clip = ClipData.newPlainText("Hypo Clipboard", item.content)
-            clipboardManager.setPrimaryClip(clip)
-            android.util.Log.d("HistoryScreen", "✅ Copied to clipboard: ${item.preview.take(30)}")
-        } catch (e: Exception) {
-            android.util.Log.e("HistoryScreen", "❌ Failed to copy to clipboard: ${e.message}", e)
+        val manager = clipboardManager
+        if (manager != null) {
+            val content = item.content
+            if (content.isNotBlank()) {
+                try {
+                    val clip = ClipData.newPlainText("Hypo Clipboard", content)
+                    manager.setPrimaryClip(clip)
+                    android.util.Log.d("HistoryScreen", "✅ Copied to clipboard: ${item.preview.take(30)}")
+                } catch (e: SecurityException) {
+                    android.util.Log.e("HistoryScreen", "❌ SecurityException when copying to clipboard: ${e.message}", e)
+                } catch (e: IllegalStateException) {
+                    android.util.Log.e("HistoryScreen", "❌ IllegalStateException when copying to clipboard: ${e.message}", e)
+                } catch (e: Exception) {
+                    android.util.Log.e("HistoryScreen", "❌ Failed to copy to clipboard: ${e.message}", e)
+                }
+            } else {
+                android.util.Log.w("HistoryScreen", "⚠️ Content is blank, cannot copy")
+            }
+        } else {
+            android.util.Log.e("HistoryScreen", "❌ ClipboardManager is null")
         }
     }
     
@@ -189,7 +206,7 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
                     modifier = Modifier.width(40.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ContentCopy,
+                        imageVector = Icons.Filled.ContentCopy,
                         contentDescription = "Copy to clipboard",
                         tint = MaterialTheme.colorScheme.primary
                     )

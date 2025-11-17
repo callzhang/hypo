@@ -1,15 +1,22 @@
 package com.hypo.clipboard.ui.settings
 
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.ComponentName
+import android.content.Context
+import android.os.Build
+import android.view.accessibility.AccessibilityManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hypo.clipboard.data.settings.SettingsRepository
 import com.hypo.clipboard.data.settings.UserSettings
+import com.hypo.clipboard.service.ClipboardAccessibilityService
 import com.hypo.clipboard.transport.ActiveTransport
 import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
 import com.hypo.clipboard.ui.components.DeviceConnectionStatus
 import com.hypo.clipboard.sync.SyncCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,7 +33,8 @@ class SettingsViewModel @Inject constructor(
     private val transportManager: TransportManager,
     private val deviceKeyStore: com.hypo.clipboard.sync.DeviceKeyStore,
     private val lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient,
-    private val syncCoordinator: SyncCoordinator
+    private val syncCoordinator: SyncCoordinator,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -37,6 +45,14 @@ class SettingsViewModel @Inject constructor(
         while (true) {
             delay(5_000L) // Check every 5 seconds
             emit(Unit)
+        }
+    }
+    
+    // Flow that emits accessibility service status
+    private val accessibilityStatusFlow = flow {
+        while (true) {
+            delay(2_000L) // Check every 2 seconds
+            emit(checkAccessibilityServiceStatus())
         }
     }
 
@@ -50,8 +66,9 @@ class SettingsViewModel @Inject constructor(
                 settingsRepository.settings,
                 transportManager.peers,
                 transportManager.lastSuccessfulTransport,
-                connectivityCheckTrigger.onStart { emit(Unit) } // Emit immediately on start
-            ) { settings, peers, lastTransport, _ ->
+                connectivityCheckTrigger.onStart { emit(Unit) }, // Emit immediately on start
+                accessibilityStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) } // Emit immediately on start
+            ) { settings, peers, lastTransport, _, isAccessibilityEnabled ->
                 // Get ALL paired device IDs from DeviceKeyStore (not just discovered ones)
                 val allPairedDeviceIds = runCatching { 
                     deviceKeyStore.getAllDeviceIds() 
@@ -159,7 +176,8 @@ class SettingsViewModel @Inject constructor(
                     historyLimit = settings.historyLimit,
                     autoDeleteDays = settings.autoDeleteDays,
                     discoveredPeers = pairedPeers,
-                    deviceStatuses = peerStatuses
+                    deviceStatuses = peerStatuses,
+                    isAccessibilityServiceEnabled = isAccessibilityEnabled
                 )
             }.collect { state ->
                 _state.value = state
@@ -199,6 +217,26 @@ class SettingsViewModel @Inject constructor(
             android.util.Log.d("SettingsViewModel", "✅ Device removed: $deviceId")
         }
     }
+    
+    private fun checkAccessibilityServiceStatus(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return true // Not needed on older Android versions
+        }
+        
+        val accessibilityManager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
+        val enabledServices = accessibilityManager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        val serviceClassName = ClipboardAccessibilityService::class.java.name
+        val serviceName = ComponentName(context.packageName, serviceClassName)
+        
+        // Check if our accessibility service is enabled
+        return enabledServices.any { serviceInfo ->
+            val componentName = ComponentName(
+                serviceInfo.resolveInfo.serviceInfo.packageName,
+                serviceInfo.resolveInfo.serviceInfo.name
+            )
+            componentName == serviceName || serviceInfo.resolveInfo.serviceInfo.name == serviceClassName
+        }
+    }
 }
 
 data class SettingsUiState(
@@ -207,5 +245,6 @@ data class SettingsUiState(
     val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT,
     val autoDeleteDays: Int = UserSettings.DEFAULT_AUTO_DELETE_DAYS,
     val discoveredPeers: List<DiscoveredPeer> = emptyList(),
-    val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap()
+    val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap(),
+    val isAccessibilityServiceEnabled: Boolean = false
 )

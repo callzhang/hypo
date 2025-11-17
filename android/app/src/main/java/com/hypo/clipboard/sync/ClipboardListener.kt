@@ -81,6 +81,7 @@ class ClipboardListener(
         pollingJob?.cancel()
         pollingJob = scope.launch(dispatcher) {
             Log.i(TAG, "🔄 Starting clipboard polling (Android 10+ workaround)")
+            var consecutiveBlockedCount = 0
             while (isActive) {
                 delay(2_000) // Poll every 2 seconds
                 try {
@@ -96,12 +97,19 @@ class ClipboardListener(
                                 if (signature != lastPolledSignature && signature != lastSignature) {
                                     Log.i(TAG, "🔍 Polling detected new clipboard content (manual paste detected)")
                                     lastPolledSignature = signature
+                                    consecutiveBlockedCount = 0 // Reset counter on success
                                     process(clip)
                                 }
                             }
                         } catch (e: SecurityException) {
                             // Parser may throw SecurityException when accessing clipboard content
-                            Log.d(TAG, "🔒 Parser: Clipboard access blocked: ${e.message}")
+                            consecutiveBlockedCount++
+                            if (consecutiveBlockedCount % 10 == 0) {
+                                // Log warning every 20 seconds (10 attempts * 2 seconds) when blocked
+                                Log.w(TAG, "🔒 Clipboard access blocked repeatedly (${consecutiveBlockedCount} times). User needs to enable \"Allow clipboard access\" in Settings → Apps → Hypo → Permissions")
+                            } else {
+                                Log.d(TAG, "🔒 Parser: Clipboard access blocked: ${e.message}")
+                            }
                         } catch (e: Exception) {
                             Log.w(TAG, "⚠️ Parser error during polling: ${e.message}", e)
                         }
@@ -109,7 +117,13 @@ class ClipboardListener(
                 } catch (e: SecurityException) {
                     // Android 10+ may block clipboard access in background
                     // This is expected behavior, just log and continue
-                    Log.d(TAG, "🔒 Clipboard access blocked (background restriction): ${e.message}")
+                    consecutiveBlockedCount++
+                    if (consecutiveBlockedCount % 10 == 0) {
+                        // Log warning every 20 seconds when blocked
+                        Log.w(TAG, "🔒 Clipboard access blocked repeatedly (${consecutiveBlockedCount} times). Background clipboard access requires user permission in system settings.")
+                    } else {
+                        Log.d(TAG, "🔒 Clipboard access blocked (background restriction): ${e.message}")
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "⚠️ Error during clipboard polling: ${e.message}", e)
                 }

@@ -49,7 +49,18 @@ class SyncEngine @Inject constructor(
             } catch (e: Exception) {
                 emptyList<String>()
             }
-            android.util.Log.d("SyncEngine", "📋 Available keys: $availableKeys")
+            android.util.Log.e("SyncEngine", "📋 Available keys in store: $availableKeys")
+            android.util.Log.e("SyncEngine", "🔍 Trying to find matching key...")
+            // Try case-insensitive and partial matching
+            val matchingKey = availableKeys.find { 
+                it.equals(targetDeviceId, ignoreCase = true) || 
+                it.contains(targetDeviceId, ignoreCase = true) ||
+                targetDeviceId.contains(it, ignoreCase = true)
+            }
+            if (matchingKey != null) {
+                android.util.Log.w("SyncEngine", "⚠️ Found similar key: $matchingKey (requested: $targetDeviceId)")
+                android.util.Log.w("SyncEngine", "💡 Device ID mismatch! Key saved as '$matchingKey' but sync target is '$targetDeviceId'")
+            }
             throw SyncEngineException.MissingKey(targetDeviceId)
         } else {
             android.util.Log.d("SyncEngine", "✅ Key loaded: ${key.size} bytes")

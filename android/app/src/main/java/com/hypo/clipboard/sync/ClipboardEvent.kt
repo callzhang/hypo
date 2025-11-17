@@ -15,7 +15,7 @@ data class ClipboardEvent(
     val skipBroadcast: Boolean = false
 )
 
-internal fun ClipboardEvent.signature(): String {
+fun ClipboardEvent.signature(): String {
     val metadataSignature = metadata.entries
         .sortedBy { it.key }
         .joinToString(separator = "|") { (key, value) -> "$key=$value" }

@@ -525,18 +525,60 @@ Log.d(TAG, "📤 Sending clipboard to device: $targetDeviceId")
 
 ---
 
+## Test Toolkit
+
+A collection of scripts to streamline clipboard sync testing and debugging. All scripts use the bundled Android SDK at `.android-sdk/platform-tools/adb`.
+
+| Script | Purpose | Usage |
+| --- | --- | --- |
+| `./scripts/test-clipboard-sync.sh` | **Primary test harness** - Guided manual test for Android ↔ macOS clipboard sync. Clears logs, prompts for copy actions, and surfaces relevant logcat snippets. | Run with device connected: `./scripts/test-clipboard-sync.sh`. Follow prompts to copy on Android, then macOS. Script prints last 20 matching log lines (ClipboardListener, SyncCoordinator, SyncEngine, IncomingClipboardHandler) to quickly identify where sync breaks. |
+| `./scripts/test-clipboard-sync-emulator.sh` | Emulator variant - Spins up configured emulator, installs current build, and runs the same prompts/log checks as above. | Requires one-time setup: `./scripts/setup-android-emulator.sh`. Then run: `./scripts/test-clipboard-sync-emulator.sh`. Faster iteration cycles, no USB needed. |
+| `./scripts/test-clipboard-polling.sh` | Real-time monitoring - Tails `ClipboardListener`, `SyncCoordinator`, and `SyncEngine` logs for 30 seconds. Useful for long diagnostic sessions. | Run: `./scripts/test-clipboard-polling.sh`. Copy text manually during monitoring window. Shows statistics on polling detection vs listener callbacks. |
+| `./scripts/capture-crash.sh` | Crash log capture - Captures last 60 seconds of logs after a crash, focusing on exceptions and clipboard-related activity. | Run immediately after a crash: `./scripts/capture-crash.sh`. Outputs crash details, exceptions, and ClipboardListener activity. Use to attach logs to this doc or GitHub issues. |
+
+### Quick Start
+
+**For physical device testing:**
+```bash
+./scripts/test-clipboard-sync.sh
+```
+
+**For emulator testing (faster iterations):**
+```bash
+./scripts/test-clipboard-sync-emulator.sh
+```
+
+**For real-time monitoring:**
+```bash
+./scripts/test-clipboard-polling.sh
+```
+
+### Test Output Interpretation
+
+The test scripts capture logs from key components:
+- **ClipboardListener**: `📋 NEW clipboard event!` = detection working
+- **SyncCoordinator**: `📨 Received clipboard event` = event reached coordinator
+- **SyncEngine**: `🔑 Loading key for device` / `❌ No key found` = key lookup status
+- **IncomingClipboardHandler**: `📥 Received clipboard message` = incoming sync working
+
+**Common failure patterns:**
+- No `ClipboardListener` logs → Detection not working (check permissions)
+- `SyncCoordinator` logs but no `SyncEngine` logs → Target devices not set
+- `❌ No key found` → Encryption keys not registered (Issue 2b)
+- No `IncomingClipboardHandler` logs → Transport connection issue
+
 ## Testing Plan
 
 ### Testing Matrix
 
 Track progress across all dimensions of clipboard sync:
 
-| Dimension | Android → macOS | macOS → Android | Status |
-|-----------|----------------|-----------------|--------|
-| **Detection** | ClipboardListener detects copy | ClipboardListener detects copy | ✅ RESOLVED (Issue 2a) |
-| **Local Save** | Item saved to database | Item saved to database | ✅ RESOLVED (Issue 2a) |
-| **Sync** | Item synced to macOS | Item synced to Android | ❌ FAILING (Issue 2b - keys missing) |
-| **UI Update** | Item appears in history | Item appears in history | 🔄 TESTING (Issue 3 - Plan A) |
+| Dimension | Android → macOS | macOS → Android | Status | Test Evidence |
+|-----------|----------------|-----------------|--------|---------------|
+| **Detection** | ClipboardListener detects copy | ClipboardListener detects copy | ✅ RESOLVED (Issue 2a) | Run `test-clipboard-sync.sh` → Look for `📋 NEW clipboard event!` in logs |
+| **Local Save** | Item saved to database | Item saved to database | ✅ RESOLVED (Issue 2a) | Run `test-clipboard-sync.sh` → Look for `📨 Received clipboard event` and `💾 Saved to database` in logs |
+| **Sync** | Item synced to macOS | Item synced to Android | ❌ FAILING (Issue 2b - keys missing) | Run `test-clipboard-sync.sh` → Check for `❌ No key found for <deviceId>` or missing `🔑 Loading key` logs. See [Test Results](#test-results) section below. |
+| **UI Update** | Item appears in history | Item appears in history | 🔄 TESTING (Issue 3 - Plan A) | Run `test-clipboard-sync.sh` with History tab open → Verify item appears within 1-2 seconds. See [Test Results](#test-results) section below. |
 
 **Legend**:
 - ✅ = Working
@@ -549,6 +591,27 @@ Track progress across all dimensions of clipboard sync:
 - **Local Save**: ✅ Working on both platforms
 - **Sync**: ❌ Failing on both directions (encryption keys not registered)
 - **UI Update**: 🔄 Testing Plan A (removed LIMIT from query)
+
+### Test Results
+
+**Date**: _[Update after running `./scripts/test-clipboard-sync.sh`]_
+
+**Test Output** (paste here after running test script):
+```
+[Paste log output from test-clipboard-sync.sh here]
+```
+
+**Key Findings**:
+- [ ] ClipboardListener detected copy? (Look for `📋 NEW clipboard event!`)
+- [ ] Event reached SyncCoordinator? (Look for `📨 Received clipboard event`)
+- [ ] Encryption key found? (Look for `🔑 Loading key` or `❌ No key found`)
+- [ ] SyncEngine attempted to send? (Look for `📤 Syncing to device`)
+- [ ] Incoming clipboard received? (Look for `📥 Received clipboard message`)
+
+**Next Steps Based on Results**:
+- If keys missing → Verify `addTargetDevice()` called after pairing (Issue 2b)
+- If no SyncEngine logs → Verify `setTargetDevices()` called (Issue 2b)
+- If UI not updating → Check Room Flow emissions (Issue 3)
 
 ---
 

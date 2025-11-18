@@ -3,6 +3,7 @@ package com.hypo.clipboard.data
 import com.hypo.clipboard.data.local.ClipboardDao
 import com.hypo.clipboard.data.local.ClipboardEntity
 import com.hypo.clipboard.domain.model.ClipboardItem
+import com.hypo.clipboard.domain.model.ClipboardType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import android.util.Log
@@ -37,6 +38,12 @@ class ClipboardRepositoryImpl @Inject constructor(
 
     override suspend fun clear() {
         dao.clear()
+    }
+    
+    override suspend fun hasRecentDuplicate(content: String, type: ClipboardType, deviceId: String, withinSeconds: Long): Boolean {
+        val since = java.time.Instant.now().minusSeconds(withinSeconds)
+        val count = dao.countRecentDuplicates(content, type.name, deviceId, since)
+        return count > 0
     }
 
     private fun ClipboardItem.toEntity(): ClipboardEntity = ClipboardEntity(

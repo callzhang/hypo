@@ -108,7 +108,7 @@
 **Diagnostic Steps**:
 ```bash
 # Test relay server connectivity
-curl -I https://hypo-relay-staging.fly.dev/health
+curl -I https://hypo.fly.dev/health
 
 # Should return HTTP 200 OK
 ```
@@ -371,10 +371,10 @@ adb shell pm clear com.hypo.clipboard
 **Diagnostic Steps**:
 ```bash
 # Test SSL connection to relay
-openssl s_client -connect hypo-relay-staging.fly.dev:443 -servername hypo-relay-staging.fly.dev
+openssl s_client -connect hypo.fly.dev:443 -servername hypo.fly.dev
 
 # Check certificate fingerprint
-echo | openssl s_client -connect hypo-relay-staging.fly.dev:443 2>/dev/null | openssl x509 -fingerprint -noout -sha256
+echo | openssl s_client -connect hypo.fly.dev:443 2>/dev/null | openssl x509 -fingerprint -noout -sha256
 ```
 
 **Solutions**:

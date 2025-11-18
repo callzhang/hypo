@@ -21,10 +21,12 @@ public struct HypoMenuBarApp: App {
             historyStore: historyStore
         )
         
-        _viewModel = StateObject(wrappedValue: ClipboardHistoryViewModel(
+        let viewModel = ClipboardHistoryViewModel(
             store: historyStore,
             transportManager: transportManager
-        ))
+        )
+        transportManager.setHistoryViewModel(viewModel)
+        _viewModel = StateObject(wrappedValue: viewModel)
     }
 
     public var body: some Scene {
@@ -80,6 +82,7 @@ private struct MenuBarContentView: View {
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @State private var selectedSection: MenuSection = .history
     @State private var search = ""
+    @State private var isVisible = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -90,7 +93,7 @@ private struct MenuBarContentView: View {
             }
             .pickerStyle(.segmented)
             .accessibilityLabel("Menu sections")
-
+            
             switch selectedSection {
             case .history:
                 HistorySectionView(viewModel: viewModel, search: $search)
@@ -100,13 +103,82 @@ private struct MenuBarContentView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-                .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
-        )
+        .background(.ultraThinMaterial)
+        .opacity(isVisible ? 1.0 : 0.0)
+        .animation(.easeInOut(duration: 0.2), value: isVisible)
+        .onAppear {
+            isVisible = true
+            configureWindowBlur()
+        }
+        .onDisappear {
+            isVisible = false
+        }
+    }
+    
+    private func configureWindowBlur() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            // Find the MenuBarExtra window
+            for window in NSApplication.shared.windows {
+                if window.isVisible && 
+                   (window.styleMask.contains(.borderless) || window.title.isEmpty) &&
+                   window.frame.width < 500 && window.frame.height < 600 {
+                    
+                    // Configure window for native blurred modal appearance
+                    window.backgroundColor = .clear
+                    window.isOpaque = false
+                    window.hasShadow = true
+                    window.titlebarAppearsTransparent = true
+                    window.titleVisibility = .hidden
+                    
+                    // Set up visual effect view as the window's background
+                    if let contentView = window.contentView {
+                        // Check if visual effect view already exists
+                        var visualEffect: NSVisualEffectView?
+                        for subview in contentView.subviews {
+                            if let effectView = subview as? NSVisualEffectView {
+                                visualEffect = effectView
+                                break
+                            }
+                        }
+                        
+                        // Create visual effect view if it doesn't exist
+                        if visualEffect == nil {
+                            visualEffect = NSVisualEffectView()
+                            visualEffect?.material = .hudWindow
+                            visualEffect?.blendingMode = .behindWindow
+                            visualEffect?.state = .active
+                            visualEffect?.frame = contentView.bounds
+                            visualEffect?.autoresizingMask = [.width, .height]
+                            
+                            // Insert at the very bottom, behind all content
+                            contentView.addSubview(visualEffect!, positioned: .below, relativeTo: nil)
+                        } else {
+                            // Update existing one
+                            visualEffect?.frame = contentView.bounds
+                        }
+                        
+                        // Ensure content view and all subviews are transparent
+                        contentView.wantsLayer = true
+                        contentView.layer?.backgroundColor = NSColor.clear.cgColor
+                        contentView.layer?.isOpaque = false
+                        
+                        // Make all SwiftUI hosting views transparent
+                        for subview in contentView.subviews {
+                            if String(describing: type(of: subview)).contains("HostingView") || 
+                               String(describing: type(of: subview)).contains("NSHostingView") {
+                                subview.wantsLayer = true
+                                subview.layer?.backgroundColor = NSColor.clear.cgColor
+                                subview.layer?.isOpaque = false
+                            }
+                        }
+                    }
+                    break
+                }
+            }
+        }
     }
 }
+
 
 private struct LatestClipboardView: View {
     let entry: ClipboardEntry?
@@ -130,7 +202,7 @@ private struct LatestClipboardView: View {
             }
 
             if let entry {
-                ClipboardCard(entry: entry)
+                ClipboardCard(entry: entry, localDeviceId: viewModel.localDeviceId)
             } else {
                 Text("Clipboard history will appear here once you copy something.")
                     .font(.subheadline)
@@ -205,6 +277,15 @@ private struct HistorySectionView: View {
 
 private struct ClipboardCard: View {
     let entry: ClipboardEntry
+    let localDeviceId: String
+    
+    private var originName: String {
+        entry.originDisplayName(localDeviceId: localDeviceId)
+    }
+    
+    private var isLocal: Bool {
+        entry.isLocal(localDeviceId: localDeviceId)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -212,8 +293,20 @@ private struct ClipboardCard: View {
                 Image(systemName: entry.content.iconName)
                     .foregroundStyle(.primary)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.content.title)
-                        .font(.headline)
+                    HStack(spacing: 6) {
+                        Text(entry.content.title)
+                            .font(.headline)
+                        // Origin badge
+                        Text(originName)
+                            .font(.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(isLocal ? Color.blue.opacity(0.2) : Color.secondary.opacity(0.2))
+                            )
+                            .foregroundStyle(isLocal ? .blue : .secondary)
+                    }
                     Text(entry.previewText)
                         .lineLimit(3)
                         .font(.subheadline)
@@ -233,6 +326,14 @@ private struct ClipboardCard: View {
 private struct ClipboardRow: View {
     let entry: ClipboardEntry
     @ObservedObject var viewModel: ClipboardHistoryViewModel
+    
+    private var originName: String {
+        entry.originDisplayName(localDeviceId: viewModel.localDeviceId)
+    }
+    
+    private var isLocal: Bool {
+        entry.isLocal(localDeviceId: viewModel.localDeviceId)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -241,8 +342,20 @@ private struct ClipboardRow: View {
                     .foregroundStyle(.primary)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.content.title)
-                        .font(.headline)
+                    HStack(spacing: 6) {
+                        Text(entry.content.title)
+                            .font(.headline)
+                        // Origin badge
+                        Text(originName)
+                            .font(.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(isLocal ? Color.blue.opacity(0.2) : Color.secondary.opacity(0.2))
+                            )
+                            .foregroundStyle(isLocal ? .blue : .secondary)
+                    }
                     Text(entry.previewText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -284,11 +397,32 @@ private struct ClipboardRow: View {
 private struct SettingsSectionView: View {
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @State private var isPresentingPairing = false
+    
+    private var versionString: String {
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+           let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+            return "Version \(version) (Build \(build))"
+        } else if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+            return "Version \(version)"
+        } else if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+            return "Build \(build)"
+        } else {
+            return "Version 0.1.0 (Development Build)"
+        }
+    }
 
     var body: some View {
         ScrollView {
             Form {
                 Section("Connection") {
+                    // Connection Status
+                    HStack {
+                        Text("Status:")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        ConnectionStatusView(state: viewModel.connectionState)
+                    }
+                    
                     Toggle(isOn: Binding(
                         get: { viewModel.transportPreference == .lanFirst },
                         set: { viewModel.updateTransportPreference($0 ? .lanFirst : .cloudOnly) }
@@ -299,6 +433,26 @@ private struct SettingsSectionView: View {
                         get: { viewModel.allowsCloudFallback },
                         set: { viewModel.setAllowsCloudFallback($0) }
                     ))
+                }
+                
+                Section("Security") {
+                    Toggle("Plain Text Mode (Debug)", isOn: Binding(
+                        get: { viewModel.plainTextModeEnabled },
+                        set: { viewModel.plainTextModeEnabled = $0 }
+                    ))
+                    Text("⚠️ Send clipboard without encryption. Less secure, for debugging only.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Section("About") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Hypo Clipboard")
+                            .font(.headline)
+                        Text(versionString)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
 
                 Section("History") {
@@ -544,6 +698,68 @@ private struct PairDeviceSheet: View {
             remoteViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)
         }
         hasStarted = true
+    }
+}
+
+private struct ConnectionStatusView: View {
+    let state: ConnectionState
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: iconName)
+                .foregroundColor(iconColor)
+                .font(.system(size: 12))
+            Text(statusText)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+    
+    private var iconName: String {
+        switch state {
+        case .idle:
+            return "wifi.slash"
+        case .connectingLan, .connectingCloud:
+            return "arrow.triangle.2.circlepath"
+        case .connectedLan:
+            return "wifi"
+        case .connectedCloud:
+            return "cloud.fill"
+        case .error:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+    
+    private var iconColor: Color {
+        switch state {
+        case .idle:
+            return .gray
+        case .connectingLan, .connectingCloud:
+            return .orange
+        case .connectedLan:
+            return .green
+        case .connectedCloud:
+            return .blue
+        case .error:
+            return .red
+        }
+    }
+    
+    private var statusText: String {
+        switch state {
+        case .idle:
+            return "Offline"
+        case .connectingLan:
+            return "Connecting (LAN)..."
+        case .connectedLan:
+            return "Connected (LAN)"
+        case .connectingCloud:
+            return "Connecting (Cloud)..."
+        case .connectedCloud:
+            return "Connected (Cloud)"
+        case .error(let message):
+            return "Error: \(message)"
+        }
     }
 }
 

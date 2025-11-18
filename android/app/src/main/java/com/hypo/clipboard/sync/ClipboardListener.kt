@@ -23,7 +23,9 @@ class ClipboardListener(
     private var lastSignature: String? = null
     private var job: Job? = null
     private var pollingJob: Job? = null
-    private var isListening: Boolean = false
+    @Volatile
+    var isListening: Boolean = false
+        private set
     private var lastPolledSignature: String? = null
 
     fun start() {
@@ -157,6 +159,9 @@ class ClipboardListener(
         }
     }
 
+    @Volatile
+    private var processingSignature: String? = null
+    
     private fun process(clip: ClipData) {
         try {
             Log.i(TAG, "🔍 Processing clip with ${clip.itemCount} items")
@@ -166,32 +171,64 @@ class ClipboardListener(
                 return
             }
             val signature = event.signature()
-            Log.i(TAG, "✏️  Event signature: $signature (last: $lastSignature)")
-            if (lastSignature == signature) {
-                Log.i(TAG, "⏭️  Duplicate detected, skipping")
-                return
+            Log.i(TAG, "✏️  Event signature: $signature (last: $lastSignature, processing: $processingSignature)")
+            
+            // Check for duplicate - use synchronized block to prevent race conditions
+            synchronized(this) {
+                if (lastSignature == signature || processingSignature == signature) {
+                    Log.i(TAG, "⏭️  Duplicate detected, skipping (last=$lastSignature, processing=$processingSignature)")
+                    return
+                }
+                // Mark as processing BEFORE launching coroutine to prevent race condition
+                processingSignature = signature
             }
-            lastSignature = signature
 
             Log.i(TAG, "✅ NEW clipboard event! Type: ${event.type}, preview: ${event.preview.take(50)}")
             job?.cancel()
             val exceptionHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
                 Log.e(TAG, "❌ Uncaught exception in clipboard callback coroutine: ${throwable.message}", throwable)
+                // Clear processing signature on error
+                synchronized(this) {
+                    if (processingSignature == signature) {
+                        processingSignature = null
+                    }
+                }
             }
             job = scope.launch(dispatcher + exceptionHandler) {
                 try {
                     Log.i(TAG, "🚀 Calling onClipboardChanged callback...")
                     onClipboardChanged(event)
                     Log.i(TAG, "✅ onClipboardChanged callback completed")
+                    // Update lastSignature and clear processingSignature AFTER callback completes
+                    synchronized(this@ClipboardListener) {
+                        lastSignature = signature
+                        if (processingSignature == signature) {
+                            processingSignature = null
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ Error in onClipboardChanged callback: ${e.message}", e)
+                    // Clear processing signature on error
+                    synchronized(this@ClipboardListener) {
+                        if (processingSignature == signature) {
+                            processingSignature = null
+                        }
+                    }
                 }
             }
         } catch (e: SecurityException) {
             // Android 10+ may block clipboard access
             Log.d(TAG, "🔒 process: Clipboard access blocked: ${e.message}")
+            // Clear processing signature on error
+            synchronized(this) {
+                processingSignature = null
+            }
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error processing clipboard clip: ${e.message}", e)
+            // Clear processing signature on error
+            synchronized(this) {
+                processingSignature = null
+            }
         }
     }
 

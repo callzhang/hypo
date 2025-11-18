@@ -48,6 +48,80 @@ public struct PairingPayload: Codable, Equatable {
         case expiresAt = "expires_at"
         case signature
     }
+    
+    // Custom encoder to include platform prefix in device ID
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(version, forKey: .version)
+        // Encode device ID with platform prefix for consistency (macos-{UUID})
+        let macDeviceIdString = "macos-\(macDeviceId.uuidString.lowercased())"
+        try container.encode(macDeviceIdString, forKey: .macDeviceId)
+        try container.encode(macPublicKey.base64EncodedString(), forKey: .macPublicKey)
+        try container.encode(macSigningPublicKey.base64EncodedString(), forKey: .macSigningPublicKey)
+        try container.encode(service, forKey: .service)
+        try container.encode(port, forKey: .port)
+        if let relayHint = relayHint {
+            try container.encode(relayHint.absoluteString, forKey: .relayHint)
+        }
+        let dateFormatter = ISO8601DateFormatter()
+        try container.encode(dateFormatter.string(from: issuedAt), forKey: .issuedAt)
+        try container.encode(dateFormatter.string(from: expiresAt), forKey: .expiresAt)
+        try container.encode(signature.base64EncodedString(), forKey: .signature)
+    }
+    
+    // Custom decoder to handle both prefixed and non-prefixed formats (backward compatibility)
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(String.self, forKey: .version)
+        
+        // Decode device ID - handle both "macos-{UUID}" and legacy "{UUID}" formats
+        let macDeviceIdString = try container.decode(String.self, forKey: .macDeviceId)
+        let uuidString: String
+        if macDeviceIdString.hasPrefix("macos-") {
+            uuidString = String(macDeviceIdString.dropFirst(6)) // Remove "macos-" prefix
+        } else {
+            uuidString = macDeviceIdString // Legacy format
+        }
+        guard let uuid = UUID(uuidString: uuidString) else {
+            throw DecodingError.dataCorruptedError(forKey: .macDeviceId, in: container, debugDescription: "Invalid UUID format: \(macDeviceIdString)")
+        }
+        macDeviceId = uuid
+        
+        let macPublicKeyString = try container.decode(String.self, forKey: .macPublicKey)
+        guard let macPublicKeyData = Data(base64Encoded: macPublicKeyString) else {
+            throw DecodingError.dataCorruptedError(forKey: .macPublicKey, in: container, debugDescription: "Invalid Base64 string for mac_pub_key")
+        }
+        macPublicKey = macPublicKeyData
+        
+        let macSigningPublicKeyString = try container.decode(String.self, forKey: .macSigningPublicKey)
+        guard let macSigningPublicKeyData = Data(base64Encoded: macSigningPublicKeyString) else {
+            throw DecodingError.dataCorruptedError(forKey: .macSigningPublicKey, in: container, debugDescription: "Invalid Base64 string for mac_signing_pub_key")
+        }
+        macSigningPublicKey = macSigningPublicKeyData
+        
+        service = try container.decode(String.self, forKey: .service)
+        port = try container.decode(Int.self, forKey: .port)
+        relayHint = try container.decodeIfPresent(String.self, forKey: .relayHint).flatMap { URL(string: $0) }
+        
+        let dateFormatter = ISO8601DateFormatter()
+        let issuedAtString = try container.decode(String.self, forKey: .issuedAt)
+        guard let issuedAtDate = dateFormatter.date(from: issuedAtString) else {
+            throw DecodingError.dataCorruptedError(forKey: .issuedAt, in: container, debugDescription: "Invalid ISO8601 date string for issued_at")
+        }
+        issuedAt = issuedAtDate
+        
+        let expiresAtString = try container.decode(String.self, forKey: .expiresAt)
+        guard let expiresAtDate = dateFormatter.date(from: expiresAtString) else {
+            throw DecodingError.dataCorruptedError(forKey: .expiresAt, in: container, debugDescription: "Invalid ISO8601 date string for expires_at")
+        }
+        expiresAt = expiresAtDate
+        
+        let signatureString = try container.decode(String.self, forKey: .signature)
+        guard let signatureData = Data(base64Encoded: signatureString) else {
+            throw DecodingError.dataCorruptedError(forKey: .signature, in: container, debugDescription: "Invalid Base64 string for signature")
+        }
+        signature = signatureData
+    }
 }
 
 public struct PairingChallengeMessage: Codable, Equatable {
@@ -136,7 +210,9 @@ public struct PairingAckMessage: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         // Use lowercase UUID string to match Android's UUID.randomUUID().toString() format
         try container.encode(challengeId.uuidString.lowercased(), forKey: .challengeId)
-        try container.encode(macDeviceId.uuidString.lowercased(), forKey: .macDeviceId)
+        // Encode device ID with platform prefix for consistency (macos-{UUID})
+        let macDeviceIdString = "macos-\(macDeviceId.uuidString.lowercased())"
+        try container.encode(macDeviceIdString, forKey: .macDeviceId)
         try container.encode(macDeviceName, forKey: .macDeviceName)
         try container.encode(nonce.base64EncodedString(), forKey: .nonce)
         try container.encode(ciphertext.base64EncodedString(), forKey: .ciphertext)

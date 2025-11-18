@@ -22,7 +22,8 @@ import javax.inject.Inject
 class HistoryViewModel @Inject constructor(
     private val repository: ClipboardRepository,
     private val settingsRepository: SettingsRepository,
-    private val deviceIdentity: com.hypo.clipboard.sync.DeviceIdentity
+    private val deviceIdentity: com.hypo.clipboard.sync.DeviceIdentity,
+    private val transportManager: com.hypo.clipboard.transport.TransportManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(HistoryUiState())
@@ -48,8 +49,9 @@ class HistoryViewModel @Inject constructor(
             combine(
                 historyItems,
                 settingsRepository.settings,
-                searchQuery
-            ) { items, settings, query ->
+                searchQuery,
+                transportManager.connectionState
+            ) { items, settings, query, connectionState ->
                 android.util.Log.d("HistoryViewModel", "📋 History Flow emitted: ${items.size} items, limit=${settings.historyLimit}, query='$query'")
                 // Apply limit in ViewModel (Room query no longer has LIMIT to ensure Flow emits)
                 val limited = items.take(settings.historyLimit)
@@ -66,7 +68,8 @@ class HistoryViewModel @Inject constructor(
                     items = filtered,
                     query = query,
                     totalItems = limited.size,
-                    historyLimit = settings.historyLimit
+                    historyLimit = settings.historyLimit,
+                    connectionState = connectionState
                 )
             }.collect { uiState ->
                 android.util.Log.d("HistoryViewModel", "📋 UI state updated: ${uiState.items.size} items, first: ${uiState.items.firstOrNull()?.preview?.take(30)}")
@@ -102,5 +105,6 @@ data class HistoryUiState(
     val items: List<ClipboardItem> = emptyList(),
     val query: String = "",
     val totalItems: Int = 0,
-    val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT
+    val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT,
+    val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Idle
 )

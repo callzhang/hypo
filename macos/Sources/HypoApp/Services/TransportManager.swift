@@ -24,6 +24,7 @@ public final class TransportManager {
     private var lanConfiguration: BonjourPublisher.Configuration
     private let webSocketServer: LanWebSocketServer
     private let incomingHandler: IncomingClipboardHandler?
+    private weak var historyViewModel: ClipboardHistoryViewModel?
 
     private var discoveryTask: Task<Void, Never>?
     private var pruneTask: Task<Void, Never>?
@@ -85,8 +86,9 @@ public final class TransportManager {
             let syncEngine = SyncEngine(
                 transport: transport,
                 keyProvider: keyProvider,
-                localDeviceId: deviceIdentity.deviceId.uuidString
+                localDeviceId: deviceIdentity.deviceIdString
             )
+            // Create handler - callback will be set up later via setHistoryViewModel
             self.incomingHandler = IncomingClipboardHandler(
                 syncEngine: syncEngine,
                 historyStore: historyStore
@@ -131,6 +133,14 @@ public final class TransportManager {
         preferenceStorage.savePreference(preference)
     }
 
+    public func setHistoryViewModel(_ viewModel: ClipboardHistoryViewModel) {
+        self.historyViewModel = viewModel
+        // Set up callback for incoming clipboard handler
+        incomingHandler?.setOnEntryAdded { [weak self] entry in
+            await self?.historyViewModel?.add(entry)
+        }
+    }
+    
     public func currentPreference() -> TransportPreference {
         preferenceStorage.loadPreference() ?? .lanFirst
     }
@@ -620,15 +630,9 @@ public final class TransportManager {
         let hostName = ProcessInfo.processInfo.hostName
         let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         
-        // Generate or load device ID from UserDefaults
-        let defaults = UserDefaults.standard
-        let deviceId: String
-        if let existing = defaults.string(forKey: "com.hypo.deviceId") {
-            deviceId = existing
-        } else {
-            deviceId = UUID().uuidString
-            defaults.set(deviceId, forKey: "com.hypo.deviceId")
-        }
+        // Use DeviceIdentity to get consistent device ID format (macos-{UUID})
+        let deviceIdentity = DeviceIdentity()
+        let deviceId = deviceIdentity.deviceIdString
         
         // Load or generate persistent keys for auto-discovery pairing
         let signingKeyStore = PairingSigningKeyStore()
@@ -910,7 +914,19 @@ extension TransportManager: LanWebSocketServerDelegate {
             logger.info("✅ Pairing completed with \(challenge.androidDeviceName)")
             #endif
             
+            // Update connection metadata with device ID
+            webSocketServer.updateConnectionMetadata(connectionId: connectionId, deviceId: challenge.androidDeviceId)
+            
             // Notify about successful pairing (for UI/history updates)
+            print("📤 [TransportManager] Posting PairingCompleted notification")
+            print("   deviceId: \(challenge.androidDeviceId)")
+            print("   deviceName: \(challenge.androidDeviceName)")
+            
+            // Write to debug log
+            try? "📤 [TransportManager] Posting PairingCompleted notification\n".appendToFile(path: "/tmp/hypo_debug.log")
+            try? "   deviceId: \(challenge.androidDeviceId)\n".appendToFile(path: "/tmp/hypo_debug.log")
+            try? "   deviceName: \(challenge.androidDeviceName)\n".appendToFile(path: "/tmp/hypo_debug.log")
+            
             NotificationCenter.default.post(
                 name: NSNotification.Name("PairingCompleted"),
                 object: nil,
@@ -919,6 +935,18 @@ extension TransportManager: LanWebSocketServerDelegate {
                     "deviceName": challenge.androidDeviceName
                 ]
             )
+            
+            // Also notify that device is now online
+            NotificationCenter.default.post(
+                name: NSNotification.Name("DeviceConnectionStatusChanged"),
+                object: nil,
+                userInfo: [
+                    "deviceId": challenge.androidDeviceId,
+                    "isOnline": true
+                ]
+            )
+            print("✅ [TransportManager] PairingCompleted notification posted")
+            try? "✅ [TransportManager] PairingCompleted notification posted\n".appendToFile(path: "/tmp/hypo_debug.log")
         } catch {
             #if canImport(os)
             let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
@@ -936,8 +964,9 @@ extension TransportManager: LanWebSocketServerDelegate {
         // Forward clipboard data to the transport for processing
         #if canImport(os)
         let syncLogger = Logger(subsystem: "com.hypo.clipboard", category: "sync")
-        syncLogger.info("📥 Received clipboard data from connection: \(connection.uuidString), \(data.count) bytes")
+        syncLogger.info("📥 CLIPBOARD RECEIVED: from connection \(connection.uuidString.prefix(8)), \(data.count) bytes")
         #endif
+        print("📥 [TransportManager] CLIPBOARD RECEIVED: from \(connection.uuidString.prefix(8)), \(data.count) bytes")
         
         // Process incoming clipboard data through IncomingClipboardHandler
         Task { @MainActor in
@@ -950,6 +979,21 @@ extension TransportManager: LanWebSocketServerDelegate {
         let connLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
         connLogger.info("WebSocket connection established: \(id.uuidString)")
         #endif
+        // Update device online status when connection is established
+        Task { @MainActor in
+            // Try to find device ID from connection metadata
+            if let metadata = server.connectionMetadata(for: id),
+               let deviceId = metadata.deviceId {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("DeviceConnectionStatusChanged"),
+                    object: nil,
+                    userInfo: [
+                        "deviceId": deviceId,
+                        "isOnline": true
+                    ]
+                )
+            }
+        }
     }
     
     nonisolated public func server(_ server: LanWebSocketServer, didCloseConnection id: UUID) {
@@ -957,5 +1001,20 @@ extension TransportManager: LanWebSocketServerDelegate {
         let closeLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
         closeLogger.info("WebSocket connection closed: \(id.uuidString)")
         #endif
+        // Update device online status when connection is closed
+        Task { @MainActor in
+            // Try to find device ID from connection metadata before it's removed
+            if let metadata = server.connectionMetadata(for: id),
+               let deviceId = metadata.deviceId {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("DeviceConnectionStatusChanged"),
+                    object: nil,
+                    userInfo: [
+                        "deviceId": deviceId,
+                        "isOnline": false
+                    ]
+                )
+            }
+        }
     }
 }

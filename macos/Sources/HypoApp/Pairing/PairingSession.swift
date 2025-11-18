@@ -208,9 +208,9 @@ public final class PairingSession: @unchecked Sendable {
                 sharedKey: sharedKey,
                 macDeviceName: configuration.deviceName
             )
-            let deviceUUID = UUID(uuidString: message.androidDeviceId) ?? UUID()
+            // Use Android device ID as-is (can be "android-<UUID>" format)
             let device = PairedDevice(
-                id: deviceUUID,
+                id: message.androidDeviceId,
                 name: message.androidDeviceName,
                 platform: "Android",
                 lastSeen: clock(),
@@ -314,8 +314,10 @@ public final class PairingSession: @unchecked Sendable {
             issuedAt: clock()
         )
         let data = try jsonEncoder.encode(payload)
-        // Use lowercase UUID string to match Android's expectation (ack.macDeviceId.toByteArray())
-        let macDeviceIdString = identity.uuidString.lowercased()
+        // Use device ID string with platform prefix for AAD (additional authenticated data)
+        // This matches the format used in PairingAckMessage encoding (macos-{UUID})
+        let deviceIdentity = DeviceIdentity()
+        let macDeviceIdString = deviceIdentity.deviceIdString.lowercased()
         let encrypted = try await cryptoService.encrypt(
             plaintext: data,
             key: sharedKey,

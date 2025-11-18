@@ -348,8 +348,7 @@ parameters.acceptLocalOnly = false
 
 ## Debugging Scripts Created
 
-1. **`scripts/monitor-pairing-debug.sh`** - Comprehensive log monitoring
-2. **`scripts/watch-pairing-logs.sh`** - Real-time log watching
+1. **`scripts/monitor-pairing.sh`** - Unified pairing monitor (use `./scripts/monitor-pairing.sh debug` for comprehensive monitoring, or `watch` for real-time logs)
 3. **`scripts/reopen-android-app.sh`** - Auto-reopen Android app after build
 
 ---

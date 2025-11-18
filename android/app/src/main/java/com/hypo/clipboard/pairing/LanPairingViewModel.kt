@@ -74,6 +74,7 @@ class LanPairingViewModel @Inject constructor(
         discoveryJob = viewModelScope.launch {
             discoverySource.discover("_hypo._tcp.")
                 .catch { error ->
+                    // Bonjour discovery surfaces IO exceptions via Flow; translate to UI error instead of crashing scope.
                     Log.e(TAG, "Discovery error: ${error.message}", error)
                     _state.value = LanPairingUiState.Error("Discovery failed: ${error.message}")
                 }
@@ -191,6 +192,7 @@ class LanPairingViewModel @Inject constructor(
                             wsClient?.sendRawJson(challengeData)
                             Log.d(TAG, "sendRawJson completed, waiting for ACK (timeout: 30s)")
                         } catch (e: Exception) {
+                            // Transport failures (socket closed, handshake failure) shouldn't crash the pairing job; surface a friendly error.
                             Log.e(TAG, "❌ Failed to send challenge: ${e.message}", e)
                             _state.value = LanPairingUiState.Error("Failed to send pairing challenge: ${e.message ?: "Unknown error"}")
                             return@launch
@@ -208,6 +210,7 @@ class LanPairingViewModel @Inject constructor(
                             _state.value = LanPairingUiState.Error("Pairing timeout: macOS did not respond. Please ensure the macOS app is running and try again.")
                             return@launch
                         } catch (e: Exception) {
+                            // JSON decode or network errors while awaiting ACK must be propagated to UI.
                             Log.e(TAG, "❌ Error waiting for ACK: ${e.message}", e)
                             _state.value = LanPairingUiState.Error("Failed to receive pairing response: ${e.message ?: "Unknown error"}")
                             return@launch
@@ -262,6 +265,7 @@ class LanPairingViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                // Top-level guard: any unexpected runtime exception during pairing should trigger a user-friendly error instead of crashing the ViewModel scope.
                 Log.e(TAG, "❌ Pairing failed with exception: ${e.message}", e)
                 val errorMessage = when (e) {
                     is java.net.ConnectException -> "Cannot connect to macOS. Please ensure the macOS app is running."

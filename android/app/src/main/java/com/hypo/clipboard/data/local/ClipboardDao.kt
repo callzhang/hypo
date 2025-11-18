@@ -85,6 +85,16 @@ interface ClipboardDao {
 
     @Query("UPDATE clipboard_items SET is_pinned = :isPinned WHERE id = :id")
     suspend fun updatePinnedStatus(id: String, isPinned: Boolean)
+    
+    // Check for duplicate clipboard items (same content, type, device within time window)
+    @Query("""
+        SELECT COUNT(*) FROM clipboard_items 
+        WHERE content = :content 
+        AND type = :type 
+        AND device_id = :deviceId 
+        AND created_at >= :since
+    """)
+    suspend fun countRecentDuplicates(content: String, type: String, deviceId: String, since: Instant): Int
 
     // Batch operations for better performance
     @Transaction

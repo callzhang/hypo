@@ -4,7 +4,8 @@ data class UserSettings(
     val lanSyncEnabled: Boolean = true,
     val cloudSyncEnabled: Boolean = true,
     val historyLimit: Int = DEFAULT_HISTORY_LIMIT,
-    val autoDeleteDays: Int = DEFAULT_AUTO_DELETE_DAYS
+    val autoDeleteDays: Int = DEFAULT_AUTO_DELETE_DAYS,
+    val plainTextModeEnabled: Boolean = false  // Plain text sync (no encryption) - for debugging
 ) {
     companion object {
         const val MIN_HISTORY_LIMIT = 20

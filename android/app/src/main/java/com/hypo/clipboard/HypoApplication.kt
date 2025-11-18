@@ -21,16 +21,5 @@ class HypoApplication : Application() {
             options.isDebug = true
             options.environment = if (com.hypo.clipboard.BuildConfig.DEBUG) "debug" else "production"
         }
-        
-        Log.i("HypoApplication", "✅ Application onCreate() completed - Sentry initialized")
-        
-        // Test Sentry by capturing a test exception
-        // TODO: Remove this after verifying Sentry is working
-        try {
-            throw Exception("This is a test exception to verify Sentry is working.")
-        } catch (e: Exception) {
-            Sentry.captureException(e)
-            Log.i("HypoApplication", "📤 Test exception sent to Sentry")
-        }
     }
 }

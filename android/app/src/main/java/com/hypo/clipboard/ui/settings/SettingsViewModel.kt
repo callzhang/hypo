@@ -66,9 +66,10 @@ class SettingsViewModel @Inject constructor(
                 settingsRepository.settings,
                 transportManager.peers,
                 transportManager.lastSuccessfulTransport,
-                connectivityCheckTrigger.onStart { emit(Unit) }, // Emit immediately on start
-                accessibilityStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) } // Emit immediately on start
-            ) { settings, peers, lastTransport, _, isAccessibilityEnabled ->
+                transportManager.connectionState,
+                connectivityCheckTrigger.onStart { emit(Unit) } // Emit immediately on start
+            ) { settings, peers, lastTransport, connectionState, _ ->
+                val isAccessibilityEnabled = checkAccessibilityServiceStatus()
                 // Get ALL paired device IDs from DeviceKeyStore (not just discovered ones)
                 val allPairedDeviceIds = runCatching { 
                     deviceKeyStore.getAllDeviceIds() 
@@ -152,19 +153,21 @@ class SettingsViewModel @Inject constructor(
                     
                     android.util.Log.d("SettingsViewModel", "🔍 Status check: deviceId=$deviceId, serviceName=$serviceName, transport=$transport, isDiscovered=$isDiscovered, lastTransport keys=${lastTransport.keys}")
                     
-                    // Determine status: device must be discovered AND have transport status to show as Connected
-                    // If device is not discovered (macOS app closed or different network), show as Disconnected
-                    // Note: When device changes network, it will be re-discovered with same device_id and status will update
+                    // Determine status: 
+                    // - LAN devices must be discovered AND have transport status to show as Connected
+                    // - CLOUD devices can show as Connected if they have transport status (don't require discovery)
+                    // - Paired devices without transport record are "Paired" (will use LAN-first, cloud-fallback on sync)
                     val status = when {
-                        // Device is discovered AND has a transport record → Connected
+                        // Device is discovered AND has LAN transport → Connected via LAN
                         // This works even if device changed network (matched by device_id, not IP)
                         isDiscovered && transport == ActiveTransport.LAN -> DeviceConnectionStatus.ConnectedLan
-                        isDiscovered && transport == ActiveTransport.CLOUD -> DeviceConnectionStatus.ConnectedCloud
+                        // Device has CLOUD transport → Connected via Cloud (don't require discovery)
+                        transport == ActiveTransport.CLOUD -> DeviceConnectionStatus.ConnectedCloud
                         // Device is discovered but no transport record → Disconnected (connection not established yet)
                         isDiscovered -> DeviceConnectionStatus.Disconnected
-                        // Device is paired but not on network (macOS app quit, different network, or unreachable) → Disconnected
-                        // Note: Cloud connectivity is handled via fallback during sync, not device discovery
-                        else -> DeviceConnectionStatus.Disconnected
+                        // Device is paired but not discovered and no transport record → Paired (will use LAN-first, cloud-fallback)
+                        // Code-paired devices may not have transport marked yet - they'll try LAN first, then cloud on sync
+                        else -> DeviceConnectionStatus.Paired
                     }
                     android.util.Log.d("SettingsViewModel", "📊 Final status for $deviceId: $status (isDiscovered=$isDiscovered, transport=$transport)")
                     serviceName to status
@@ -175,12 +178,19 @@ class SettingsViewModel @Inject constructor(
                     cloudSyncEnabled = settings.cloudSyncEnabled,
                     historyLimit = settings.historyLimit,
                     autoDeleteDays = settings.autoDeleteDays,
+                    plainTextModeEnabled = settings.plainTextModeEnabled,
                     discoveredPeers = pairedPeers,
                     deviceStatuses = peerStatuses,
-                    isAccessibilityServiceEnabled = isAccessibilityEnabled
+                    isAccessibilityServiceEnabled = isAccessibilityEnabled,
+                    connectionState = connectionState
                 )
             }.collect { state ->
                 _state.value = state
+            }
+            
+            // Also observe accessibility status separately to update it periodically
+            accessibilityStatusFlow.collect { isEnabled ->
+                _state.value = _state.value.copy(isAccessibilityServiceEnabled = isEnabled)
             }
         }
     }
@@ -199,6 +209,10 @@ class SettingsViewModel @Inject constructor(
 
     fun onAutoDeleteDaysChanged(days: Int) {
         viewModelScope.launch { settingsRepository.setAutoDeleteDays(days) }
+    }
+
+    fun onPlainTextModeChanged(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setPlainTextModeEnabled(enabled) }
     }
     
     fun removeDevice(peer: DiscoveredPeer) {
@@ -244,7 +258,9 @@ data class SettingsUiState(
     val cloudSyncEnabled: Boolean = true,
     val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT,
     val autoDeleteDays: Int = UserSettings.DEFAULT_AUTO_DELETE_DAYS,
+    val plainTextModeEnabled: Boolean = false,
     val discoveredPeers: List<DiscoveredPeer> = emptyList(),
     val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap(),
-    val isAccessibilityServiceEnabled: Boolean = false
+    val isAccessibilityServiceEnabled: Boolean = false,
+    val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Idle
 )

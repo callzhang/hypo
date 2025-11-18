@@ -165,21 +165,29 @@ object AppModule {
         @Named("lan_ws_config") config: TlsWebSocketConfig,
         @Named("lan_ws_connector") connector: WebSocketConnector,
         frameCodec: TransportFrameCodec,
-        analytics: TransportAnalytics
+        analytics: TransportAnalytics,
+        transportManager: com.hypo.clipboard.transport.TransportManager
     ): com.hypo.clipboard.transport.ws.LanWebSocketClient = com.hypo.clipboard.transport.ws.LanWebSocketClient(
         config,
         connector,
         frameCodec,
         CoroutineScope(SupervisorJob() + Dispatchers.IO),
         Clock.systemUTC(),
-        analytics = analytics
+        analytics = analytics,
+        transportManager = transportManager
     )
     
     @Provides
     @Singleton
     fun provideSyncTransport(
-        lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
-    ): SyncTransport = lanWebSocketClient
+        lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient,
+        relayWebSocketClient: RelayWebSocketClient,
+        transportManager: com.hypo.clipboard.transport.TransportManager
+    ): SyncTransport = com.hypo.clipboard.transport.ws.FallbackSyncTransport(
+        lanTransport = lanWebSocketClient,
+        cloudTransport = relayWebSocketClient,
+        transportManager = transportManager
+    )
 
     @Provides
     @Singleton

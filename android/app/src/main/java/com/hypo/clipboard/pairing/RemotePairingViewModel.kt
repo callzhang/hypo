@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.crypto.tink.subtle.X25519
 import com.hypo.clipboard.sync.DeviceIdentity
+import com.hypo.clipboard.sync.SyncCoordinator
+import com.hypo.clipboard.transport.ActiveTransport
+import com.hypo.clipboard.transport.TransportManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Duration
 import java.time.Instant
@@ -23,6 +26,8 @@ class RemotePairingViewModel @Inject constructor(
     private val relayClient: PairingRelayClient,
     private val handshakeManager: PairingHandshakeManager,
     private val identity: DeviceIdentity,
+    private val transportManager: TransportManager,
+    private val syncCoordinator: SyncCoordinator,
     private val json: Json = Json { prettyPrint = true }
 ) : ViewModel() {
     private val _state = MutableStateFlow(RemotePairingUiState())
@@ -171,13 +176,50 @@ class RemotePairingViewModel @Inject constructor(
                 }
                 when (val completion = handshakeManager.complete(stateSnapshot, ackJson)) {
                     is PairingCompletionResult.Success -> {
+                        val deviceId = completion.macDeviceId
+                        val deviceName = completion.macDeviceName
+                        
+                        android.util.Log.d("RemotePairingViewModel", "✅ Pairing handshake completed! Key saved for device: $deviceId")
+                        
+                        // Check if device is discoverable on LAN (same as LAN-paired devices)
+                        // Code-paired devices should also use LAN-first, cloud-fallback approach
+                        val peers = transportManager.currentPeers()
+                        val isDiscoveredOnLan = peers.any {
+                            val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
+                            peerDeviceId == deviceId || peerDeviceId.equals(deviceId, ignoreCase = true)
+                        }
+                        
+                        // Mark transport based on discovery status
+                        // If discovered on LAN, mark as LAN (will try LAN first)
+                        // If not discovered, don't mark yet - let first sync attempt determine it
+                        // The transport selection logic will try LAN first, then fallback to cloud
+                        if (isDiscoveredOnLan) {
+                            transportManager.markDeviceConnected(deviceId, ActiveTransport.LAN)
+                            android.util.Log.d("RemotePairingViewModel", "Device discovered on LAN, marked as LAN transport")
+                        } else {
+                            // Don't mark transport yet - let the first sync attempt determine it
+                            // This allows LAN-first, cloud-fallback to work naturally
+                            android.util.Log.d("RemotePairingViewModel", "Device not discovered on LAN, transport will be determined on first sync")
+                        }
+                        
+                        // Store device name for display when device is offline
+                        transportManager.persistDeviceName(deviceId, deviceName)
+                        
+                        android.util.Log.d("RemotePairingViewModel", "Paired device $deviceId, name=$deviceName, discoveredOnLan=$isDiscoveredOnLan")
+                        
+                        // Register device as sync target
+                        android.util.Log.d("RemotePairingViewModel", "🎯 Registering device as manual sync target...")
+                        syncCoordinator.addTargetDevice(deviceId)
+                        val targets = syncCoordinator.targets.value
+                        android.util.Log.d("RemotePairingViewModel", "✅ Target devices now: $targets (count: ${targets.size})")
+                        
                         countdownJob?.cancel()
                         countdownJob = null
                         _state.value = RemotePairingUiState(
                             phase = RemotePairingPhase.Completed,
-                            status = "Paired with ${completion.macDeviceName}",
+                            status = "Paired with $deviceName",
                             codeInput = code,
-                            macDeviceName = completion.macDeviceName
+                            macDeviceName = deviceName
                         )
                         pollJob = null
                         sessionState = null

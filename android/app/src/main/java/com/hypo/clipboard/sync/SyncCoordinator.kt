@@ -4,8 +4,11 @@ import android.util.Log
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,7 +22,8 @@ class SyncCoordinator @Inject constructor(
     private val repository: ClipboardRepository,
     private val syncEngine: SyncEngine,
     private val identity: DeviceIdentity,
-    private val transportManager: com.hypo.clipboard.transport.TransportManager
+    private val transportManager: com.hypo.clipboard.transport.TransportManager,
+    private val deviceKeyStore: DeviceKeyStore
 ) {
     private var eventChannel: Channel<ClipboardEvent>? = null
     private var job: Job? = null
@@ -27,10 +31,12 @@ class SyncCoordinator @Inject constructor(
     private val manualTargets = MutableStateFlow<Set<String>>(emptySet())
     private val _targets = MutableStateFlow<Set<String>>(emptySet())
     val targets: StateFlow<Set<String>> = _targets.asStateFlow()
+    private val keyStoreScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val pairedDeviceIdsCache = MutableStateFlow<Set<String>>(emptySet())
     
     init {
         // Observe transport manager peers to get auto-discovered devices
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default).launch {
+        keyStoreScope.launch {
             transportManager.peers.collect { peers ->
                 val deviceIds = peers.map { it.attributes["device_id"] ?: it.serviceName }.toSet()
                 autoTargets.value = deviceIds
@@ -38,13 +44,42 @@ class SyncCoordinator @Inject constructor(
                 android.util.Log.i(TAG, "🔄 Auto targets updated: ${deviceIds.size}, total=${_targets.value.size}")
             }
         }
+        
+        // Periodically refresh paired device IDs cache
+        keyStoreScope.launch {
+            while (true) {
+                try {
+                    val deviceIds = deviceKeyStore.getAllDeviceIds().toSet()
+                    pairedDeviceIdsCache.value = deviceIds
+                    recomputeTargets()
+                    delay(5_000) // Refresh every 5 seconds
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ Failed to refresh paired device IDs: ${e.message}")
+                    delay(5_000)
+                }
+            }
+        }
     }
 
     private fun recomputeTargets() {
         // Combine auto and manual targets, but exclude local device ID (don't sync to ourselves)
-        val combined = (autoTargets.value + manualTargets.value) - identity.deviceId
-        _targets.value = combined
-        Log.d(TAG, "🎯 Recomputed targets: auto=${autoTargets.value.size}, manual=${manualTargets.value.size}, combined=${combined.size}, localDeviceId=${identity.deviceId}")
+        // CRITICAL: Only include devices that have encryption keys (paired devices)
+        // This prevents sync attempts to unpaired devices or Android devices
+        val allCandidates = (autoTargets.value + manualTargets.value) - identity.deviceId
+        
+        // Filter to only devices that have keys in the key store (use cached value)
+        val pairedDeviceIds = pairedDeviceIdsCache.value
+        val filtered = allCandidates.filter { candidateId ->
+            pairedDeviceIds.contains(candidateId)
+        }.toSet()
+        
+        _targets.value = filtered
+        Log.d(TAG, "🎯 Recomputed targets: auto=${autoTargets.value.size}, manual=${manualTargets.value.size}, candidates=${allCandidates.size}, paired=${pairedDeviceIds.size}, filtered=${filtered.size}, localDeviceId=${identity.deviceId}")
+        
+        if (filtered.size < allCandidates.size) {
+            val missing = allCandidates - filtered
+            Log.w(TAG, "⚠️ Excluded ${missing.size} devices without keys: $missing")
+        }
     }
 
     fun start(scope: CoroutineScope) {
@@ -62,6 +97,20 @@ class SyncCoordinator @Inject constructor(
                 // Use source device info if available (from remote sync), otherwise use local device info
                 val deviceId = event.sourceDeviceId ?: identity.deviceId
                 val deviceName = event.sourceDeviceName ?: identity.deviceName
+                
+                // Check for duplicate based on content (prevent duplicates from ClipboardListener + AccessibilityService)
+                val signature = event.signature()
+                val isDuplicate = repository.hasRecentDuplicate(
+                    content = event.content,
+                    type = event.type,
+                    deviceId = deviceId,
+                    withinSeconds = 5
+                )
+                
+                if (isDuplicate) {
+                    Log.i(TAG, "⏭️ Duplicate clipboard event detected (signature: ${signature.take(50)}), skipping save")
+                    continue
+                }
                 
                 val item = ClipboardItem(
                     id = event.id,
@@ -121,13 +170,33 @@ class SyncCoordinator @Inject constructor(
 
     fun addTargetDevice(deviceId: String) {
         manualTargets.update { it + deviceId }
-        recomputeTargets()
+        // Refresh paired device IDs cache when adding a target (key should be saved by now)
+        keyStoreScope.launch {
+            try {
+                val deviceIds = deviceKeyStore.getAllDeviceIds().toSet()
+                pairedDeviceIdsCache.value = deviceIds
+                recomputeTargets()
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Failed to refresh paired device IDs after adding target: ${e.message}")
+                recomputeTargets() // Still recompute with current cache
+            }
+        }
         Log.i(TAG, "➕ Added manual sync target: $deviceId")
     }
 
     fun removeTargetDevice(deviceId: String) {
         manualTargets.update { it - deviceId }
-        recomputeTargets()
+        // Refresh paired device IDs cache when removing a target (key should be deleted by now)
+        keyStoreScope.launch {
+            try {
+                val deviceIds = deviceKeyStore.getAllDeviceIds().toSet()
+                pairedDeviceIdsCache.value = deviceIds
+                recomputeTargets()
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Failed to refresh paired device IDs after removing target: ${e.message}")
+                recomputeTargets() // Still recompute with current cache
+            }
+        }
         Log.i(TAG, "➖ Removed manual sync target: $deviceId")
     }
 

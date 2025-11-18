@@ -11,6 +11,8 @@ public final class IncomingClipboardHandler {
     private let syncEngine: SyncEngine
     private let historyStore: HistoryStore
     private let pasteboard: NSPasteboard
+    private let frameCodec = TransportFrameCodec()
+    private var onEntryAdded: ((ClipboardEntry) async -> Void)?
     
     #if canImport(os)
     private let logger = Logger(subsystem: "com.hypo.clipboard", category: "incoming")
@@ -19,47 +21,95 @@ public final class IncomingClipboardHandler {
     public init(
         syncEngine: SyncEngine,
         historyStore: HistoryStore,
-        pasteboard: NSPasteboard = .general
+        pasteboard: NSPasteboard = .general,
+        onEntryAdded: ((ClipboardEntry) async -> Void)? = nil
     ) {
         self.syncEngine = syncEngine
         self.historyStore = historyStore
         self.pasteboard = pasteboard
+        self.onEntryAdded = onEntryAdded
+    }
+    
+    public func setOnEntryAdded(_ callback: @escaping (ClipboardEntry) async -> Void) {
+        self.onEntryAdded = callback
     }
     
     /// Handle incoming clipboard data from remote device
     public func handle(_ data: Data) async {
         do {
             #if canImport(os)
-            logger.info("📥 Processing incoming clipboard data (\(data.count) bytes)")
+            logger.info("📥 CLIPBOARD RECEIVED: Processing incoming clipboard data (\(data.count) bytes)")
             #endif
+            print("📥 [IncomingClipboardHandler] CLIPBOARD RECEIVED: \(data.count) bytes")
             
-            // Decode the encrypted clipboard payload
-            let payload = try await syncEngine.decode(data)
+            // Extract the JSON payload from the frame (same as frameCodec.decode does internally)
+            guard data.count >= MemoryLayout<UInt32>.size else {
+                throw TransportFrameError.truncated
+            }
+            let lengthRange = 0..<MemoryLayout<UInt32>.size
+            let lengthValue = data[lengthRange].withUnsafeBytes { buffer -> UInt32 in
+                buffer.load(as: UInt32.self)
+            }
+            let length = Int(UInt32(bigEndian: lengthValue))
+            guard data.count - MemoryLayout<UInt32>.size >= length else {
+                throw TransportFrameError.truncated
+            }
+            let envelopeJSON = data.subdata(in: MemoryLayout<UInt32>.size..<(MemoryLayout<UInt32>.size + length))
+            
+            // Decode envelope to get device info
+            let envelope = try frameCodec.decode(data)
+            let deviceId = envelope.payload.deviceId
+            let deviceName = envelope.payload.deviceName
+            
+            // Decode the encrypted clipboard payload using the extracted JSON
+            let payload = try await syncEngine.decode(envelopeJSON)
             
             #if canImport(os)
-            logger.info("✅ Decoded clipboard: type=\(payload.contentType.rawValue)")
+            logger.info("📋 Envelope decoded: from device \(deviceId), name: \(deviceName ?? "unknown")")
             #endif
+            print("📋 [IncomingClipboardHandler] Envelope decoded: deviceId=\(deviceId), deviceName=\(deviceName ?? "unknown")")
+            
+            #if canImport(os)
+            logger.info("✅ CLIPBOARD DECODED: type=\(payload.contentType.rawValue)")
+            #endif
+            print("✅ [IncomingClipboardHandler] CLIPBOARD DECODED: type=\(payload.contentType.rawValue)")
             
             // Apply to system clipboard
             try await applyToClipboard(payload)
             
-            // Add to history (marked as from remote device)
-            await addToHistory(payload)
+            // Add to history (marked as from remote device) with device info from envelope
+            await addToHistory(payload, deviceId: deviceId, deviceName: deviceName)
+            
+            // Notify that clipboard was received from this device (updates lastSeen)
+            NotificationCenter.default.post(
+                name: NSNotification.Name("ClipboardReceivedFromDevice"),
+                object: nil,
+                userInfo: ["deviceId": deviceId]
+            )
             
         } catch {
             #if canImport(os)
-            logger.error("❌ Failed to handle incoming clipboard: \(error.localizedDescription)")
+            logger.error("❌ CLIPBOARD ERROR: Failed to handle incoming clipboard: \(error.localizedDescription)")
             #endif
+            print("❌ [IncomingClipboardHandler] CLIPBOARD ERROR: \(error.localizedDescription)")
+            print("❌ [IncomingClipboardHandler] Error type: \(String(describing: type(of: error)))")
+            if let decodingError = error as? DecodingError {
+                print("❌ [IncomingClipboardHandler] DecodingError details: \(decodingError)")
+            }
         }
     }
     
     private func applyToClipboard(_ payload: ClipboardPayload) async throws {
-        pasteboard.clearContents()
+        await MainActor.run {
+            pasteboard.clearContents()
+        }
         
         switch payload.contentType {
         case .text:
             let text = String(data: payload.data, encoding: .utf8) ?? ""
-            pasteboard.setString(text, forType: .string)
+            await MainActor.run {
+                pasteboard.setString(text, forType: .string)
+            }
             
             #if canImport(os)
             logger.info("✅ Applied text to clipboard (\(text.count) chars)")
@@ -67,32 +117,34 @@ public final class IncomingClipboardHandler {
             
         case .link:
             let urlString = String(data: payload.data, encoding: .utf8) ?? ""
-            pasteboard.setString(urlString, forType: .string)
+            await MainActor.run {
+                pasteboard.setString(urlString, forType: .string)
+            }
             
             #if canImport(os)
             logger.info("✅ Applied link to clipboard: \(urlString)")
             #endif
             
         case .image:
-            if let image = NSImage(data: payload.data) {
+            guard let image = NSImage(data: payload.data) else {
+                throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create image from data"])
+            }
+            await MainActor.run {
                 pasteboard.writeObjects([image])
-                
-                #if canImport(os)
-                logger.info("✅ Applied image to clipboard")
-                #endif
             }
             
-        case .file:
-            // File handling would require additional work (temp file creation, etc.)
             #if canImport(os)
-            logger.warning("⚠️ File clipboard type not yet supported")
+            logger.info("✅ Applied image to clipboard")
             #endif
+            
+        case .file:
+            throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "File clipboard type not yet supported"])
         }
     }
     
-    private func addToHistory(_ payload: ClipboardPayload) async {
-        let deviceId = payload.metadata?["device_id"] ?? "unknown"
-        let deviceName = payload.metadata?["device_name"] ?? "Remote Device"
+    private func addToHistory(_ payload: ClipboardPayload, deviceId: String, deviceName: String?) async {
+        let finalDeviceId = deviceId
+        let finalDeviceName = deviceName ?? "Remote Device"
         
         let content: ClipboardContent
         switch payload.contentType {
@@ -134,17 +186,23 @@ public final class IncomingClipboardHandler {
         let entry = ClipboardEntry(
             id: UUID(),
             timestamp: Date(),
-            originDeviceId: deviceId,
-            originDeviceName: deviceName,
+            originDeviceId: finalDeviceId,
+            originDeviceName: finalDeviceName,
             content: content,
             isPinned: false
         )
         
         _ = await historyStore.insert(entry)
         
+        // Notify callback if provided (e.g., to update viewModel)
+        if let onEntryAdded = onEntryAdded {
+            await onEntryAdded(entry)
+        }
+        
         #if canImport(os)
-        logger.info("✅ Added to history from device: \(deviceName)")
+        logger.info("✅ Added to history from device: \(finalDeviceName) (id: \(finalDeviceId))")
         #endif
+        print("✅ [IncomingClipboardHandler] Added to history: \(finalDeviceName) (id: \(finalDeviceId.prefix(8)))")
     }
 }
 

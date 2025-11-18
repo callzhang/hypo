@@ -18,7 +18,7 @@ public protocol ClipboardNotificationScheduling: AnyObject {
 }
 
 public final class ClipboardNotificationController: NSObject, ClipboardNotificationScheduling {
-    public static let shared = ClipboardNotificationController()
+    public static let shared: ClipboardNotificationScheduling = ClipboardNotificationController() ?? NoOpNotificationController()
 
     private enum Constants {
         static let categoryIdentifier = "clipboard_entry"
@@ -32,12 +32,31 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
     private weak var handler: ClipboardNotificationHandling?
     private let fileManager: FileManager
 
-    public init(
-        center: UNUserNotificationCenter = .current(),
+    public init?(
+        center: UNUserNotificationCenter? = nil,
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default
     ) {
-        self.center = center
+        // Use provided center or try to get current, but handle case where bundle isn't available (debug builds)
+        let notificationCenter: UNUserNotificationCenter
+        if let providedCenter = center {
+            notificationCenter = providedCenter
+        } else {
+            // Check if we're in a proper app bundle before using .current()
+            // UNUserNotificationCenter.current() requires a proper app bundle
+            // When running from .build directory, Bundle.main.bundleURL won't end in .app
+            let bundleURL = Bundle.main.bundleURL
+            if bundleURL.pathExtension == "app" || bundleURL.path.contains(".app/") {
+                // We're in a proper app bundle, safe to use .current()
+                notificationCenter = .current()
+            } else {
+                // For debug builds running from .build directory, we can't use .current()
+                // Return nil to indicate notifications aren't available
+                return nil
+            }
+        }
+        
+        self.center = notificationCenter
         self.defaults = defaults
         self.fileManager = fileManager
         super.init()
@@ -172,5 +191,12 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
 }
 
 extension UNUserNotificationCenter: @retroactive @unchecked Sendable {}
+
+// No-op implementation for when notifications aren't available (debug builds)
+final class NoOpNotificationController: NSObject, ClipboardNotificationScheduling {
+    func configure(handler: ClipboardNotificationHandling) {}
+    func requestAuthorizationIfNeeded() {}
+    func deliverNotification(for entry: ClipboardEntry) {}
+}
 
 #endif

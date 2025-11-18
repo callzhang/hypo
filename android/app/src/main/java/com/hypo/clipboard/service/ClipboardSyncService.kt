@@ -397,16 +397,37 @@ class ClipboardSyncService : Service() {
             Log.i(TAG, "♿ Accessibility service: $status (allows background clipboard access on Android 10+)")
             if (isEnabled) {
                 Log.i(TAG, "✅ Background clipboard access is now available via accessibility service!")
+                // Stop ClipboardListener to prevent duplicates - accessibility service will handle clipboard monitoring
+                Log.i(TAG, "🛑 Stopping ClipboardListener to prevent duplicates (accessibility service will handle monitoring)")
+                listener.stop()
+            } else {
+                // Accessibility service disabled - start ClipboardListener if not already running
+                if (!listener.isListening) {
+                    Log.i(TAG, "🔄 Accessibility service disabled - starting ClipboardListener")
+                    ensureClipboardPermissionAndStartListener()
+                }
             }
             updateNotification()
         }
     }
 
     private fun ensureClipboardPermissionAndStartListener() {
+        // Don't start ClipboardListener if accessibility service is enabled (prevents duplicates)
+        if (isAccessibilityServiceEnabled) {
+            Log.i(TAG, "⏭️ Skipping ClipboardListener start - accessibility service is enabled and will handle clipboard monitoring")
+            return
+        }
+        
         clipboardPermissionJob?.cancel()
         clipboardPermissionJob = scope.launch {
             Log.i(TAG, "🔍 Starting clipboard permission check loop...")
             while (isActive) {
+                // Check again if accessibility service was enabled while waiting
+                if (isAccessibilityServiceEnabled) {
+                    Log.i(TAG, "⏭️ Accessibility service enabled during permission check - stopping ClipboardListener setup")
+                    return@launch
+                }
+                
                 val allowed = clipboardAccessChecker.canReadClipboard()
                 awaitingClipboardPermission = !allowed
                 Log.d(TAG, "📋 Clipboard permission status: allowed=$allowed, awaiting=$awaitingClipboardPermission")

@@ -24,7 +24,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -39,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import com.hypo.clipboard.R
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
+import com.hypo.clipboard.transport.ConnectionState
+import com.hypo.clipboard.ui.components.ConnectionStatusBadge
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -49,6 +53,7 @@ fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.
         items = state.items,
         query = state.query,
         currentDeviceId = viewModel.currentDeviceId,
+        connectionState = state.connectionState,
         onQueryChange = viewModel::onQueryChange,
         onClearHistory = viewModel::clearHistory
     )
@@ -59,6 +64,7 @@ fun HistoryScreen(
     items: List<ClipboardItem>,
     query: String,
     currentDeviceId: String,
+    connectionState: ConnectionState,
     onQueryChange: (String) -> Unit,
     onClearHistory: () -> Unit,
     modifier: Modifier = Modifier
@@ -79,6 +85,8 @@ fun HistoryScreen(
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.weight(1f))
+            ConnectionStatusBadge(connectionState = connectionState)
+            Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = onClearHistory, enabled = items.isNotEmpty()) {
                 Text(text = stringResource(id = R.string.clear_history))
             }
@@ -143,11 +151,10 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
     val formatter = DateTimeFormatter.ofPattern("MMM d, HH:mm")
     val isLocal = item.deviceId == currentDeviceId
     
-    // Determine device name with better detection
-    // TODO: Complete sync handler to properly tag remote items with source device info
-    val deviceName = when {
+    // Determine origin display name: "Local" for this device, device name for paired devices
+    val originName = when {
+        isLocal -> "Local"
         item.deviceName != null && item.deviceName.isNotBlank() -> item.deviceName
-        isLocal -> "This device"
         item.deviceId.startsWith("mac-") || 
         item.deviceId.contains("macbook", ignoreCase = true) ||
         item.deviceId.contains("imac", ignoreCase = true) ||
@@ -160,6 +167,8 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
         if (manager != null) {
             val content = item.content
             if (content.isNotBlank()) {
+                // Clipboard writes can be rejected (SecurityException) when app in background or clipboard locked,
+                // so guard the call and surface a log instead of crashing the UI.
                 try {
                     val clip = ClipData.newPlainText("Hypo Clipboard", content)
                     manager.setPrimaryClip(clip)
@@ -193,13 +202,37 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
                     text = item.type.icon,
                     style = MaterialTheme.typography.titleLarge
                 )
-                // Device name as title
-                Text(
-                    text = deviceName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                // Content title and origin badge
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.weight(1f)
-                )
+                ) {
+                    Text(
+                        text = item.type.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    // Origin badge
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isLocal) 
+                            MaterialTheme.colorScheme.primaryContainer 
+                        else 
+                            MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.padding(horizontal = 2.dp)
+                    ) {
+                        Text(
+                            text = originName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isLocal)
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
                 // Copy button
                 IconButton(
                     onClick = copyToClipboard,

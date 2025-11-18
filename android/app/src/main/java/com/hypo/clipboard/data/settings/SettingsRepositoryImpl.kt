@@ -20,7 +20,8 @@ class SettingsRepositoryImpl @Inject constructor(
             lanSyncEnabled = preferences[Keys.LAN_SYNC_ENABLED] ?: true,
             cloudSyncEnabled = preferences[Keys.CLOUD_SYNC_ENABLED] ?: true,
             historyLimit = preferences[Keys.HISTORY_LIMIT] ?: UserSettings.DEFAULT_HISTORY_LIMIT,
-            autoDeleteDays = preferences[Keys.AUTO_DELETE_DAYS] ?: UserSettings.DEFAULT_AUTO_DELETE_DAYS
+            autoDeleteDays = preferences[Keys.AUTO_DELETE_DAYS] ?: UserSettings.DEFAULT_AUTO_DELETE_DAYS,
+            plainTextModeEnabled = preferences[Keys.PLAIN_TEXT_MODE_ENABLED] ?: false
         )
     }
 
@@ -42,10 +43,15 @@ class SettingsRepositoryImpl @Inject constructor(
         dataStore.edit { prefs -> prefs[Keys.AUTO_DELETE_DAYS] = clamped }
     }
 
+    override suspend fun setPlainTextModeEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[Keys.PLAIN_TEXT_MODE_ENABLED] = enabled }
+    }
+
     private object Keys {
         val LAN_SYNC_ENABLED = booleanPreferencesKey("lan_sync_enabled")
         val CLOUD_SYNC_ENABLED = booleanPreferencesKey("cloud_sync_enabled")
         val HISTORY_LIMIT = intPreferencesKey("history_limit")
         val AUTO_DELETE_DAYS = intPreferencesKey("auto_delete_days")
+        val PLAIN_TEXT_MODE_ENABLED = booleanPreferencesKey("plain_text_mode_enabled")
     }
 }

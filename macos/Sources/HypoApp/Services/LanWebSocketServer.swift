@@ -26,11 +26,47 @@ public protocol LanWebSocketServerDelegate: AnyObject {
 public final class LanWebSocketServer {
     private final class ConnectionContext: @unchecked Sendable {
         let connection: NWConnection
-        var buffer = Data()
+        private var buffer = Data()
+        // Protects buffer mutations so concurrent frame appends can't corrupt indices (Issue 7)
+        private let bufferLock = NSLock()
         var upgraded = false
 
         init(connection: NWConnection) {
             self.connection = connection
+        }
+        
+        func appendToBuffer(_ chunk: Data) {
+            guard !chunk.isEmpty else { return }
+            bufferLock.lock()
+            buffer.append(chunk)
+            bufferLock.unlock()
+        }
+        
+        func consumeHeader(upTo delimiter: Data) -> Data? {
+            bufferLock.lock()
+            defer { bufferLock.unlock() }
+            guard let headerRange = buffer.range(of: delimiter) else { return nil }
+            let headerData = buffer.subdata(in: 0..<headerRange.upperBound)
+            buffer = Data(buffer[headerRange.upperBound...])
+            return headerData
+        }
+        
+        func snapshotBuffer() -> Data {
+            bufferLock.lock()
+            let copy = buffer
+            bufferLock.unlock()
+            return copy
+        }
+        
+        func dropPrefix(_ length: Int) {
+            guard length > 0 else { return }
+            bufferLock.lock()
+            if length >= buffer.count {
+                buffer.removeAll(keepingCapacity: true)
+            } else {
+                buffer.removeSubrange(0..<length)
+            }
+            bufferLock.unlock()
         }
     }
 
@@ -39,16 +75,34 @@ public final class LanWebSocketServer {
     private var connectionMetadata: [UUID: ConnectionMetadata] = [:]
     public weak var delegate: LanWebSocketServerDelegate?
     
+    public func connectionMetadata(for connectionId: UUID) -> ConnectionMetadata? {
+        connectionMetadata[connectionId]
+    }
+    
+    public func updateConnectionMetadata(connectionId: UUID, deviceId: String) {
+        if var existing = connectionMetadata[connectionId] {
+            connectionMetadata[connectionId] = ConnectionMetadata(deviceId: deviceId, connectedAt: existing.connectedAt)
+        } else {
+            connectionMetadata[connectionId] = ConnectionMetadata(deviceId: deviceId, connectedAt: Date())
+        }
+    }
+    
     #if canImport(os)
     private let logger = Logger(subsystem: "com.hypo.clipboard", category: "lan-server")
     #endif
     
+    private let frameCodec = TransportFrameCodec()
     private let handshakeDelimiter = Data("\r\n\r\n".utf8)
     private let websocketGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
     
-    private struct ConnectionMetadata {
-        let deviceId: String?
-        let connectedAt: Date
+    public struct ConnectionMetadata {
+        public let deviceId: String?
+        public let connectedAt: Date
+        
+        public init(deviceId: String?, connectedAt: Date) {
+            self.deviceId = deviceId
+            self.connectedAt = connectedAt
+        }
     }
     
     public init() {}
@@ -211,6 +265,9 @@ public final class LanWebSocketServer {
         print("🔌 [LanWebSocketServer] New connection: \(id.uuidString)")
         print("🔌 [LanWebSocketServer] Total active connections: \(connections.count)")
         
+        // Write to debug log
+        try? "🔌 [LanWebSocketServer] New connection: \(id.uuidString)\n".appendToFile(path: "/tmp/hypo_debug.log")
+        
         connection.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
                 guard let self = self else {
@@ -264,7 +321,7 @@ public final class LanWebSocketServer {
                     return
                 }
                 if let data, !data.isEmpty {
-                    context.buffer.append(data)
+                    context.appendToBuffer(data)
                     if self.processHandshakeBuffer(for: connectionId, context: context) {
                         return
                     }
@@ -279,12 +336,9 @@ public final class LanWebSocketServer {
     }
 
     private func processHandshakeBuffer(for connectionId: UUID, context: ConnectionContext) -> Bool {
-        guard let headerRange = context.buffer.range(of: handshakeDelimiter) else {
+        guard let headerData = context.consumeHeader(upTo: handshakeDelimiter) else {
             return false
         }
-        let headerData = context.buffer.subdata(in: 0..<headerRange.upperBound)
-        let remaining = context.buffer[headerRange.upperBound...]
-        context.buffer = Data(remaining)
         guard let request = String(data: headerData, encoding: .utf8) else {
             sendHTTPError(status: "400 Bad Request", connectionId: connectionId, context: context)
             return true
@@ -325,10 +379,12 @@ public final class LanWebSocketServer {
                 }
                 context.upgraded = true
                 #if canImport(os)
-                self.logger.info("✅ Manual WebSocket handshake completed for \(connectionId.uuidString)")
+                self.logger.info("✅ CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded for \(connectionId.uuidString.prefix(8))")
                 #endif
+                print("✅ [LanWebSocketServer] CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded, starting frame reception")
                 self.delegate?.server(self, didAcceptConnection: connectionId)
                 self.processFrameBuffer(for: connectionId, context: context)
+                print("📡 [LanWebSocketServer] CLIPBOARD SETUP: Starting receiveFrameChunk for connection \(connectionId.uuidString.prefix(8))")
                 self.receiveFrameChunk(for: connectionId, context: context)
             }
         })
@@ -336,10 +392,20 @@ public final class LanWebSocketServer {
     }
 
     private func receiveFrameChunk(for connectionId: UUID, context: ConnectionContext) {
+        #if canImport(os)
+        logger.debug("📡 CLIPBOARD RECEIVE: Setting up receive callback for connection \(connectionId.uuidString.prefix(8))")
+        #endif
+        print("📡 [LanWebSocketServer] CLIPBOARD RECEIVE: Setting up receive callback for \(connectionId.uuidString.prefix(8))")
         context.connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
             Task { @MainActor in
-                guard let self else { return }
-                guard let context = self.connections[connectionId] else { return }
+                guard let self else {
+                    print("⚠️ [LanWebSocketServer] Self is nil in receive callback")
+                    return
+                }
+                guard let context = self.connections[connectionId] else {
+                    print("⚠️ [LanWebSocketServer] Connection context not found for \(connectionId.uuidString.prefix(8))")
+                    return
+                }
                 if let error = error {
                     #if canImport(os)
                     self.logger.error("Frame receive error: \(error.localizedDescription)")
@@ -348,10 +414,17 @@ public final class LanWebSocketServer {
                     return
                 }
                 if let data, !data.isEmpty {
-                    context.buffer.append(data)
+                    #if canImport(os)
+                    self.logger.info("📥 FRAME RECEIVED: \(data.count) bytes from connection \(connectionId.uuidString.prefix(8))")
+                    #endif
+                    print("📥 [LanWebSocketServer] FRAME RECEIVED: \(data.count) bytes from \(connectionId.uuidString.prefix(8))")
+                    context.appendToBuffer(data)
                     self.processFrameBuffer(for: connectionId, context: context)
                 }
                 if isComplete {
+                    #if canImport(os)
+                    self.logger.info("Connection \(connectionId.uuidString) completed")
+                    #endif
                     self.closeConnection(connectionId)
                     return
                 }
@@ -361,46 +434,81 @@ public final class LanWebSocketServer {
     }
 
     private func processFrameBuffer(for connectionId: UUID, context: ConnectionContext) {
-        guard context.upgraded else { return }
+        guard context.upgraded else {
+            #if canImport(os)
+            logger.debug("⏸️ Frame processing skipped - connection not upgraded: \(connectionId.uuidString)")
+            #endif
+            return
+        }
         while true {
-            guard context.buffer.count >= 2 else { return }
-            let firstByte = context.buffer[0]
-            let secondByte = context.buffer[1]
+            // Work on a snapshot to avoid races with concurrent appends
+            let bufferSnapshot = context.snapshotBuffer()
+            guard bufferSnapshot.count >= 2 else {
+                #if canImport(os)
+                logger.debug("⏸️ Frame processing paused - buffer too small (\(bufferSnapshot.count) bytes)")
+                #endif
+                return
+            }
+            
+            var headerBytes = [UInt8](repeating: 0, count: 2)
+            bufferSnapshot.copyBytes(to: &headerBytes, count: 2)
+            let firstByte = headerBytes[0]
+            let secondByte = headerBytes[1]
             let isFinal = (firstByte & 0x80) != 0
             let opcode = firstByte & 0x0F
             let isMasked = (secondByte & 0x80) != 0
             var offset = 2
             var payloadLength = Int(secondByte & 0x7F)
+            
             if payloadLength == 126 {
-                guard context.buffer.count >= offset + 2 else { return }
-                payloadLength = Int(readUInt16(from: context.buffer, offset: offset))
+                guard bufferSnapshot.count >= offset + 2 else { return }
+                let lengthBytes = bufferSnapshot.subdata(in: offset..<offset + 2)
+                payloadLength = Int(readUInt16(from: lengthBytes, offset: 0))
                 offset += 2
             } else if payloadLength == 127 {
-                guard context.buffer.count >= offset + 8 else { return }
-                payloadLength = Int(readUInt64(from: context.buffer, offset: offset))
+                guard bufferSnapshot.count >= offset + 8 else { return }
+                let lengthBytes = bufferSnapshot.subdata(in: offset..<offset + 8)
+                payloadLength = Int(readUInt64(from: lengthBytes, offset: 0))
                 offset += 8
             }
+            
             let maskLength = isMasked ? 4 : 0
-            guard context.buffer.count >= offset + maskLength + payloadLength else { return }
-            var payload = context.buffer.subdata(in: offset + maskLength ..< offset + maskLength + payloadLength)
+            let requiredLength = offset + maskLength + payloadLength
+            guard bufferSnapshot.count >= requiredLength else { return }
+            
+            // Extract all needed data atomically before processing
+            let frameData = bufferSnapshot.subdata(in: 0..<requiredLength)
+            var payload = frameData.subdata(in: offset + maskLength..<requiredLength)
+            
             if isMasked {
                 let maskStart = offset
-                let maskBytes = Array(context.buffer[maskStart..<maskStart + 4])
+                let maskBytes = Array(frameData[maskStart..<maskStart + 4])
                 unmask(&payload, with: maskBytes)
             }
-            let total = offset + maskLength + payloadLength
-            context.buffer.removeFirst(total)
+            
+            // Remove processed frame from buffer
+            context.dropPrefix(requiredLength)
+            #if canImport(os)
+            logger.info("📦 FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes, masked=\(isMasked), connection=\(connectionId.uuidString.prefix(8))")
+            #endif
+            print("📦 [LanWebSocketServer] FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes")
             handleFrame(opcode: opcode, isFinal: isFinal, payload: payload, connectionId: connectionId, context: context)
         }
     }
 
     private func handleFrame(opcode: UInt8, isFinal: Bool, payload: Data, connectionId: UUID, context: ConnectionContext) {
         guard isFinal else {
-            print("⚠️ [LanWebSocketServer] Fragmented frames are not supported")
+            #if canImport(os)
+            logger.warning("⚠️ Fragmented frames are not supported")
+            #endif
             return
         }
         switch opcode {
         case 0x1, 0x2:
+            #if canImport(os)
+            logger.info("📨 FRAME HANDLED: data frame opcode=\(opcode), \(payload.count) bytes from \(connectionId.uuidString.prefix(8))")
+            #endif
+            print("📨 [LanWebSocketServer] FRAME HANDLED: data frame, \(payload.count) bytes")
             handleReceivedData(payload, from: connectionId)
         case 0x8:
             print("🔌 [LanWebSocketServer] Close frame received from \(connectionId.uuidString)")
@@ -440,12 +548,14 @@ public final class LanWebSocketServer {
     }
 
     private func readUInt16(from data: Data, offset: Int) -> UInt16 {
+        guard offset + 1 < data.count else { return 0 }
         let high = UInt16(data[offset]) << 8
         let low = UInt16(data[offset + 1])
         return high | low
     }
 
     private func readUInt64(from data: Data, offset: Int) -> UInt64 {
+        guard offset + 7 < data.count else { return 0 }
         var value: UInt64 = 0
         for index in 0..<8 {
             value = (value << 8) | UInt64(data[offset + index])
@@ -466,22 +576,109 @@ public final class LanWebSocketServer {
     
     private func handleReceivedData(_ data: Data, from connectionId: UUID) {
         #if canImport(os)
-        logger.info("📨 Received data: \(data.count) bytes from connection \(connectionId.uuidString)")
+        logger.info("📨 CLIPBOARD DATA RECEIVED: \(data.count) bytes from connection \(connectionId.uuidString.prefix(8))")
         #endif
+        print("📨 [LanWebSocketServer] CLIPBOARD DATA RECEIVED: \(data.count) bytes")
+        
+        // Decode the frame-encoded payload (Android sends: 4-byte length + JSON)
+        // Try to decode as TransportFrameCodec frame first (for clipboard messages)
+        do {
+            let envelope = try frameCodec.decode(data)
+            #if canImport(os)
+            logger.info("✅ CLIPBOARD FRAME DECODED: envelope type=\(envelope.type.rawValue)")
+            #endif
+            print("✅ [LanWebSocketServer] CLIPBOARD FRAME DECODED: type=\(envelope.type.rawValue)")
+            
+            // Handle based on envelope type
+            switch envelope.type {
+            case .clipboard:
+                // Forward the original frame-encoded data to the delegate
+                // (it will decode it again in IncomingClipboardHandler)
+                #if canImport(os)
+                logger.info("✅ CLIPBOARD MESSAGE RECEIVED: forwarding to delegate, \(data.count) bytes")
+                #endif
+                print("✅ [LanWebSocketServer] CLIPBOARD MESSAGE RECEIVED: \(data.count) bytes, forwarding to delegate")
+                delegate?.server(self, didReceiveClipboardData: data, from: connectionId)
+                return
+            case .control:
+                #if canImport(os)
+                logger.info("📋 CLIPBOARD CONTROL MESSAGE: ignoring for now")
+                #endif
+                print("📋 [LanWebSocketServer] CLIPBOARD CONTROL MESSAGE: ignoring")
+                return
+            }
+        } catch let decodingError as DecodingError {
+            // Detailed decoding error logging
+            #if canImport(os)
+            logger.error("⚠️ CLIPBOARD FRAME DECODE FAILED: DecodingError")
+            switch decodingError {
+            case .typeMismatch(let type, let context):
+                logger.error("   Type mismatch: expected \(String(describing: type)) at path: \(context.codingPath.map { $0.stringValue })")
+            case .keyNotFound(let key, let context):
+                logger.error("   Key not found: \(key.stringValue) at path: \(context.codingPath.map { $0.stringValue })")
+            case .valueNotFound(let type, let context):
+                logger.error("   Value not found: \(String(describing: type)) at path: \(context.codingPath.map { $0.stringValue })")
+            case .dataCorrupted(let context):
+                logger.error("   Data corrupted: \(context.debugDescription) at path: \(context.codingPath.map { $0.stringValue })")
+            @unknown default:
+                logger.error("   Unknown decoding error")
+            }
+            #endif
+            print("⚠️ [LanWebSocketServer] CLIPBOARD FRAME DECODE FAILED: DecodingError")
+            switch decodingError {
+            case .typeMismatch(let type, let context):
+                print("   Type mismatch: expected \(String(describing: type)) at path: \(context.codingPath.map { $0.stringValue })")
+            case .keyNotFound(let key, let context):
+                print("   Key not found: \(key.stringValue) at path: \(context.codingPath.map { $0.stringValue })")
+            case .valueNotFound(let type, let context):
+                print("   Value not found: \(String(describing: type)) at path: \(context.codingPath.map { $0.stringValue })")
+            case .dataCorrupted(let context):
+                print("   Data corrupted: \(context.debugDescription) at path: \(context.codingPath.map { $0.stringValue })")
+            @unknown default:
+                print("   Unknown decoding error")
+            }
+            print("   Data size: \(data.count) bytes")
+            if data.count >= 4 {
+                let lengthBytes = data.prefix(4)
+                let lengthValue = lengthBytes.withUnsafeBytes { buffer -> UInt32 in
+                    buffer.load(as: UInt32.self)
+                }
+                let length = Int(UInt32(bigEndian: lengthValue))
+                print("   First 4 bytes as length: \(length) (data has \(data.count) bytes)")
+                if data.count > 4 && length > 0 && length <= data.count - 4 {
+                    let jsonData = data.subdata(in: 4..<(4 + length))
+                    if let jsonString = String(data: jsonData, encoding: .utf8) {
+                        print("   Full JSON: \(jsonString)")
+                    }
+                }
+            }
+        } catch {
+            // Other errors
+            #if canImport(os)
+            logger.error("⚠️ CLIPBOARD FRAME DECODE FAILED: \(error.localizedDescription)")
+            logger.error("   Error type: \(String(describing: type(of: error)))")
+            #endif
+            print("⚠️ [LanWebSocketServer] CLIPBOARD FRAME DECODE FAILED: \(error.localizedDescription)")
+            print("   Error type: \(String(describing: type(of: error)))")
+        }
+        
+        // Fall back to direct JSON parsing for pairing messages
         let messageType = detectMessageType(data)
         
         #if canImport(os)
-        logger.info("📋 Detected message type: \(String(describing: messageType))")
+        logger.info("📋 CLIPBOARD MESSAGE TYPE: \(String(describing: messageType))")
         #endif
+        print("📋 [LanWebSocketServer] CLIPBOARD MESSAGE TYPE: \(String(describing: messageType))")
         
         switch messageType {
         case .pairing:
             // Log JSON before attempting decode
             #if canImport(os)
             if let jsonString = String(data: data, encoding: .utf8) {
-                logger.info("🔍 Attempting to decode pairing message: \(jsonString)")
+                logger.info("🔍 CLIPBOARD PAIRING MESSAGE: \(jsonString.prefix(200))")
             }
             #endif
+            print("🔍 [LanWebSocketServer] CLIPBOARD PAIRING MESSAGE detected")
             do {
                 try handlePairingMessage(data, from: connectionId)
             } catch let decodingError as DecodingError {
@@ -529,11 +726,18 @@ public final class LanWebSocketServer {
                 return
             }
         case .clipboard:
+            // This case should not be reached if frame decoding succeeded above
+            // But keep it as fallback for non-frame-encoded clipboard messages
+            #if canImport(os)
+            logger.info("✅ CLIPBOARD MESSAGE RECEIVED (fallback): forwarding to delegate, \(data.count) bytes")
+            #endif
+            print("✅ [LanWebSocketServer] CLIPBOARD MESSAGE RECEIVED (fallback): \(data.count) bytes, forwarding to delegate")
             delegate?.server(self, didReceiveClipboardData: data, from: connectionId)
         case .unknown:
             #if canImport(os)
-            logger.warning("Received unknown message type from \(connectionId.uuidString)")
+            logger.warning("⚠️ CLIPBOARD UNKNOWN MESSAGE TYPE from \(connectionId.uuidString.prefix(8)), \(data.count) bytes")
             #endif
+            print("⚠️ [LanWebSocketServer] CLIPBOARD UNKNOWN MESSAGE TYPE: \(data.count) bytes")
         }
     }
     

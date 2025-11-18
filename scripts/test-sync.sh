@@ -259,7 +259,7 @@ deploy_backend() {
             log_info "Waiting for backend health check..."
             sleep 5
             
-            if curl -sf https://hypo-relay-staging.fly.dev/health > /dev/null; then
+            if curl -sf https://hypo.fly.dev/health > /dev/null; then
                 log_success "Backend health check passed"
                 return 0
             else

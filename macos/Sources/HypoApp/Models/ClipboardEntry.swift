@@ -130,6 +130,22 @@ public extension ClipboardEntry {
     var previewText: String {
         content.previewDescription
     }
+    
+    /// Returns the display name for the origin device
+    /// - Parameter localDeviceId: The current device's ID to compare against
+    /// - Returns: "Local" if from this device, otherwise the device name or a fallback
+    func originDisplayName(localDeviceId: String) -> String {
+        if originDeviceId == localDeviceId {
+            return "Local"
+        }
+        return originDeviceName ?? "Unknown Device"
+    }
+    
+    /// Returns true if this entry is from the local device
+    /// - Parameter localDeviceId: The current device's ID to compare against
+    func isLocal(localDeviceId: String) -> Bool {
+        originDeviceId == localDeviceId
+    }
 
     func accessibilityDescription() -> String {
         switch content {

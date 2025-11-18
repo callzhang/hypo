@@ -1,6 +1,7 @@
 package com.hypo.clipboard.data
 
 import com.hypo.clipboard.domain.model.ClipboardItem
+import com.hypo.clipboard.domain.model.ClipboardType
 import kotlinx.coroutines.flow.Flow
 
 interface ClipboardRepository {
@@ -8,4 +9,5 @@ interface ClipboardRepository {
     suspend fun upsert(item: ClipboardItem)
     suspend fun delete(id: String)
     suspend fun clear()
+    suspend fun hasRecentDuplicate(content: String, type: ClipboardType, deviceId: String, withinSeconds: Long = 5): Boolean
 }

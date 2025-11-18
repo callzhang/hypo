@@ -27,6 +27,7 @@ import com.hypo.clipboard.transport.ActiveTransport
 enum class DeviceConnectionStatus {
     ConnectedLan,
     ConnectedCloud,
+    Paired,
     Disconnected,
     Failed
 }
@@ -48,6 +49,12 @@ fun DeviceStatusBadge(
             textRes = R.string.device_status_cloud,
             containerColor = Color(0xFF2196F3), // Blue
             contentColor = Color.White
+        )
+        DeviceConnectionStatus.Paired -> DeviceStatusVisuals(
+            icon = Icons.Filled.Wifi,
+            textRes = R.string.device_status_paired,
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
         )
         DeviceConnectionStatus.Disconnected -> DeviceStatusVisuals(
             icon = Icons.Outlined.CloudOff,
@@ -92,6 +99,7 @@ fun DeviceStatusIndicator(
     val color = when (status) {
         DeviceConnectionStatus.ConnectedLan -> Color(0xFF4CAF50) // Green
         DeviceConnectionStatus.ConnectedCloud -> Color(0xFF2196F3) // Blue
+        DeviceConnectionStatus.Paired -> MaterialTheme.colorScheme.primary
         DeviceConnectionStatus.Disconnected -> MaterialTheme.colorScheme.onSurfaceVariant
         DeviceConnectionStatus.Failed -> MaterialTheme.colorScheme.error
     }

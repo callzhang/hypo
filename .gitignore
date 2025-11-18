@@ -208,8 +208,4 @@ TODO.txt
 # Downloaded Android SDK for local testing
 .android-sdk/
 
-.gradle/caches/CACHEDIR.TAG
-
-# macOS app bundles (build artifacts)
-macos/*.app/
 .gradle/

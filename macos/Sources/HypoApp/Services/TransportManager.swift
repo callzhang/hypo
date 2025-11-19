@@ -24,6 +24,7 @@ public final class TransportManager {
     private var lanConfiguration: BonjourPublisher.Configuration
     private let webSocketServer: LanWebSocketServer
     private let incomingHandler: IncomingClipboardHandler?
+    private let connectionStatusProber: ConnectionStatusProber
     private weak var historyViewModel: ClipboardHistoryViewModel?
 
     private var discoveryTask: Task<Void, Never>?
@@ -42,6 +43,7 @@ public final class TransportManager {
     private var manualRetryRequested = false
     private var networkChangeRequested = false
     private static let lanPairingKeyIdentifier = "lan-discovery-key"
+    private var notificationTokens: [NSObjectProtocol] = []
 
 #if canImport(Combine)
     public var connectionStatePublisher: Published<ConnectionState>.Publisher { $connectionState }
@@ -77,6 +79,13 @@ public final class TransportManager {
         self.lanConfiguration = lanConfiguration ?? TransportManager.defaultLanConfiguration()
         self.lastSeen = discoveryCache.load()
         self.webSocketServer = webSocketServer
+        self.connectionStatusProber = ConnectionStatusProber(
+            configuration: .init(
+                pollInterval: max(5, pruneInterval / 6),
+                offlineGracePeriod: max(30, stalePeerInterval)
+            ),
+            dateProvider: dateProvider
+        )
         
         // Set up incoming clipboard handler if history store is provided
         if let historyStore = historyStore {
@@ -99,6 +108,8 @@ public final class TransportManager {
         
         // Set up WebSocket server delegate
         webSocketServer.delegate = self
+        connectionStatusProber.start()
+        registerStatusObservers()
 
         #if canImport(AppKit)
         lifecycleObserver = ApplicationLifecycleObserver(
@@ -122,6 +133,11 @@ public final class TransportManager {
         #else
         Task { await activateLanServices() }
         #endif
+    }
+
+    deinit {
+        notificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
+        connectionStatusProber.stop()
     }
 
     public func loadTransport() -> SyncTransport {
@@ -620,9 +636,11 @@ public final class TransportManager {
             lanPeers[peer.serviceName] = peer
             lastSeen[peer.serviceName] = peer.lastSeen
             discoveryCache.save(lastSeen)
+            connectionStatusProber.recordLanPeerAdded(peer)
         case .removed(let serviceName):
             lanPeers.removeValue(forKey: serviceName)
             discoveryCache.save(lastSeen)
+            connectionStatusProber.recordLanPeerRemoved(serviceName: serviceName)
         }
     }
 
@@ -937,13 +955,9 @@ extension TransportManager: LanWebSocketServerDelegate {
             )
             
             // Also notify that device is now online
-            NotificationCenter.default.post(
-                name: NSNotification.Name("DeviceConnectionStatusChanged"),
-                object: nil,
-                userInfo: [
-                    "deviceId": challenge.androidDeviceId,
-                    "isOnline": true
-                ]
+            connectionStatusProber.publishImmediateStatus(
+                deviceId: challenge.androidDeviceId,
+                isOnline: true
             )
             print("✅ [TransportManager] PairingCompleted notification posted")
             try? "✅ [TransportManager] PairingCompleted notification posted\n".appendToFile(path: "/tmp/hypo_debug.log")
@@ -980,18 +994,12 @@ extension TransportManager: LanWebSocketServerDelegate {
         connLogger.info("WebSocket connection established: \(id.uuidString)")
         #endif
         // Update device online status when connection is established
-        Task { @MainActor in
+        Task { [weak self] @MainActor in
+            guard let self else { return }
             // Try to find device ID from connection metadata
             if let metadata = server.connectionMetadata(for: id),
                let deviceId = metadata.deviceId {
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("DeviceConnectionStatusChanged"),
-                    object: nil,
-                    userInfo: [
-                        "deviceId": deviceId,
-                        "isOnline": true
-                    ]
-                )
+                self.connectionStatusProber.publishImmediateStatus(deviceId: deviceId, isOnline: true)
             }
         }
     }
@@ -1001,15 +1009,8 @@ extension TransportManager: LanWebSocketServerDelegate {
         let connLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
         connLogger.info("WebSocket connection \(connection.uuidString) belongs to device: \(deviceId)")
         #endif
-        Task { @MainActor in
-            NotificationCenter.default.post(
-                name: NSNotification.Name("DeviceConnectionStatusChanged"),
-                object: nil,
-                userInfo: [
-                    "deviceId": deviceId,
-                    "isOnline": true
-                ]
-            )
+        Task { [weak self] @MainActor in
+            self?.connectionStatusProber.recordActivity(deviceId: deviceId)
         }
     }
 
@@ -1019,19 +1020,26 @@ extension TransportManager: LanWebSocketServerDelegate {
         closeLogger.info("WebSocket connection closed: \(id.uuidString)")
         #endif
         // Update device online status when connection is closed
-        Task { @MainActor in
+        Task { [weak self] @MainActor in
+            guard let self else { return }
             // Try to find device ID from connection metadata before it's removed
             if let metadata = server.connectionMetadata(for: id),
                let deviceId = metadata.deviceId {
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("DeviceConnectionStatusChanged"),
-                    object: nil,
-                    userInfo: [
-                        "deviceId": deviceId,
-                        "isOnline": false
-                    ]
-                )
+                self.connectionStatusProber.publishImmediateStatus(deviceId: deviceId, isOnline: false)
             }
         }
+    }
+
+    private func registerStatusObservers() {
+        let center = NotificationCenter.default
+        let clipboardToken = center.addObserver(
+            forName: NSNotification.Name("ClipboardReceivedFromDevice"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let deviceId = notification.userInfo?["deviceId"] as? String else { return }
+            self?.connectionStatusProber.recordActivity(deviceId: deviceId)
+        }
+        notificationTokens.append(clipboardToken)
     }
 }

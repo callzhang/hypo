@@ -40,7 +40,7 @@ public final class ConnectionStatusProber {
     public func start() {
         stop() // Stop any existing task
         
-        let msg = "🔍 [ConnectionStatusProber] Started - will probe every 10 minutes\n"
+        let msg = "🔍 [ConnectionStatusProber] Started - will probe every 30 seconds\n"
         print(msg)
         try? msg.appendToFile(path: "/tmp/hypo_debug.log")
         
@@ -55,10 +55,10 @@ public final class ConnectionStatusProber {
             try? taskDoneMsg.appendToFile(path: "/tmp/hypo_debug.log")
         }
         
-        // Periodic probe every 10 minutes
+        // Periodic probe every 30 seconds (similar to Android's frequent checks)
         periodicTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 10 * 60 * 1_000_000_000) // 10 minutes
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000) // 30 seconds
                 guard !Task.isCancelled else { break }
                 await self?.probeConnections()
             }
@@ -348,21 +348,31 @@ public final class ConnectionStatusProber {
         for device in pairedDevices {
             let hasActiveConnection = onlineDeviceIds.contains(device.id)
             let isDiscovered = discoveredDeviceIds.contains(device.id)
-            // Device is online if it's on LAN (connected or discovered) OR cloud transport is connected
-            let isOnline = hasActiveConnection || isDiscovered || cloudTransportConnected
             
-            let deviceStatusMsg = "🔍 [ConnectionStatusProber] Device \(device.name) (\(device.id.prefix(20))...): hasConnection=\(hasActiveConnection), isDiscovered=\(isDiscovered), cloudConnected=\(cloudTransportConnected) → isOnline=\(isOnline)\n"
+            // Check if device was recently seen (within last 2 minutes)
+            // This provides a grace period for devices that were just connected
+            let timeSinceLastSeen = Date().timeIntervalSince(device.lastSeen)
+            let wasRecentlySeen = timeSinceLastSeen < 120.0 // 2 minutes
+            
+            // Device is online if:
+            // 1. Has active connection, OR
+            // 2. Is discovered via Bonjour, OR
+            // 3. Cloud transport is connected (all devices accessible via cloud), OR
+            // 4. Was recently seen (grace period for recently connected devices)
+            let isOnline = hasActiveConnection || isDiscovered || cloudTransportConnected || wasRecentlySeen
+            
+            let deviceStatusMsg = "🔍 [ConnectionStatusProber] Device \(device.name) (\(device.id.prefix(20))...): hasConnection=\(hasActiveConnection), isDiscovered=\(isDiscovered), cloudConnected=\(cloudTransportConnected), recentlySeen=\(wasRecentlySeen) (lastSeen: \(Int(timeSinceLastSeen))s ago) → isOnline=\(isOnline)\n"
             print(deviceStatusMsg)
             try? deviceStatusMsg.appendToFile(path: "/tmp/hypo_debug.log")
             
             // Only update if status changed
             if device.isOnline != isOnline {
-                let updateMsg = "🔄 [ConnectionStatusProber] Updating device \(device.name) status: \(device.isOnline) → \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), cloud=\(cloudTransportConnected))\n"
+                let updateMsg = "🔄 [ConnectionStatusProber] Updating device \(device.name) status: \(device.isOnline) → \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), cloud=\(cloudTransportConnected), recentlySeen=\(wasRecentlySeen))\n"
                 print(updateMsg)
                 try? updateMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 await historyViewModel.updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
             } else {
-                let unchangedMsg = "ℹ️ [ConnectionStatusProber] Device \(device.name) status unchanged: \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), cloud=\(cloudTransportConnected))\n"
+                let unchangedMsg = "ℹ️ [ConnectionStatusProber] Device \(device.name) status unchanged: \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), cloud=\(cloudTransportConnected), recentlySeen=\(wasRecentlySeen))\n"
                 print(unchangedMsg)
                 try? unchangedMsg.appendToFile(path: "/tmp/hypo_debug.log")
             }

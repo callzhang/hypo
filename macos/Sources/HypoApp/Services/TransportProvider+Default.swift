@@ -5,6 +5,7 @@ public final class DefaultTransportProvider: TransportProvider {
     private let server: LanWebSocketServer
     private let lanTransport: LanSyncTransport
     private let cloudTransport: CloudRelayTransport
+    private let dualTransport: DualSyncTransport
     
     public init(server: LanWebSocketServer) {
         self.server = server
@@ -13,12 +14,19 @@ public final class DefaultTransportProvider: TransportProvider {
         // Initialize cloud relay transport with production configuration
         let cloudConfig = CloudRelayDefaults.production()
         self.cloudTransport = CloudRelayTransport(configuration: cloudConfig)
+        
+        // Create dual transport that sends to both LAN and cloud simultaneously
+        self.dualTransport = DualSyncTransport(
+            lanTransport: lanTransport,
+            cloudTransport: cloudTransport
+        )
     }
 
     public func preferredTransport(for preference: TransportPreference) -> SyncTransport {
         switch preference {
         case .lanFirst:
-            return lanTransport
+            // Use dual transport to send to both LAN and cloud simultaneously
+            return dualTransport
         case .cloudOnly:
             return cloudTransport
         }

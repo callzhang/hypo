@@ -58,7 +58,11 @@ class OkHttpWebSocketConnector @Inject constructor(
         val normalizedUrl = normalizeWebSocketUrl(config.url)
         val url = normalizedUrl.toHttpUrl()
         val builder = baseClient.newBuilder()
-        config.fingerprintSha256?.takeIf { it.isNotBlank() }?.let { hex ->
+        // Only apply certificate pinning for secure connections (wss:// -> https://)
+        // Skip pinning for non-secure connections (ws:// -> http://)
+        val isSecure = config.url.startsWith("wss://", ignoreCase = true)
+        if (isSecure && config.fingerprintSha256?.takeIf { it.isNotBlank() } != null) {
+            val hex = config.fingerprintSha256!!
             try {
                 val pin = hexToPin(hex)
                 val pinner = CertificatePinner.Builder()
@@ -69,6 +73,8 @@ class OkHttpWebSocketConnector @Inject constructor(
                 // Invalid fingerprint format - log and skip pinning
                 android.util.Log.w("OkHttpWebSocketConnector", "Invalid fingerprint format: ${e.message}, skipping certificate pinning")
             }
+        } else if (!isSecure && config.fingerprintSha256 != null) {
+            android.util.Log.d("OkHttpWebSocketConnector", "Skipping certificate pinning for non-secure connection (ws://)")
         }
         client = builder.build()
         val requestBuilder = Request.Builder().url(url)
@@ -175,9 +181,12 @@ class LanWebSocketClient @Inject constructor(
                 android.util.Log.d("LanWebSocketClient", "🔍 Resolved target device $targetDeviceId to peer IP: $peerUrl (was: $currentUrl)")
                 
                 // Create new connector with peer's URL
+                // For LAN connections (ws://), skip certificate pinning (no TLS)
+                // Only use certificate pinning for secure connections (wss://)
+                val isSecure = peerUrl.startsWith("wss://", ignoreCase = true)
                 val peerConfig = TlsWebSocketConfig(
                     url = peerUrl,
-                    fingerprintSha256 = peer?.fingerprint,
+                    fingerprintSha256 = if (isSecure) peer?.fingerprint else null, // No pinning for ws://
                     headers = config.headers,
                     environment = config.environment,
                     idleTimeoutMillis = config.idleTimeoutMillis,

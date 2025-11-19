@@ -70,7 +70,18 @@ class SyncCoordinator @Inject constructor(
         // Filter to only devices that have keys in the key store (use cached value)
         val pairedDeviceIds = pairedDeviceIdsCache.value
         val filtered = allCandidates.filter { candidateId ->
-            pairedDeviceIds.contains(candidateId)
+            // Try exact match first
+            val exactMatch = pairedDeviceIds.contains(candidateId)
+            if (exactMatch) {
+                true
+            } else {
+                // Try case-insensitive match
+                val caseInsensitiveMatch = pairedDeviceIds.any { it.equals(candidateId, ignoreCase = true) }
+                if (caseInsensitiveMatch) {
+                    Log.w(TAG, "⚠️ Device ID case mismatch: candidate=$candidateId, found in store (case-insensitive)")
+                }
+                caseInsensitiveMatch
+            }
         }.toSet()
         
         _targets.value = filtered
@@ -79,6 +90,19 @@ class SyncCoordinator @Inject constructor(
         if (filtered.size < allCandidates.size) {
             val missing = allCandidates - filtered
             Log.w(TAG, "⚠️ Excluded ${missing.size} devices without keys: $missing")
+            Log.w(TAG, "📋 Available keys in store: $pairedDeviceIds")
+            Log.w(TAG, "📋 Candidate device IDs: $allCandidates")
+            // Log detailed mismatch info for debugging
+            missing.forEach { candidateId ->
+                val similar = pairedDeviceIds.find { 
+                    it.equals(candidateId, ignoreCase = true) || 
+                    it.contains(candidateId, ignoreCase = true) ||
+                    candidateId.contains(it, ignoreCase = true)
+                }
+                if (similar != null) {
+                    Log.w(TAG, "💡 Similar key found: candidate=$candidateId, similar=$similar (might be a format mismatch)")
+                }
+            }
         }
     }
 
@@ -132,14 +156,18 @@ class SyncCoordinator @Inject constructor(
                 if (!event.skipBroadcast) {
                     val pairedDevices = _targets.value
                     if (pairedDevices.isNotEmpty()) {
-                        Log.i(TAG, "📤 Broadcasting to ${pairedDevices.size} paired devices")
+                        Log.i(TAG, "📤 Broadcasting to ${pairedDevices.size} paired devices: $pairedDevices")
                         pairedDevices.forEach { target ->
-                            Log.i(TAG, "📤 Syncing to device: ${target.take(20)}...")
-                            runCatching { syncEngine.sendClipboard(item, target) }
-                                .onFailure { error -> Log.e(TAG, "Failed to sync to $target: ${error.message}") }
+                            Log.i(TAG, "📤 Syncing to device: $target")
+                            try {
+                                val envelope = syncEngine.sendClipboard(item, target)
+                                Log.i(TAG, "✅ Successfully sent clipboard to $target, envelope type: ${envelope.type}")
+                            } catch (error: Exception) {
+                                Log.e(TAG, "❌ Failed to sync to $target: ${error.message}", error)
+                            }
                         }
                     } else {
-                        Log.i(TAG, "⏭️  No paired devices to broadcast to")
+                        Log.i(TAG, "⏭️  No paired devices to broadcast to (targets: ${_targets.value})")
                     }
                 } else {
                     Log.i(TAG, "⏭️  Skipping broadcast (received from remote)")

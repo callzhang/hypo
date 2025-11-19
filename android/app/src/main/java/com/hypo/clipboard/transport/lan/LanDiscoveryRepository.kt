@@ -35,17 +35,29 @@ class LanDiscoveryRepository(
         val multicastLock = (multicastLockFactory ?: { createMulticastLock() }).invoke().also { it.acquire() }
 
         val listener = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(regType: String?) {}
+            override fun onDiscoveryStarted(regType: String?) {
+                android.util.Log.d("LanDiscoveryRepository", "✅ Discovery started for type: $regType")
+            }
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                android.util.Log.d("LanDiscoveryRepository", "🔍 Service found: ${serviceInfo.serviceName}, type: ${serviceInfo.serviceType}")
                 nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                        android.util.Log.w("LanDiscoveryRepository", "❌ Failed to resolve service ${serviceInfo.serviceName}: errorCode=$errorCode")
                         // No-op: discovery will continue on subsequent callbacks.
                     }
 
                     override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                        android.util.Log.d("LanDiscoveryRepository", "✅ Service resolved: ${serviceInfo.serviceName} at ${serviceInfo.host?.hostAddress}:${serviceInfo.port}")
+                        android.util.Log.d("LanDiscoveryRepository", "   Attributes count: ${serviceInfo.attributes?.size ?: 0}")
+                        serviceInfo.attributes?.forEach { (key, value) ->
+                            android.util.Log.d("LanDiscoveryRepository", "   Attr: $key = ${value?.let { String(it).take(50) } ?: "null"}")
+                        }
                         toPeer(serviceInfo)?.let { peer ->
+                            android.util.Log.d("LanDiscoveryRepository", "✅ Converted to DiscoveredPeer: ${peer.serviceName}")
                             trySend(LanDiscoveryEvent.Added(peer))
+                        } ?: run {
+                            android.util.Log.w("LanDiscoveryRepository", "⚠️ Failed to convert serviceInfo to DiscoveredPeer")
                         }
                     }
                 })
@@ -58,6 +70,14 @@ class LanDiscoveryRepository(
             override fun onDiscoveryStopped(serviceType: String?) {}
 
             override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) {
+                android.util.Log.e("LanDiscoveryRepository", "❌ Failed to start discovery for $serviceType: errorCode=$errorCode")
+                val errorMsg = when (errorCode) {
+                    NsdManager.FAILURE_INTERNAL_ERROR -> "Internal error"
+                    NsdManager.FAILURE_ALREADY_ACTIVE -> "Already active"
+                    NsdManager.FAILURE_MAX_LIMIT -> "Max limit reached"
+                    else -> "Unknown error ($errorCode)"
+                }
+                android.util.Log.e("LanDiscoveryRepository", "   Error: $errorMsg")
                 trySend(LanDiscoveryEvent.Removed(serviceType ?: ""))
             }
 

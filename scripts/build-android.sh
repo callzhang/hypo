@@ -35,14 +35,26 @@ fi
 # Set up environment variables
 echo -e "${YELLOW}Setting up environment...${NC}"
 
-# Java Home (try Homebrew location first)
+# Java Home (try Homebrew location first, then system java_home)
 if [ -z "$JAVA_HOME" ]; then
     if [ -d "/opt/homebrew/opt/openjdk@17" ]; then
         export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
         export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
         echo "   Using Homebrew OpenJDK 17"
+    elif command -v /usr/libexec/java_home &> /dev/null; then
+        # Try to find Java 17 via java_home
+        JAVA_17_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || echo "")
+        if [ -n "$JAVA_17_HOME" ] && [ -d "$JAVA_17_HOME" ]; then
+            export JAVA_HOME="$JAVA_17_HOME"
+            echo "   Using system Java 17: $JAVA_HOME"
+        else
+            echo -e "${RED}❌ JAVA_HOME not set and Java 17 not found${NC}"
+            echo "   Install with: brew install openjdk@17"
+            exit 1
+        fi
     else
         echo -e "${RED}❌ JAVA_HOME not set and Homebrew OpenJDK 17 not found${NC}"
+        echo "   Install with: brew install openjdk@17"
         exit 1
     fi
 fi
@@ -106,38 +118,55 @@ if [ -f "$APK_PATH" ]; then
     echo ""
     
     # Auto-install and reopen app if device is connected
-    ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
-    if [ -f "$ADB" ]; then
-        DEVICE_CHECK=$("$ADB" devices 2>/dev/null | grep -q "device$" && echo "yes" || echo "no")
-        if [ "$DEVICE_CHECK" = "yes" ]; then
-            echo -e "${YELLOW}Installing on connected device...${NC}"
-            if "$ADB" install -r "$PROJECT_ROOT/android/$APK_PATH" 2>/dev/null; then
-                echo -e "${GREEN}✅ Installed successfully${NC}"
+    # Try system-wide adb first (from Homebrew), then fallback to SDK adb
+    if command -v adb &> /dev/null; then
+        ADB="adb"
+    elif [ -f "$ANDROID_SDK_ROOT/platform-tools/adb" ]; then
+        ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
+    else
+        ADB=""
+    fi
+    
+    if [ -n "$ADB" ]; then
+        # Get list of connected devices
+        DEVICES=$("$ADB" devices 2>/dev/null | grep "device$" | awk '{print $1}')
+        DEVICE_COUNT=$(echo "$DEVICES" | grep -c . || echo "0")
+        
+        if [ "$DEVICE_COUNT" -gt 0 ]; then
+            echo -e "${YELLOW}Found $DEVICE_COUNT connected device(s)${NC}"
+            
+            # Install and launch on each device
+            for DEVICE_ID in $DEVICES; do
+                DEVICE_NAME=$("$ADB" -s "$DEVICE_ID" shell getprop ro.product.model 2>/dev/null | tr -d '\r' || echo "unknown")
+                echo ""
+                echo -e "${YELLOW}Installing on device: $DEVICE_ID ($DEVICE_NAME)...${NC}"
                 
-                # Reopen the app using the dedicated script
-                if [ -f "$PROJECT_ROOT/scripts/reopen-android-app.sh" ]; then
-                    echo -e "${YELLOW}Opening Hypo app...${NC}"
-                    "$PROJECT_ROOT/scripts/reopen-android-app.sh" 2>/dev/null || echo -e "${YELLOW}⚠️  Could not auto-open app. Please open manually.${NC}"
-                else
-                    # Fallback: try direct adb commands
-                    # Use debug package name for debug builds
+                if "$ADB" -s "$DEVICE_ID" install -r "$PROJECT_ROOT/android/$APK_PATH" 2>/dev/null; then
+                    echo -e "${GREEN}✅ Installed successfully on $DEVICE_ID${NC}"
+                    
+                    # Launch the app
                     PACKAGE_NAME="com.hypo.clipboard.debug"
-                    echo -e "${YELLOW}Opening Hypo app...${NC}"
-                    "$ADB" shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" 2>/dev/null || \
-                    "$ADB" shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 2>/dev/null || \
-                    echo -e "${YELLOW}⚠️  Could not auto-open app. Please open manually.${NC}"
+                    echo -e "${YELLOW}Opening Hypo app on $DEVICE_ID...${NC}"
+                    
+                    if "$ADB" -s "$DEVICE_ID" shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" >/dev/null 2>&1; then
+                        echo -e "${GREEN}✅ App opened on $DEVICE_ID${NC}"
+                    elif "$ADB" -s "$DEVICE_ID" shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; then
+                        echo -e "${GREEN}✅ App opened on $DEVICE_ID${NC}"
+                    else
+                        echo -e "${YELLOW}⚠️  Could not auto-open app on $DEVICE_ID. Please open manually.${NC}"
+                    fi
+                else
+                    echo -e "${RED}❌ Installation failed on $DEVICE_ID${NC}"
+                    echo "   Try manually: $ADB -s $DEVICE_ID install -r android/$APK_PATH"
                 fi
-            else
-                echo -e "${RED}❌ Installation failed${NC}"
-                echo "   Try manually: $ADB install -r android/$APK_PATH"
-            fi
+            done
         else
-            echo "To install on connected device:"
+            echo "No devices connected. To install manually:"
             echo "   $ADB install -r android/$APK_PATH"
         fi
     else
         echo "To install on connected device:"
-        echo "   \$ANDROID_SDK_ROOT/platform-tools/adb install -r android/$APK_PATH"
+        echo "   adb install -r android/$APK_PATH"
     fi
 else
     echo -e "${RED}❌ Build failed - APK not found${NC}"

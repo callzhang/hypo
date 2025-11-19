@@ -203,7 +203,14 @@ class PairingHandshakeManager @Inject constructor(
         val now = clock.instant()
         require(payload.issuedInstant() <= now.plusSeconds(60)) { "Payload not yet valid" }
         require(payload.expiryInstant() >= now) { "Pairing QR expired" }
-        UUID.fromString(payload.macDeviceId)
+        
+        // Handle both "macos-{UUID}" and legacy "{UUID}" formats
+        val uuidString = if (payload.macDeviceId.startsWith("macos-")) {
+            payload.macDeviceId.substring(6) // Remove "macos-" prefix
+        } else {
+            payload.macDeviceId // Legacy format without prefix
+        }
+        UUID.fromString(uuidString)
     }
 
     private fun verifySignature(payload: PairingPayload, signingKey: ByteArray) {

@@ -9,6 +9,10 @@ public struct HypoMenuBarApp: App {
     @State private var monitor: ClipboardMonitor?
 
     public init() {
+        let initMsg = "🚀 [HypoMenuBarApp] Initializing app\n"
+        print(initMsg)
+        try? initMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
         // Create shared dependencies
         let historyStore = HistoryStore()
         let server = LanWebSocketServer()
@@ -25,7 +29,17 @@ public struct HypoMenuBarApp: App {
             store: historyStore,
             transportManager: transportManager
         )
+        
+        let beforeSetMsg = "🚀 [HypoMenuBarApp] About to call setHistoryViewModel\n"
+        print(beforeSetMsg)
+        try? beforeSetMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
         transportManager.setHistoryViewModel(viewModel)
+        
+        let afterSetMsg = "🚀 [HypoMenuBarApp] setHistoryViewModel completed\n"
+        print(afterSetMsg)
+        try? afterSetMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
         _viewModel = StateObject(wrappedValue: viewModel)
     }
 
@@ -35,11 +49,30 @@ public struct HypoMenuBarApp: App {
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)
                 .preferredColorScheme(viewModel.appearancePreference.colorScheme)
-                .task { await viewModel.start() }
+                .onAppear {
+                    // CRITICAL: Ensure setHistoryViewModel is called when view appears
+                    // This is the most reliable place since SwiftUI might not call our custom init()
+                    if let transportManager = viewModel.transportManager {
+                        let initMsg = "🚀 [HypoMenuBarApp] .onAppear: Ensuring setHistoryViewModel is called\n"
+                        print(initMsg)
+                        try? initMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                        transportManager.setHistoryViewModel(viewModel)
+                    }
+                    setupMonitor()
+                }
+                .task {
+                    // Also call it from .task as backup
+                    if let transportManager = viewModel.transportManager {
+                        let taskMsg = "🚀 [HypoMenuBarApp] .task: Ensuring setHistoryViewModel is called\n"
+                        print(taskMsg)
+                        try? taskMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                        transportManager.setHistoryViewModel(viewModel)
+                    }
+                    await viewModel.start()
+                }
                 .onOpenURL { url in
                     Task { await viewModel.handleDeepLink(url) }
                 }
-                .onAppear(perform: setupMonitor)
         }
         .menuBarExtraStyle(.window)
     }
@@ -399,15 +432,28 @@ private struct SettingsSectionView: View {
     @State private var isPresentingPairing = false
     
     private var versionString: String {
-        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-           let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+        // Get the app bundle - when running as .app, Bundle.main should be the app bundle
+        let bundle = Bundle.main
+        
+        // Debug: log bundle info
+        print("📦 [SettingsSectionView] Bundle path: \(bundle.bundlePath)")
+        print("📦 [SettingsSectionView] Bundle identifier: \(bundle.bundleIdentifier ?? "nil")")
+        print("📦 [SettingsSectionView] Info dictionary keys: \(bundle.infoDictionary?.keys.sorted() ?? [])")
+        
+        if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String,
+           let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
+            print("📦 [SettingsSectionView] Found version: \(version), build: \(build)")
             return "Version \(version) (Build \(build))"
-        } else if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+        } else if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String {
+            print("📦 [SettingsSectionView] Found version only: \(version)")
             return "Version \(version)"
-        } else if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+        } else if let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
+            print("📦 [SettingsSectionView] Found build only: \(build)")
             return "Build \(build)"
         } else {
-            return "Version 0.1.0 (Development Build)"
+            // Fallback: use Info.plist values directly
+            print("📦 [SettingsSectionView] No version found in bundle, using fallback")
+            return "Version 1.0.0"
         }
     }
 
@@ -415,24 +461,18 @@ private struct SettingsSectionView: View {
         ScrollView {
             Form {
                 Section("Connection") {
-                    // Connection Status
                     HStack {
-                        Text("Status:")
-                            .foregroundColor(.secondary)
+                        Toggle("Allow cloud relay fallback", isOn: Binding(
+                            get: { viewModel.allowsCloudFallback },
+                            set: { viewModel.setAllowsCloudFallback($0) }
+                        ))
                         Spacer()
-                        ConnectionStatusView(state: viewModel.connectionState)
+                        // Connection Status Icon - inline with toggle
+                        Image(systemName: connectionStatusIconName(for: viewModel.connectionState))
+                            .foregroundColor(connectionStatusIconColor(for: viewModel.connectionState))
+                            .font(.system(size: 14, weight: .medium))
+                            .help(connectionStatusTooltip(for: viewModel.connectionState))
                     }
-                    
-                    Toggle(isOn: Binding(
-                        get: { viewModel.transportPreference == .lanFirst },
-                        set: { viewModel.updateTransportPreference($0 ? .lanFirst : .cloudOnly) }
-                    )) {
-                        Text("Prefer local network connections")
-                    }
-                    Toggle("Allow cloud relay fallback", isOn: Binding(
-                        get: { viewModel.allowsCloudFallback },
-                        set: { viewModel.setAllowsCloudFallback($0) }
-                    ))
                 }
                 
                 Section("Security") {
@@ -443,16 +483,6 @@ private struct SettingsSectionView: View {
                     Text("⚠️ Send clipboard without encryption. Less secure, for debugging only.")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                }
-
-                Section("About") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Hypo Clipboard")
-                            .font(.headline)
-                        Text(versionString)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
                 }
 
                 Section("History") {
@@ -549,6 +579,16 @@ private struct SettingsSectionView: View {
                     }
                     Button("Pair new device") { isPresentingPairing = true }
                 }
+
+                Section("About") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Hypo Clipboard")
+                            .font(.headline)
+                        Text(versionString)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .formStyle(.grouped)
@@ -563,6 +603,53 @@ private struct SettingsSectionView: View {
         case .system: return "System"
         case .light: return "Light"
         case .dark: return "Dark"
+        }
+    }
+    
+    private func connectionStatusIconName(for state: ConnectionState) -> String {
+        switch state {
+        case .idle:
+            return "wifi.slash"
+        case .connectingLan, .connectingCloud:
+            return "arrow.triangle.2.circlepath"
+        case .connectedLan:
+            return "wifi"
+        case .connectedCloud:
+            return "cloud.fill"
+        case .error:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+    
+    private func connectionStatusIconColor(for state: ConnectionState) -> Color {
+        switch state {
+        case .idle:
+            return .gray
+        case .connectingLan, .connectingCloud:
+            return .orange
+        case .connectedLan:
+            return .green
+        case .connectedCloud:
+            return .blue
+        case .error:
+            return .red
+        }
+    }
+    
+    private func connectionStatusTooltip(for state: ConnectionState) -> String {
+        switch state {
+        case .idle:
+            return "Server Offline"
+        case .connectingLan:
+            return "Connecting via LAN..."
+        case .connectedLan:
+            return "Connected via LAN"
+        case .connectingCloud:
+            return "Connecting via Cloud..."
+        case .connectedCloud:
+            return "Connected via Cloud"
+        case .error:
+            return "Connection Error"
         }
     }
 }
@@ -705,14 +792,18 @@ private struct ConnectionStatusView: View {
     let state: ConnectionState
     
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: iconName)
                 .foregroundColor(iconColor)
-                .font(.system(size: 12))
+                .font(.system(size: 14, weight: .medium))
             Text(statusText)
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(.subheadline)
+                .foregroundColor(.primary)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(iconColor.opacity(0.1))
+        .cornerRadius(8)
     }
     
     private var iconName: String {

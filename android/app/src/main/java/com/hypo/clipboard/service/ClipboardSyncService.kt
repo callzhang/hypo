@@ -52,6 +52,7 @@ class ClipboardSyncService : Service() {
     @Inject lateinit var incomingClipboardHandler: com.hypo.clipboard.sync.IncomingClipboardHandler
     @Inject lateinit var lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
     @Inject lateinit var clipboardAccessChecker: com.hypo.clipboard.sync.ClipboardAccessChecker
+    @Inject lateinit var connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var listener: ClipboardListener
@@ -109,10 +110,20 @@ class ClipboardSyncService : Service() {
         android.util.Log.i("ClipboardSyncService", "📱 Registering screen state receiver...")
         registerScreenStateReceiver()
         
+        // Start connection status prober
+        android.util.Log.i("ClipboardSyncService", "🔍 Starting connection status prober...")
+        connectionStatusProber.start()
+        
         // Monitor app foreground state and accessibility service status
         scope.launch {
             while (isActive) {
+                val wasForeground = isAppInForeground
                 checkAppForegroundState()
+                // Probe connections when app comes to foreground
+                if (!wasForeground && isAppInForeground) {
+                    android.util.Log.i("ClipboardSyncService", "📱 App came to foreground, probing connections...")
+                    connectionStatusProber.probeNow()
+                }
                 checkAccessibilityServiceStatus()
                 delay(2_000) // Check every 2 seconds
             }
@@ -128,6 +139,7 @@ class ClipboardSyncService : Service() {
         syncCoordinator.stop()
         clipboardPermissionJob?.cancel()
         transportManager.stop()
+        connectionStatusProber.cleanup()
         scope.coroutineContext.cancelChildren()
         super.onDestroy()
     }

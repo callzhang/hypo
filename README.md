@@ -89,6 +89,26 @@ hypo/
 └── tests/              # Cross-platform integration tests
 ```
 
+### Build Scripts
+
+```bash
+# Build both platforms at once
+./scripts/build-all.sh
+
+# Build Android only
+./scripts/build-android.sh
+
+# Build macOS only
+./scripts/build-macos.sh
+
+# Watch for changes and auto-build (requires fswatch)
+./scripts/watch-and-build.sh
+# Options:
+#   --no-android    Skip Android builds
+#   --no-macos      Skip macOS builds
+#   --no-install    Don't auto-install on devices
+```
+
 ### macOS Client
 
 ```bash

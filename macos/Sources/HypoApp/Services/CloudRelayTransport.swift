@@ -70,4 +70,9 @@ public final class CloudRelayTransport: SyncTransport {
     }
 
     var underlying: LanWebSocketTransport { delegate }
+    
+    /// Check if the cloud transport is currently connected
+    public func isConnected() -> Bool {
+        return delegate.isConnected()
+    }
 }

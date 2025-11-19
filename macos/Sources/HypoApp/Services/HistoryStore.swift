@@ -101,7 +101,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     @Published public private(set) var connectionState: ConnectionState = .idle
 
     private let store: HistoryStore
-    private let transportManager: TransportManager?
+    public let transportManager: TransportManager?
     private var connectionStateCancellable: AnyCancellable?
     private let defaults: UserDefaults
 #if canImport(UserNotifications)
@@ -199,12 +199,35 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         // Observe TransportManager's connection state
         if let transportManager = transportManager {
 #if canImport(Combine)
+            // Set initial state first
+            connectionState = transportManager.connectionState
+            print("🔌 [ClipboardHistoryViewModel] Initial connection state: \(connectionState)")
+            print("🔌 [ClipboardHistoryViewModel] TransportManager connectionState: \(transportManager.connectionState)")
+            
+            // Observe changes
             connectionStateCancellable = transportManager.connectionStatePublisher
                 .receive(on: DispatchQueue.main)
-                .assign(to: \.connectionState, on: self)
-            // Set initial state
-            connectionState = transportManager.connectionState
+                .sink { [weak self] newState in
+                    guard let self = self else { return }
+                    print("🔌 [ClipboardHistoryViewModel] Connection state updated from publisher: \(newState)")
+                    self.connectionState = newState
+                    print("🔌 [ClipboardHistoryViewModel] Updated self.connectionState to: \(self.connectionState)")
+                }
+            
+            // Also set up a timer to periodically check the state (fallback)
+            Task { @MainActor in
+                while true {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000) // Every 2 seconds
+                    let currentState = transportManager.connectionState
+                    if currentState != connectionState {
+                        print("🔌 [ClipboardHistoryViewModel] State mismatch detected! Publisher: \(connectionState), Direct: \(currentState)")
+                        connectionState = currentState
+                    }
+                }
+            }
 #endif
+        } else {
+            print("⚠️ [ClipboardHistoryViewModel] No TransportManager provided, connection state will remain idle")
         }
         
         // Listen for connection status changes
@@ -213,11 +236,15 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            print("🔔 [HistoryStore] DeviceConnectionStatusChanged notification received")
+            print("🔔 [HistoryStore] userInfo: \(notification.userInfo ?? [:])")
             guard let userInfo = notification.userInfo,
                   let deviceId = userInfo["deviceId"] as? String,
                   let isOnline = userInfo["isOnline"] as? Bool else {
+                print("⚠️ [HistoryStore] Invalid notification userInfo: \(notification.userInfo ?? [:])")
                 return
             }
+            print("🔔 [HistoryStore] Calling updateDeviceOnlineStatus: deviceId=\(deviceId), isOnline=\(isOnline)")
             Task { @MainActor in
                 await self?.updateDeviceOnlineStatus(deviceId: deviceId, isOnline: isOnline)
             }
@@ -340,8 +367,21 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func start() async {
+        // Ensure setHistoryViewModel is called if transportManager is available
+        // This handles cases where SwiftUI doesn't call the custom init()
+        if let transportManager = transportManager {
+            let startMsg = "🚀 [ClipboardHistoryViewModel] start() called, ensuring setHistoryViewModel\n"
+            print(startMsg)
+            try? startMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            transportManager.setHistoryViewModel(self)
+        }
         // Reload and deduplicate paired devices on startup
         reloadPairedDevices()
+        
+        // Initial connection status check on startup
+        // (Periodic checks are handled by ConnectionStatusProber)
+        await checkActiveConnections()
+        
 #if canImport(UserNotifications)
         notificationController?.requestAuthorizationIfNeeded()
 #endif
@@ -514,14 +554,46 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         persistPairedDevices()
     }
     
-    private func updateDeviceOnlineStatus(deviceId: String, isOnline: Bool) async {
+    public func updateDeviceOnlineStatus(deviceId: String, isOnline: Bool) async {
+        let callMsg = "🔍 [HistoryStore] updateDeviceOnlineStatus called: deviceId=\(deviceId), isOnline=\(isOnline)\n"
+        print(callMsg)
+        try? callMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        let countMsg = "🔍 [HistoryStore] Current paired devices count: \(pairedDevices.count)\n"
+        print(countMsg)
+        try? countMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        for (idx, device) in pairedDevices.enumerated() {
+            let deviceMsg = "🔍 [HistoryStore] Paired device[\(idx)]: id=\(device.id), name=\(device.name), isOnline=\(device.isOnline)\n"
+            print(deviceMsg)
+            try? deviceMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        }
+        
         guard let index = pairedDevices.firstIndex(where: { $0.id == deviceId }) else {
             print("⚠️ [HistoryStore] Cannot update online status - device not found: \(deviceId)")
+            print("⚠️ [HistoryStore] Available device IDs: \(pairedDevices.map { $0.id }.joined(separator: ", "))")
+            // Try case-insensitive matching as fallback
+            if let caseInsensitiveIndex = pairedDevices.firstIndex(where: { $0.id.lowercased() == deviceId.lowercased() }) {
+                print("✅ [HistoryStore] Found device with case-insensitive match, updating...")
+                let device = pairedDevices[caseInsensitiveIndex]
+                if device.isOnline != isOnline {
+                    print("🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)")
+                    pairedDevices[caseInsensitiveIndex] = PairedDevice(
+                        id: device.id,
+                        name: device.name,
+                        platform: device.platform,
+                        lastSeen: isOnline ? Date() : device.lastSeen,
+                        isOnline: isOnline
+                    )
+                    persistPairedDevices()
+                }
+                return
+            }
             return
         }
         let device = pairedDevices[index]
         if device.isOnline != isOnline {
-            print("🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)")
+            let updateMsg = "🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)\n"
+            print(updateMsg)
+            try? updateMsg.appendToFile(path: "/tmp/hypo_debug.log")
             pairedDevices[index] = PairedDevice(
                 id: device.id,
                 name: device.name,
@@ -529,6 +601,41 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 lastSeen: isOnline ? Date() : device.lastSeen,
                 isOnline: isOnline
             )
+            persistPairedDevices()
+            let persistedMsg = "✅ [HistoryStore] Device \(device.name) status persisted: isOnline=\(isOnline)\n"
+            print(persistedMsg)
+            try? persistedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        } else {
+            let unchangedMsg = "ℹ️ [HistoryStore] Device \(device.name) online status unchanged: \(isOnline)\n"
+            print(unchangedMsg)
+            try? unchangedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        }
+    }
+    
+    /// Check active WebSocket connections and update device online status
+    private func checkActiveConnections() async {
+        // Connection status is managed via DeviceConnectionStatusChanged notifications
+        // which are posted when connections are established/closed.
+        // On startup, we mark all devices as offline initially, and they'll be marked
+        // online when connections are actually established.
+        print("🔍 [HistoryStore] Initializing device status - connections will update via notifications")
+        
+        // Mark all devices as offline initially (they'll be updated when connections are established)
+        var updated = false
+        for (index, device) in pairedDevices.enumerated() {
+            if device.isOnline {
+                print("🔄 [HistoryStore] Marking device \(device.name) as offline on startup (will update when connection established)")
+                pairedDevices[index] = PairedDevice(
+                    id: device.id,
+                    name: device.name,
+                    platform: device.platform,
+                    lastSeen: device.lastSeen,
+                    isOnline: false
+                )
+                updated = true
+            }
+        }
+        if updated {
             persistPairedDevices()
         }
     }

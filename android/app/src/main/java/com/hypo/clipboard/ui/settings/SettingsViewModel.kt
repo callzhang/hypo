@@ -102,27 +102,32 @@ class SettingsViewModel @Inject constructor(
                 }
                 
                 // Then, create synthetic peers for paired devices that are not currently discovered
+                // Only create synthetic peers if the device has a stored name (otherwise it was deleted)
                 for (deviceId in allPairedDeviceIds) {
                     if (!pairedPeersMap.containsKey(deviceId)) {
-                        // Get stored device name, fallback to deviceId if not found
-                        val deviceName = transportManager.getDeviceName(deviceId) ?: deviceId
-                        // Create a synthetic peer for this paired but not discovered device
-                        val syntheticPeer = DiscoveredPeer(
-                            serviceName = deviceName, // Use stored device name for display
-                            host = "unknown",
-                            port = 0,
-                            fingerprint = null,
-                            attributes = mapOf("device_id" to deviceId, "device_name" to deviceName),
-                            lastSeen = java.time.Instant.now()
-                        )
-                        pairedPeersMap[deviceId] = syntheticPeer
-                        android.util.Log.d("SettingsViewModel", "📦 Created synthetic peer for paired but not discovered device: $deviceId (name=$deviceName)")
+                        // Get stored device name - if null, skip creating synthetic peer (device was deleted)
+                        val deviceName = transportManager.getDeviceName(deviceId)
+                        if (deviceName != null) {
+                            // Create a synthetic peer for this paired but not discovered device
+                            val syntheticPeer = DiscoveredPeer(
+                                serviceName = deviceName, // Use stored device name for display
+                                host = "unknown",
+                                port = 0,
+                                fingerprint = null,
+                                attributes = mapOf("device_id" to deviceId, "device_name" to deviceName),
+                                lastSeen = java.time.Instant.now()
+                            )
+                            pairedPeersMap[deviceId] = syntheticPeer
+                            android.util.Log.d("SettingsViewModel", "📦 Created synthetic peer for paired but not discovered device: $deviceId (name=$deviceName)")
+                        } else {
+                            android.util.Log.d("SettingsViewModel", "⏭️ Skipping synthetic peer for $deviceId - no stored device name (device was deleted)")
+                        }
                     }
                 }
                 
                 val pairedPeers = pairedPeersMap.values.toList()
                 
-                // Map peers to include connection status
+                // Map peers to include connection status and transport info
                 val peerStatuses = pairedPeers.associate { peer ->
                     val deviceId = peer.attributes["device_id"] ?: peer.serviceName
                     val serviceName = peer.serviceName
@@ -173,6 +178,31 @@ class SettingsViewModel @Inject constructor(
                     serviceName to status
                 }
                 
+                // Map peers to include transport info for address display
+                val peerTransports = pairedPeers.associate { peer ->
+                    val deviceId = peer.attributes["device_id"] ?: peer.serviceName
+                    val serviceName = peer.serviceName
+                    
+                    // Look up transport status (same logic as above)
+                    val transport = lastTransport[deviceId]
+                        ?: lastTransport[serviceName]
+                        ?: lastTransport.entries.firstOrNull { 
+                            it.key.equals(deviceId, ignoreCase = true)
+                        }?.value
+                        ?: lastTransport.entries.firstOrNull { 
+                            it.key.equals(serviceName, ignoreCase = true)
+                        }?.value
+                        ?: lastTransport.entries.firstOrNull { 
+                            val key = it.key
+                            key.equals(deviceId, ignoreCase = true) || 
+                            key.equals(serviceName, ignoreCase = true) ||
+                            key.replace("-", "").equals(deviceId.replace("-", ""), ignoreCase = true) ||
+                            key.replace("-", "").equals(serviceName.replace("-", ""), ignoreCase = true)
+                        }?.value
+                    
+                    serviceName to transport
+                }
+                
                 SettingsUiState(
                     lanSyncEnabled = settings.lanSyncEnabled,
                     cloudSyncEnabled = settings.cloudSyncEnabled,
@@ -181,6 +211,7 @@ class SettingsViewModel @Inject constructor(
                     plainTextModeEnabled = settings.plainTextModeEnabled,
                     discoveredPeers = pairedPeers,
                     deviceStatuses = peerStatuses,
+                    deviceTransports = peerTransports,
                     isAccessibilityServiceEnabled = isAccessibilityEnabled,
                     connectionState = connectionState
                 )
@@ -223,11 +254,14 @@ class SettingsViewModel @Inject constructor(
             if (peer.host != "unknown") {
                 transportManager.removePeer(peer.serviceName)
             }
-            // Forget the paired device (clears transport status and device name)
+            // Delete the encryption key FIRST (this removes it from getAllDeviceIds())
+            runCatching { 
+                deviceKeyStore.deleteKey(deviceId)
+                android.util.Log.d("SettingsViewModel", "🔑 Deleted encryption key for device: $deviceId")
+            }
+            // Then forget the paired device (clears transport status and device name)
             transportManager.forgetPairedDevice(deviceId)
             syncCoordinator.removeTargetDevice(deviceId)
-            // Delete the encryption key
-            runCatching { deviceKeyStore.deleteKey(deviceId) }
             android.util.Log.d("SettingsViewModel", "✅ Device removed: $deviceId")
         }
     }
@@ -254,13 +288,14 @@ class SettingsViewModel @Inject constructor(
 }
 
 data class SettingsUiState(
-    val lanSyncEnabled: Boolean = true,
-    val cloudSyncEnabled: Boolean = true,
-    val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT,
-    val autoDeleteDays: Int = UserSettings.DEFAULT_AUTO_DELETE_DAYS,
-    val plainTextModeEnabled: Boolean = false,
-    val discoveredPeers: List<DiscoveredPeer> = emptyList(),
-    val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap(),
-    val isAccessibilityServiceEnabled: Boolean = false,
-    val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Idle
-)
+        val lanSyncEnabled: Boolean = true,
+        val cloudSyncEnabled: Boolean = true,
+        val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT,
+        val autoDeleteDays: Int = UserSettings.DEFAULT_AUTO_DELETE_DAYS,
+        val plainTextModeEnabled: Boolean = false,
+        val discoveredPeers: List<DiscoveredPeer> = emptyList(),
+        val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap(),
+        val deviceTransports: Map<String, ActiveTransport?> = emptyMap(),
+        val isAccessibilityServiceEnabled: Boolean = false,
+        val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Idle
+    )

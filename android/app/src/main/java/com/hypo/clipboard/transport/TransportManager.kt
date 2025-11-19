@@ -148,6 +148,13 @@ class TransportManager(
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
     val lastSuccessfulTransport: StateFlow<Map<String, ActiveTransport>> =
         _lastSuccessfulTransport.asStateFlow()
+    
+    /**
+     * Update the connection state (used by ConnectionStatusProber)
+     */
+    fun updateConnectionState(newState: ConnectionState) {
+        _connectionState.value = newState
+    }
 
     fun start(config: LanRegistrationConfig) {
         currentConfig = config

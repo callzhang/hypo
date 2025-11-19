@@ -396,16 +396,19 @@ class LanWebSocketClient @Inject constructor(
                         }
                         is LoopEvent.Envelope -> {
                             val payload = frameCodec.encode(event.envelope)
+                            android.util.Log.d("LanWebSocketClient", "📤 Encoding envelope: type=${event.envelope.type}, target=${event.envelope.payload.target}, payload size=${payload.size} bytes")
                             val now = clock.instant()
                             synchronized(pendingLock) {
                                 prunePendingLocked(now)
                                 pendingRoundTrips[event.envelope.id] = now
                             }
+                            android.util.Log.d("LanWebSocketClient", "📤 Sending frame: ${payload.size} bytes via WebSocket")
                             val sent = socket.send(of(*payload))
                             if (!sent) {
                                 android.util.Log.w("LanWebSocketClient", "⚠️ WebSocket send failed (connection may be closed), closing connection loop")
                                 break@loop
                             }
+                            android.util.Log.d("LanWebSocketClient", "✅ Frame transmitted successfully: ${payload.size} bytes")
                             touch()
                         }
                     }

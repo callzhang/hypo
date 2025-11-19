@@ -2,6 +2,58 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [0.2.0] - 2025-11-18 - Connection Status & UI Improvements
+
+### Added
+- **Connection Status Display (macOS)**: Real-time server connection status in Settings
+  - Shows current connection state (Offline/Connecting/Connected LAN/Connected Cloud/Error)
+  - Status badge with color-coded icons and text
+  - Debug information showing TransportManager availability
+  - Periodic state polling (2-second fallback) for reliable updates
+  - Located in Settings → Connection section
+
+- **Connection Status Display (Android)**: Server connection status in History and Settings screens
+  - Connection status badge in History screen top-right corner
+  - "Server Connection" section in Settings screen with status card
+  - Real-time updates as connection state changes
+  - Color-coded badges (green for LAN, blue for Cloud, gray for Offline, red for Error)
+
+- **Device Identifier Consistency**: Standardized device ID format across platforms
+  - macOS: `macos-{UUID}` format (was: `{UUID}`)
+  - Android: `android-{UUID}` format (unchanged)
+  - Future iOS: `ios-{UUID}` format (prepared)
+  - Automatic migration for existing macOS devices
+  - Consistent platform identification in pairing and sync
+
+### Changed
+- **Android History UI**: Removed "Clear History" button from History screen
+  - Simplified UI with only connection status badge in header
+  - History management available through other means if needed
+
+- **macOS Connection State Observation**: Improved reliability
+  - Changed from `.assign` to `.sink` for better reactivity
+  - Added periodic polling (2-second intervals) as fallback
+  - Enhanced debug logging for connection state changes
+  - More prominent status display with background and padding
+
+### Fixed
+- **macOS Version Display**: Fixed version info reading from Info.plist
+  - Added debug logging to diagnose bundle information
+  - Improved fallback handling for version string
+  - Version now displays correctly in About section
+
+- **macOS App Bundle Updates**: Ensured app bundle is updated after builds
+  - Executable copied to `.app` bundle after each build
+  - App restarts automatically with latest changes
+
+### Technical Details
+- Connection state observed via Combine publishers on macOS
+- Connection state observed via Flow on Android
+- Both platforms update UI reactively when connection state changes
+- Device ID format migration handles legacy UUID-only format
+
+---
+
 ## [Sprint 9] - 2025-10-12 - LAN Auto-Discovery ✅ COMPLETE
 
 ### Added (macOS)

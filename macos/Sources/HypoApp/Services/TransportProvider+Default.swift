@@ -4,10 +4,15 @@ import Foundation
 public final class DefaultTransportProvider: TransportProvider {
     private let server: LanWebSocketServer
     private let lanTransport: LanSyncTransport
+    private let cloudTransport: CloudRelayTransport
     
     public init(server: LanWebSocketServer) {
         self.server = server
         self.lanTransport = LanSyncTransport(server: server)
+        
+        // Initialize cloud relay transport with production configuration
+        let cloudConfig = CloudRelayDefaults.production()
+        self.cloudTransport = CloudRelayTransport(configuration: cloudConfig)
     }
 
     public func preferredTransport(for preference: TransportPreference) -> SyncTransport {
@@ -15,9 +20,13 @@ public final class DefaultTransportProvider: TransportProvider {
         case .lanFirst:
             return lanTransport
         case .cloudOnly:
-            // TODO: Implement CloudRelayTransport when cloud fallback is needed
-            return lanTransport
+            return cloudTransport
         }
+    }
+    
+    /// Get cloud transport instance for fallback scenarios
+    public func getCloudTransport() -> CloudRelayTransport {
+        return cloudTransport
     }
 }
 

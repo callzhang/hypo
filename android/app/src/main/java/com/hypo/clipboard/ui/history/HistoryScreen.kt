@@ -54,8 +54,7 @@ fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.
         query = state.query,
         currentDeviceId = viewModel.currentDeviceId,
         connectionState = state.connectionState,
-        onQueryChange = viewModel::onQueryChange,
-        onClearHistory = viewModel::clearHistory
+        onQueryChange = viewModel::onQueryChange
     )
 }
 
@@ -66,7 +65,6 @@ fun HistoryScreen(
     currentDeviceId: String,
     connectionState: ConnectionState,
     onQueryChange: (String) -> Unit,
-    onClearHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -86,10 +84,6 @@ fun HistoryScreen(
             )
             Spacer(modifier = Modifier.weight(1f))
             ConnectionStatusBadge(connectionState = connectionState)
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onClearHistory, enabled = items.isNotEmpty()) {
-                Text(text = stringResource(id = R.string.clear_history))
-            }
         }
 
         OutlinedTextField(

@@ -25,6 +25,7 @@ public final class TransportManager {
     private let webSocketServer: LanWebSocketServer
     private let incomingHandler: IncomingClipboardHandler?
     private weak var historyViewModel: ClipboardHistoryViewModel?
+    private var connectionStatusProber: ConnectionStatusProber?
 
     private var discoveryTask: Task<Void, Never>?
     private var pruneTask: Task<Void, Never>?
@@ -39,6 +40,8 @@ public final class TransportManager {
 #endif
     private var lastSuccessfulTransport: [String: TransportChannel] = [:]
     private var connectionSupervisorTask: Task<Void, Never>?
+    private var autoConnectTask: Task<Void, Never>?
+    private var initTask: Task<Void, Never>?
     private var manualRetryRequested = false
     private var networkChangeRequested = false
     private static let lanPairingKeyIdentifier = "lan-discovery-key"
@@ -99,11 +102,18 @@ public final class TransportManager {
         
         // Set up WebSocket server delegate
         webSocketServer.delegate = self
+        
+        // Connection status prober will be initialized after historyViewModel is set
+        // (via setHistoryViewModel)
 
         #if canImport(AppKit)
         lifecycleObserver = ApplicationLifecycleObserver(
             onActivate: { [weak self] in
-                Task { await self?.activateLanServices() }
+                Task {
+                    await self?.activateLanServices()
+                    // Probe connections when app becomes active
+                    self?.connectionStatusProber?.probeNow()
+                }
             },
             onDeactivate: { [weak self] in
                 Task { await self?.deactivateLanServices() }
@@ -113,11 +123,35 @@ public final class TransportManager {
             }
         )
         // Start LAN services immediately (menu bar apps don't trigger didBecomeActive on launch)
-        Task {
+        initTask = Task { @MainActor [weak self] in
+            guard let self = self else {
+                let deallocMsg = "⚠️ [TransportManager] Self deallocated in initTask\n"
+                print(deallocMsg)
+                try? deallocMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                return
+            }
             let logPath = "/tmp/hypo_debug.log"
-            try? "🔷 [TransportManager] Init: Starting activation task\n".appendToFile(path: logPath)
-            await activateLanServices()
-            try? "🔷 [TransportManager] Init: Activation task completed\n".appendToFile(path: logPath)
+            do {
+                try? "🔷 [TransportManager] Init: Starting activation task\n".appendToFile(path: logPath)
+                await self.activateLanServices()
+                try? "🔷 [TransportManager] Init: Activation task completed\n".appendToFile(path: logPath)
+                
+                // CRITICAL: Add immediate logging to verify execution continues
+                let continueMsg = "➡️ [TransportManager] Execution continues after activateLanServices()\n"
+                print(continueMsg)
+                try? continueMsg.appendToFile(path: logPath)
+                
+                // Note: Auto-connect is now handled by ConnectionStatusProber
+                // which is initialized via setHistoryViewModel()
+                // This avoids duplicate connection attempts
+                let skipMsg = "ℹ️ [TransportManager] Skipping auto-connect (handled by ConnectionStatusProber)\n"
+                print(skipMsg)
+                try? skipMsg.appendToFile(path: logPath)
+            } catch {
+                let errorMsg = "❌ [TransportManager] Init task error: \(error.localizedDescription)\n"
+                print(errorMsg)
+                try? errorMsg.appendToFile(path: logPath)
+            }
         }
         #else
         Task { await activateLanServices() }
@@ -134,15 +168,145 @@ public final class TransportManager {
     }
 
     public func setHistoryViewModel(_ viewModel: ClipboardHistoryViewModel) {
+        // Prevent duplicate initialization
+        guard self.historyViewModel == nil || connectionStatusProber == nil else {
+            let skipMsg = "🔧 [TransportManager] setHistoryViewModel already called, skipping\n"
+            print(skipMsg)
+            try? skipMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            return
+        }
+        
+        let msg = "🔧 [TransportManager] setHistoryViewModel called\n"
+        print(msg)
+        try? msg.appendToFile(path: "/tmp/hypo_debug.log")
+        
         self.historyViewModel = viewModel
         // Set up callback for incoming clipboard handler
         incomingHandler?.setOnEntryAdded { [weak self] entry in
             await self?.historyViewModel?.add(entry)
         }
+        
+        // Initialize connection status prober now that we have the ViewModel
+        #if canImport(AppKit)
+        if connectionStatusProber == nil {
+            let initMsg = "🔧 [TransportManager] Initializing ConnectionStatusProber\n"
+            print(initMsg)
+            try? initMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            
+            connectionStatusProber = ConnectionStatusProber(
+                historyViewModel: viewModel,
+                webSocketServer: webSocketServer,
+                transportManager: self,
+                transportProvider: provider
+            )
+            // Start periodic probing
+            connectionStatusProber?.start()
+            
+            let startedMsg = "🔧 [TransportManager] ConnectionStatusProber started\n"
+            print(startedMsg)
+            try? startedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            
+            // Trigger immediate probe to update connection state
+            // This ensures the UI shows the correct status on launch
+            Task { @MainActor in
+                // Small delay to ensure everything is initialized
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                let probeMsg = "🔧 [TransportManager] Triggering initial probe\n"
+                print(probeMsg)
+                try? probeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                connectionStatusProber?.probeNow()
+            }
+        } else {
+            let alreadyMsg = "🔧 [TransportManager] ConnectionStatusProber already initialized\n"
+            print(alreadyMsg)
+            try? alreadyMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        }
+        #endif
     }
     
     public func currentPreference() -> TransportPreference {
         preferenceStorage.loadPreference() ?? .lanFirst
+    }
+    
+    /// Update the connection state (used by ConnectionStatusProber)
+    @MainActor
+    public func updateConnectionState(_ newState: ConnectionState) {
+        if connectionState != newState {
+            let msg = "🔄 [TransportManager] Updating connectionState: \(connectionState) → \(newState)\n"
+            print(msg)
+            try? msg.appendToFile(path: "/tmp/hypo_debug.log")
+            connectionState = newState
+        }
+    }
+    
+    /// Start auto-connect to cloud relay
+    @MainActor
+    private func startAutoConnect() async {
+        let startFuncMsg = "🚀 [TransportManager] startAutoConnect() called\n"
+        print(startFuncMsg)
+        try? startFuncMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
+        autoConnectTask = Task { @MainActor in
+            let taskStartMsg = "🚀 [TransportManager] Auto-connect Task started\n"
+            print(taskStartMsg)
+            try? taskStartMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            let logPath = "/tmp/hypo_debug.log"
+            do {
+                // Auto-connect to cloud relay after a delay to show server availability
+                let delayMsg = "⏳ [TransportManager] Waiting 3 seconds before cloud connection attempt\n"
+                print(delayMsg)
+                try? delayMsg.appendToFile(path: logPath)
+                
+                try await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                
+                let afterDelayMsg = "⏰ [TransportManager] Delay completed, proceeding with cloud connection\n"
+                print(afterDelayMsg)
+                try? afterDelayMsg.appendToFile(path: logPath)
+                
+                let checkMsg = "🔍 [TransportManager] Checking cloud transport provider\n"
+                print(checkMsg)
+                try? checkMsg.appendToFile(path: logPath)
+                
+                if let provider = provider as? DefaultTransportProvider {
+                    let providerMsg = "✅ [TransportManager] Provider is DefaultTransportProvider\n"
+                    print(providerMsg)
+                    try? providerMsg.appendToFile(path: logPath)
+                    let cloudTransport = provider.getCloudTransport()
+                    if !cloudTransport.isConnected() {
+                        let autoMsg = "☁️ [TransportManager] Auto-connecting to cloud relay\n"
+                        print(autoMsg)
+                        try? autoMsg.appendToFile(path: logPath)
+                        
+                        connectionState = .connectingCloud
+                        do {
+                            try await cloudTransport.connect()
+                            connectionState = .connectedCloud
+                            let successMsg = "✅ [TransportManager] Successfully connected to cloud relay\n"
+                            print(successMsg)
+                            try? successMsg.appendToFile(path: logPath)
+                        } catch {
+                            connectionState = .idle
+                            let errorMsg = "❌ [TransportManager] Cloud connection failed: \(error.localizedDescription)\n"
+                            print(errorMsg)
+                            try? errorMsg.appendToFile(path: logPath)
+                        }
+                    } else {
+                        connectionState = .connectedCloud
+                        let alreadyMsg = "☁️ [TransportManager] Cloud relay already connected\n"
+                        print(alreadyMsg)
+                        try? alreadyMsg.appendToFile(path: logPath)
+                    }
+                } else {
+                    let noProviderMsg = "⚠️ [TransportManager] Provider is not DefaultTransportProvider: \(type(of: provider))\n"
+                    print(noProviderMsg)
+                    try? noProviderMsg.appendToFile(path: logPath)
+                }
+            } catch {
+                let errorMsg = "❌ [TransportManager] Auto-connect task error: \(error.localizedDescription)\n"
+                print(errorMsg)
+                try? errorMsg.appendToFile(path: logPath)
+            }
+        }
     }
 
     public func ensureLanDiscoveryActive() async {
@@ -968,8 +1132,50 @@ extension TransportManager: LanWebSocketServerDelegate {
         #endif
         print("📥 [TransportManager] CLIPBOARD RECEIVED: from \(connection.uuidString.prefix(8)), \(data.count) bytes")
         
-        // Process incoming clipboard data through IncomingClipboardHandler
+        // Extract deviceId from envelope to update connection metadata and online status
         Task { @MainActor in
+            // Try to extract deviceId from the frame-encoded data
+            let frameCodec = TransportFrameCodec()
+            do {
+                let envelope = try frameCodec.decode(data)
+                let deviceId = envelope.payload.deviceId
+                print("✅ [TransportManager] Extracted deviceId from envelope: \(deviceId)")
+                
+                // Update connection metadata if not already set
+                if server.connectionMetadata(for: connection)?.deviceId == nil {
+                    server.updateConnectionMetadata(connectionId: connection, deviceId: deviceId)
+                    print("✅ [TransportManager] Updated connection metadata with deviceId: \(deviceId)")
+                }
+                
+                // Update device online status (device is online if we're receiving data from it)
+                print("📤 [TransportManager] Posting DeviceConnectionStatusChanged notification: deviceId=\(deviceId), isOnline=true")
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("DeviceConnectionStatusChanged"),
+                    object: nil,
+                    userInfo: [
+                        "deviceId": deviceId,
+                        "isOnline": true
+                    ]
+                )
+                print("✅ [TransportManager] Notification posted successfully")
+            } catch {
+                print("⚠️ [TransportManager] Failed to decode envelope for device status update: \(error)")
+                // Try to get deviceId from connection metadata as fallback
+                if let metadata = server.connectionMetadata(for: connection),
+                   let deviceId = metadata.deviceId {
+                    print("📤 [TransportManager] Using deviceId from connection metadata: \(deviceId)")
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("DeviceConnectionStatusChanged"),
+                        object: nil,
+                        userInfo: [
+                            "deviceId": deviceId,
+                            "isOnline": true
+                        ]
+                    )
+                }
+            }
+            
+            // Process incoming clipboard data through IncomingClipboardHandler
             await self.incomingHandler?.handle(data)
         }
     }
@@ -984,6 +1190,7 @@ extension TransportManager: LanWebSocketServerDelegate {
             // Try to find device ID from connection metadata
             if let metadata = server.connectionMetadata(for: id),
                let deviceId = metadata.deviceId {
+                print("✅ [TransportManager] Connection established for device: \(deviceId)")
                 NotificationCenter.default.post(
                     name: NSNotification.Name("DeviceConnectionStatusChanged"),
                     object: nil,
@@ -992,6 +1199,8 @@ extension TransportManager: LanWebSocketServerDelegate {
                         "isOnline": true
                     ]
                 )
+            } else {
+                print("⚠️ [TransportManager] Connection established but no deviceId in metadata yet (will update when handshake completes)")
             }
         }
     }

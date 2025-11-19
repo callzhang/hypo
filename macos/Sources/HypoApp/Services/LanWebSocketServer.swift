@@ -193,7 +193,20 @@ public final class LanWebSocketServer {
     }
     
     public func activeConnections() -> [UUID] {
-        Array(connections.keys)
+        let active = Array(connections.keys)
+        let activeMsg = "🔍 [LanWebSocketServer] activeConnections() called: \(active.count) connections\n"
+        print(activeMsg)
+        try? activeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        if active.count > 0 {
+            for id in active {
+                if let metadata = connectionMetadata[id] {
+                    let metaMsg = "🔍 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)): deviceId=\(metadata.deviceId ?? "nil"), upgraded=\(connections[id]?.upgraded ?? false)\n"
+                    print(metaMsg)
+                    try? metaMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                }
+            }
+        }
+        return active
     }
     
     public func sendPairingAck(_ ack: PairingAckMessage, to connectionId: UUID) throws {
@@ -264,9 +277,15 @@ public final class LanWebSocketServer {
         #endif
         print("🔌 [LanWebSocketServer] New connection: \(id.uuidString)")
         print("🔌 [LanWebSocketServer] Total active connections: \(connections.count)")
+        print("🔌 [LanWebSocketServer] Initial connection state: \(String(describing: connection.state))")
+        try? "🔌 [LanWebSocketServer] New connection: \(id.uuidString), initial state: \(String(describing: connection.state))\n".appendToFile(path: "/tmp/hypo_debug.log")
         
-        // Write to debug log
-        try? "🔌 [LanWebSocketServer] New connection: \(id.uuidString)\n".appendToFile(path: "/tmp/hypo_debug.log")
+        // Check initial state - connection might already be ready
+        if case .ready = connection.state {
+            print("✅ [LanWebSocketServer] Connection already ready, starting handshake immediately")
+            try? "✅ [LanWebSocketServer] Connection already ready, starting handshake\n".appendToFile(path: "/tmp/hypo_debug.log")
+            beginHandshake(for: id)
+        }
         
         connection.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
@@ -274,12 +293,15 @@ public final class LanWebSocketServer {
                     print("⚠️ [LanWebSocketServer] Self is nil in stateUpdateHandler")
                     return
                 }
+                print("🔄 [LanWebSocketServer] Connection state changed for \(id.uuidString.prefix(8)): \(String(describing: state))")
+                try? "🔄 [LanWebSocketServer] Connection state changed: \(String(describing: state))\n".appendToFile(path: "/tmp/hypo_debug.log")
                 switch state {
                 case .ready:
                     #if canImport(os)
                     self.logger.info("✅ Connection ready: \(id.uuidString)")
                     #endif
                     print("✅ [LanWebSocketServer] Connection ready: \(id.uuidString) - performing manual WebSocket handshake")
+                    try? "✅ [LanWebSocketServer] Connection ready: \(id.uuidString)\n".appendToFile(path: "/tmp/hypo_debug.log")
                     self.beginHandshake(for: id)
                 case .failed(let error):
                     #if canImport(os)
@@ -304,11 +326,18 @@ public final class LanWebSocketServer {
     }
 
     private func beginHandshake(for connectionId: UUID) {
-        guard let context = connections[connectionId] else { return }
+        print("🤝 [LanWebSocketServer] beginHandshake called for \(connectionId.uuidString.prefix(8))")
+        try? "🤝 [LanWebSocketServer] beginHandshake called for \(connectionId.uuidString.prefix(8))\n".appendToFile(path: "/tmp/hypo_debug.log")
+        guard let context = connections[connectionId] else {
+            print("⚠️ [LanWebSocketServer] No context found for connection \(connectionId.uuidString.prefix(8))")
+            return
+        }
         receiveHandshakeChunk(for: connectionId, context: context)
     }
 
     private func receiveHandshakeChunk(for connectionId: UUID, context: ConnectionContext) {
+        print("📥 [LanWebSocketServer] receiveHandshakeChunk: Setting up receive callback for \(connectionId.uuidString.prefix(8))")
+        try? "📥 [LanWebSocketServer] receiveHandshakeChunk: Setting up receive callback\n".appendToFile(path: "/tmp/hypo_debug.log")
         context.connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, isComplete, error in
             Task { @MainActor in
                 guard let self else { return }
@@ -317,16 +346,26 @@ public final class LanWebSocketServer {
                     #if canImport(os)
                     self.logger.error("Handshake receive error: \(error.localizedDescription)")
                     #endif
+                    print("❌ [LanWebSocketServer] Handshake receive error: \(error.localizedDescription)")
                     self.closeConnection(connectionId)
                     return
                 }
                 if let data, !data.isEmpty {
+                    print("📥 [LanWebSocketServer] Handshake data received: \(data.count) bytes")
+                    try? "📥 [LanWebSocketServer] Handshake data received: \(data.count) bytes\n".appendToFile(path: "/tmp/hypo_debug.log")
                     context.appendToBuffer(data)
-                    if self.processHandshakeBuffer(for: connectionId, context: context) {
+                    print("📥 [LanWebSocketServer] Data appended to buffer, calling processHandshakeBuffer")
+                    let processed = self.processHandshakeBuffer(for: connectionId, context: context)
+                    print("📥 [LanWebSocketServer] processHandshakeBuffer returned: \(processed)")
+                    if processed {
+                        print("✅ [LanWebSocketServer] Handshake processing complete, stopping receive loop")
                         return
+                    } else {
+                        print("⏳ [LanWebSocketServer] Handshake processing incomplete, continuing receive loop")
                     }
                 }
                 if isComplete {
+                    print("⚠️ [LanWebSocketServer] Handshake receive completed without data")
                     self.closeConnection(connectionId)
                     return
                 }
@@ -336,21 +375,35 @@ public final class LanWebSocketServer {
     }
 
     private func processHandshakeBuffer(for connectionId: UUID, context: ConnectionContext) -> Bool {
+        print("🔍 [LanWebSocketServer] processHandshakeBuffer: Checking for handshake delimiter")
+        let bufferSnapshot = context.snapshotBuffer()
+        print("🔍 [LanWebSocketServer] processHandshakeBuffer: Buffer size: \(bufferSnapshot.count) bytes")
+        if let headerString = String(data: bufferSnapshot.prefix(min(200, bufferSnapshot.count)), encoding: .utf8) {
+            print("🔍 [LanWebSocketServer] processHandshakeBuffer: First 200 chars: \(headerString)")
+        }
+        
         guard let headerData = context.consumeHeader(upTo: handshakeDelimiter) else {
+            print("⏳ [LanWebSocketServer] processHandshakeBuffer: Handshake delimiter not found yet, waiting for more data")
             return false
         }
+        print("✅ [LanWebSocketServer] processHandshakeBuffer: Handshake delimiter found, header size: \(headerData.count) bytes")
+        
         guard let request = String(data: headerData, encoding: .utf8) else {
+            print("❌ [LanWebSocketServer] processHandshakeBuffer: Failed to decode header as UTF-8")
             sendHTTPError(status: "400 Bad Request", connectionId: connectionId, context: context)
             return true
         }
+        print("✅ [LanWebSocketServer] processHandshakeBuffer: Header decoded, processing request")
         let lines = request.components(separatedBy: "\r\n").filter { !$0.isEmpty }
         guard
             let requestLine = lines.first,
             requestLine.hasPrefix("GET")
         else {
+            print("❌ [LanWebSocketServer] processHandshakeBuffer: Invalid request line: \(lines.first ?? "none")")
             sendHTTPError(status: "400 Bad Request", connectionId: connectionId, context: context)
             return true
         }
+        print("✅ [LanWebSocketServer] processHandshakeBuffer: Request line valid: \(requestLine)")
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             guard let separator = line.firstIndex(of: ":") else { continue }
@@ -358,14 +411,17 @@ public final class LanWebSocketServer {
             let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
             headers[name] = value
         }
+        print("🔍 [LanWebSocketServer] processHandshakeBuffer: Parsed \(headers.count) headers")
         guard
             headers["upgrade"]?.lowercased().contains("websocket") == true,
             headers["connection"]?.lowercased().contains("upgrade") == true,
             let key = headers["sec-websocket-key"]
         else {
+            print("❌ [LanWebSocketServer] processHandshakeBuffer: Missing required headers. Upgrade: \(headers["upgrade"] ?? "nil"), Connection: \(headers["connection"] ?? "nil"), Key: \(headers["sec-websocket-key"] != nil ? "present" : "missing")")
             sendHTTPError(status: "400 Bad Request", connectionId: connectionId, context: context)
             return true
         }
+        print("✅ [LanWebSocketServer] processHandshakeBuffer: All headers valid, sending handshake response")
         let response = handshakeResponse(for: key)
         context.connection.send(content: response, completion: .contentProcessed { [weak self] error in
             Task { @MainActor in
@@ -374,6 +430,7 @@ public final class LanWebSocketServer {
                     #if canImport(os)
                     self.logger.error("Handshake send error: \(error.localizedDescription)")
                     #endif
+                    print("❌ [LanWebSocketServer] Handshake send error: \(error.localizedDescription)")
                     self.closeConnection(connectionId)
                     return
                 }
@@ -382,9 +439,11 @@ public final class LanWebSocketServer {
                 self.logger.info("✅ CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded for \(connectionId.uuidString.prefix(8))")
                 #endif
                 print("✅ [LanWebSocketServer] CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded, starting frame reception")
+                try? "✅ [LanWebSocketServer] CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded\n".appendToFile(path: "/tmp/hypo_debug.log")
                 self.delegate?.server(self, didAcceptConnection: connectionId)
                 self.processFrameBuffer(for: connectionId, context: context)
                 print("📡 [LanWebSocketServer] CLIPBOARD SETUP: Starting receiveFrameChunk for connection \(connectionId.uuidString.prefix(8))")
+                try? "📡 [LanWebSocketServer] CLIPBOARD SETUP: Starting receiveFrameChunk\n".appendToFile(path: "/tmp/hypo_debug.log")
                 self.receiveFrameChunk(for: connectionId, context: context)
             }
         })
@@ -850,6 +909,10 @@ public final class LanWebSocketServer {
     // This method is kept for backward compatibility but may not be called
     
     private func closeConnection(_ id: UUID) {
+        let deviceId = connectionMetadata[id]?.deviceId ?? "unknown"
+        let closeMsg = "🔌 [LanWebSocketServer] closeConnection called: \(id.uuidString.prefix(8)), deviceId=\(deviceId)\n"
+        print(closeMsg)
+        try? closeMsg.appendToFile(path: "/tmp/hypo_debug.log")
         connections[id]?.connection.cancel()
         connections.removeValue(forKey: id)
         connectionMetadata.removeValue(forKey: id)

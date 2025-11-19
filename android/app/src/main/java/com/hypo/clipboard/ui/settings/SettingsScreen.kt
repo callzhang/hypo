@@ -57,7 +57,6 @@ fun SettingsRoute(
     val state by viewModel.state.collectAsState()
     SettingsScreen(
         state = state,
-        onLanSyncChanged = viewModel::onLanSyncChanged,
         onCloudSyncChanged = viewModel::onCloudSyncChanged,
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
         onAutoDeleteDaysChanged = viewModel::onAutoDeleteDaysChanged,
@@ -73,7 +72,6 @@ fun SettingsRoute(
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
-    onLanSyncChanged: (Boolean) -> Unit,
     onCloudSyncChanged: (Boolean) -> Unit,
     onHistoryLimitChanged: (Int) -> Unit,
     onAutoDeleteDaysChanged: (Int) -> Unit,
@@ -102,10 +100,8 @@ fun SettingsScreen(
             
             item {
                 SyncSection(
-                    lanEnabled = state.lanSyncEnabled,
                     cloudEnabled = state.cloudSyncEnabled,
                     plainTextMode = state.plainTextModeEnabled,
-                    onLanSyncChanged = onLanSyncChanged,
                     onCloudSyncChanged = onCloudSyncChanged,
                     onPlainTextModeChanged = onPlainTextModeChanged
                 )
@@ -135,6 +131,7 @@ fun SettingsScreen(
                 DevicesSection(
                     peers = state.discoveredPeers,
                     deviceStatuses = state.deviceStatuses,
+                    deviceTransports = state.deviceTransports,
                     onStartPairing = onStartPairing,
                     onRemoveDevice = onRemoveDevice
                 )
@@ -212,10 +209,8 @@ private fun ConnectionStatusSection(connectionState: ConnectionState) {
 
 @Composable
 private fun SyncSection(
-    lanEnabled: Boolean,
     cloudEnabled: Boolean,
     plainTextMode: Boolean,
-    onLanSyncChanged: (Boolean) -> Unit,
     onCloudSyncChanged: (Boolean) -> Unit,
     onPlainTextModeChanged: (Boolean) -> Unit
 ) {
@@ -225,14 +220,6 @@ private fun SyncSection(
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold
         )
-        ListItem(
-            headlineContent = { Text(text = stringResource(id = R.string.settings_lan_sync)) },
-            supportingContent = { Text(text = stringResource(id = R.string.settings_lan_sync_description)) },
-            trailingContent = {
-                Switch(checked = lanEnabled, onCheckedChange = onLanSyncChanged)
-            }
-        )
-        Divider()
         ListItem(
             headlineContent = { Text(text = stringResource(id = R.string.settings_cloud_sync)) },
             supportingContent = { Text(text = stringResource(id = R.string.settings_cloud_sync_description)) },
@@ -402,6 +389,7 @@ private fun AccessibilitySection(
 private fun DevicesSection(
     peers: List<DiscoveredPeer>,
     deviceStatuses: Map<String, DeviceConnectionStatus>,
+    deviceTransports: Map<String, com.hypo.clipboard.transport.ActiveTransport?>,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit
 ) {
@@ -425,9 +413,11 @@ private fun DevicesSection(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 peers.forEach { peer ->
                     val status = deviceStatuses[peer.serviceName] ?: DeviceConnectionStatus.Disconnected
+                    val transport = deviceTransports[peer.serviceName]
                     DeviceRow(
                         peer = peer,
                         status = status,
+                        transport = transport,
                         onRemove = { onRemoveDevice(peer) }
                     )
                 }
@@ -443,6 +433,7 @@ private fun DevicesSection(
 private fun DeviceRow(
     peer: DiscoveredPeer,
     status: DeviceConnectionStatus,
+    transport: com.hypo.clipboard.transport.ActiveTransport?,
     onRemove: () -> Unit
 ) {
     Card(
@@ -470,8 +461,20 @@ private fun DeviceRow(
                     )
                     DeviceStatusBadge(status = status)
                 }
+                // Display address based on connection status
+                val addressText = when {
+                    status == DeviceConnectionStatus.ConnectedLan && peer.host != "unknown" -> {
+                        "${peer.host}:${peer.port}"
+                    }
+                    status == DeviceConnectionStatus.ConnectedCloud -> {
+                        stringResource(id = R.string.device_address_cloud)
+                    }
+                    else -> {
+                        stringResource(id = R.string.device_address_disconnected)
+                    }
+                }
                 Text(
-                    text = "${peer.host}:${peer.port}",
+                    text = addressText,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -79,6 +79,8 @@
     <string name="device_status_lan">LAN</string>
     <string name="device_status_cloud">Cloud</string>
     <string name="device_status_paired">Paired</string>
+    <string name="device_address_cloud">Connected via server</string>
+    <string name="device_address_disconnected">Disconnected</string>
     <string name="device_status_disconnected">Offline</string>
     <string name="device_status_failed">Failed</string>
 

@@ -42,27 +42,18 @@ public final class IncomingClipboardHandler {
             #endif
             print("📥 [IncomingClipboardHandler] CLIPBOARD RECEIVED: \(data.count) bytes")
             
-            // Extract the JSON payload from the frame (same as frameCodec.decode does internally)
-            guard data.count >= MemoryLayout<UInt32>.size else {
-                throw TransportFrameError.truncated
-            }
-            let lengthRange = 0..<MemoryLayout<UInt32>.size
-            let lengthValue = data[lengthRange].withUnsafeBytes { buffer -> UInt32 in
-                buffer.load(as: UInt32.self)
-            }
-            let length = Int(UInt32(bigEndian: lengthValue))
-            guard data.count - MemoryLayout<UInt32>.size >= length else {
-                throw TransportFrameError.truncated
-            }
-            let envelopeJSON = data.subdata(in: MemoryLayout<UInt32>.size..<(MemoryLayout<UInt32>.size + length))
-            
             // Decode envelope to get device info
             let envelope = try frameCodec.decode(data)
             let deviceId = envelope.payload.deviceId
             let deviceName = envelope.payload.deviceName
             
-            // Decode the encrypted clipboard payload using the extracted JSON
-            let payload = try await syncEngine.decode(envelopeJSON)
+            // Note: We need connectionId to update metadata, but we don't have it here
+            // The connectionId is available in TransportManager.server(_:didReceiveClipboardData:from:)
+            // So we'll update status via notification instead
+            
+            // Decode the encrypted clipboard payload - syncEngine.decode expects the full frame data
+            // It will decode the envelope, decrypt the ciphertext, and decode the ClipboardPayload
+            let payload = try await syncEngine.decode(data)
             
             #if canImport(os)
             logger.info("📋 Envelope decoded: from device \(deviceId), name: \(deviceName ?? "unknown")")

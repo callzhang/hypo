@@ -71,23 +71,59 @@ class LanPairingViewModel @Inject constructor(
         discoveredDevices.clear()
         _state.value = LanPairingUiState.Discovering
         
+        Log.d(TAG, "🔍 Starting discovery for _hypo._tcp.")
         discoveryJob = viewModelScope.launch {
             discoverySource.discover("_hypo._tcp.")
                 .catch { error ->
                     // Bonjour discovery surfaces IO exceptions via Flow; translate to UI error instead of crashing scope.
-                    Log.e(TAG, "Discovery error: ${error.message}", error)
+                    Log.e(TAG, "❌ Discovery error: ${error.message}", error)
                     _state.value = LanPairingUiState.Error("Discovery failed: ${error.message}")
                 }
                 .collect { event ->
                     when (event) {
                         is LanDiscoveryEvent.Added -> {
-                            Log.d(TAG, "Device discovered: ${event.peer.serviceName} at ${event.peer.host}:${event.peer.port}")
-                            discoveredDevices[event.peer.serviceName] = event.peer
+                            val peer = event.peer
+                            Log.d(TAG, "✅ Device discovered: ${peer.serviceName} at ${peer.host}:${peer.port}")
+                            Log.d(TAG, "   Attributes: ${peer.attributes}")
+                            val deviceId = peer.attributes["device_id"] ?: ""
+                            Log.d(TAG, "   Device ID: ${if (deviceId.isEmpty()) "missing" else deviceId}")
+                            Log.d(TAG, "   Public Key: ${peer.attributes["pub_key"]?.take(20) ?: "missing"}...")
+                            
+                            // Filter out Android devices (only show macOS/iOS devices)
+                            // Check both device_id and serviceName since Android devices may not have device_id attribute
+                            val isAndroidDevice = deviceId.startsWith("android-") || 
+                                                  peer.serviceName.startsWith("android-")
+                            if (isAndroidDevice) {
+                                Log.d(TAG, "⏭️ Skipping Android device: deviceId=$deviceId, serviceName=${peer.serviceName}")
+                                return@collect
+                            }
+                            
+                            // Use device_id as key if available, otherwise fallback to serviceName
+                            // This deduplicates devices discovered on multiple network interfaces
+                            val key = if (deviceId.isNotEmpty()) {
+                                deviceId
+                            } else {
+                                // For devices without device_id, extract base serviceName (remove network interface suffixes like " (2)")
+                                // This helps deduplicate devices discovered on multiple interfaces
+                                val baseServiceName = peer.serviceName.replace(Regex(" \\(\\d+\\)$"), "")
+                                Log.w(TAG, "⚠️ Device ${peer.serviceName} has no device_id, using base serviceName as key: $baseServiceName")
+                                baseServiceName
+                            }
+                            
+                            // Only add if we don't already have this device (deduplication)
+                            if (!discoveredDevices.containsKey(key)) {
+                                discoveredDevices[key] = peer
+                                Log.d(TAG, "➕ Added device to list: key=$key, serviceName=${peer.serviceName}")
+                            } else {
+                                Log.d(TAG, "⏭️ Skipping duplicate device: key=$key, serviceName=${peer.serviceName}")
+                            }
                             updateDevicesList()
                         }
                         is LanDiscoveryEvent.Removed -> {
-                            Log.d(TAG, "Device lost: ${event.serviceName}")
-                            discoveredDevices.remove(event.serviceName)
+                            val serviceName = event.serviceName
+                            Log.d(TAG, "❌ Device lost: $serviceName")
+                            // Remove by serviceName or device_id
+                            discoveredDevices.entries.removeIf { (_, peer) -> peer.serviceName == serviceName }
                             updateDevicesList()
                         }
                     }
@@ -97,6 +133,10 @@ class LanPairingViewModel @Inject constructor(
     
     private fun updateDevicesList() {
         val devices = discoveredDevices.values.toList()
+        Log.d(TAG, "📋 Updated devices list: ${devices.size} devices")
+        devices.forEach { peer ->
+            Log.d(TAG, "   - ${peer.serviceName} (${peer.host}:${peer.port})")
+        }
         _state.value = if (devices.isEmpty()) {
             LanPairingUiState.Discovering
         } else {
@@ -222,10 +262,14 @@ class LanPairingViewModel @Inject constructor(
                         
                         when (completionResult) {
                             is PairingCompletionResult.Success -> {
+                                // Use the device ID from the pairing result (this is what the key was saved with)
                                 val deviceId = completionResult.macDeviceId ?: device.attributes["device_id"] ?: device.serviceName
                                 val deviceName = completionResult.macDeviceName ?: device.serviceName
                                 
                                 Log.d(TAG, "✅ Pairing handshake completed! Key saved for device: $deviceId")
+                                Log.d(TAG, "📋 Device ID from pairing result: ${completionResult.macDeviceId}")
+                                Log.d(TAG, "📋 Device ID from peer attributes: ${device.attributes["device_id"]}")
+                                Log.d(TAG, "📋 Device service name: ${device.serviceName}")
                                 
                                 // Step 1: Verify key was saved (Issue 2b checklist)
                                 Log.d(TAG, "🔑 Verifying key was saved for device: $deviceId")
@@ -234,6 +278,13 @@ class LanPairingViewModel @Inject constructor(
                                     Log.d(TAG, "✅ Key exists in store: ${savedKey.size} bytes")
                                 } else {
                                     Log.e(TAG, "❌ Key missing from store! Available keys: ${deviceKeyStore.getAllDeviceIds()}")
+                                    // Try to find the key with case-insensitive matching
+                                    val allKeys = deviceKeyStore.getAllDeviceIds()
+                                    val matchingKey = allKeys.find { it.equals(deviceId, ignoreCase = true) }
+                                    if (matchingKey != null) {
+                                        Log.w(TAG, "⚠️ Found key with case-insensitive match: $matchingKey (requested: $deviceId)")
+                                        Log.w(TAG, "💡 This suggests a device ID format mismatch - key was saved with different case/format")
+                                    }
                                 }
                                 
                                 // Add to transport manager
@@ -252,6 +303,11 @@ class LanPairingViewModel @Inject constructor(
                                 syncCoordinator.addTargetDevice(deviceId)
                                 val targets = syncCoordinator.targets.value
                                 Log.d(TAG, "✅ Target devices now: $targets (count: ${targets.size})")
+                                
+                                // Verify the device is in sync targets
+                                if (!targets.contains(deviceId)) {
+                                    Log.w(TAG, "⚠️ Device $deviceId not in sync targets after adding! Available keys: ${deviceKeyStore.getAllDeviceIds()}")
+                                }
                                 
                                 _state.value = LanPairingUiState.Success(device.serviceName)
                                 Log.d(TAG, "Pairing completed successfully with ${device.serviceName}")

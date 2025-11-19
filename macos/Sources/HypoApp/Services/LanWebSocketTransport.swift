@@ -78,9 +78,10 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         metricsRecorder: TransportMetricsRecorder = NullTransportMetricsRecorder(),
         analytics: TransportAnalytics = NoopTransportAnalytics(),
         sessionFactory: @escaping @Sendable (URLSessionDelegate, TimeInterval) -> URLSessionProviding = { delegate, timeout in
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = timeout
-            config.timeoutIntervalForResource = timeout
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = max(timeout, 60) // Minimum 60 seconds for WebSocket handshake
+            config.timeoutIntervalForResource = max(timeout * 2, 120) // Longer timeout for WebSocket connections
+            config.waitsForConnectivity = true
             return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         }
     ) {
@@ -98,10 +99,20 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
     }
 
     public func connect() async throws {
+        let connectStartMsg = "🔌 [LanWebSocketTransport] connect() called, state: \(state), url: \(configuration.url)\n"
+        print(connectStartMsg)
+        try? connectStartMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
         switch state {
         case .connected:
+            let alreadyMsg = "✅ [LanWebSocketTransport] Already connected\n"
+            print(alreadyMsg)
+            try? alreadyMsg.appendToFile(path: "/tmp/hypo_debug.log")
             return
         case .connecting:
+            let waitingMsg = "⏳ [LanWebSocketTransport] Already connecting, waiting...\n"
+            print(waitingMsg)
+            try? waitingMsg.appendToFile(path: "/tmp/hypo_debug.log")
             try await withCheckedThrowingContinuation { continuation in
                 handshakeContinuation = continuation
             }
@@ -123,10 +134,32 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
 
         let task = session.webSocketTask(with: request)
         state = .connecting
+        
+        let resumeMsg = "🚀 [LanWebSocketTransport] Resuming WebSocket task\n"
+        print(resumeMsg)
+        try? resumeMsg.appendToFile(path: "/tmp/hypo_debug.log")
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            handshakeContinuation = continuation
-            task.resume()
+        // CRITICAL: Retain self and session during connection to prevent deallocation
+        let retainedSelf = self
+        let retainedSession = session
+        
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                // Ensure session and self are retained
+                let _ = retainedSelf
+                let _ = retainedSession
+                
+                retainedSelf.handshakeContinuation = continuation
+                task.resume()
+            }
+            let successMsg = "✅ [LanWebSocketTransport] Connection established successfully\n"
+            print(successMsg)
+            try? successMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        } catch {
+            let errorMsg = "❌ [LanWebSocketTransport] Connection failed: \(error.localizedDescription)\n"
+            print(errorMsg)
+            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            throw error
         }
     }
 
@@ -172,6 +205,16 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         session = nil
         handshakeStartedAt = nil
         await pendingRoundTrips.removeAll()
+    }
+    
+    /// Check if the transport is currently connected
+    public func isConnected() -> Bool {
+        switch state {
+        case .connected:
+            return true
+        case .connecting, .idle:
+            return false
+        }
     }
 
     private func ensureConnected() async throws {
@@ -226,6 +269,11 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let errorMsg = error != nil ? error!.localizedDescription : "none"
+        let completeMsg = "🔚 [LanWebSocketTransport] didCompleteWithError: \(errorMsg)\n"
+        print(completeMsg)
+        try? completeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
         if let continuation = handshakeContinuation {
             handshakeContinuation = nil
             continuation.resume(throwing: error ?? NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown))

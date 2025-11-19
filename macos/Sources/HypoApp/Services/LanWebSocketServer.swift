@@ -20,6 +20,11 @@ public protocol LanWebSocketServerDelegate: AnyObject {
     func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID)
     func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID)
     func server(_ server: LanWebSocketServer, didCloseConnection id: UUID)
+    func server(_ server: LanWebSocketServer, didIdentifyDevice deviceId: String, for connection: UUID)
+}
+
+public extension LanWebSocketServerDelegate {
+    func server(_ server: LanWebSocketServer, didIdentifyDevice deviceId: String, for connection: UUID) {}
 }
 
 @MainActor
@@ -79,12 +84,12 @@ public final class LanWebSocketServer {
         connectionMetadata[connectionId]
     }
     
-    public func updateConnectionMetadata(connectionId: UUID, deviceId: String) {
-        if var existing = connectionMetadata[connectionId] {
-            connectionMetadata[connectionId] = ConnectionMetadata(deviceId: deviceId, connectedAt: existing.connectedAt)
-        } else {
-            connectionMetadata[connectionId] = ConnectionMetadata(deviceId: deviceId, connectedAt: Date())
-        }
+    @discardableResult
+    public func updateConnectionMetadata(connectionId: UUID, deviceId: String) -> ConnectionMetadata {
+        let connectedAt = connectionMetadata[connectionId]?.connectedAt ?? Date()
+        let metadata = ConnectionMetadata(deviceId: deviceId, connectedAt: connectedAt)
+        connectionMetadata[connectionId] = metadata
+        return metadata
     }
     
     #if canImport(os)
@@ -598,6 +603,12 @@ public final class LanWebSocketServer {
                 logger.info("✅ CLIPBOARD MESSAGE RECEIVED: forwarding to delegate, \(data.count) bytes")
                 #endif
                 print("✅ [LanWebSocketServer] CLIPBOARD MESSAGE RECEIVED: \(data.count) bytes, forwarding to delegate")
+                let previousDeviceId = connectionMetadata[connectionId]?.deviceId
+                let deviceId = envelope.payload.deviceId
+                updateConnectionMetadata(connectionId: connectionId, deviceId: deviceId)
+                if previousDeviceId != deviceId {
+                    delegate?.server(self, didIdentifyDevice: deviceId, for: connectionId)
+                }
                 delegate?.server(self, didReceiveClipboardData: data, from: connectionId)
                 return
             case .control:
@@ -850,11 +861,11 @@ public final class LanWebSocketServer {
     // This method is kept for backward compatibility but may not be called
     
     private func closeConnection(_ id: UUID) {
-        connections[id]?.connection.cancel()
-        connections.removeValue(forKey: id)
-        connectionMetadata.removeValue(forKey: id)
+        let context = connections.removeValue(forKey: id)
+        context?.connection.cancel()
         delegate?.server(self, didCloseConnection: id)
-        
+        connectionMetadata.removeValue(forKey: id)
+
         #if canImport(os)
         logger.info("Connection closed: \(id.uuidString)")
         #endif

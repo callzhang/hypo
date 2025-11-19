@@ -105,30 +105,40 @@ public struct SyncEnvelope: Codable {
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             algorithm = try container.decode(String.self, forKey: .algorithm)
-            
+
             // Decode nonce from base64 string (Android uses standard base64 without padding)
             let nonceString = try container.decode(String.self, forKey: .nonce)
-            let nonceRemainder = nonceString.count % 4
-            let paddedNonce = nonceRemainder == 0 ? nonceString : nonceString + String(repeating: "=", count: 4 - nonceRemainder)
-            print("🔍 [SyncEngine] Decoding nonce: \(nonceString) (padded: \(paddedNonce))")
-            guard let nonceData = Data(base64Encoded: paddedNonce) else {
-                print("❌ [SyncEngine] Failed to decode base64 nonce")
-                throw DecodingError.dataCorruptedError(forKey: .nonce, in: container, debugDescription: "Invalid Base64 string for nonce: \(nonceString)")
+            if nonceString.isEmpty {
+                print("⚠️ [SyncEngine] Empty nonce received - treating as plain text mode")
+                self.nonce = Data()
+            } else {
+                let nonceRemainder = nonceString.count % 4
+                let paddedNonce = nonceRemainder == 0 ? nonceString : nonceString + String(repeating: "=", count: 4 - nonceRemainder)
+                print("🔍 [SyncEngine] Decoding nonce: \(nonceString) (padded: \(paddedNonce))")
+                guard let nonceData = Data(base64Encoded: paddedNonce) else {
+                    print("❌ [SyncEngine] Failed to decode base64 nonce")
+                    throw DecodingError.dataCorruptedError(forKey: .nonce, in: container, debugDescription: "Invalid Base64 string for nonce: \(nonceString)")
+                }
+                print("✅ [SyncEngine] Nonce decoded: \(nonceData.count) bytes")
+                self.nonce = nonceData
             }
-            print("✅ [SyncEngine] Nonce decoded: \(nonceData.count) bytes")
-            self.nonce = nonceData
-            
+
             // Decode tag from base64 string (Android uses standard base64 without padding)
             let tagString = try container.decode(String.self, forKey: .tag)
-            let tagRemainder = tagString.count % 4
-            let paddedTag = tagRemainder == 0 ? tagString : tagString + String(repeating: "=", count: 4 - tagRemainder)
-            print("🔍 [SyncEngine] Decoding tag: \(tagString) (padded: \(paddedTag))")
-            guard let tagData = Data(base64Encoded: paddedTag) else {
-                print("❌ [SyncEngine] Failed to decode base64 tag")
-                throw DecodingError.dataCorruptedError(forKey: .tag, in: container, debugDescription: "Invalid Base64 string for tag: \(tagString)")
+            if tagString.isEmpty {
+                print("⚠️ [SyncEngine] Empty tag received - treating as plain text mode")
+                self.tag = Data()
+            } else {
+                let tagRemainder = tagString.count % 4
+                let paddedTag = tagRemainder == 0 ? tagString : tagString + String(repeating: "=", count: 4 - tagRemainder)
+                print("🔍 [SyncEngine] Decoding tag: \(tagString) (padded: \(paddedTag))")
+                guard let tagData = Data(base64Encoded: paddedTag) else {
+                    print("❌ [SyncEngine] Failed to decode base64 tag")
+                    throw DecodingError.dataCorruptedError(forKey: .tag, in: container, debugDescription: "Invalid Base64 string for tag: \(tagString)")
+                }
+                print("✅ [SyncEngine] Tag decoded: \(tagData.count) bytes")
+                self.tag = tagData
             }
-            print("✅ [SyncEngine] Tag decoded: \(tagData.count) bytes")
-            self.tag = tagData
         }
     }
 }

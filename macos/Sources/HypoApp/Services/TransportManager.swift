@@ -995,7 +995,24 @@ extension TransportManager: LanWebSocketServerDelegate {
             }
         }
     }
-    
+
+    nonisolated public func server(_ server: LanWebSocketServer, didIdentifyDevice deviceId: String, for connection: UUID) {
+        #if canImport(os)
+        let connLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
+        connLogger.info("WebSocket connection \(connection.uuidString) belongs to device: \(deviceId)")
+        #endif
+        Task { @MainActor in
+            NotificationCenter.default.post(
+                name: NSNotification.Name("DeviceConnectionStatusChanged"),
+                object: nil,
+                userInfo: [
+                    "deviceId": deviceId,
+                    "isOnline": true
+                ]
+            )
+        }
+    }
+
     nonisolated public func server(_ server: LanWebSocketServer, didCloseConnection id: UUID) {
         #if canImport(os)
         let closeLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")

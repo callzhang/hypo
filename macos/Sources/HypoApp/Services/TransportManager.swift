@@ -1080,6 +1080,9 @@ extension TransportManager: LanWebSocketServerDelegate {
             
             // Update connection metadata with device ID
             webSocketServer.updateConnectionMetadata(connectionId: connectionId, deviceId: challenge.androidDeviceId)
+            let metadataMsg = "✅ [TransportManager] Updated connection metadata: connectionId=\(connectionId.uuidString.prefix(8)), deviceId=\(challenge.androidDeviceId)\n"
+            print(metadataMsg)
+            try? metadataMsg.appendToFile(path: "/tmp/hypo_debug.log")
             
             // Notify about successful pairing (for UI/history updates)
             print("📤 [TransportManager] Posting PairingCompleted notification")
@@ -1100,7 +1103,10 @@ extension TransportManager: LanWebSocketServerDelegate {
                 ]
             )
             
-            // Also notify that device is now online
+            // Also notify that device is now online (connection is established)
+            let onlineMsg = "✅ [TransportManager] Marking device as online after pairing: \(challenge.androidDeviceId)\n"
+            print(onlineMsg)
+            try? onlineMsg.appendToFile(path: "/tmp/hypo_debug.log")
             NotificationCenter.default.post(
                 name: NSNotification.Name("DeviceConnectionStatusChanged"),
                 object: nil,
@@ -1190,7 +1196,9 @@ extension TransportManager: LanWebSocketServerDelegate {
             // Try to find device ID from connection metadata
             if let metadata = server.connectionMetadata(for: id),
                let deviceId = metadata.deviceId {
-                print("✅ [TransportManager] Connection established for device: \(deviceId)")
+                let establishedMsg = "✅ [TransportManager] Connection established for device: \(deviceId)\n"
+                print(establishedMsg)
+                try? establishedMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 NotificationCenter.default.post(
                     name: NSNotification.Name("DeviceConnectionStatusChanged"),
                     object: nil,
@@ -1200,7 +1208,9 @@ extension TransportManager: LanWebSocketServerDelegate {
                     ]
                 )
             } else {
-                print("⚠️ [TransportManager] Connection established but no deviceId in metadata yet (will update when handshake completes)")
+                let noIdMsg = "⚠️ [TransportManager] Connection established but no deviceId in metadata yet (will update when handshake completes)\n"
+                print(noIdMsg)
+                try? noIdMsg.appendToFile(path: "/tmp/hypo_debug.log")
             }
         }
     }

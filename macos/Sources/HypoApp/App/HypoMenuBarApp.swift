@@ -567,6 +567,12 @@ private struct SettingsSectionView: View {
                                     .fill(device.isOnline ? Color.green : Color.gray)
                                     .frame(width: 10, height: 10)
                                     .accessibilityLabel(device.isOnline ? "Online" : "Offline")
+                                    .id("\(device.id)-\(device.isOnline)") // Force re-render when isOnline changes
+                                    .onAppear {
+                                        let debugMsg = "🎨 [UI] Device \(device.name) rendered: isOnline=\(device.isOnline), id=\(device.id)\n"
+                                        print(debugMsg)
+                                        try? debugMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                                    }
                                 Button(role: .destructive) {
                                     viewModel.removePairedDevice(device)
                                 } label: {

@@ -1,10 +1,10 @@
 # Clipboard Sync Bug Report: Android-to-macOS Clipboard Synchronization Issues
 
 **Date**: November 16, 2025  
-**Last Updated**: December 19, 2025 - 11:20 UTC  
-**Status**: 🔄 **TESTING IN PROGRESS** - Pairing successful, sync infrastructure working, but WebSocket connection issue preventing data transmission  
-**Severity**: Critical - Core sync functionality blocked by transport layer  
-**Priority**: P0 - WebSocket connection management needs investigation
+**Last Updated**: November 19, 2025 - 07:05 UTC  
+**Status**: ❌ **SYNC BLOCKED** - Clipboard detection working, but sync targets empty when events processed (timing issue)  
+**Severity**: Critical - Core sync functionality blocked by target computation timing  
+**Priority**: P0 - Target computation and LAN discovery stability needs investigation
 
 ---
 
@@ -12,24 +12,27 @@
 
 This document tracks issues with clipboard synchronization between Android and macOS devices. After successful pairing, clipboard data should sync bidirectionally in real-time.
 
-**Latest Status** (Dec 19, 2025 - 13:45 UTC):
+**Latest Status** (Nov 19, 2025 - 07:05 UTC):
 - ✅ **LAN Auto-Discovery Pairing**: Fully functional - devices can pair via tap-to-pair with automatic key exchange
-- ✅ **Sync Infrastructure**: Detection, processing, queuing, and target identification verified end-to-end
-- ✅ **WebSocket Transport**: Connection now gates clipboard send until handshake completes, fixing EOF failures (Issue 10 RESOLVED)
-- ✅ **Testing Status**: Pairing + Android ↔ macOS clipboard sync are green after the transport fix
+- ✅ **Clipboard Detection**: Events detected and received by SyncCoordinator
+- ❌ **Sync Broadcasting**: NOT happening - targets are 0 when clipboard events are processed
+- ⚠️ **LAN Discovery**: Intermittent - targets fluctuate (0→1→0), causing timing issues
+- ❌ **Cloud Relay**: Connection failing due to missing `X-Device-Id` and `X-Device-Platform` headers
 
-**Current Status** (Dec 19, 2025 - 13:45 UTC):
+**Current Status** (Nov 19, 2025 - 07:05 UTC):
 - ✅ **LAN Auto-Discovery Pairing** - Fully working; pairing completes successfully with key exchange
 - ✅ **Clipboard detection working** - AccessibilityService detecting changes (Issue 2a resolved)
-- ✅ **Events being processed** - Events flow from AccessibilityService → coordinator → database (Issue 2a resolved)
-- ✅ **Sync target filtering fixed** - Only paired devices (with keys) are included in sync targets (Issue 2b - FIXED)
+- ✅ **Events being received** - Events reach SyncCoordinator (logs show "📨 Received clipboard event!")
+- ❌ **Events NOT being broadcast** - No "Broadcasting" or "No paired devices" logs after event received
+- ❌ **Sync targets empty** - Targets are 0 when clipboard events are processed (timing issue)
+- ⚠️ **LAN discovery intermittent** - Targets fluctuate between 0 and 1, causing sync to be skipped
+- ❌ **Cloud relay headers missing** - `X-Device-Id` and `X-Device-Platform` not sent, causing 400 errors
 - ✅ **Dynamic peer IP resolution** - WebSocket connects to discovered peer IPs (Issue 5 - FIXED)
 - ✅ **macOS crash fixed** - Issue 7 patched and verified (buffer snapshot locking)
 - ✅ **History update mechanism** - ViewModel callback implemented (Issue 9b - resolved)
 - ✅ **WebSocket transport stabilized** - Sync waits for `onOpen` before sending frames (Issue 10 - FIXED)
 - ✅ **UI updating in real-time** - Hot StateFlow implementation ensures immediate updates (Issue 3 - resolved)
 - ✅ **Device deduplication** - Fixed duplicate devices appearing in paired devices list (Issue 8 - FIXED)
-- ✅ **WebSocket Connection for Sync** - Connection now waits for handshake and stays open for clipboard sync (Issue 10)
 
 **Recent Fixes**:
 - Clipboard permission checking implemented (Change 1) - detects when clipboard access is restricted and guides users to enable it
@@ -46,7 +49,7 @@ This document tracks issues with clipboard synchronization between Android and m
 
 ## Symptoms
 
-**Status**: ✅ **MOSTLY RESOLVED** - Clipboard detection working, sync target filtering fixed, UI updates working
+**Status**: ❌ **SYNC BLOCKED** - Clipboard detection working, but sync broadcasting not happening due to empty targets
 
 ### Android Side
 - ✅ `ClipboardSyncService` is running (confirmed via `dumpsys activity services`)
@@ -63,12 +66,13 @@ This document tracks issues with clipboard synchronization between Android and m
 
 ### User Experience
 - ✅ Copy text on Android → Detected and saved locally (AccessibilityService working)
-- ✅ Copy text on Android → Processed by SyncCoordinator and queued for sync
-- ❌ Copy text on Android → **NOT syncing to macOS** (WebSocket connection failing)
+- ✅ Copy text on Android → Received by SyncCoordinator (logs confirm event received)
+- ❌ Copy text on Android → **NOT broadcasting** - Targets are 0 when event processed
+- ❌ Copy text on Android → **NOT syncing to macOS** - No sync attempt made (targets empty)
 - ❓ Copy text on macOS → **NOT TESTED YET** (blocked by Android → macOS issue)
 - ✅ Items appear in history in real-time (Issue 3 - fixed with hot StateFlow)
 - ✅ Devices show as paired and sync targets are correctly filtered
-- ⚠️ WebSocket connection for sync operations failing with EOFException
+- ⚠️ **Root Cause**: Timing issue - targets are 0 when clipboard event is processed, even though targets become 1 later
 
 ---
 
@@ -111,31 +115,43 @@ adb logcat | grep "onPrimaryClipChanged"
 
 ### Observation 2: Sync Issues
 **Date**: November 16, 2025  
-**Status**: ✅ **RESOLVED** - Events reach coordinator and sync works both directions
+**Last Updated**: November 19, 2025 - 07:05 UTC  
+**Status**: ❌ **BLOCKED** - Events reach coordinator but broadcasting not happening
 
 **What We See**:
-- ✅ Logs from `SyncCoordinator` when clipboard changes (RESOLVED - events received)
-- ✅ Events being saved to database (RESOLVED - logs confirm saves)
-- ✅ Sync to paired devices working (Issue 2b fixed, Issue 9 verified)
-- ✅ Logs from `SyncEngine` for sending (keys registered)
-- ✅ Logs from `IncomingClipboardHandler` on Android/macOS (Issue 9 resolved)
+- ✅ Logs from `SyncCoordinator` when clipboard changes (events received: "📨 Received clipboard event!")
+- ✅ Events being saved to database (logs confirm saves)
+- ❌ **No broadcasting logs** - No "📤 Broadcasting" or "⏭️ No paired devices" logs after event received
+- ❌ **Targets are 0** - When clipboard event is processed, `_targets.value` is empty
+- ⚠️ **LAN discovery intermittent** - Targets fluctuate (0→1→0), causing timing issues
+- ❌ **Cloud relay failing** - Missing `X-Device-Id` and `X-Device-Platform` headers causing 400 errors
 
-**Evidence**:
+**Evidence** (Nov 19, 2025):
 ```bash
-# SyncCoordinator logs (now working)
-adb logcat | grep SyncCoordinator
-# Output: "📨 Received clipboard event!" ✅
+# Clipboard event detected
+11-18 23:03:09.423 I ClipboardListener: ✅ NEW clipboard event! Type: TEXT
+11-18 23:03:09.423 I SyncCoordinator: 📨 Received clipboard event! Type: TEXT
 
-# SyncEngine logs (still failing)
-adb logcat | grep SyncEngine
-# Output: "No symmetric key registered..." ❌
+# But no broadcasting logs after this
+# (No "📤 Broadcasting" or "⏭️ No paired devices" logs)
+
+# Targets computation shows intermittent discovery
+11-18 23:02:52.213 I SyncCoordinator: 🔄 Auto targets updated: 1, total=1
+11-18 23:03:14.242 I SyncCoordinator: 🔄 Auto targets updated: 0, total=0
+11-18 23:03:34.288 I SyncCoordinator: 🔄 Auto targets updated: 1, total=1
 ```
 
-**Resolved Items**:
-1. ✅ Clipboard events reaching `SyncCoordinator` - Events are now flowing from `ClipboardListener` → `SyncCoordinator`
-2. ✅ Events being processed - `SyncCoordinator` receives and processes events correctly
+**Root Cause**:
+- **Timing Issue**: When clipboard is copied, targets are 0 (no devices discovered)
+- Even if targets become 1 later, the event was already processed and skipped
+- LAN discovery is intermittent, causing targets to fluctuate
+- Event processing stops after "Received clipboard event" - no "Item saved" or "Broadcasting" logs
 
-**Open Items**: _None_
+**Open Items**:
+1. ❌ Fix target computation timing - Ensure targets are available when events are processed
+2. ❌ Stabilize LAN discovery - Prevent targets from fluctuating (0→1→0)
+3. ❌ Add cloud relay headers - Include `X-Device-Id` and `X-Device-Platform` in WebSocket handshake
+4. ❌ Investigate why event processing stops - No "Item saved" or "Broadcasting" logs after event received
 
 **Code to Check**:
 - `SyncCoordinator.start()` - Verify event loop is running
@@ -1008,6 +1024,117 @@ tail -100 /tmp/hypo_app.log | grep -E "(Added to history|insert)"
 - When a clipboard event fired right after pairing, the loop attempted to `socket.send()` before the server finished the HTTP upgrade. OkHttp closed the socket with `java.io.EOFException`, triggering `onFailure` and dropping the envelope.
 
 ### Fix Implemented
+
+1. **Reset handshake signal for every reconnect**  
+   - Each connection attempt now replaces `connectionSignal` with a new `CompletableDeferred` so callers don't see stale "completed" signals after a disconnect.
+
+2. **Wait for `onOpen` before sending clipboard frames**  
+   - `runConnectionLoop()` now captures the per-connection `handshakeSignal`, waits (with timeout) for it to complete, and only then enters the send loop. If the handshake never finishes, the socket is canceled and the loop retries.
+
+3. **Propagate handshake failures**  
+   - If `onFailure` fires before `onOpen`, the new await path surfaces the exception immediately, preventing silent EOF retries.
+
+**Files Modified**:
+- `android/app/src/main/java/com/hypo/clipboard/transport/ws/LanWebSocketClient.kt`
+
+### Verification
+
+- `cd macos && swift build` (no regressions on the server side)
+- Android logs now show:  
+  ```
+  D LanWebSocketClient: runConnectionLoop: Connecting to ws://192.168.68.114:7010
+  D LanWebSocketClient: onOpen: WebSocket connection established!
+  D LanWebSocketClient: ✅ Envelope sent to queue successfully
+  ```  
+  with no subsequent EOF exceptions.
+- macOS `/tmp/hypo_app.log` records incoming frames and clipboard updates immediately after Android copies text.
+- Multiple consecutive clipboard copies keep the connection alive (watchdog idle timeout respected) and no longer reconnect unnecessarily.
+
+---
+
+**Issue 11: Sync Broadcasting Not Happening - Empty Targets Timing Issue** (❌ OPEN - Nov 19, 2025 - 07:05 UTC)
+
+**Status**: ❌ **BLOCKED**  
+**Severity**: Critical - Core sync functionality blocked  
+**Priority**: P0 - Target computation timing needs fix
+
+### Symptoms
+
+- ✅ Clipboard events detected and received by `SyncCoordinator`
+- ❌ No broadcasting logs after event received (no "📤 Broadcasting" or "⏭️ No paired devices")
+- ❌ Targets are 0 when clipboard events are processed
+- ⚠️ LAN discovery is intermittent - targets fluctuate (0→1→0)
+- ❌ Event processing stops after "Received clipboard event" - no "Item saved" or "Broadcasting" logs
+
+### Evidence
+
+```bash
+# Clipboard event detected
+11-18 23:03:09.423 I ClipboardListener: ✅ NEW clipboard event! Type: TEXT
+11-18 23:03:09.423 I SyncCoordinator: 📨 Received clipboard event! Type: TEXT
+
+# But no logs after this point:
+# - No "💾 Upserting item to repository..."
+# - No "✅ Item saved to database!"
+# - No "📤 Broadcasting to X paired devices"
+# - No "⏭️ No paired devices to broadcast to"
+
+# Targets computation shows intermittent discovery
+11-18 23:02:52.213 I SyncCoordinator: 🔄 Auto targets updated: 1, total=1
+11-18 23:03:14.242 I SyncCoordinator: 🔄 Auto targets updated: 0, total=0
+11-18 23:03:34.288 I SyncCoordinator: 🔄 Auto targets updated: 1, total=1
+```
+
+### Root Cause Analysis
+
+**Primary Issue: Timing Problem**
+- When clipboard is copied, `_targets.value` is 0 (no devices discovered)
+- Even if targets become 1 later, the event was already processed and skipped
+- `SyncCoordinator` checks `if (pairedDevices.isNotEmpty())` but targets are empty at that moment
+- Event processing appears to stop after receiving the event - no further logs
+
+**Secondary Issues**:
+1. **LAN Discovery Intermittent**: Targets fluctuate between 0 and 1, indicating discovery is unstable
+2. **Cloud Relay Headers Missing**: `X-Device-Id` and `X-Device-Platform` not sent, causing 400 errors
+3. **Event Processing Hanging**: No "Item saved" logs suggest event processing may be hanging or failing silently
+
+### Possible Causes
+
+1. **Duplicate Detection**: Event might be marked as duplicate and skipped before reaching broadcast check
+2. **Repository Save Failing**: `repository.upsert()` might be failing silently
+3. **Event Processing Hanging**: Event loop might be blocked or hanging
+4. **Targets Computation Race**: Targets computed after event is already processed
+
+### Next Steps
+
+1. **Add comprehensive logging** to trace event processing flow:
+   - Log after duplicate check
+   - Log before/after repository save
+   - Log target count when checking for broadcast
+   - Log if event is skipped and why
+
+2. **Fix target computation timing**:
+   - Ensure targets are computed before event processing
+   - Consider caching paired device IDs (not just discovered peers)
+   - Add retry mechanism if targets become available after event processing
+
+3. **Stabilize LAN discovery**:
+   - Investigate why discovery is intermittent
+   - Add connection state persistence
+   - Consider using cloud relay as fallback when LAN discovery fails
+
+4. **Add cloud relay headers**:
+   - Include `X-Device-Id` and `X-Device-Platform` in WebSocket handshake
+   - Fix cloud relay connection to enable fallback sync
+
+### Related Files
+
+- `android/app/src/main/java/com/hypo/clipboard/sync/SyncCoordinator.kt` - Event processing and target checking
+- `android/app/src/main/java/com/hypo/clipboard/transport/TransportManager.kt` - Peer discovery
+- `android/app/src/main/java/com/hypo/clipboard/transport/lan/LanDiscoveryRepository.kt` - LAN discovery
+- `android/app/src/main/java/com/hypo/clipboard/transport/ws/RelayWebSocketClient.kt` - Cloud relay connection
+
+---
 
 1. **Reset handshake signal for every reconnect**  
    - Each connection attempt now replaces `connectionSignal` with a new `CompletableDeferred` so callers don’t see stale “completed” signals after a disconnect.

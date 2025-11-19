@@ -209,3 +209,4 @@ TODO.txt
 .android-sdk/
 
 .gradle/
+macos/HypoApp.app

@@ -575,15 +575,33 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 print("✅ [HistoryStore] Found device with case-insensitive match, updating...")
                 let device = pairedDevices[caseInsensitiveIndex]
                 if device.isOnline != isOnline {
-                    print("🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)")
-                    pairedDevices[caseInsensitiveIndex] = PairedDevice(
-                        id: device.id,
-                        name: device.name,
-                        platform: device.platform,
-                        lastSeen: isOnline ? Date() : device.lastSeen,
-                        isOnline: isOnline
-                    )
+                    let updateMsg = "🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)\n"
+                    print(updateMsg)
+                    try? updateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    
+                    // Create a new array with the updated device to ensure SwiftUI detects the change
+                    var updatedDevices: [PairedDevice] = []
+                    for (idx, d) in pairedDevices.enumerated() {
+                        if idx == caseInsensitiveIndex {
+                            updatedDevices.append(PairedDevice(
+                                id: device.id,
+                                name: device.name,
+                                platform: device.platform,
+                                lastSeen: isOnline ? Date() : device.lastSeen,
+                                isOnline: isOnline
+                            ))
+                        } else {
+                            updatedDevices.append(d)
+                        }
+                    }
+                    
+                    // Update the ViewModel's @Published property by replacing the entire array
+                    self.pairedDevices = updatedDevices
                     persistPairedDevices()
+                    
+                    let persistedMsg = "✅ [HistoryStore] Device \(device.name) status updated (case-insensitive) and persisted: isOnline=\(isOnline)\n"
+                    print(persistedMsg)
+                    try? persistedMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 }
                 return
             }
@@ -594,15 +612,32 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             let updateMsg = "🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)\n"
             print(updateMsg)
             try? updateMsg.appendToFile(path: "/tmp/hypo_debug.log")
-            pairedDevices[index] = PairedDevice(
-                id: device.id,
-                name: device.name,
-                platform: device.platform,
-                lastSeen: isOnline ? Date() : device.lastSeen,
-                isOnline: isOnline
-            )
+            
+            // Create a new array with the updated device to ensure SwiftUI detects the change
+            // This replaces the entire array, which triggers @Published change detection
+            var updatedDevices: [PairedDevice] = []
+            for (idx, d) in pairedDevices.enumerated() {
+                if idx == index {
+                    updatedDevices.append(PairedDevice(
+                        id: device.id,
+                        name: device.name,
+                        platform: device.platform,
+                        lastSeen: isOnline ? Date() : device.lastSeen,
+                        isOnline: isOnline
+                    ))
+                } else {
+                    updatedDevices.append(d)
+                }
+            }
+            
+            // Update the ViewModel's @Published property by replacing the entire array
+            // This triggers SwiftUI's change detection
+            self.pairedDevices = updatedDevices
+            
+            // Persist to UserDefaults
             persistPairedDevices()
-            let persistedMsg = "✅ [HistoryStore] Device \(device.name) status persisted: isOnline=\(isOnline)\n"
+            
+            let persistedMsg = "✅ [HistoryStore] Device \(device.name) status updated and persisted: isOnline=\(isOnline) (array replaced, count: \(updatedDevices.count))\n"
             print(persistedMsg)
             try? persistedMsg.appendToFile(path: "/tmp/hypo_debug.log")
         } else {
@@ -770,12 +805,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     private func persistPairedDevices() {
-        // Always deduplicate before persisting
-        let deduplicated = Self.deduplicateDevices(pairedDevices)
-        if deduplicated.count != pairedDevices.count {
-            print("🔄 [HistoryStore] Deduplicating before persist: \(pairedDevices.count) → \(deduplicated.count) devices")
-            pairedDevices = deduplicated
-        }
+        // Persist the current pairedDevices array to UserDefaults
+        // Note: We don't modify pairedDevices here to avoid overwriting recent updates
+        // Deduplication is handled when loading from UserDefaults, not when persisting
         guard let data = try? JSONEncoder().encode(pairedDevices) else { return }
         defaults.set(data, forKey: DefaultsKey.pairedDevices)
     }

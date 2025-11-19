@@ -961,13 +961,26 @@ extension TransportManager: LanWebSocketServerDelegate {
     }
     
     nonisolated public func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {
-        // Forward clipboard data to the transport for processing
         #if canImport(os)
         let syncLogger = Logger(subsystem: "com.hypo.clipboard", category: "sync")
         syncLogger.info("📥 CLIPBOARD RECEIVED: from connection \(connection.uuidString.prefix(8)), \(data.count) bytes")
         #endif
         print("📥 [TransportManager] CLIPBOARD RECEIVED: from \(connection.uuidString.prefix(8)), \(data.count) bytes")
-        
+
+        // Try to decode envelope header to attach connection metadata and update online status
+        if let envelope = try? TransportFrameCodec().decode(data) {
+            let deviceId = envelope.payload.deviceId
+            server.updateConnectionMetadata(connectionId: connection, deviceId: deviceId)
+            NotificationCenter.default.post(
+                name: NSNotification.Name("DeviceConnectionStatusChanged"),
+                object: nil,
+                userInfo: [
+                    "deviceId": deviceId,
+                    "isOnline": true
+                ]
+            )
+        }
+
         // Process incoming clipboard data through IncomingClipboardHandler
         Task { @MainActor in
             await self.incomingHandler?.handle(data)

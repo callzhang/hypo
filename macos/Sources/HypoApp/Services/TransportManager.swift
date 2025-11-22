@@ -109,6 +109,17 @@ public final class TransportManager {
         // Set up WebSocket server delegate
         webSocketServer.delegate = self
         
+        // Set up cloud relay incoming message handler
+        if let defaultProvider = provider as? DefaultTransportProvider,
+           let handler = incomingHandler {
+            defaultProvider.setCloudIncomingMessageHandler { [weak handler] data in
+                await handler?.handle(data)
+            }
+            let cloudHandlerMsg = "✅ [TransportManager] Cloud relay incoming message handler set\n"
+            print(cloudHandlerMsg)
+            try? cloudHandlerMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        }
+        
         // Connection status prober will be initialized after historyViewModel is set
         // (via setHistoryViewModel)
 
@@ -1208,39 +1219,63 @@ extension TransportManager: LanWebSocketServerDelegate {
     
     nonisolated public func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {
         // Forward clipboard data to the transport for processing
+        let callMsg = "📥 [TransportManager] server(_:didReceiveClipboardData:from:) CALLED: \(connection.uuidString.prefix(8)), \(data.count) bytes\n"
+        print(callMsg)
+        try? callMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        fflush(stdout)  // Force flush stdout
         #if canImport(os)
         let syncLogger = Logger(subsystem: "com.hypo.clipboard", category: "sync")
         syncLogger.info("📥 CLIPBOARD RECEIVED: from connection \(connection.uuidString.prefix(8)), \(data.count) bytes")
         #endif
         print("📥 [TransportManager] CLIPBOARD RECEIVED: from \(connection.uuidString.prefix(8)), \(data.count) bytes")
+        try? "📥 [TransportManager] CLIPBOARD RECEIVED: from \(connection.uuidString.prefix(8)), \(data.count) bytes\n".appendToFile(path: "/tmp/hypo_debug.log")
         
         // Extract deviceId from envelope to update connection metadata (but NOT online status)
         // Online status is determined by periodic checks only, not sync signals
+        print("🔍 [TransportManager] About to create Task for processing clipboard data")
+        try? "🔍 [TransportManager] About to create Task for processing clipboard data\n".appendToFile(path: "/tmp/hypo_debug.log")
         Task { @MainActor in
+            print("🔍 [TransportManager] Task started, incomingHandler: \(self.incomingHandler != nil ? "exists" : "nil")")
+            try? "🔍 [TransportManager] Task started, incomingHandler: \(self.incomingHandler != nil ? "exists" : "nil")\n".appendToFile(path: "/tmp/hypo_debug.log")
             // Try to extract deviceId from the frame-encoded data
             let frameCodec = TransportFrameCodec()
             do {
                 let envelope = try frameCodec.decode(data)
                 let deviceId = envelope.payload.deviceId
                 print("✅ [TransportManager] Extracted deviceId from envelope: \(deviceId)")
+                try? "✅ [TransportManager] Extracted deviceId from envelope: \(deviceId)\n".appendToFile(path: "/tmp/hypo_debug.log")
                 
                 // Update connection metadata if not already set (for ConnectionStatusProber to use)
                 if server.connectionMetadata(for: connection)?.deviceId == nil {
                     server.updateConnectionMetadata(connectionId: connection, deviceId: deviceId)
                     print("✅ [TransportManager] Updated connection metadata with deviceId: \(deviceId)")
+                    try? "✅ [TransportManager] Updated connection metadata with deviceId: \(deviceId)\n".appendToFile(path: "/tmp/hypo_debug.log")
                 }
                 // Note: We do NOT update online status here - that's handled by ConnectionStatusProber periodic checks
             } catch {
                 print("⚠️ [TransportManager] Failed to decode envelope for metadata update: \(error)")
+                try? "⚠️ [TransportManager] Failed to decode envelope for metadata update: \(error)\n".appendToFile(path: "/tmp/hypo_debug.log")
                 // Try to get deviceId from connection metadata as fallback
                 if let metadata = server.connectionMetadata(for: connection),
                    let deviceId = metadata.deviceId {
                     print("✅ [TransportManager] Using deviceId from connection metadata: \(deviceId)")
+                    try? "✅ [TransportManager] Using deviceId from connection metadata: \(deviceId)\n".appendToFile(path: "/tmp/hypo_debug.log")
                 }
             }
             
             // Process incoming clipboard data through IncomingClipboardHandler
-            await self.incomingHandler?.handle(data)
+            print("🔍 [TransportManager] About to call incomingHandler?.handle(data)")
+            try? "🔍 [TransportManager] About to call incomingHandler?.handle(data)\n".appendToFile(path: "/tmp/hypo_debug.log")
+            if let handler = self.incomingHandler {
+                print("✅ [TransportManager] incomingHandler exists, calling handle()")
+                try? "✅ [TransportManager] incomingHandler exists, calling handle()\n".appendToFile(path: "/tmp/hypo_debug.log")
+                await handler.handle(data)
+                print("✅ [TransportManager] incomingHandler.handle() completed")
+                try? "✅ [TransportManager] incomingHandler.handle() completed\n".appendToFile(path: "/tmp/hypo_debug.log")
+            } else {
+                print("❌ [TransportManager] incomingHandler is nil!")
+                try? "❌ [TransportManager] incomingHandler is nil!\n".appendToFile(path: "/tmp/hypo_debug.log")
+            }
         }
     }
     

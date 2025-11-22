@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-
 use tokio::sync::{mpsc, RwLock};
+
+type BinaryFrame = Vec<u8>;
+type SessionChannel = mpsc::UnboundedSender<BinaryFrame>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -10,11 +12,14 @@ pub enum SessionError {
 
     #[error("session send failed: {0}")]
     SendError(String),
+
+    #[error("invalid message format")]
+    InvalidMessage,
 }
 
 #[derive(Clone, Default)]
 pub struct SessionManager {
-    inner: Arc<RwLock<HashMap<String, mpsc::UnboundedSender<String>>>>,
+    inner: Arc<RwLock<HashMap<String, SessionChannel>>>,
 }
 
 impl SessionManager {
@@ -22,7 +27,7 @@ impl SessionManager {
         Self::default()
     }
 
-    pub async fn register(&self, device_id: String) -> mpsc::UnboundedReceiver<String> {
+    pub async fn register(&self, device_id: String) -> mpsc::UnboundedReceiver<BinaryFrame> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.inner.write().await.insert(device_id, tx);
         rx
@@ -33,24 +38,45 @@ impl SessionManager {
     }
 
     pub async fn broadcast_except(&self, sender_id: &str, message: &str) {
+        let binary_frame = encode_binary_frame(message);
+        self.broadcast_except_binary(sender_id, binary_frame).await;
+    }
+
+    pub async fn broadcast_except_binary(&self, sender_id: &str, frame: BinaryFrame) {
         let sessions = self.inner.read().await;
         for (id, channel) in sessions.iter() {
             if id == sender_id {
                 continue;
             }
-            let _ = channel.send(message.to_string());
+            let _ = channel.send(frame.clone());
         }
     }
 
     pub async fn send(&self, device_id: &str, message: &str) -> Result<(), SessionError> {
+        let binary_frame = encode_binary_frame(message);
+        self.send_binary(device_id, binary_frame).await
+    }
+
+    pub async fn send_binary(&self, device_id: &str, frame: BinaryFrame) -> Result<(), SessionError> {
         let sessions = self.inner.read().await;
         let sender = sessions
             .get(device_id)
             .ok_or(SessionError::DeviceNotConnected)?;
         sender
-            .send(message.to_string())
+            .send(frame)
             .map_err(|err| SessionError::SendError(err.to_string()))
     }
+}
+
+/// Encode JSON string to binary frame (4-byte big-endian length + JSON payload)
+fn encode_binary_frame(json_str: &str) -> Vec<u8> {
+    let json_bytes = json_str.as_bytes();
+    let length = json_bytes.len() as u32;
+    
+    let mut frame = Vec::with_capacity(4 + json_bytes.len());
+    frame.extend_from_slice(&length.to_be_bytes());
+    frame.extend_from_slice(json_bytes);
+    frame
 }
 
 #[cfg(test)]
@@ -66,7 +92,10 @@ mod tests {
 
         manager.broadcast_except("a", "hello").await;
 
-        assert_eq!(rx_b.recv().await.unwrap(), "hello");
+        // Decode binary frame
+        let frame = rx_b.recv().await.unwrap();
+        let json_str = std::str::from_utf8(&frame[4..]).unwrap();
+        assert_eq!(json_str, "hello");
         assert!(rx_a.try_recv().is_err());
 
         manager.unregister("a").await;
@@ -79,7 +108,10 @@ mod tests {
         let mut rx = manager.register("device-a".to_string()).await;
 
         manager.send("device-a", "direct").await.expect("send succeeds");
-        assert_eq!(rx.recv().await.unwrap(), "direct");
+        // Decode binary frame
+        let frame = rx.recv().await.unwrap();
+        let json_str = std::str::from_utf8(&frame[4..]).unwrap();
+        assert_eq!(json_str, "direct");
 
         let err = manager.send("missing", "payload").await.unwrap_err();
         assert!(matches!(err, SessionError::DeviceNotConnected));
@@ -109,7 +141,9 @@ mod tests {
         assert!(first_rx.recv().await.is_none());
 
         manager.send("dup", "latest").await.unwrap();
-        assert_eq!(second_rx.recv().await.unwrap(), "latest");
+        let frame = second_rx.recv().await.unwrap();
+        let json_str = std::str::from_utf8(&frame[4..]).unwrap();
+        assert_eq!(json_str, "latest");
     }
 
     #[tokio::test]
@@ -128,7 +162,9 @@ mod tests {
             if idx == 3 {
                 assert!(rx.try_recv().is_err());
             } else {
-                assert_eq!(rx.recv().await.unwrap(), "fanout");
+                let frame = rx.recv().await.unwrap();
+                let json_str = std::str::from_utf8(&frame[4..]).unwrap();
+                assert_eq!(json_str, "fanout");
             }
         }
     }

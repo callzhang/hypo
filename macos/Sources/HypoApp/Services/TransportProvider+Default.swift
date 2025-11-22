@@ -7,7 +7,7 @@ public final class DefaultTransportProvider: TransportProvider {
     private let cloudTransport: CloudRelayTransport
     private let dualTransport: DualSyncTransport
     
-    public init(server: LanWebSocketServer) {
+    public init(server: LanWebSocketServer, onIncomingMessage: ((Data) async -> Void)? = nil) {
         self.server = server
         self.lanTransport = LanSyncTransport(server: server)
         
@@ -15,11 +15,21 @@ public final class DefaultTransportProvider: TransportProvider {
         let cloudConfig = CloudRelayDefaults.production()
         self.cloudTransport = CloudRelayTransport(configuration: cloudConfig)
         
+        // Set incoming message handler for cloud relay
+        if let handler = onIncomingMessage {
+            self.cloudTransport.setOnIncomingMessage(handler)
+        }
+        
         // Create dual transport that sends to both LAN and cloud simultaneously
         self.dualTransport = DualSyncTransport(
             lanTransport: lanTransport,
             cloudTransport: cloudTransport
         )
+    }
+    
+    /// Set handler for incoming messages from cloud relay
+    public func setCloudIncomingMessageHandler(_ handler: @escaping (Data) async -> Void) {
+        cloudTransport.setOnIncomingMessage(handler)
     }
 
     public func preferredTransport(for preference: TransportPreference) -> SyncTransport {

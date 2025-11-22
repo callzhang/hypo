@@ -164,29 +164,24 @@ class ClipboardListener(
     
     private fun process(clip: ClipData) {
         try {
-            Log.i(TAG, "🔍 Processing clip with ${clip.itemCount} items")
             val event = parser.parse(clip)
             if (event == null) {
-                Log.w(TAG, "⚠️  Parser returned null event")
                 return
             }
             val signature = event.signature()
-            Log.i(TAG, "✏️  Event signature: $signature (last: $lastSignature, processing: $processingSignature)")
             
             // Check for duplicate - use synchronized block to prevent race conditions
             synchronized(this) {
                 if (lastSignature == signature || processingSignature == signature) {
-                    Log.i(TAG, "⏭️  Duplicate detected, skipping (last=$lastSignature, processing=$processingSignature)")
                     return
                 }
                 // Mark as processing BEFORE launching coroutine to prevent race condition
                 processingSignature = signature
             }
 
-            Log.i(TAG, "✅ NEW clipboard event! Type: ${event.type}, preview: ${event.preview.take(50)}")
             job?.cancel()
             val exceptionHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
-                Log.e(TAG, "❌ Uncaught exception in clipboard callback coroutine: ${throwable.message}", throwable)
+                Log.e(TAG, "❌ Uncaught exception in clipboard callback: ${throwable.message}", throwable)
                 // Clear processing signature on error
                 synchronized(this) {
                     if (processingSignature == signature) {
@@ -196,9 +191,7 @@ class ClipboardListener(
             }
             job = scope.launch(dispatcher + exceptionHandler) {
                 try {
-                    Log.i(TAG, "🚀 Calling onClipboardChanged callback...")
                     onClipboardChanged(event)
-                    Log.i(TAG, "✅ onClipboardChanged callback completed")
                     // Update lastSignature and clear processingSignature AFTER callback completes
                     synchronized(this@ClipboardListener) {
                         lastSignature = signature

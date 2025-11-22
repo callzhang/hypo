@@ -71,6 +71,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
     private var lastActivity: Date = Date()
     private var handshakeStartedAt: Date?
     private let pendingRoundTrips: PendingRoundTripStore
+    private var onIncomingMessage: ((Data) async -> Void)?
 
     public init(
         configuration: LanWebSocketConfiguration,
@@ -83,7 +84,8 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             config.timeoutIntervalForResource = max(timeout * 2, 120) // Longer timeout for WebSocket connections
             config.waitsForConnectivity = true
             return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-        }
+        },
+        onIncomingMessage: ((Data) async -> Void)? = nil
     ) {
         self.configuration = configuration
         self.frameCodec = frameCodec
@@ -91,6 +93,11 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         self.analytics = analytics
         self.sessionFactory = sessionFactory
         self.pendingRoundTrips = PendingRoundTripStore(maxAge: configuration.roundTripTimeout)
+        self.onIncomingMessage = onIncomingMessage
+    }
+    
+    public func setOnIncomingMessage(_ handler: @escaping (Data) async -> Void) {
+        self.onIncomingMessage = handler
     }
 
     deinit {
@@ -127,10 +134,48 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
 
         let session = sessionFactory(self, configuration.idleTimeout)
         self.session = session
-        var request = URLRequest(url: configuration.url)
+        
+        // Build URL with query parameters as fallback if headers don't work
+        var url = configuration.url
+        if let deviceId = configuration.headers["X-Device-Id"],
+           let platform = configuration.headers["X-Device-Platform"] {
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            var queryItems = components?.queryItems ?? []
+            queryItems.append(URLQueryItem(name: "device_id", value: deviceId))
+            queryItems.append(URLQueryItem(name: "platform", value: platform))
+            components?.queryItems = queryItems
+            if let newUrl = components?.url {
+                url = newUrl
+            }
+        }
+        
+        var request = URLRequest(url: url)
+        let headersCount = configuration.headers.count
+        let headersMsg = "📋 [LanWebSocketTransport] Setting \(headersCount) headers + query params\n"
+        print(headersMsg)
+        fflush(stdout)
+        try? headersMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        if configuration.headers.isEmpty {
+            let emptyMsg = "⚠️ [LanWebSocketTransport] WARNING: Headers dictionary is EMPTY!\n"
+            print(emptyMsg)
+            fflush(stdout)
+            try? emptyMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        }
         configuration.headers.forEach { key, value in
             request.setValue(value, forHTTPHeaderField: key)
+            let headerMsg = "📋 [LanWebSocketTransport] Set header: \(key) = \(value)\n"
+            print(headerMsg)
+            fflush(stdout)
+            try? headerMsg.appendToFile(path: "/tmp/hypo_debug.log")
         }
+        let allHeadersMsg = "📋 [LanWebSocketTransport] Final URL: \(url.absoluteString)\n"
+        print(allHeadersMsg)
+        fflush(stdout)
+        try? allHeadersMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        let requestHeadersMsg = "📋 [LanWebSocketTransport] Request headers: \(request.allHTTPHeaderFields ?? [:])\n"
+        print(requestHeadersMsg)
+        fflush(stdout)
+        try? requestHeadersMsg.appendToFile(path: "/tmp/hypo_debug.log")
 
         let task = session.webSocketTask(with: request)
         state = .connecting
@@ -258,11 +303,17 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
 extension LanWebSocketTransport: @unchecked Sendable {}
 
 extension LanWebSocketTransport: URLSessionWebSocketDelegate {
-    public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+    public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocolName: String?) {
+        let delegateMsg = "🎉 [LanWebSocketTransport] didOpenWithProtocol called! protocol: \(protocolName ?? "nil")\n"
+        print(delegateMsg)
+        try? delegateMsg.appendToFile(path: "/tmp/hypo_debug.log")
         handleOpen(task: webSocketTask)
     }
 
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        let closeMsg = "🔌 [LanWebSocketTransport] didCloseWith: code=\(closeCode.rawValue), reason=\(reason != nil ? String(data: reason!, encoding: .utf8) ?? "binary" : "nil")\n"
+        print(closeMsg)
+        try? closeMsg.appendToFile(path: "/tmp/hypo_debug.log")
         state = .idle
         watchdogTask?.cancel()
         watchdogTask = nil
@@ -285,22 +336,50 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func receiveNext(on task: WebSocketTasking) {
+        let receiveMsg = "📡 [LanWebSocketTransport] receiveNext() called, setting up receive callback\n"
+        print(receiveMsg)
+        try? receiveMsg.appendToFile(path: "/tmp/hypo_debug.log")
         task.receive { [weak self] result in
-            guard let self else { return }
+            guard let self else {
+                let nilMsg = "⚠️ [LanWebSocketTransport] Self is nil in receive callback\n"
+                print(nilMsg)
+                try? nilMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                return
+            }
+            let callbackMsg = "📡 [LanWebSocketTransport] receive callback triggered\n"
+            print(callbackMsg)
+            try? callbackMsg.appendToFile(path: "/tmp/hypo_debug.log")
             switch result {
             case .success(let message):
                 self.touch()
+                let successMsg = "✅ [LanWebSocketTransport] Message received: \(message)\n"
+                print(successMsg)
+                try? successMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 if case .data(let data) = message {
+                    let dataMsg = "📦 [LanWebSocketTransport] Binary data received: \(data.count) bytes\n"
+                    print(dataMsg)
+                    try? dataMsg.appendToFile(path: "/tmp/hypo_debug.log")
                     self.handleIncoming(data: data)
+                } else {
+                    let nonDataMsg = "⚠️ [LanWebSocketTransport] Non-binary message received\n"
+                    print(nonDataMsg)
+                    try? nonDataMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 }
                 self.receiveNext(on: task)
-            case .failure:
+            case .failure(let error):
+                let errorMsg = "❌ [LanWebSocketTransport] Receive failed: \(error.localizedDescription)\n"
+                print(errorMsg)
+                try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 Task { await self.disconnect() }
             }
         }
     }
 
     private func handleIncoming(data: Data) {
+        let handleMsg = "📥 [LanWebSocketTransport] handleIncoming: \(data.count) bytes\n"
+        print(handleMsg)
+        try? handleMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
         do {
             let envelope = try frameCodec.decode(data)
             Task { [metricsRecorder] in
@@ -311,7 +390,24 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                 }
                 await pendingRoundTrips.pruneExpired(referenceDate: now)
             }
+            
+            // Forward to incoming message handler (for cloud relay messages)
+            if let handler = onIncomingMessage {
+                let forwardMsg = "📤 [LanWebSocketTransport] Forwarding to onIncomingMessage handler\n"
+                print(forwardMsg)
+                try? forwardMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                Task {
+                    await handler(data)
+                }
+            } else {
+                let noHandlerMsg = "⚠️ [LanWebSocketTransport] No onIncomingMessage handler set\n"
+                print(noHandlerMsg)
+                try? noHandlerMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            }
         } catch {
+            let errorMsg = "❌ [LanWebSocketTransport] Failed to decode incoming data: \(error)\n"
+            print(errorMsg)
+            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
             Task {
                 await pendingRoundTrips.pruneExpired(referenceDate: Date())
             }
@@ -319,6 +415,9 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     func handleOpen(task: WebSocketTasking) {
+        let openMsg = "✅ [LanWebSocketTransport] handleOpen() called, connection established\n"
+        print(openMsg)
+        try? openMsg.appendToFile(path: "/tmp/hypo_debug.log")
         state = .connected(task)
         touch()
         startWatchdog(for: task)
@@ -329,6 +428,9 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
         handshakeStartedAt = nil
         handshakeContinuation?.resume(returning: ())
         handshakeContinuation = nil
+        let receiveNextMsg = "📡 [LanWebSocketTransport] handleOpen: Starting receiveNext()\n"
+        print(receiveNextMsg)
+        try? receiveNextMsg.appendToFile(path: "/tmp/hypo_debug.log")
         receiveNext(on: task)
     }
 }

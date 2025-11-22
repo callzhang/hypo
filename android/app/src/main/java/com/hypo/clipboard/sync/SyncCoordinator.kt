@@ -52,7 +52,7 @@ class SyncCoordinator @Inject constructor(
                 val deviceIds = peers.map { it.attributes["device_id"] ?: it.serviceName }.toSet()
                 autoTargets.value = deviceIds
                 recomputeTargets()
-                android.util.Log.i(TAG, "🔄 Auto targets updated: ${deviceIds.size}, total=${_targets.value.size}")
+                // Targets updated silently
             }
         }
     }
@@ -63,9 +63,16 @@ class SyncCoordinator @Inject constructor(
         // This prevents sync attempts to unpaired devices or Android devices
         val allCandidates = (autoTargets.value + manualTargets.value) - identity.deviceId
         
-        // Filter to only devices that have keys in the key store (use cached value)
+        // Get all paired device IDs (devices with keys in the key store)
         val pairedDeviceIds = pairedDeviceIdsCache.value
-        val filtered = allCandidates.filter { candidateId ->
+        
+        // IMPORTANT: Include ALL paired devices as targets, not just discovered ones
+        // This ensures we can sync to paired devices even if they're not currently discovered
+        // (e.g., macOS device on different network, temporarily offline, etc.)
+        val allPairedTargets = pairedDeviceIds - identity.deviceId
+        
+        // Filter discovered candidates to only those that are paired
+        val discoveredAndPaired = allCandidates.filter { candidateId ->
             // Try exact match first
             val exactMatch = pairedDeviceIds.contains(candidateId)
             if (exactMatch) {
@@ -80,8 +87,12 @@ class SyncCoordinator @Inject constructor(
             }
         }.toSet()
         
+        // Combine: all paired devices (for sync even when not discovered) + discovered paired devices
+        // This ensures we sync to all paired devices, whether discovered or not
+        val filtered = (allPairedTargets + discoveredAndPaired).toSet()
+        
         _targets.value = filtered
-        Log.d(TAG, "🎯 Recomputed targets: auto=${autoTargets.value.size}, manual=${manualTargets.value.size}, candidates=${allCandidates.size}, paired=${pairedDeviceIds.size}, filtered=${filtered.size}, localDeviceId=${identity.deviceId}")
+        Log.d(TAG, "🎯 Recomputed targets: auto=${autoTargets.value.size}, manual=${manualTargets.value.size}, candidates=${allCandidates.size}, paired=${pairedDeviceIds.size}, allPairedTargets=${allPairedTargets.size}, discoveredAndPaired=${discoveredAndPaired.size}, filtered=${filtered.size}, localDeviceId=${identity.deviceId}")
         
         if (filtered.size < allCandidates.size) {
             val missing = allCandidates - filtered
@@ -111,9 +122,7 @@ class SyncCoordinator @Inject constructor(
         val channel = Channel<ClipboardEvent>(Channel.BUFFERED)
         eventChannel = channel
         job = scope.launch {
-            Log.i(TAG, "✅ SyncCoordinator event loop RUNNING, waiting for events...")
             for (event in channel) {
-                Log.i(TAG, "📨 Received clipboard event! Type: ${event.type}, id: ${event.id}")
                 // Use source device info if available (from remote sync), otherwise use local device info
                 val deviceId = event.sourceDeviceId ?: identity.deviceId
                 val deviceName = event.sourceDeviceName ?: identity.deviceName
@@ -128,7 +137,6 @@ class SyncCoordinator @Inject constructor(
                 )
                 
                 if (isDuplicate) {
-                    Log.i(TAG, "⏭️ Duplicate clipboard event detected (signature: ${signature.take(50)}), skipping save")
                     continue
                 }
                 
@@ -143,17 +151,13 @@ class SyncCoordinator @Inject constructor(
                     createdAt = event.createdAt,
                     isPinned = false
                 )
-                Log.i(TAG, "💾 Upserting item to repository...")
-                Log.i(TAG, "📱 Device Info: deviceId=${deviceId.take(20)}..., fullId=$deviceId, deviceName=$deviceName, isRemote=${event.sourceDeviceId != null}, skipBroadcast=${event.skipBroadcast}")
                 repository.upsert(item)
-                Log.i(TAG, "✅ Item saved to database!")
 
                 // Only broadcast if not a received item (prevent loops)
                 if (!event.skipBroadcast) {
                     // Wait up to 10 seconds for targets to be available (handles race condition with peer discovery)
                     var pairedDevices = _targets.value
                     if (pairedDevices.isEmpty()) {
-                        Log.i(TAG, "⏳ Targets empty, waiting up to 10s for targets to be ready...")
                         val startTime = System.currentTimeMillis()
                         while (pairedDevices.isEmpty() && (System.currentTimeMillis() - startTime) < 10_000) {
                             kotlinx.coroutines.delay(100) // Check every 100ms
@@ -180,8 +184,6 @@ class SyncCoordinator @Inject constructor(
                     } else {
                         Log.i(TAG, "⏭️  No paired devices to broadcast to (targets: ${_targets.value})")
                     }
-                } else {
-                    Log.i(TAG, "⏭️  Skipping broadcast (received from remote)")
                 }
             }
         }
@@ -195,9 +197,7 @@ class SyncCoordinator @Inject constructor(
     }
 
     suspend fun onClipboardEvent(event: ClipboardEvent) {
-        Log.i(TAG, "📬 onClipboardEvent called! Sending to channel...")
         eventChannel?.send(event)
-        Log.i(TAG, "✅ Event sent to channel successfully")
     }
 
     fun setTargetDevices(deviceIds: Set<String>) {

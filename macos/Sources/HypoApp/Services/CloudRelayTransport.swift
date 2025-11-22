@@ -75,4 +75,9 @@ public final class CloudRelayTransport: SyncTransport {
     public func isConnected() -> Bool {
         return delegate.isConnected()
     }
+    
+    /// Set handler for incoming messages from cloud relay
+    public func setOnIncomingMessage(_ handler: @escaping (Data) async -> Void) {
+        delegate.setOnIncomingMessage(handler)
+    }
 }

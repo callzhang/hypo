@@ -184,7 +184,10 @@ class LanPairingViewModel @Inject constructor(
                         val config = TlsWebSocketConfig(
                             url = wsUrl,
                             fingerprintSha256 = fingerprint,
-                            headers = emptyMap(),
+                            headers = mapOf(
+                                "X-Device-Id" to identity.deviceId,
+                                "X-Device-Platform" to "android"
+                            ),
                             environment = "lan",
                             idleTimeoutMillis = 30_000,
                             roundTripTimeoutMillis = 60_000

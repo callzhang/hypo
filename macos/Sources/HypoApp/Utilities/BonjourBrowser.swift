@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 public struct LanEndpoint: Equatable {
     public let host: String
@@ -203,6 +206,28 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
 
     private func emitResolved(for service: NetService) {
         guard let host = service.hostName else { return }
+        
+        // Extract IP address from NetService.addresses (preferred) or fallback to hostname
+        var ipAddress: String? = nil
+        if let addresses = service.addresses, !addresses.isEmpty {
+            // NetService.addresses contains Data objects representing sockaddr structures
+            // Try to extract IPv4 or IPv6 address from the first address
+            for addressData in addresses {
+                var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                let result = addressData.withUnsafeBytes { bytes -> Int32 in
+                    let sockaddrPtr = bytes.bindMemory(to: sockaddr.self).baseAddress!
+                    return getnameinfo(sockaddrPtr, socklen_t(addressData.count), &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
+                }
+                if result == 0 {
+                    ipAddress = String(cString: hostname)
+                    break // Use first valid IP address
+                }
+            }
+        }
+        
+        // Use IP address if available, otherwise fallback to hostname
+        let displayHost = ipAddress ?? host
+        
         let txt = NetService.dictionary(fromTXTRecord: service.txtRecordData() ?? Data())
         var metadata: [String: String] = [:]
         for (key, value) in txt {
@@ -210,7 +235,7 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
         }
         let record = BonjourServiceRecord(
             serviceName: service.name,
-            host: host,
+            host: displayHost,
             port: service.port,
             txtRecords: metadata
         )

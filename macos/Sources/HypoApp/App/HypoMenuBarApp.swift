@@ -534,11 +534,11 @@ private struct SettingsSectionView: View {
                         ForEach(viewModel.pairedDevices) { device in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(device.name)
-                                    Text(device.platform)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text("Last seen \(device.lastSeen.formatted(date: .omitted, time: .shortened))")
+                                    HStack(spacing: 6) {
+                                        Text(device.name)
+                                        PlatformBadge(platform: device.platform)
+                                    }
+                                    Text(connectionStatusText(for: device))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -676,6 +676,92 @@ private struct SettingsSectionView: View {
         case .error:
             return "Connection Error"
         }
+    }
+    
+    private struct PlatformBadge: View {
+        let platform: String
+        
+        var body: some View {
+            Text(platformIcon)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(platformColor)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule()
+                        .fill(platformColor.opacity(0.15))
+                )
+        }
+        
+        private var platformIcon: String {
+            switch platform.lowercased() {
+            case "android":
+                return "🤖"
+            case "ios", "iphone", "ipad":
+                return "📱"
+            case "macos", "mac":
+                return "💻"
+            default:
+                return "📱"
+            }
+        }
+        
+        private var platformColor: Color {
+            switch platform.lowercased() {
+            case "android":
+                return .green
+            case "ios", "iphone", "ipad":
+                return .blue
+            case "macos", "mac":
+                return .blue
+            default:
+                return .secondary
+            }
+        }
+    }
+    
+    private func connectionStatusText(for device: PairedDevice) -> String {
+        guard device.isOnline else {
+            // Offline - show last seen time
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .short
+            return "Last seen \(formatter.string(from: device.lastSeen))"
+        }
+        
+        // Device is online - determine connection method
+        // Match Android's logic: show "and server" if device is discovered on LAN AND server is connected
+        let hasLan = device.bonjourHost != nil && device.bonjourPort != nil && device.bonjourHost != "unknown"
+        let isServerConnected = viewModel.connectionState == .connectedCloud
+        
+        // Get device transport to determine if it's using cloud (for cloud-only case)
+        var deviceTransport: TransportChannel? = nil
+        if let transportManager = viewModel.transportManager {
+            deviceTransport = transportManager.lastSuccessfulTransport(for: device.id)
+                ?? transportManager.lastSuccessfulTransport(for: device.name)
+                ?? (device.serviceName != nil ? transportManager.lastSuccessfulTransport(for: device.serviceName!) : nil)
+        }
+        let isCloudTransport = deviceTransport == .cloud && isServerConnected
+        
+        // Match Android's logic: if device is discovered on LAN AND server is connected, show "and server"
+        // This works even if the device doesn't have a cloud transport record yet
+        if hasLan && isServerConnected {
+            // Connected via both LAN and server (mirror Android's behavior)
+            if let host = device.bonjourHost, let port = device.bonjourPort {
+                return "Connected via \(host):\(port) and server"
+            }
+        } else if hasLan {
+            // Connected via LAN only
+            if let host = device.bonjourHost, let port = device.bonjourPort {
+                return "Connected via \(host):\(port)"
+            }
+        } else if isCloudTransport {
+            // Connected via cloud only (device has cloud transport record)
+            return "Connected via server"
+        }
+        
+        // Fallback: just show "Connected" if online but no specific connection info
+        return "Connected"
     }
 }
 

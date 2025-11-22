@@ -2,6 +2,32 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [0.2.2] - 2025-01-21 - UI Improvements & Code Refactoring
+
+### Fixed
+- **macOS Connection Status Display**: Fixed connection status text to show actual IP address instead of Bonjour hostname
+  - Extracts IP address from `NetService.addresses` using `getnameinfo()`
+  - Now displays "Connected via 10.0.0.137:7010 and server" instead of "Connected via Android_NOLKQLA2.local.:7010 and server"
+  - Falls back to hostname if IP extraction fails
+
+- **macOS Device Discovery Info Preservation**: Fixed `bonjourHost` and `bonjourPort` being lost when updating device online status
+  - `updateDeviceOnlineStatus` now preserves all discovery fields (serviceName, bonjourHost, bonjourPort, fingerprint)
+  - Ensures connection status text can display IP:PORT information correctly
+
+### Changed
+- **Android SettingsViewModel Refactoring**: Removed synthetic peers approach in favor of direct storage-based model
+  - Loads paired devices directly from `DeviceKeyStore` instead of creating fake `DiscoveredPeer` objects
+  - Simpler logic: Storage → Check Discovery/Connection Status → Display
+  - More maintainable and easier to understand code flow
+  - Eliminates unnecessary object creation and merging logic
+
+### Technical Details
+- `BonjourBrowser` now extracts IP addresses from resolved `NetService` addresses
+- `HistoryStore.updateDeviceOnlineStatus` preserves all `PairedDevice` fields when updating status
+- `SettingsViewModel` uses `PairedDeviceInfo` internal model for cleaner data flow
+
+---
+
 ## [0.2.1] - 2025-11-19 - Clipboard Sync Stability & Cloud Relay Support
 
 ### Fixed

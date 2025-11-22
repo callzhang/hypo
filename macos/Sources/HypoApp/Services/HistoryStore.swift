@@ -588,7 +588,11 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                                 name: device.name,
                                 platform: device.platform,
                                 lastSeen: device.lastSeen, // Don't update lastSeen here - only update on actual activity
-                                isOnline: isOnline
+                                isOnline: isOnline,
+                                serviceName: device.serviceName,
+                                bonjourHost: device.bonjourHost,
+                                bonjourPort: device.bonjourPort,
+                                fingerprint: device.fingerprint
                             ))
                         } else {
                             updatedDevices.append(d)
@@ -639,7 +643,11 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                         name: device.name,
                         platform: device.platform,
                         lastSeen: device.lastSeen, // Don't update lastSeen here - only update on actual activity
-                        isOnline: isOnline
+                        isOnline: isOnline,
+                        serviceName: device.serviceName,
+                        bonjourHost: device.bonjourHost,
+                        bonjourPort: device.bonjourPort,
+                        fingerprint: device.fingerprint
                     ))
                 } else {
                     updatedDevices.append(d)

@@ -70,158 +70,102 @@ class SettingsViewModel @Inject constructor(
                 connectivityCheckTrigger.onStart { emit(Unit) } // Emit immediately on start
             ) { settings, peers, lastTransport, connectionState, _ ->
                 val isAccessibilityEnabled = checkAccessibilityServiceStatus()
-                // Get ALL paired device IDs from DeviceKeyStore (not just discovered ones)
+                // Load all paired devices directly from persistent storage
                 val allPairedDeviceIds = runCatching { 
                     deviceKeyStore.getAllDeviceIds() 
                 }.getOrElse { emptyList() }
                 
                 android.util.Log.d("SettingsViewModel", "📋 Found ${allPairedDeviceIds.size} paired devices: $allPairedDeviceIds")
-                android.util.Log.d("SettingsViewModel", "📋 Discovered peers: ${peers.size}, lastTransport size: ${lastTransport.size}, keys: ${lastTransport.keys}")
+                android.util.Log.d("SettingsViewModel", "📋 Discovered peers: ${peers.size}, lastTransport size: ${lastTransport.size}")
                 
-                // Debug: Log the full lastTransport map
-                if (lastTransport.isNotEmpty()) {
-                    android.util.Log.d("SettingsViewModel", "📋 lastTransport contents: $lastTransport")
-                } else {
-                    android.util.Log.w("SettingsViewModel", "⚠️ lastTransport is empty! This should not happen if status was persisted.")
-                }
-                
-                // Build a map of paired peers: discovered peers + synthetic peers for paired but not discovered devices
-                val pairedPeersMap = mutableMapOf<String, DiscoveredPeer>()
-                
-                // First, add all discovered peers that are paired
-                // Note: Devices are matched by device_id (UUID) which is stable across network changes
-                // When a device changes network (different IP), it will be re-discovered with the same device_id
-                for (peer in peers) {
-                    val deviceId = peer.attributes["device_id"] ?: peer.serviceName
-                    // Match by device_id (preferred) or serviceName (fallback for legacy devices)
-                    if (allPairedDeviceIds.contains(deviceId) || allPairedDeviceIds.contains(peer.serviceName)) {
-                        // Use deviceId as key to ensure consistent matching even if serviceName changes
-                        pairedPeersMap[deviceId] = peer
-                        android.util.Log.d("SettingsViewModel", "✅ Found discovered paired device: deviceId=$deviceId, serviceName=${peer.serviceName}, host=${peer.host}")
-                    }
-                }
-                
-                // Then, create synthetic peers for paired devices that are not currently discovered
-                // Only create synthetic peers if the device has a stored name (otherwise it was deleted)
-                for (deviceId in allPairedDeviceIds) {
-                    if (!pairedPeersMap.containsKey(deviceId)) {
-                        // Get stored device name - if null, skip creating synthetic peer (device was deleted)
-                        val deviceName = transportManager.getDeviceName(deviceId)
-                        if (deviceName != null) {
-                            // Create a synthetic peer for this paired but not discovered device
-                            val syntheticPeer = DiscoveredPeer(
-                                serviceName = deviceName, // Use stored device name for display
-                                host = "unknown",
-                                port = 0,
-                                fingerprint = null,
-                                attributes = mapOf("device_id" to deviceId, "device_name" to deviceName),
-                                lastSeen = java.time.Instant.now()
-                            )
-                            pairedPeersMap[deviceId] = syntheticPeer
-                            android.util.Log.d("SettingsViewModel", "📦 Created synthetic peer for paired but not discovered device: $deviceId (name=$deviceName)")
-                        } else {
-                            android.util.Log.d("SettingsViewModel", "⏭️ Skipping synthetic peer for $deviceId - no stored device name (device was deleted)")
+                // Build list of paired devices from storage (not synthetic peers)
+                val pairedDevices = allPairedDeviceIds.mapNotNull { deviceId ->
+                    val deviceName = transportManager.getDeviceName(deviceId)
+                    if (deviceName != null) {
+                        // Find discovered peer for this device (if any)
+                        val discoveredPeer = peers.firstOrNull { peer ->
+                            val peerDeviceId = peer.attributes["device_id"] ?: peer.serviceName
+                            peerDeviceId == deviceId || peer.serviceName == deviceId
                         }
+                        PairedDeviceInfo(
+                            deviceId = deviceId,
+                            deviceName = deviceName,
+                            discoveredPeer = discoveredPeer
+                        )
+                    } else {
+                        // Skip devices without stored name (they were deleted)
+                        null
                     }
                 }
                 
-                val pairedPeers = pairedPeersMap.values.toList()
+                android.util.Log.d("SettingsViewModel", "📋 Built ${pairedDevices.size} paired devices from storage")
                 
-                // Map peers to include connection status and transport info
-                val peerStatuses = pairedPeers.associate { peer ->
-                    val deviceId = peer.attributes["device_id"] ?: peer.serviceName
-                    val serviceName = peer.serviceName
+                // Convert paired devices to DiscoveredPeer for UI (since UI still expects DiscoveredPeer)
+                // This is cleaner than "synthetic peers" - we're converting from storage to display format
+                val pairedPeersForUi = pairedDevices.map { device ->
+                    device.discoveredPeer ?: DiscoveredPeer(
+                        serviceName = device.deviceName,
+                        host = "unknown",
+                        port = 0,
+                        fingerprint = null,
+                        attributes = mapOf("device_id" to device.deviceId, "device_name" to device.deviceName),
+                        lastSeen = java.time.Instant.now()
+                    )
+                }
+                
+                // Map paired devices to include connection status and transport info
+                val peerStatuses = pairedDevices.associate { device ->
+                    val deviceId = device.deviceId
+                    val serviceName = device.discoveredPeer?.serviceName ?: device.deviceName
+                    val isDiscovered = device.discoveredPeer != null
                     
-                    // Look up transport status using the deviceId (this is what was saved during pairing)
-                    // Try exact match first (case-sensitive), then case-insensitive, then fuzzy matching
+                    // Look up transport status using deviceId
                     val transport = lastTransport[deviceId]
-                        ?: lastTransport[serviceName]
                         ?: lastTransport.entries.firstOrNull { 
                             it.key.equals(deviceId, ignoreCase = true)
                         }?.value
-                        ?: lastTransport.entries.firstOrNull { 
-                            it.key.equals(serviceName, ignoreCase = true)
-                        }?.value
-                        ?: lastTransport.entries.firstOrNull { 
-                            // Try fuzzy matching for device IDs (UUIDs might have different case)
-                            val key = it.key
-                            key.equals(deviceId, ignoreCase = true) || 
-                            key.equals(serviceName, ignoreCase = true) ||
-                            key.replace("-", "").equals(deviceId.replace("-", ""), ignoreCase = true) ||
-                            key.replace("-", "").equals(serviceName.replace("-", ""), ignoreCase = true)
-                        }?.value
                     
-                    val isDiscovered = peers.any { 
-                        val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
-                        peerDeviceId == deviceId || it.serviceName == serviceName
-                    }
-                    
-                    android.util.Log.d("SettingsViewModel", "🔍 Status check: deviceId=$deviceId, serviceName=$serviceName, transport=$transport, isDiscovered=$isDiscovered, lastTransport keys=${lastTransport.keys}")
-                    
-                    // Determine status: 
-                    // - LAN devices must be discovered AND have transport status to show as Connected
-                    // - CLOUD devices can show as Connected ONLY if server is actually connected AND they have transport status
-                    // - Paired devices without transport record are "Paired" (will use LAN-first, cloud-fallback on sync)
                     val isServerConnected = connectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedCloud
                     val isServerIdle = connectionState == com.hypo.clipboard.transport.ConnectionState.Idle
                     
-                    // If server is Idle (no network), all peers are offline immediately
+                    // Determine status: mark online if discovered on LAN or connected via cloud
                     val status = if (isServerIdle) {
                         DeviceConnectionStatus.Disconnected
                     } else when {
-                        // Device is discovered AND has LAN transport → Connected via LAN
-                        // This works even if device changed network (matched by device_id, not IP)
-                        isDiscovered && transport == ActiveTransport.LAN -> DeviceConnectionStatus.ConnectedLan
-                        // Device is discovered but no transport record → Connected via LAN (discovered means on same network)
-                        // This handles the case where device was just paired and transport status hasn't been set yet
+                        // Device is discovered on LAN → Connected via LAN
                         isDiscovered -> DeviceConnectionStatus.ConnectedLan
-                        // Device has CLOUD transport → Connected via Cloud ONLY if server is actually connected
-                        // Don't show as "Connected via server" if server is offline
+                        // Device has CLOUD transport AND server is connected → Connected via Cloud
                         transport == ActiveTransport.CLOUD && isServerConnected -> DeviceConnectionStatus.ConnectedCloud
                         // Device has CLOUD transport but server is offline → Disconnected
                         transport == ActiveTransport.CLOUD && !isServerConnected -> DeviceConnectionStatus.Disconnected
-                        // Device is paired but not discovered and no transport record → Paired (will use LAN-first, cloud-fallback on sync)
-                        // Code-paired devices may not have transport marked yet - they'll try LAN first, then cloud on sync
-                        else -> DeviceConnectionStatus.Paired
+                        // Device is paired but not discovered and no transport record → Offline
+                        else -> DeviceConnectionStatus.Disconnected
                     }
-                    android.util.Log.d("SettingsViewModel", "📊 Final status for $deviceId: $status (isDiscovered=$isDiscovered, transport=$transport)")
+                    
                     serviceName to status
                 }
                 
                 // Map peers to include transport info for address display
-                val peerTransports = pairedPeers.associate { peer ->
-                    val deviceId = peer.attributes["device_id"] ?: peer.serviceName
-                    val serviceName = peer.serviceName
-                    
-                    // Look up transport status (same logic as above)
+                val peerTransports = pairedDevices.associate { device ->
+                    val deviceId = device.deviceId
+                    val serviceName = device.discoveredPeer?.serviceName ?: device.deviceName
                     val transport = lastTransport[deviceId]
-                        ?: lastTransport[serviceName]
                         ?: lastTransport.entries.firstOrNull { 
                             it.key.equals(deviceId, ignoreCase = true)
                         }?.value
-                        ?: lastTransport.entries.firstOrNull { 
-                            it.key.equals(serviceName, ignoreCase = true)
-                        }?.value
-                        ?: lastTransport.entries.firstOrNull { 
-                            val key = it.key
-                            key.equals(deviceId, ignoreCase = true) || 
-                            key.equals(serviceName, ignoreCase = true) ||
-                            key.replace("-", "").equals(deviceId.replace("-", ""), ignoreCase = true) ||
-                            key.replace("-", "").equals(serviceName.replace("-", ""), ignoreCase = true)
-                        }?.value
-                    
                     serviceName to transport
                 }
                 
+                // Map peers to include device names (always use stored name)
+                val peerDeviceNames = pairedDevices.associate { device ->
+                    val serviceName = device.discoveredPeer?.serviceName ?: device.deviceName
+                    serviceName to device.deviceName
+                }
+                
                 // Map peers to include discovery status for connection info display
-                val peerDiscoveryStatus = pairedPeers.associate { peer ->
-                    val deviceId = peer.attributes["device_id"] ?: peer.serviceName
-                    val serviceName = peer.serviceName
-                    val isDiscovered = peers.any { 
-                        val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
-                        peerDeviceId == deviceId || it.serviceName == serviceName
-                    }
-                    serviceName to isDiscovered
+                val peerDiscoveryStatus = pairedDevices.associate { device ->
+                    val serviceName = device.discoveredPeer?.serviceName ?: device.deviceName
+                    serviceName to (device.discoveredPeer != null)
                 }
                 
                 SettingsUiState(
@@ -230,12 +174,13 @@ class SettingsViewModel @Inject constructor(
                     historyLimit = settings.historyLimit,
                     autoDeleteDays = settings.autoDeleteDays,
                     plainTextModeEnabled = settings.plainTextModeEnabled,
-                    discoveredPeers = pairedPeers,
+                    discoveredPeers = pairedPeersForUi,
                     deviceStatuses = peerStatuses,
                     deviceTransports = peerTransports,
                     isAccessibilityServiceEnabled = isAccessibilityEnabled,
                     connectionState = connectionState,
-                    peerDiscoveryStatus = peerDiscoveryStatus
+                    peerDiscoveryStatus = peerDiscoveryStatus,
+                    peerDeviceNames = peerDeviceNames
                 )
             }.collect { state ->
                 _state.value = state
@@ -288,6 +233,13 @@ class SettingsViewModel @Inject constructor(
         }
     }
     
+    // Internal data class for paired device info
+    private data class PairedDeviceInfo(
+        val deviceId: String,
+        val deviceName: String,
+        val discoveredPeer: DiscoveredPeer? // null if not currently discovered on LAN
+    )
+    
     private fun checkAccessibilityServiceStatus(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             return true // Not needed on older Android versions
@@ -320,5 +272,6 @@ data class SettingsUiState(
         val deviceTransports: Map<String, ActiveTransport?> = emptyMap(),
         val isAccessibilityServiceEnabled: Boolean = false,
         val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Idle,
-        val peerDiscoveryStatus: Map<String, Boolean> = emptyMap() // Maps serviceName to isDiscovered
+        val peerDiscoveryStatus: Map<String, Boolean> = emptyMap(), // Maps serviceName to isDiscovered
+        val peerDeviceNames: Map<String, String?> = emptyMap() // Maps serviceName to device name
     )

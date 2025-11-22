@@ -455,8 +455,13 @@ public final class LanWebSocketServer {
         logger.debug("📡 CLIPBOARD RECEIVE: Setting up receive callback for connection \(connectionId.uuidString.prefix(8))")
         #endif
         print("📡 [LanWebSocketServer] CLIPBOARD RECEIVE: Setting up receive callback for \(connectionId.uuidString.prefix(8))")
+        try? "📡 [LanWebSocketServer] CLIPBOARD RECEIVE: Setting up receive callback for \(connectionId.uuidString.prefix(8))\n".appendToFile(path: "/tmp/hypo_debug.log")
         context.connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
             Task { @MainActor in
+                let callbackMsg = "📥 [LanWebSocketServer] receiveFrameChunk callback triggered: connectionId=\(connectionId.uuidString.prefix(8)), hasData=\(data != nil && !data!.isEmpty), dataSize=\(data?.count ?? 0), isComplete=\(isComplete), hasError=\(error != nil)\n"
+                print(callbackMsg)
+                try? callbackMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                
                 guard let self else {
                     print("⚠️ [LanWebSocketServer] Self is nil in receive callback")
                     return
@@ -466,6 +471,9 @@ public final class LanWebSocketServer {
                     return
                 }
                 if let error = error {
+                    let errorMsg = "❌ [LanWebSocketServer] Frame receive error: \(error.localizedDescription)\n"
+                    print(errorMsg)
+                    try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
                     #if canImport(os)
                     self.logger.error("Frame receive error: \(error.localizedDescription)")
                     #endif
@@ -476,24 +484,48 @@ public final class LanWebSocketServer {
                     #if canImport(os)
                     self.logger.info("📥 FRAME RECEIVED: \(data.count) bytes from connection \(connectionId.uuidString.prefix(8))")
                     #endif
-                    print("📥 [LanWebSocketServer] FRAME RECEIVED: \(data.count) bytes from \(connectionId.uuidString.prefix(8))")
+                    let frameMsg = "📥 [LanWebSocketServer] FRAME RECEIVED: \(data.count) bytes from \(connectionId.uuidString.prefix(8))\n"
+                    print(frameMsg)
+                    try? frameMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    let appendMsg = "📥 [LanWebSocketServer] Appending \(data.count) bytes to buffer for \(connectionId.uuidString.prefix(8))\n"
+                    print(appendMsg)
+                    try? appendMsg.appendToFile(path: "/tmp/hypo_debug.log")
                     context.appendToBuffer(data)
+                    let processMsg = "📦 [LanWebSocketServer] Calling processFrameBuffer for \(connectionId.uuidString.prefix(8))\n"
+                    print(processMsg)
+                    try? processMsg.appendToFile(path: "/tmp/hypo_debug.log")
                     self.processFrameBuffer(for: connectionId, context: context)
-                }
-                if isComplete {
+                    // Continue receiving even if isComplete is true (isComplete just means this receive operation finished)
+                    self.receiveFrameChunk(for: connectionId, context: context)
+                } else if isComplete {
+                    // Connection was closed by peer (no data and isComplete means EOF)
+                    let eofMsg = "🔌 [LanWebSocketServer] Connection \(connectionId.uuidString.prefix(8)) closed by peer (EOF - no data, isComplete=true)\n"
+                    print(eofMsg)
+                    try? eofMsg.appendToFile(path: "/tmp/hypo_debug.log")
                     #if canImport(os)
-                    self.logger.info("Connection \(connectionId.uuidString) completed")
+                    self.logger.info("Connection \(connectionId.uuidString) closed by peer")
                     #endif
                     self.closeConnection(connectionId)
                     return
+                } else {
+                    // No data yet, but connection still open - continue receiving
+                    let continueMsg = "⏳ [LanWebSocketServer] No data yet, continuing to wait for frames...\n"
+                    print(continueMsg)
+                    try? continueMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    self.receiveFrameChunk(for: connectionId, context: context)
                 }
-                self.receiveFrameChunk(for: connectionId, context: context)
             }
         }
     }
 
     private func processFrameBuffer(for connectionId: UUID, context: ConnectionContext) {
+        let processStartMsg = "🔍 [LanWebSocketServer] processFrameBuffer called: connectionId=\(connectionId.uuidString.prefix(8)), upgraded=\(context.upgraded)\n"
+        print(processStartMsg)
+        try? processStartMsg.appendToFile(path: "/tmp/hypo_debug.log")
         guard context.upgraded else {
+            let notUpgradedMsg = "⏸️ [LanWebSocketServer] Frame processing skipped - connection not upgraded\n"
+            print(notUpgradedMsg)
+            try? notUpgradedMsg.appendToFile(path: "/tmp/hypo_debug.log")
             #if canImport(os)
             logger.debug("⏸️ Frame processing skipped - connection not upgraded: \(connectionId.uuidString)")
             #endif
@@ -502,7 +534,13 @@ public final class LanWebSocketServer {
         while true {
             // Work on a snapshot to avoid races with concurrent appends
             let bufferSnapshot = context.snapshotBuffer()
+            let bufferSizeMsg = "🔍 [LanWebSocketServer] Buffer snapshot size: \(bufferSnapshot.count) bytes\n"
+            print(bufferSizeMsg)
+            try? bufferSizeMsg.appendToFile(path: "/tmp/hypo_debug.log")
             guard bufferSnapshot.count >= 2 else {
+                let tooSmallMsg = "⏸️ [LanWebSocketServer] Frame processing paused - buffer too small (\(bufferSnapshot.count) bytes)\n"
+                print(tooSmallMsg)
+                try? tooSmallMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 #if canImport(os)
                 logger.debug("⏸️ Frame processing paused - buffer too small (\(bufferSnapshot.count) bytes)")
                 #endif
@@ -519,21 +557,49 @@ public final class LanWebSocketServer {
             var offset = 2
             var payloadLength = Int(secondByte & 0x7F)
             
+            let headerMsg = "🔍 [LanWebSocketServer] Frame header: firstByte=0x\(String(firstByte, radix: 16)), secondByte=0x\(String(secondByte, radix: 16)), isFinal=\(isFinal), opcode=\(opcode), isMasked=\(isMasked), initialPayloadLength=\(payloadLength)\n"
+            print(headerMsg)
+            try? headerMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            
             if payloadLength == 126 {
-                guard bufferSnapshot.count >= offset + 2 else { return }
+                guard bufferSnapshot.count >= offset + 2 else {
+                    let msg = "⏸️ [LanWebSocketServer] Need 2 more bytes for extended length (have \(bufferSnapshot.count), need \(offset + 2))\n"
+                    print(msg)
+                    try? msg.appendToFile(path: "/tmp/hypo_debug.log")
+                    return
+                }
                 let lengthBytes = bufferSnapshot.subdata(in: offset..<offset + 2)
                 payloadLength = Int(readUInt16(from: lengthBytes, offset: 0))
                 offset += 2
+                let extMsg = "🔍 [LanWebSocketServer] Extended length (126): payloadLength=\(payloadLength)\n"
+                print(extMsg)
+                try? extMsg.appendToFile(path: "/tmp/hypo_debug.log")
             } else if payloadLength == 127 {
-                guard bufferSnapshot.count >= offset + 8 else { return }
+                guard bufferSnapshot.count >= offset + 8 else {
+                    let msg = "⏸️ [LanWebSocketServer] Need 8 more bytes for extended length (have \(bufferSnapshot.count), need \(offset + 8))\n"
+                    print(msg)
+                    try? msg.appendToFile(path: "/tmp/hypo_debug.log")
+                    return
+                }
                 let lengthBytes = bufferSnapshot.subdata(in: offset..<offset + 8)
                 payloadLength = Int(readUInt64(from: lengthBytes, offset: 0))
                 offset += 8
+                let extMsg = "🔍 [LanWebSocketServer] Extended length (127): payloadLength=\(payloadLength)\n"
+                print(extMsg)
+                try? extMsg.appendToFile(path: "/tmp/hypo_debug.log")
             }
             
             let maskLength = isMasked ? 4 : 0
             let requiredLength = offset + maskLength + payloadLength
-            guard bufferSnapshot.count >= requiredLength else { return }
+            let reqMsg = "🔍 [LanWebSocketServer] Required length: offset=\(offset), maskLength=\(maskLength), payloadLength=\(payloadLength), required=\(requiredLength), buffer=\(bufferSnapshot.count)\n"
+            print(reqMsg)
+            try? reqMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            guard bufferSnapshot.count >= requiredLength else {
+                let msg = "⏸️ [LanWebSocketServer] Need \(requiredLength - bufferSnapshot.count) more bytes (have \(bufferSnapshot.count), need \(requiredLength))\n"
+                print(msg)
+                try? msg.appendToFile(path: "/tmp/hypo_debug.log")
+                return
+            }
             
             // Extract all needed data atomically before processing
             let frameData = bufferSnapshot.subdata(in: 0..<requiredLength)
@@ -547,16 +613,36 @@ public final class LanWebSocketServer {
             
             // Remove processed frame from buffer
             context.dropPrefix(requiredLength)
+            let frameProcessMsg = "📦 [LanWebSocketServer] FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes, masked=\(isMasked), isFinal=\(isFinal), connection=\(connectionId.uuidString.prefix(8))\n"
+            print(frameProcessMsg)
+            try? frameProcessMsg.appendToFile(path: "/tmp/hypo_debug.log")
             #if canImport(os)
             logger.info("📦 FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes, masked=\(isMasked), connection=\(connectionId.uuidString.prefix(8))")
             #endif
-            print("📦 [LanWebSocketServer] FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes")
-            handleFrame(opcode: opcode, isFinal: isFinal, payload: payload, connectionId: connectionId, context: context)
+            
+            // Call handleFrame with error handling
+            do {
+                print("🔵 [LanWebSocketServer] About to call handleFrame")
+                try? "🔵 [LanWebSocketServer] About to call handleFrame\n".appendToFile(path: "/tmp/hypo_debug.log")
+                handleFrame(opcode: opcode, isFinal: isFinal, payload: payload, connectionId: connectionId, context: context)
+                print("🔵 [LanWebSocketServer] Returned from handleFrame")
+                try? "🔵 [LanWebSocketServer] Returned from handleFrame\n".appendToFile(path: "/tmp/hypo_debug.log")
+            } catch {
+                let errorMsg = "❌ [LanWebSocketServer] Error in handleFrame: \(error)\n"
+                print(errorMsg)
+                try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            }
         }
     }
 
     private func handleFrame(opcode: UInt8, isFinal: Bool, payload: Data, connectionId: UUID, context: ConnectionContext) {
+        let handleFrameMsg = "🎯 [LanWebSocketServer] handleFrame called: opcode=\(opcode), isFinal=\(isFinal), payload=\(payload.count) bytes\n"
+        print(handleFrameMsg)
+        try? handleFrameMsg.appendToFile(path: "/tmp/hypo_debug.log")
         guard isFinal else {
+            let notFinalMsg = "⚠️ [LanWebSocketServer] Fragmented frames are not supported\n"
+            print(notFinalMsg)
+            try? notFinalMsg.appendToFile(path: "/tmp/hypo_debug.log")
             #if canImport(os)
             logger.warning("⚠️ Fragmented frames are not supported")
             #endif
@@ -564,10 +650,12 @@ public final class LanWebSocketServer {
         }
         switch opcode {
         case 0x1, 0x2:
+            let dataFrameMsg = "📨 [LanWebSocketServer] FRAME HANDLED: data frame opcode=\(opcode), \(payload.count) bytes\n"
+            print(dataFrameMsg)
+            try? dataFrameMsg.appendToFile(path: "/tmp/hypo_debug.log")
             #if canImport(os)
             logger.info("📨 FRAME HANDLED: data frame opcode=\(opcode), \(payload.count) bytes from \(connectionId.uuidString.prefix(8))")
             #endif
-            print("📨 [LanWebSocketServer] FRAME HANDLED: data frame, \(payload.count) bytes")
             handleReceivedData(payload, from: connectionId)
         case 0x8:
             print("🔌 [LanWebSocketServer] Close frame received from \(connectionId.uuidString)")
@@ -634,30 +722,59 @@ public final class LanWebSocketServer {
     }
     
     private func handleReceivedData(_ data: Data, from connectionId: UUID) {
+        let receivedMsg = "📨 [LanWebSocketServer] CLIPBOARD DATA RECEIVED: \(data.count) bytes from \(connectionId.uuidString.prefix(8))\n"
+        print(receivedMsg)
+        try? receivedMsg.appendToFile(path: "/tmp/hypo_debug.log")
         #if canImport(os)
         logger.info("📨 CLIPBOARD DATA RECEIVED: \(data.count) bytes from connection \(connectionId.uuidString.prefix(8))")
         #endif
-        print("📨 [LanWebSocketServer] CLIPBOARD DATA RECEIVED: \(data.count) bytes")
+        
+        // Simple test log to verify execution continues
+        print("🔍 TEST: After CLIPBOARD DATA RECEIVED log")
+        try? "🔍 TEST: After CLIPBOARD DATA RECEIVED log\n".appendToFile(path: "/tmp/hypo_debug.log")
         
         // Decode the frame-encoded payload (Android sends: 4-byte length + JSON)
         // Try to decode as TransportFrameCodec frame first (for clipboard messages)
+        print("🔍 [LanWebSocketServer] Attempting to decode frame: \(data.count) bytes")
+        try? "🔍 [LanWebSocketServer] Attempting to decode frame: \(data.count) bytes\n".appendToFile(path: "/tmp/hypo_debug.log")
         do {
             let envelope = try frameCodec.decode(data)
             #if canImport(os)
             logger.info("✅ CLIPBOARD FRAME DECODED: envelope type=\(envelope.type.rawValue)")
             #endif
             print("✅ [LanWebSocketServer] CLIPBOARD FRAME DECODED: type=\(envelope.type.rawValue)")
+            try? "✅ [LanWebSocketServer] CLIPBOARD FRAME DECODED: type=\(envelope.type.rawValue)\n".appendToFile(path: "/tmp/hypo_debug.log")
+            
+            // Simple test log
+            print("🔍 TEST2: After CLIPBOARD FRAME DECODED")
+            try? "🔍 TEST2: After CLIPBOARD FRAME DECODED\n".appendToFile(path: "/tmp/hypo_debug.log")
             
             // Handle based on envelope type
+            print("🔍 [LanWebSocketServer] Switching on envelope type")
+            try? "🔍 [LanWebSocketServer] Switching on envelope type\n".appendToFile(path: "/tmp/hypo_debug.log")
             switch envelope.type {
             case .clipboard:
+                print("✅ [LanWebSocketServer] Case .clipboard matched")
+                try? "✅ [LanWebSocketServer] Case .clipboard matched\n".appendToFile(path: "/tmp/hypo_debug.log")
                 // Forward the original frame-encoded data to the delegate
                 // (it will decode it again in IncomingClipboardHandler)
                 #if canImport(os)
                 logger.info("✅ CLIPBOARD MESSAGE RECEIVED: forwarding to delegate, \(data.count) bytes")
                 #endif
                 print("✅ [LanWebSocketServer] CLIPBOARD MESSAGE RECEIVED: \(data.count) bytes, forwarding to delegate")
-                delegate?.server(self, didReceiveClipboardData: data, from: connectionId)
+                try? "✅ [LanWebSocketServer] CLIPBOARD MESSAGE RECEIVED: \(data.count) bytes, forwarding to delegate\n".appendToFile(path: "/tmp/hypo_debug.log")
+                print("🔍 [LanWebSocketServer] About to call delegate?.server()")
+                try? "🔍 [LanWebSocketServer] About to call delegate?.server()\n".appendToFile(path: "/tmp/hypo_debug.log")
+                if let delegate = delegate {
+                    print("✅ [LanWebSocketServer] Delegate exists: \(type(of: delegate))")
+                    try? "✅ [LanWebSocketServer] Delegate exists: \(type(of: delegate))\n".appendToFile(path: "/tmp/hypo_debug.log")
+                    delegate.server(self, didReceiveClipboardData: data, from: connectionId)
+                    print("✅ [LanWebSocketServer] delegate.server() called")
+                    try? "✅ [LanWebSocketServer] delegate.server() called\n".appendToFile(path: "/tmp/hypo_debug.log")
+                } else {
+                    print("❌ [LanWebSocketServer] Delegate is nil!")
+                    try? "❌ [LanWebSocketServer] Delegate is nil!\n".appendToFile(path: "/tmp/hypo_debug.log")
+                }
                 return
             case .control:
                 #if canImport(os)
@@ -668,6 +785,9 @@ public final class LanWebSocketServer {
             }
         } catch let decodingError as DecodingError {
             // Detailed decoding error logging
+            let errorMsg = "⚠️ [LanWebSocketServer] CLIPBOARD FRAME DECODE FAILED: DecodingError\n"
+            print(errorMsg)
+            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
             #if canImport(os)
             logger.error("⚠️ CLIPBOARD FRAME DECODE FAILED: DecodingError")
             switch decodingError {
@@ -713,12 +833,13 @@ public final class LanWebSocketServer {
             }
         } catch {
             // Other errors
+            let errorMsg = "⚠️ [LanWebSocketServer] CLIPBOARD FRAME DECODE FAILED: \(error.localizedDescription), type: \(String(describing: type(of: error)))\n"
+            print(errorMsg)
+            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
             #if canImport(os)
             logger.error("⚠️ CLIPBOARD FRAME DECODE FAILED: \(error.localizedDescription)")
             logger.error("   Error type: \(String(describing: type(of: error)))")
             #endif
-            print("⚠️ [LanWebSocketServer] CLIPBOARD FRAME DECODE FAILED: \(error.localizedDescription)")
-            print("   Error type: \(String(describing: type(of: error)))")
         }
         
         // Fall back to direct JSON parsing for pairing messages

@@ -135,7 +135,8 @@ fun SettingsScreen(
                     peerDiscoveryStatus = state.peerDiscoveryStatus,
                     connectionState = state.connectionState,
                     onStartPairing = onStartPairing,
-                    onRemoveDevice = onRemoveDevice
+                    onRemoveDevice = onRemoveDevice,
+                    peerDeviceNames = state.peerDeviceNames
                 )
             }
 
@@ -395,7 +396,8 @@ private fun DevicesSection(
     peerDiscoveryStatus: Map<String, Boolean>,
     connectionState: com.hypo.clipboard.transport.ConnectionState,
     onStartPairing: () -> Unit,
-    onRemoveDevice: (DiscoveredPeer) -> Unit
+    onRemoveDevice: (DiscoveredPeer) -> Unit,
+    peerDeviceNames: Map<String, String?> = emptyMap()
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -419,13 +421,16 @@ private fun DevicesSection(
                     val status = deviceStatuses[peer.serviceName] ?: DeviceConnectionStatus.Disconnected
                     val transport = deviceTransports[peer.serviceName]
                     val isDiscovered = peerDiscoveryStatus[peer.serviceName] ?: false
+                    // Get device name from state (looked up from TransportManager), fall back to serviceName (Bonjour hostname)
+                    val deviceName = peerDeviceNames[peer.serviceName]
                     DeviceRow(
                         peer = peer,
                         status = status,
                         transport = transport,
                         isDiscovered = isDiscovered,
                         isServerConnected = connectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedCloud,
-                        onRemove = { onRemoveDevice(peer) }
+                        onRemove = { onRemoveDevice(peer) },
+                        deviceName = deviceName
                     )
                 }
             }
@@ -443,8 +448,12 @@ private fun DeviceRow(
     transport: com.hypo.clipboard.transport.ActiveTransport?,
     isDiscovered: Boolean,
     isServerConnected: Boolean,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    deviceName: String? = null
 ) {
+    // Use stored device name if available, otherwise fall back to serviceName (Bonjour hostname)
+    val displayName = deviceName ?: peer.attributes["device_name"] ?: peer.serviceName
+    
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -465,7 +474,7 @@ private fun DeviceRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = peer.serviceName,
+                        text = displayName,
                         style = MaterialTheme.typography.titleMedium
                     )
                     DeviceStatusBadge(status = status)

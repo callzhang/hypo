@@ -119,10 +119,16 @@ object AppModule {
     @Provides
     @Singleton
     @Named("lan_ws_config")
-    fun provideLanTlsWebSocketConfig(): TlsWebSocketConfig =
+    fun provideLanTlsWebSocketConfig(
+        deviceIdentity: DeviceIdentity
+    ): TlsWebSocketConfig =
         TlsWebSocketConfig(
             url = "wss://127.0.0.1:${TransportManager.DEFAULT_PORT}/ws",
-            fingerprintSha256 = null
+            fingerprintSha256 = null,
+            headers = mapOf(
+                "X-Device-Id" to deviceIdentity.deviceId,
+                "X-Device-Platform" to "android"
+            )
         )
 
     @Provides
@@ -136,13 +142,17 @@ object AppModule {
     @Provides
     @Singleton
     @Named("cloud_ws_config")
-    fun provideCloudTlsWebSocketConfig(): TlsWebSocketConfig =
+    fun provideCloudTlsWebSocketConfig(
+        deviceIdentity: DeviceIdentity
+    ): TlsWebSocketConfig =
         TlsWebSocketConfig(
             url = BuildConfig.RELAY_WS_URL,
             fingerprintSha256 = BuildConfig.RELAY_CERT_FINGERPRINT.takeIf { it.isNotBlank() },
             headers = mapOf(
                 "X-Hypo-Client" to BuildConfig.VERSION_NAME,
-                "X-Hypo-Environment" to BuildConfig.RELAY_ENVIRONMENT
+                "X-Hypo-Environment" to BuildConfig.RELAY_ENVIRONMENT,
+                "X-Device-Id" to deviceIdentity.deviceId,
+                "X-Device-Platform" to "android"
             ),
             environment = "cloud"
         )

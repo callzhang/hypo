@@ -314,21 +314,22 @@ public final class ConnectionStatusProber {
             
             // Determine device online status - REAL-TIME STATUS (no grace period):
             // Devices are only online if they are:
-            //   1. Discovered on LAN (active discovery)
+            //   1. Discovered on LAN (active discovery) - LAN discovery means network is available
             //   2. Have an active WebSocket connection (LAN or cloud)
             //   3. Have cloud transport AND server is connected via cloud (device connected via cloud relay)
-            let isOnline = if currentConnectionState == .idle {
-                false // No network = all devices offline
+            let isOnline: Bool
+            if isDiscovered || hasActiveConnection {
+                // Device is discovered on LAN or has active connection - definitely online
+                isOnline = true
+            } else if deviceTransport == .cloud && currentConnectionState == .connectedCloud {
+                // Device has cloud transport and server is connected - device is reachable via cloud
+                isOnline = true
+            } else if currentConnectionState == .idle {
+                // No network connectivity and device not discovered - offline
+                isOnline = false
             } else {
-                // Real-time status: online if discovered, has active connection, or connected via cloud
-                if isDiscovered || hasActiveConnection {
-                    true // LAN discovery or active connection
-                } else if deviceTransport == .cloud && currentConnectionState == .connectedCloud {
-                    // Device has cloud transport and server is connected - device is reachable via cloud
-                    true
-                } else {
-                    false
-                }
+                // Network available but device not discovered and no active connection - offline
+                isOnline = false
             }
             
             let deviceStatusMsg = "🔍 [ConnectionStatusProber] Device \(device.name) (\(device.id.prefix(20))...): hasConnection=\(hasActiveConnection), isDiscovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState) → isOnline=\(isOnline)\n"

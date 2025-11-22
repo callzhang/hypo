@@ -71,7 +71,6 @@ class ClipboardSyncService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        android.util.Log.i("ClipboardSyncService", "🚀🚀🚀 SERVICE onCreate() CALLED! Starting initialization...")
         notificationManager = NotificationManagerCompat.from(this)
         createNotificationChannel()
         
@@ -82,7 +81,6 @@ class ClipboardSyncService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        android.util.Log.i("ClipboardSyncService", "✅ Service started foreground with notification (keeps app alive for clipboard access)")
 
         val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         val parser = ClipboardParser(contentResolver)
@@ -97,27 +95,15 @@ class ClipboardSyncService : Service() {
             scope = scope
         )
 
-        android.util.Log.i("ClipboardSyncService", "🎯 Starting sync coordinator...")
         syncCoordinator.start(scope)
-        android.util.Log.i("ClipboardSyncService", "🌐 Starting transport manager...")
         transportManager.start(buildLanRegistrationConfig())
-        android.util.Log.i("ClipboardSyncService", "📥 Setting up incoming clipboard handler...")
         lanWebSocketClient.setIncomingClipboardHandler { envelope ->
             incomingClipboardHandler.handle(envelope)
         }
-        android.util.Log.i("ClipboardSyncService", "📋 Starting clipboard listener...")
         ensureClipboardPermissionAndStartListener()
-        android.util.Log.i("ClipboardSyncService", "👀 Observing latest item...")
         observeLatestItem()
-        android.util.Log.i("ClipboardSyncService", "📱 Registering screen state receiver...")
         registerScreenStateReceiver()
-        
-        // Register network connectivity change callback
-        android.util.Log.i("ClipboardSyncService", "🌐 Registering network connectivity callback...")
         registerNetworkChangeCallback()
-        
-        // Start connection status prober
-        android.util.Log.i("ClipboardSyncService", "🔍 Starting connection status prober...")
         connectionStatusProber.start()
         
         // Monitor app foreground state and accessibility service status
@@ -127,15 +113,12 @@ class ClipboardSyncService : Service() {
                 checkAppForegroundState()
                 // Probe connections when app comes to foreground
                 if (!wasForeground && isAppInForeground) {
-                    android.util.Log.i("ClipboardSyncService", "📱 App came to foreground, probing connections...")
                     connectionStatusProber.probeNow()
                 }
                 checkAccessibilityServiceStatus()
                 delay(2_000) // Check every 2 seconds
             }
         }
-        
-        android.util.Log.i("ClipboardSyncService", "✅✅✅ SERVICE FULLY INITIALIZED AND READY!")
     }
 
     override fun onDestroy() {

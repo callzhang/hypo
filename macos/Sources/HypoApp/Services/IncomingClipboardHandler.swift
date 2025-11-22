@@ -36,11 +36,13 @@ public final class IncomingClipboardHandler {
     
     /// Handle incoming clipboard data from remote device
     public func handle(_ data: Data) async {
+        let receivedMsg = "📥 [IncomingClipboardHandler] CLIPBOARD RECEIVED: \(data.count) bytes\n"
+        print(receivedMsg)
+        try? receivedMsg.appendToFile(path: "/tmp/hypo_debug.log")
         do {
             #if canImport(os)
             logger.info("📥 CLIPBOARD RECEIVED: Processing incoming clipboard data (\(data.count) bytes)")
             #endif
-            print("📥 [IncomingClipboardHandler] CLIPBOARD RECEIVED: \(data.count) bytes")
             
             // Decode envelope to get device info
             let envelope = try frameCodec.decode(data)
@@ -58,12 +60,15 @@ public final class IncomingClipboardHandler {
             #if canImport(os)
             logger.info("📋 Envelope decoded: from device \(deviceId), name: \(deviceName ?? "unknown")")
             #endif
-            print("📋 [IncomingClipboardHandler] Envelope decoded: deviceId=\(deviceId), deviceName=\(deviceName ?? "unknown")")
-            
+            let decodedMsg = "📋 [IncomingClipboardHandler] Envelope decoded: deviceId=\(deviceId), deviceName=\(deviceName ?? "unknown")\n"
+            print(decodedMsg)
+            try? decodedMsg.appendToFile(path: "/tmp/hypo_debug.log")
             #if canImport(os)
             logger.info("✅ CLIPBOARD DECODED: type=\(payload.contentType.rawValue)")
             #endif
-            print("✅ [IncomingClipboardHandler] CLIPBOARD DECODED: type=\(payload.contentType.rawValue)")
+            let typeMsg = "✅ [IncomingClipboardHandler] CLIPBOARD DECODED: type=\(payload.contentType.rawValue)\n"
+            print(typeMsg)
+            try? typeMsg.appendToFile(path: "/tmp/hypo_debug.log")
             
             // Apply to system clipboard
             try await applyToClipboard(payload)
@@ -79,11 +84,12 @@ public final class IncomingClipboardHandler {
             )
             
         } catch {
+            let errorMsg = "❌ [IncomingClipboardHandler] CLIPBOARD ERROR: \(error.localizedDescription), type: \(String(describing: type(of: error)))\n"
+            print(errorMsg)
+            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
             #if canImport(os)
             logger.error("❌ CLIPBOARD ERROR: Failed to handle incoming clipboard: \(error.localizedDescription)")
             #endif
-            print("❌ [IncomingClipboardHandler] CLIPBOARD ERROR: \(error.localizedDescription)")
-            print("❌ [IncomingClipboardHandler] Error type: \(String(describing: type(of: error)))")
             if let decodingError = error as? DecodingError {
                 print("❌ [IncomingClipboardHandler] DecodingError details: \(decodingError)")
             }

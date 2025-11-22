@@ -295,7 +295,9 @@ public final actor SyncEngine {
     }
 
     public func decode(_ data: Data) async throws -> ClipboardPayload {
-        let envelope = try decoder.decode(SyncEnvelope.self, from: data)
+        // Decode frame-encoded data (4-byte length + JSON) to get envelope
+        let frameCodec = TransportFrameCodec()
+        let envelope = try frameCodec.decode(data)
         let senderId = envelope.payload.deviceId
         
         // Check if this is a plain text message (empty nonce/tag indicates no encryption)

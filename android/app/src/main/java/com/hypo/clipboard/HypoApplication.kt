@@ -17,8 +17,8 @@ class HypoApplication : Application() {
             // Set tracesSampleRate to 1.0 to capture 100% of transactions for tracing.
             // We recommend adjusting this value in production.
             options.tracesSampleRate = 1.0
-            // When first trying Sentry it's good to see what the SDK is doing:
-            options.isDebug = true
+            // Disable debug logging to reduce log spam
+            options.isDebug = false
             options.environment = if (com.hypo.clipboard.BuildConfig.DEBUG) "debug" else "production"
         }
     }

@@ -154,39 +154,31 @@ class ConnectionStatusProber @Inject constructor(
      */
     private suspend fun probeConnections() {
         if (isProbing) {
-            Log.d(TAG, "Probe already in progress, skipping")
             return
         }
         
         isProbing = true
         try {
-            Log.d(TAG, "Probing connection status for paired devices...")
-            
             // Check network connectivity first - update status immediately if disconnected
             val hasNetwork = checkNetworkConnectivity()
             if (!hasNetwork) {
-                Log.d(TAG, "🌐 No network connectivity - updating to Idle immediately")
                 transportManager.updateConnectionState(ConnectionState.Idle)
                 // Continue to check peers - they will be marked as offline in SettingsViewModel
                 // based on connectionState being Idle
             } else {
                 // Check actual WebSocket connection status first (most accurate)
                 val webSocketConnected = cloudWebSocketClient.isConnected()
-                Log.d(TAG, "🔌 WebSocket connection status: $webSocketConnected")
                 
                 if (webSocketConnected) {
                     // WebSocket is connected - we're definitely online
-                    Log.d(TAG, "✅ WebSocket is connected - updating to ConnectedCloud")
                     transportManager.updateConnectionState(ConnectionState.ConnectedCloud)
                 } else {
                     // WebSocket is not connected - check if server is reachable via HTTP
                     // If server is reachable, show as ConnectedCloud (WebSocket will connect on demand)
                     val serverReachable = checkServerHealth()
                     if (serverReachable) {
-                        Log.d(TAG, "✅ Server is reachable via HTTP - updating to ConnectedCloud (WebSocket will connect on demand)")
                         transportManager.updateConnectionState(ConnectionState.ConnectedCloud)
                     } else {
-                        Log.d(TAG, "❌ Server health check failed - updating to Idle")
                         transportManager.updateConnectionState(ConnectionState.Idle)
                     }
                 }
@@ -194,17 +186,14 @@ class ConnectionStatusProber @Inject constructor(
             
             // Get current peers (discovered devices)
             val peers = transportManager.currentPeers()
-            Log.d(TAG, "Found ${peers.size} discovered peers")
             
             // Get last successful transport status from StateFlow
             val lastTransport = transportManager.lastSuccessfulTransport.value
-            Log.d(TAG, "Found ${lastTransport.size} devices with transport status")
             
             // Get paired device IDs from DeviceKeyStore (devices with encryption keys)
             val pairedDeviceIds = runCatching {
                 deviceKeyStore.getAllDeviceIds().toSet()
             }.getOrElse { emptySet() }
-            Log.d(TAG, "Found ${pairedDeviceIds.size} paired devices")
             
             // Check connection status for each paired device
             // Note: If network is offline (hasNetwork = false), all peers are offline
@@ -212,7 +201,6 @@ class ConnectionStatusProber @Inject constructor(
             for (deviceId in pairedDeviceIds) {
                 // If no network, skip peer status updates (SettingsViewModel handles it via connectionState)
                 if (!hasNetwork) {
-                    Log.d(TAG, "❌ Device $deviceId is offline (no network connectivity)")
                     continue
                 }
                 
@@ -255,17 +243,11 @@ class ConnectionStatusProber @Inject constructor(
                     if (transport == null && isDiscovered) {
                         // Device is discovered but no transport status yet - mark as LAN
                         transportManager.markDeviceConnected(deviceId, ActiveTransport.LAN)
-                        Log.d(TAG, "✅ Device $deviceId is online via LAN (discovered, transport status set)")
                     } else if (transport != null) {
                         transportManager.markDeviceConnected(deviceId, transport)
-                        Log.d(TAG, "✅ Device $deviceId is online via $transport")
                     }
-                } else {
-                    Log.d(TAG, "❌ Device $deviceId is offline (discovered=$isDiscovered, transport=$transport)")
                 }
             }
-            
-            Log.i(TAG, "Probe complete")
         } catch (e: Exception) {
             Log.e(TAG, "Error probing connections: ${e.message}", e)
         } finally {

@@ -15,22 +15,49 @@ pub async fn websocket_handler(
     body: web::Payload,
     data: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
+    // Try headers first, then fall back to query parameters
     let device_id = req
         .headers()
         .get("X-Device-Id")
         .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .or_else(|| {
+            req.uri().query().and_then(|q| {
+                q.split('&')
+                    .find_map(|pair| {
+                        let mut parts = pair.splitn(2, '=');
+                        if parts.next() == Some("device_id") {
+                            parts.next().map(|v| v.to_string())
+                        } else {
+                            None
+                        }
+                    })
+            })
+        });
 
     let platform = req
         .headers()
         .get("X-Device-Platform")
         .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .or_else(|| {
+            req.uri().query().and_then(|q| {
+                q.split('&')
+                    .find_map(|pair| {
+                        let mut parts = pair.splitn(2, '=');
+                        if parts.next() == Some("platform") {
+                            parts.next().map(|v| v.to_string())
+                        } else {
+                            None
+                        }
+                    })
+            })
+        });
 
     if device_id.is_none() || platform.is_none() {
-        warn!("WebSocket connection rejected: missing device headers");
+        warn!("WebSocket connection rejected: missing device headers or query params");
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Missing X-Device-Id or X-Device-Platform header"
+            "error": "Missing X-Device-Id or X-Device-Platform (header or query param)"
         })));
     }
 
@@ -51,7 +78,8 @@ pub async fn websocket_handler(
     let writer_device_id = device_id.clone();
     actix_web::rt::spawn(async move {
         while let Some(message) = outbound.recv().await {
-            if let Err(err) = writer_session.text(message).await {
+            // message is already in binary frame format (4-byte length + JSON)
+            if let Err(err) = writer_session.binary(message).await {
                 error!("Failed to push message to {}: {:?}", writer_device_id, err);
                 break;
             }
@@ -69,12 +97,25 @@ pub async fn websocket_handler(
         while let Some(Ok(msg)) = msg_stream.recv().await {
             match msg {
                 Message::Text(text) => {
+                    // Legacy text format - decode and convert to binary frame
                     if let Err(err) =
                         handle_text_message(&reader_device_id, &text, &reader_sessions, &key_store)
                             .await
                     {
                         error!(
                             "Failed to handle message from {}: {:?}",
+                            reader_device_id, err
+                        );
+                    }
+                }
+                Message::Binary(bytes) => {
+                    // Binary frame format (4-byte length + JSON) - forward as-is
+                    if let Err(err) =
+                        handle_binary_message(&reader_device_id, &bytes, &reader_sessions, &key_store)
+                            .await
+                    {
+                        error!(
+                            "Failed to handle binary message from {}: {:?}",
                             reader_device_id, err
                         );
                     }
@@ -93,6 +134,84 @@ pub async fn websocket_handler(
     });
 
     Ok(response)
+}
+
+/// Decode binary frame (4-byte big-endian length + JSON payload)
+fn decode_binary_frame(data: &[u8]) -> Result<String, &'static str> {
+    if data.len() < 4 {
+        return Err("frame too short");
+    }
+    
+    // Read 4-byte big-endian length
+    let length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+    
+    if data.len() < 4 + length {
+        return Err("frame truncated");
+    }
+    
+    // Extract JSON payload
+    let json_bytes = &data[4..4 + length];
+    let json_str = std::str::from_utf8(json_bytes)
+        .map_err(|_| "invalid UTF-8 in JSON payload")?;
+    
+    Ok(json_str.to_string())
+}
+
+/// Encode JSON string to binary frame (4-byte big-endian length + JSON payload)
+fn encode_binary_frame(json_str: &str) -> Vec<u8> {
+    let json_bytes = json_str.as_bytes();
+    let length = json_bytes.len() as u32;
+    
+    let mut frame = Vec::with_capacity(4 + json_bytes.len());
+    frame.extend_from_slice(&length.to_be_bytes());
+    frame.extend_from_slice(json_bytes);
+    frame
+}
+
+async fn handle_binary_message(
+    sender_id: &str,
+    frame: &[u8],
+    sessions: &crate::services::session_manager::SessionManager,
+    key_store: &crate::services::device_key_store::DeviceKeyStore,
+) -> Result<(), SessionError> {
+    // Decode binary frame to get JSON string
+    let json_str = decode_binary_frame(frame)
+        .map_err(|e| {
+            warn!("Failed to decode binary frame from {}: {}", sender_id, e);
+            SessionError::InvalidMessage
+        })?;
+    
+    // Parse JSON to ClipboardMessage
+    let parsed: ClipboardMessage = serde_json::from_str(&json_str)
+        .map_err(|err| {
+            warn!("Received invalid message from {}: {}", sender_id, err);
+            SessionError::InvalidMessage
+        })?;
+
+    let payload: &Value = &parsed.payload;
+
+    if parsed.msg_type == crate::models::message::MessageType::Control {
+        handle_control_message(sender_id, payload, key_store).await;
+        return Ok(());
+    }
+
+    if let Err(err) = validate_encryption_block(payload) {
+        warn!("Discarding message from {}: {}", sender_id, err);
+        return Ok(());
+    }
+
+    let target_device = payload
+        .get("target")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+
+    // Forward the binary frame as-is (already in correct format)
+    if let Some(target) = target_device {
+        sessions.send_binary(&target, frame.to_vec()).await
+    } else {
+        sessions.broadcast_except_binary(sender_id, frame.to_vec()).await;
+        Ok(())
+    }
 }
 
 async fn handle_text_message(
@@ -126,10 +245,13 @@ async fn handle_text_message(
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
 
+    // Convert text message to binary frame format for forwarding
+    let binary_frame = encode_binary_frame(message);
+    
     if let Some(target) = target_device {
-        sessions.send(&target, message).await
+        sessions.send_binary(&target, binary_frame).await
     } else {
-        sessions.broadcast_except(sender_id, message).await;
+        sessions.broadcast_except_binary(sender_id, binary_frame).await;
         Ok(())
     }
 }

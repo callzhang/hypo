@@ -79,6 +79,12 @@ public final class TransportManager {
         self.analytics = analytics
         self.lanConfiguration = lanConfiguration ?? TransportManager.defaultLanConfiguration()
         self.lastSeen = discoveryCache.load()
+        // Restore persisted peers from cache
+        let cachedPeers = discoveryCache.loadPeers()
+        self.lanPeers = cachedPeers
+        let restoreMsg = "🔄 [TransportManager] Restored \(cachedPeers.count) peers from cache\n"
+        print(restoreMsg)
+        try? restoreMsg.appendToFile(path: "/tmp/hypo_debug.log")
         self.webSocketServer = webSocketServer
         
         // Set up incoming clipboard handler if history store is provided
@@ -107,6 +113,8 @@ public final class TransportManager {
         // (via setHistoryViewModel)
 
         #if canImport(AppKit)
+        // For menu bar apps, we don't want to deactivate services when the window closes
+        // Only deactivate on actual app termination
         lifecycleObserver = ApplicationLifecycleObserver(
             onActivate: { [weak self] in
                 Task {
@@ -116,7 +124,12 @@ public final class TransportManager {
                 }
             },
             onDeactivate: { [weak self] in
-                Task { await self?.deactivateLanServices() }
+                // Don't deactivate LAN services on window close for menu bar apps
+                // Services should stay running in the background
+                // Only trigger a probe to update status
+                Task {
+                    self?.connectionStatusProber?.probeNow()
+                }
             },
             onTerminate: { [weak self] in
                 Task { await self?.shutdownLanServices() }
@@ -199,23 +212,12 @@ public final class TransportManager {
                 transportManager: self,
                 transportProvider: provider
             )
-            // Start periodic probing
+            // Start event-driven checking (no periodic polling)
             connectionStatusProber?.start()
             
-            let startedMsg = "🔧 [TransportManager] ConnectionStatusProber started\n"
+            let startedMsg = "🔧 [TransportManager] ConnectionStatusProber started (event-driven)\n"
             print(startedMsg)
             try? startedMsg.appendToFile(path: "/tmp/hypo_debug.log")
-            
-            // Trigger immediate probe to update connection state
-            // This ensures the UI shows the correct status on launch
-            Task { @MainActor in
-                // Small delay to ensure everything is initialized
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-                let probeMsg = "🔧 [TransportManager] Triggering initial probe\n"
-                print(probeMsg)
-                try? probeMsg.appendToFile(path: "/tmp/hypo_debug.log")
-                connectionStatusProber?.probeNow()
-            }
         } else {
             let alreadyMsg = "🔧 [TransportManager] ConnectionStatusProber already initialized\n"
             print(alreadyMsg)
@@ -312,13 +314,22 @@ public final class TransportManager {
     public func ensureLanDiscoveryActive() async {
         await activateLanServices()
     }
+    
+    /// Trigger connection status probe to refresh peer status
+    public func probeConnectionStatus() async {
+        connectionStatusProber?.probeNow()
+    }
 
     public func suspendLanDiscovery() async {
         await deactivateLanServices()
     }
 
     public func lanDiscoveredPeers() -> [DiscoveredPeer] {
-        lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
+        let peers = lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
+        let peersMsg = "🔍 [TransportManager] lanDiscoveredPeers() returning \(peers.count) peers: \(peers.map { "\($0.serviceName):\($0.endpoint.metadata["device_id"] ?? "none")" }.joined(separator: ", "))\n"
+        print(peersMsg)
+        try? peersMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        return peers
     }
 
     public func currentLanConfiguration() -> BonjourPublisher.Configuration {
@@ -460,6 +471,8 @@ public final class TransportManager {
             }
         }
         await browser.start()
+        let browserMsg = "🔍 [TransportManager] Bonjour browser started, waiting for peers...\n"
+        try? browserMsg.appendToFile(path: "/tmp/hypo_debug.log")
         startPruneTaskIfNeeded()
     }
 
@@ -781,12 +794,27 @@ public final class TransportManager {
     private func handle(event: LanDiscoveryEvent) {
         switch event {
         case .added(let peer):
+            let eventMsg = "🔍 [TransportManager] Peer discovered: \(peer.serviceName) at \(peer.endpoint.host):\(peer.endpoint.port), device_id=\(peer.endpoint.metadata["device_id"] ?? "none")\n"
+            print(eventMsg)
+            try? eventMsg.appendToFile(path: "/tmp/hypo_debug.log")
             lanPeers[peer.serviceName] = peer
             lastSeen[peer.serviceName] = peer.lastSeen
             discoveryCache.save(lastSeen)
+            discoveryCache.savePeers(lanPeers) // Persist peer data
+            let afterMsg = "🔍 [TransportManager] After adding peer, lanPeers.count=\(lanPeers.count), serviceName=\(peer.serviceName)\n"
+            print(afterMsg)
+            try? afterMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            // Trigger connection status probe when peer is discovered
+            connectionStatusProber?.probeNow()
         case .removed(let serviceName):
+            let eventMsg = "🔍 [TransportManager] Peer removed: \(serviceName)\n"
+            print(eventMsg)
+            try? eventMsg.appendToFile(path: "/tmp/hypo_debug.log")
             lanPeers.removeValue(forKey: serviceName)
             discoveryCache.save(lastSeen)
+            discoveryCache.savePeers(lanPeers) // Persist peer data
+            // Trigger connection status probe when peer is removed
+            connectionStatusProber?.probeNow()
         }
     }
 
@@ -960,10 +988,13 @@ public struct UserDefaultsPreferenceStorage: PreferenceStorage {
 public protocol LanDiscoveryCache {
     func load() -> [String: Date]
     func save(_ lastSeen: [String: Date])
+    func loadPeers() -> [String: DiscoveredPeer]
+    func savePeers(_ peers: [String: DiscoveredPeer])
 }
 
 public struct UserDefaultsLanDiscoveryCache: LanDiscoveryCache {
     private let key = "lan_discovery_last_seen"
+    private let peersKey = "lan_discovery_peers"
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -982,6 +1013,51 @@ public struct UserDefaultsLanDiscoveryCache: LanDiscoveryCache {
             result[entry.key] = entry.value.timeIntervalSince1970
         }
         defaults.set(payload, forKey: key)
+    }
+    
+    public func loadPeers() -> [String: DiscoveredPeer] {
+        guard let data = defaults.data(forKey: peersKey),
+              let decoded = try? JSONDecoder().decode([String: CachedPeer].self, from: data) else {
+            return [:]
+        }
+        return decoded.compactMapValues { cachedPeer -> DiscoveredPeer? in
+            let endpoint = LanEndpoint(
+                host: cachedPeer.host,
+                port: cachedPeer.port,
+                fingerprint: cachedPeer.fingerprint,
+                metadata: cachedPeer.metadata
+            )
+            return DiscoveredPeer(
+                serviceName: cachedPeer.serviceName,
+                endpoint: endpoint,
+                lastSeen: cachedPeer.lastSeen
+            )
+        }
+    }
+    
+    public func savePeers(_ peers: [String: DiscoveredPeer]) {
+        let cachedPeers = peers.mapValues { peer in
+            CachedPeer(
+                serviceName: peer.serviceName,
+                host: peer.endpoint.host,
+                port: peer.endpoint.port,
+                fingerprint: peer.endpoint.fingerprint,
+                metadata: peer.endpoint.metadata,
+                lastSeen: peer.lastSeen
+            )
+        }
+        if let encoded = try? JSONEncoder().encode(cachedPeers) {
+            defaults.set(encoded, forKey: peersKey)
+        }
+    }
+    
+    private struct CachedPeer: Codable {
+        let serviceName: String
+        let host: String
+        let port: Int
+        let fingerprint: String?
+        let metadata: [String: String]
+        let lastSeen: Date
     }
 }
 
@@ -1138,7 +1214,8 @@ extension TransportManager: LanWebSocketServerDelegate {
         #endif
         print("📥 [TransportManager] CLIPBOARD RECEIVED: from \(connection.uuidString.prefix(8)), \(data.count) bytes")
         
-        // Extract deviceId from envelope to update connection metadata and online status
+        // Extract deviceId from envelope to update connection metadata (but NOT online status)
+        // Online status is determined by periodic checks only, not sync signals
         Task { @MainActor in
             // Try to extract deviceId from the frame-encoded data
             let frameCodec = TransportFrameCodec()
@@ -1147,37 +1224,18 @@ extension TransportManager: LanWebSocketServerDelegate {
                 let deviceId = envelope.payload.deviceId
                 print("✅ [TransportManager] Extracted deviceId from envelope: \(deviceId)")
                 
-                // Update connection metadata if not already set
+                // Update connection metadata if not already set (for ConnectionStatusProber to use)
                 if server.connectionMetadata(for: connection)?.deviceId == nil {
                     server.updateConnectionMetadata(connectionId: connection, deviceId: deviceId)
                     print("✅ [TransportManager] Updated connection metadata with deviceId: \(deviceId)")
                 }
-                
-                // Update device online status (device is online if we're receiving data from it)
-                print("📤 [TransportManager] Posting DeviceConnectionStatusChanged notification: deviceId=\(deviceId), isOnline=true")
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("DeviceConnectionStatusChanged"),
-                    object: nil,
-                    userInfo: [
-                        "deviceId": deviceId,
-                        "isOnline": true
-                    ]
-                )
-                print("✅ [TransportManager] Notification posted successfully")
+                // Note: We do NOT update online status here - that's handled by ConnectionStatusProber periodic checks
             } catch {
-                print("⚠️ [TransportManager] Failed to decode envelope for device status update: \(error)")
+                print("⚠️ [TransportManager] Failed to decode envelope for metadata update: \(error)")
                 // Try to get deviceId from connection metadata as fallback
                 if let metadata = server.connectionMetadata(for: connection),
                    let deviceId = metadata.deviceId {
-                    print("📤 [TransportManager] Using deviceId from connection metadata: \(deviceId)")
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("DeviceConnectionStatusChanged"),
-                        object: nil,
-                        userInfo: [
-                            "deviceId": deviceId,
-                            "isOnline": true
-                        ]
-                    )
+                    print("✅ [TransportManager] Using deviceId from connection metadata: \(deviceId)")
                 }
             }
             

@@ -209,9 +209,14 @@ class LanWebSocketClient @Inject constructor(
         }
         
         ensureConnection()
-        android.util.Log.d("LanWebSocketClient", "📤 Sending envelope to sendQueue...")
-        sendQueue.send(envelope)
-        android.util.Log.d("LanWebSocketClient", "✅ Envelope sent to queue successfully")
+        android.util.Log.d("LanWebSocketClient", "📤 send(): Sending envelope to sendQueue (closed: ${sendQueue.isClosedForSend})...")
+        try {
+            sendQueue.send(envelope)
+            android.util.Log.d("LanWebSocketClient", "✅ send(): Envelope sent to queue successfully: type=${envelope.type}, id=${envelope.id}, target=${envelope.payload.target}")
+        } catch (e: Exception) {
+            android.util.Log.e("LanWebSocketClient", "❌ send(): Failed to send envelope to queue: ${e.message}", e)
+            throw e
+        }
     }
     
     /**
@@ -372,38 +377,45 @@ class LanWebSocketClient @Inject constructor(
             }
 
             handshakeStarted = clock.instant()
-            android.util.Log.d("LanWebSocketClient", "runConnectionLoop: Connecting to $currentUrl")
+            android.util.Log.d("LanWebSocketClient", "🔌 runConnectionLoop: Connecting to $currentUrl")
             val socket = currentConnector.connect(listener)
-            android.util.Log.d("LanWebSocketClient", "runConnectionLoop: Socket created, waiting for connection...")
+            android.util.Log.d("LanWebSocketClient", "🔌 runConnectionLoop: Socket created, waiting for connection (timeout: ${if (config.roundTripTimeoutMillis > 0) config.roundTripTimeoutMillis else 10_000L}ms)...")
             val connectTimeoutMillis = if (config.roundTripTimeoutMillis > 0) config.roundTripTimeoutMillis else 10_000L
             val connected = try {
                 withTimeout(connectTimeoutMillis) {
                     handshakeSignal.await()
+                    android.util.Log.d("LanWebSocketClient", "✅ runConnectionLoop: Connection established, starting send loop")
                     true
                 }
             } catch (t: Throwable) {
-                android.util.Log.e("LanWebSocketClient", "runConnectionLoop: Handshake failed before connection ready (${t.message})", t)
+                android.util.Log.e("LanWebSocketClient", "❌ runConnectionLoop: Handshake failed before connection ready (${t.message})", t)
                 socket.cancel()
                 shutdownSocket(socket)
                 continue
             }
             if (!connected) {
+                android.util.Log.w("LanWebSocketClient", "⚠️ runConnectionLoop: Connection not established, retrying...")
                 socket.cancel()
                 shutdownSocket(socket)
                 continue
             }
 
             try {
+                android.util.Log.d("LanWebSocketClient", "🔄 runConnectionLoop: Starting send loop, waiting for envelopes from queue...")
                 loop@ while (true) {
+                    android.util.Log.d("LanWebSocketClient", "🔄 runConnectionLoop: Waiting for event (queue closed: ${sendQueue.isClosedForReceive})...")
                     when (val event = waitForEvent(closedSignal)) {
                         LoopEvent.ChannelClosed -> {
+                            android.util.Log.d("LanWebSocketClient", "🛑 runConnectionLoop: Channel closed, closing socket")
                             socket.close(1000, "channel closed")
                             return
                         }
                         LoopEvent.ConnectionClosed -> {
+                            android.util.Log.d("LanWebSocketClient", "🛑 runConnectionLoop: Connection closed, breaking loop")
                             break@loop
                         }
                         is LoopEvent.Envelope -> {
+                            android.util.Log.d("LanWebSocketClient", "📦 runConnectionLoop: Received envelope from queue: type=${event.envelope.type}, target=${event.envelope.payload.target}")
                             val payload = frameCodec.encode(event.envelope)
                             android.util.Log.d("LanWebSocketClient", "📤 Encoding envelope: type=${event.envelope.type}, target=${event.envelope.payload.target}, payload size=${payload.size} bytes")
                             val now = clock.instant()
@@ -433,15 +445,20 @@ class LanWebSocketClient @Inject constructor(
     }
 
     private suspend fun waitForEvent(closedSignal: CompletableDeferred<Unit>): LoopEvent {
+        android.util.Log.d("LanWebSocketClient", "⏳ waitForEvent: Waiting for event (queue closed: ${sendQueue.isClosedForReceive}, closedSignal completed: ${closedSignal.isCompleted})...")
         return select {
             sendQueue.onReceiveCatching { result ->
                 if (result.isClosed) {
+                    android.util.Log.d("LanWebSocketClient", "🛑 waitForEvent: Send queue closed")
                     LoopEvent.ChannelClosed
                 } else {
-                    LoopEvent.Envelope(result.getOrThrow())
+                    val envelope = result.getOrThrow()
+                    android.util.Log.d("LanWebSocketClient", "📬 waitForEvent: Received envelope from queue: type=${envelope.type}, id=${envelope.id}")
+                    LoopEvent.Envelope(envelope)
                 }
             }
             closedSignal.onAwait {
+                android.util.Log.d("LanWebSocketClient", "🛑 waitForEvent: Connection closed signal received")
                 LoopEvent.ConnectionClosed
             }
         }

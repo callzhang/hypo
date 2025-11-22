@@ -39,7 +39,7 @@ class ConnectionStatusProber @Inject constructor(
     
     companion object {
         private const val TAG = "ConnectionStatusProber"
-        private val PROBE_INTERVAL_MS = Duration.ofMinutes(10).toMillis() // 10 minutes
+        private val PROBE_INTERVAL_MS = Duration.ofSeconds(10).toMillis() // 10 seconds - immediate status updates
     }
     
     /**
@@ -63,7 +63,7 @@ class ConnectionStatusProber @Inject constructor(
             }
         }
         
-        Log.i(TAG, "Connection status prober started - will probe every 10 minutes")
+        Log.i(TAG, "Connection status prober started - will probe every 10 seconds")
     }
     
     /**
@@ -92,16 +92,44 @@ class ConnectionStatusProber @Inject constructor(
     }
     
     /**
+     * Check network connectivity first, then server health
+     */
+    private suspend fun checkNetworkConnectivity(): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                // Quick connectivity check - try to resolve a well-known DNS
+                val url = URL("https://www.google.com")
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "HEAD"
+                connection.connectTimeout = 2000 // 2 seconds - fast check
+                connection.readTimeout = 2000
+                connection.connect()
+                connection.disconnect()
+                true
+            } catch (e: Exception) {
+                Log.d(TAG, "🌐 Network connectivity check failed: ${e.message}")
+                false
+            }
+        }
+    }
+    
+    /**
      * Check server health via HTTP (fallback when WebSocket fails)
      */
     private suspend fun checkServerHealth(): Boolean {
+        // First check if we have network connectivity
+        if (!checkNetworkConnectivity()) {
+            Log.d(TAG, "🌐 No network connectivity - server unreachable")
+            return false
+        }
+        
         return withContext(Dispatchers.IO) {
             try {
                 val url = URL("https://hypo.fly.dev/health")
                 val connection = url.openConnection() as HttpURLConnection
                 connection.requestMethod = "GET"
-                connection.connectTimeout = 5000 // 5 seconds
-                connection.readTimeout = 5000
+                connection.connectTimeout = 3000 // 3 seconds - faster check
+                connection.readTimeout = 3000
                 connection.connect()
                 
                 val responseCode = connection.responseCode
@@ -134,16 +162,34 @@ class ConnectionStatusProber @Inject constructor(
         try {
             Log.d(TAG, "Probing connection status for paired devices...")
             
-            // Check cloud server availability via HTTP health check
-            // This provides a fallback when WebSocket connection fails
-            val serverReachable = checkServerHealth()
-            if (serverReachable) {
-                Log.d(TAG, "✅ Server is reachable via HTTP")
-                transportManager.updateConnectionState(ConnectionState.ConnectedCloud)
+            // Check network connectivity first - update status immediately if disconnected
+            val hasNetwork = checkNetworkConnectivity()
+            if (!hasNetwork) {
+                Log.d(TAG, "🌐 No network connectivity - updating to Idle immediately")
+                transportManager.updateConnectionState(ConnectionState.Idle)
+                // Continue to check peers - they will be marked as offline in SettingsViewModel
+                // based on connectionState being Idle
             } else {
-                Log.d(TAG, "❌ Server health check failed")
-                // Don't update to Error immediately - might be temporary network issue
-                // Only update if we have no other connections
+                // Check actual WebSocket connection status first (most accurate)
+                val webSocketConnected = cloudWebSocketClient.isConnected()
+                Log.d(TAG, "🔌 WebSocket connection status: $webSocketConnected")
+                
+                if (webSocketConnected) {
+                    // WebSocket is connected - we're definitely online
+                    Log.d(TAG, "✅ WebSocket is connected - updating to ConnectedCloud")
+                    transportManager.updateConnectionState(ConnectionState.ConnectedCloud)
+                } else {
+                    // WebSocket is not connected - check if server is reachable via HTTP
+                    // If server is reachable, show as ConnectedCloud (WebSocket will connect on demand)
+                    val serverReachable = checkServerHealth()
+                    if (serverReachable) {
+                        Log.d(TAG, "✅ Server is reachable via HTTP - updating to ConnectedCloud (WebSocket will connect on demand)")
+                        transportManager.updateConnectionState(ConnectionState.ConnectedCloud)
+                    } else {
+                        Log.d(TAG, "❌ Server health check failed - updating to Idle")
+                        transportManager.updateConnectionState(ConnectionState.Idle)
+                    }
+                }
             }
             
             // Get current peers (discovered devices)
@@ -161,7 +207,15 @@ class ConnectionStatusProber @Inject constructor(
             Log.d(TAG, "Found ${pairedDeviceIds.size} paired devices")
             
             // Check connection status for each paired device
+            // Note: If network is offline (hasNetwork = false), all peers are offline
+            // SettingsViewModel will mark them as Disconnected based on connectionState being Idle
             for (deviceId in pairedDeviceIds) {
+                // If no network, skip peer status updates (SettingsViewModel handles it via connectionState)
+                if (!hasNetwork) {
+                    Log.d(TAG, "❌ Device $deviceId is offline (no network connectivity)")
+                    continue
+                }
+                
                 val isDiscovered = peers.any { 
                     val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
                     peerDeviceId == deviceId || it.serviceName == deviceId

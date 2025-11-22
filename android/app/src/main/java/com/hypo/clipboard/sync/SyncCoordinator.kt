@@ -35,6 +35,17 @@ class SyncCoordinator @Inject constructor(
     private val pairedDeviceIdsCache = MutableStateFlow<Set<String>>(emptySet())
     
     init {
+        // Initial load of paired device IDs (event-driven updates happen in addTargetDevice/removeTargetDevice)
+        keyStoreScope.launch {
+            try {
+                val deviceIds = deviceKeyStore.getAllDeviceIds().toSet()
+                pairedDeviceIdsCache.value = deviceIds
+                Log.d(TAG, "📋 Initial paired device IDs loaded: ${deviceIds.size} devices")
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Failed to load initial paired device IDs: ${e.message}")
+            }
+        }
+        
         // Observe transport manager peers to get auto-discovered devices
         keyStoreScope.launch {
             transportManager.peers.collect { peers ->
@@ -42,21 +53,6 @@ class SyncCoordinator @Inject constructor(
                 autoTargets.value = deviceIds
                 recomputeTargets()
                 android.util.Log.i(TAG, "🔄 Auto targets updated: ${deviceIds.size}, total=${_targets.value.size}")
-            }
-        }
-        
-        // Periodically refresh paired device IDs cache
-        keyStoreScope.launch {
-            while (true) {
-                try {
-                    val deviceIds = deviceKeyStore.getAllDeviceIds().toSet()
-                    pairedDeviceIdsCache.value = deviceIds
-                    recomputeTargets()
-                    delay(5_000) // Refresh every 5 seconds
-                } catch (e: Exception) {
-                    Log.w(TAG, "⚠️ Failed to refresh paired device IDs: ${e.message}")
-                    delay(5_000)
-                }
             }
         }
     }
@@ -154,7 +150,22 @@ class SyncCoordinator @Inject constructor(
 
                 // Only broadcast if not a received item (prevent loops)
                 if (!event.skipBroadcast) {
-                    val pairedDevices = _targets.value
+                    // Wait up to 10 seconds for targets to be available (handles race condition with peer discovery)
+                    var pairedDevices = _targets.value
+                    if (pairedDevices.isEmpty()) {
+                        Log.i(TAG, "⏳ Targets empty, waiting up to 10s for targets to be ready...")
+                        val startTime = System.currentTimeMillis()
+                        while (pairedDevices.isEmpty() && (System.currentTimeMillis() - startTime) < 10_000) {
+                            kotlinx.coroutines.delay(100) // Check every 100ms
+                            pairedDevices = _targets.value
+                        }
+                        if (pairedDevices.isEmpty()) {
+                            Log.w(TAG, "⏭️  No paired devices available after waiting (targets: ${_targets.value})")
+                        } else {
+                            Log.i(TAG, "✅ Targets became available after ${System.currentTimeMillis() - startTime}ms: ${pairedDevices.size} devices")
+                        }
+                    }
+                    
                     if (pairedDevices.isNotEmpty()) {
                         Log.i(TAG, "📤 Broadcasting to ${pairedDevices.size} paired devices: $pairedDevices")
                         pairedDevices.forEach { target ->

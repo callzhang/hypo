@@ -587,7 +587,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                                 id: device.id,
                                 name: device.name,
                                 platform: device.platform,
-                                lastSeen: isOnline ? Date() : device.lastSeen,
+                                lastSeen: device.lastSeen, // Don't update lastSeen here - only update on actual activity
                                 isOnline: isOnline
                             ))
                         } else {
@@ -596,7 +596,23 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                     }
                     
                     // Update the ViewModel's @Published property by replacing the entire array
+                    // Since we're already @MainActor, update directly
                     self.pairedDevices = updatedDevices
+                    
+                    // Force UI update by triggering objectWillChange BEFORE the @Published change
+                    objectWillChange.send()
+                    
+                    let uiUpdateMsg = "🔄 [HistoryStore] Updated pairedDevices array (count: \(updatedDevices.count)) and triggered objectWillChange.send() (case-insensitive)\n"
+                    print(uiUpdateMsg)
+                    try? uiUpdateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    
+                    // Verify the update immediately
+                    if let updatedDevice = pairedDevices.first(where: { $0.id == device.id }) {
+                        let verifyMsg = "✅ [HistoryStore] Verified update: device \(device.name) isOnline=\(updatedDevice.isOnline) in array\n"
+                        print(verifyMsg)
+                        try? verifyMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    }
+                    
                     persistPairedDevices()
                     
                     let persistedMsg = "✅ [HistoryStore] Device \(device.name) status updated (case-insensitive) and persisted: isOnline=\(isOnline)\n"
@@ -622,7 +638,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                         id: device.id,
                         name: device.name,
                         platform: device.platform,
-                        lastSeen: isOnline ? Date() : device.lastSeen,
+                        lastSeen: device.lastSeen, // Don't update lastSeen here - only update on actual activity
                         isOnline: isOnline
                     ))
                 } else {
@@ -632,7 +648,27 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             
             // Update the ViewModel's @Published property by replacing the entire array
             // This triggers SwiftUI's change detection
+            // Since we're already @MainActor, update directly
             self.pairedDevices = updatedDevices
+            
+            // Force UI update by triggering objectWillChange BEFORE the @Published change
+            // This ensures SwiftUI sees the change
+            objectWillChange.send()
+            
+            let uiUpdateMsg = "🔄 [HistoryStore] Updated pairedDevices array (count: \(updatedDevices.count)) and triggered objectWillChange.send()\n"
+            print(uiUpdateMsg)
+            try? uiUpdateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            
+            // Verify the update immediately
+            if let updatedDevice = pairedDevices.first(where: { $0.id == device.id }) {
+                let verifyMsg = "✅ [HistoryStore] Verified update: device \(device.name) isOnline=\(updatedDevice.isOnline) in array\n"
+                print(verifyMsg)
+                try? verifyMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            } else {
+                let errorMsg = "❌ [HistoryStore] ERROR: Device \(device.name) not found in updated array!\n"
+                print(errorMsg)
+                try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            }
             
             // Persist to UserDefaults
             persistPairedDevices()
@@ -876,12 +912,60 @@ public struct PairedDevice: Identifiable, Equatable, Codable {
     public let platform: String
     public let lastSeen: Date
     public let isOnline: Bool
-
-    public init(id: String = UUID().uuidString, name: String, platform: String, lastSeen: Date, isOnline: Bool) {
+    
+    // Bonjour/discovery information
+    public let serviceName: String?
+    public let bonjourHost: String?
+    public let bonjourPort: Int?
+    public let fingerprint: String?
+    
+    public init(
+        id: String = UUID().uuidString,
+        name: String,
+        platform: String,
+        lastSeen: Date,
+        isOnline: Bool,
+        serviceName: String? = nil,
+        bonjourHost: String? = nil,
+        bonjourPort: Int? = nil,
+        fingerprint: String? = nil
+    ) {
         self.id = id
         self.name = name
         self.platform = platform
         self.lastSeen = lastSeen
         self.isOnline = isOnline
+        self.serviceName = serviceName
+        self.bonjourHost = bonjourHost
+        self.bonjourPort = bonjourPort
+        self.fingerprint = fingerprint
+    }
+    
+    /// Create a PairedDevice from a DiscoveredPeer
+    public init(from peer: DiscoveredPeer, name: String, platform: String) {
+        self.id = peer.endpoint.metadata["device_id"] ?? peer.serviceName
+        self.name = name
+        self.platform = platform
+        self.lastSeen = peer.lastSeen
+        self.isOnline = true
+        self.serviceName = peer.serviceName
+        self.bonjourHost = peer.endpoint.host
+        self.bonjourPort = peer.endpoint.port
+        self.fingerprint = peer.endpoint.fingerprint
+    }
+    
+    /// Update with discovery information from a DiscoveredPeer
+    public func updating(from peer: DiscoveredPeer) -> PairedDevice {
+        PairedDevice(
+            id: self.id,
+            name: self.name,
+            platform: self.platform,
+            lastSeen: max(self.lastSeen, peer.lastSeen),
+            isOnline: self.isOnline,
+            serviceName: peer.serviceName,
+            bonjourHost: peer.endpoint.host,
+            bonjourPort: peer.endpoint.port,
+            fingerprint: peer.endpoint.fingerprint
+        )
     }
 }

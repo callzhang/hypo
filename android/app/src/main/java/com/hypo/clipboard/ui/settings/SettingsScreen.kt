@@ -132,6 +132,8 @@ fun SettingsScreen(
                     peers = state.discoveredPeers,
                     deviceStatuses = state.deviceStatuses,
                     deviceTransports = state.deviceTransports,
+                    peerDiscoveryStatus = state.peerDiscoveryStatus,
+                    connectionState = state.connectionState,
                     onStartPairing = onStartPairing,
                     onRemoveDevice = onRemoveDevice
                 )
@@ -390,6 +392,8 @@ private fun DevicesSection(
     peers: List<DiscoveredPeer>,
     deviceStatuses: Map<String, DeviceConnectionStatus>,
     deviceTransports: Map<String, com.hypo.clipboard.transport.ActiveTransport?>,
+    peerDiscoveryStatus: Map<String, Boolean>,
+    connectionState: com.hypo.clipboard.transport.ConnectionState,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit
 ) {
@@ -414,10 +418,13 @@ private fun DevicesSection(
                 peers.forEach { peer ->
                     val status = deviceStatuses[peer.serviceName] ?: DeviceConnectionStatus.Disconnected
                     val transport = deviceTransports[peer.serviceName]
+                    val isDiscovered = peerDiscoveryStatus[peer.serviceName] ?: false
                     DeviceRow(
                         peer = peer,
                         status = status,
                         transport = transport,
+                        isDiscovered = isDiscovered,
+                        isServerConnected = connectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedCloud,
                         onRemove = { onRemoveDevice(peer) }
                     )
                 }
@@ -434,6 +441,8 @@ private fun DeviceRow(
     peer: DiscoveredPeer,
     status: DeviceConnectionStatus,
     transport: com.hypo.clipboard.transport.ActiveTransport?,
+    isDiscovered: Boolean,
+    isServerConnected: Boolean,
     onRemove: () -> Unit
 ) {
     Card(
@@ -461,16 +470,30 @@ private fun DeviceRow(
                     )
                     DeviceStatusBadge(status = status)
                 }
-                // Display address based on connection status
+                // Display detailed connection status or last seen based on connection status
                 val addressText = when {
-                    status == DeviceConnectionStatus.ConnectedLan && peer.host != "unknown" -> {
-                        "${peer.host}:${peer.port}"
+                    // Connected via both LAN and server
+                    status == DeviceConnectionStatus.ConnectedLan && isDiscovered && isServerConnected && peer.host != "unknown" -> {
+                        "Connected via ${peer.host}:${peer.port} and server"
                     }
-                    status == DeviceConnectionStatus.ConnectedCloud -> {
-                        stringResource(id = R.string.device_address_cloud)
+                    // Connected via LAN only
+                    status == DeviceConnectionStatus.ConnectedLan && isDiscovered && peer.host != "unknown" -> {
+                        "Connected via ${peer.host}:${peer.port}"
+                    }
+                    // Connected via server only
+                    status == DeviceConnectionStatus.ConnectedCloud && isServerConnected -> {
+                        "Connected via server"
+                    }
+                    // Connected but no detailed info
+                    status == DeviceConnectionStatus.ConnectedLan || status == DeviceConnectionStatus.ConnectedCloud -> {
+                        "Connected"
                     }
                     else -> {
-                        stringResource(id = R.string.device_address_disconnected)
+                        // Show last seen timestamp for disconnected devices
+                        val lastSeen = peer.lastSeen
+                        val formatter = java.time.format.DateTimeFormatter.ofPattern("M/d/yyyy h:mm a")
+                        val zonedDateTime = lastSeen.atZone(java.time.ZoneId.systemDefault())
+                        "Last seen ${formatter.format(zonedDateTime)}"
                     }
                 }
                 Text(

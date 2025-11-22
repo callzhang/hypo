@@ -160,17 +160,27 @@ class SettingsViewModel @Inject constructor(
                     
                     // Determine status: 
                     // - LAN devices must be discovered AND have transport status to show as Connected
-                    // - CLOUD devices can show as Connected if they have transport status (don't require discovery)
+                    // - CLOUD devices can show as Connected ONLY if server is actually connected AND they have transport status
                     // - Paired devices without transport record are "Paired" (will use LAN-first, cloud-fallback on sync)
-                    val status = when {
+                    val isServerConnected = connectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedCloud
+                    val isServerIdle = connectionState == com.hypo.clipboard.transport.ConnectionState.Idle
+                    
+                    // If server is Idle (no network), all peers are offline immediately
+                    val status = if (isServerIdle) {
+                        DeviceConnectionStatus.Disconnected
+                    } else when {
                         // Device is discovered AND has LAN transport → Connected via LAN
                         // This works even if device changed network (matched by device_id, not IP)
                         isDiscovered && transport == ActiveTransport.LAN -> DeviceConnectionStatus.ConnectedLan
-                        // Device has CLOUD transport → Connected via Cloud (don't require discovery)
-                        transport == ActiveTransport.CLOUD -> DeviceConnectionStatus.ConnectedCloud
-                        // Device is discovered but no transport record → Disconnected (connection not established yet)
-                        isDiscovered -> DeviceConnectionStatus.Disconnected
-                        // Device is paired but not discovered and no transport record → Paired (will use LAN-first, cloud-fallback)
+                        // Device is discovered but no transport record → Connected via LAN (discovered means on same network)
+                        // This handles the case where device was just paired and transport status hasn't been set yet
+                        isDiscovered -> DeviceConnectionStatus.ConnectedLan
+                        // Device has CLOUD transport → Connected via Cloud ONLY if server is actually connected
+                        // Don't show as "Connected via server" if server is offline
+                        transport == ActiveTransport.CLOUD && isServerConnected -> DeviceConnectionStatus.ConnectedCloud
+                        // Device has CLOUD transport but server is offline → Disconnected
+                        transport == ActiveTransport.CLOUD && !isServerConnected -> DeviceConnectionStatus.Disconnected
+                        // Device is paired but not discovered and no transport record → Paired (will use LAN-first, cloud-fallback on sync)
                         // Code-paired devices may not have transport marked yet - they'll try LAN first, then cloud on sync
                         else -> DeviceConnectionStatus.Paired
                     }
@@ -203,6 +213,17 @@ class SettingsViewModel @Inject constructor(
                     serviceName to transport
                 }
                 
+                // Map peers to include discovery status for connection info display
+                val peerDiscoveryStatus = pairedPeers.associate { peer ->
+                    val deviceId = peer.attributes["device_id"] ?: peer.serviceName
+                    val serviceName = peer.serviceName
+                    val isDiscovered = peers.any { 
+                        val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
+                        peerDeviceId == deviceId || it.serviceName == serviceName
+                    }
+                    serviceName to isDiscovered
+                }
+                
                 SettingsUiState(
                     lanSyncEnabled = settings.lanSyncEnabled,
                     cloudSyncEnabled = settings.cloudSyncEnabled,
@@ -213,7 +234,8 @@ class SettingsViewModel @Inject constructor(
                     deviceStatuses = peerStatuses,
                     deviceTransports = peerTransports,
                     isAccessibilityServiceEnabled = isAccessibilityEnabled,
-                    connectionState = connectionState
+                    connectionState = connectionState,
+                    peerDiscoveryStatus = peerDiscoveryStatus
                 )
             }.collect { state ->
                 _state.value = state
@@ -297,5 +319,6 @@ data class SettingsUiState(
         val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap(),
         val deviceTransports: Map<String, ActiveTransport?> = emptyMap(),
         val isAccessibilityServiceEnabled: Boolean = false,
-        val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Idle
+        val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Idle,
+        val peerDiscoveryStatus: Map<String, Boolean> = emptyMap() // Maps serviceName to isDiscovered
     )

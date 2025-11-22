@@ -39,4 +39,12 @@ class RelayWebSocketClient @Inject constructor(
     suspend fun close() {
         delegate.close()
     }
+    
+    /**
+     * Check if the WebSocket is currently connected.
+     * This is used to determine connection status in the UI.
+     */
+    fun isConnected(): Boolean {
+        return delegate.isConnected()
+    }
 }

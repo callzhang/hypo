@@ -32,12 +32,36 @@ class LanRegistrationManager(
     private var retryJob: Job? = null
     private var attempts = 0
     private var currentConfig: LanRegistrationConfig? = null
+    private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
 
     override fun start(config: LanRegistrationConfig) {
+        android.util.Log.d("LanRegistrationManager", "🚀 Starting service registration: serviceName=${config.serviceName}, port=${config.port}, serviceType=${config.serviceType}")
         currentConfig = config
         registerReceiverIfNeeded()
+        acquireMulticastLock()
         attempts = 0
         registerService(config)
+    }
+    
+    private fun acquireMulticastLock() {
+        if (multicastLock == null) {
+            multicastLock = wifiManager.createMulticastLock("HypoLanRegistration").apply {
+                setReferenceCounted(true)
+            }
+        }
+        if (multicastLock?.isHeld != true) {
+            multicastLock?.acquire()
+            android.util.Log.d("LanRegistrationManager", "🔒 Multicast lock acquired")
+        }
+    }
+    
+    private fun releaseMulticastLock() {
+        multicastLock?.let { lock ->
+            if (lock.isHeld) {
+                lock.release()
+                android.util.Log.d("LanRegistrationManager", "🔓 Multicast lock released")
+            }
+        }
     }
 
     override fun stop() {
@@ -52,6 +76,7 @@ class LanRegistrationManager(
             applicationContext.unregisterReceiver(receiver)
         }
         connectivityReceiver = null
+        releaseMulticastLock()
     }
 
     private fun registerReceiverIfNeeded() {
@@ -68,6 +93,7 @@ class LanRegistrationManager(
     }
 
     private fun registerService(config: LanRegistrationConfig) {
+        android.util.Log.d("LanRegistrationManager", "📝 Registering NSD service: serviceName=${config.serviceName}, port=${config.port}, serviceType=${config.serviceType}")
         val info = NsdServiceInfo().apply {
             serviceName = config.serviceName
             serviceType = config.serviceType
@@ -75,26 +101,50 @@ class LanRegistrationManager(
             setAttribute("fingerprint_sha256", config.fingerprint)
             setAttribute("version", config.version)
             setAttribute("protocols", config.protocols.joinToString(","))
+            // Add device_id attribute so macOS can match discovered devices
+            config.deviceId?.let { deviceId ->
+                setAttribute("device_id", deviceId)
+                android.util.Log.d("LanRegistrationManager", "📝 Added device_id attribute: $deviceId")
+            }
         }
+        android.util.Log.d("LanRegistrationManager", "📝 Service info created: name=${info.serviceName}, type=${info.serviceType}, port=${info.port}")
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                android.util.Log.i("LanRegistrationManager", "✅ Service registered successfully: ${serviceInfo.serviceName}")
                 attempts = 0
             }
 
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                val errorMsg = when (errorCode) {
+                    NsdManager.FAILURE_INTERNAL_ERROR -> "Internal error"
+                    NsdManager.FAILURE_ALREADY_ACTIVE -> "Already active"
+                    NsdManager.FAILURE_MAX_LIMIT -> "Max limit reached"
+                    else -> "Unknown error ($errorCode)"
+                }
+                android.util.Log.e("LanRegistrationManager", "❌ Service registration failed: $errorMsg (code=$errorCode), serviceName=${serviceInfo.serviceName}")
                 scheduleRetry(config)
             }
 
-            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {}
+            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
+                android.util.Log.d("LanRegistrationManager", "📴 Service unregistered: ${serviceInfo.serviceName}")
+            }
 
             override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                android.util.Log.w("LanRegistrationManager", "⚠️ Service unregistration failed: errorCode=$errorCode, serviceName=${serviceInfo.serviceName}")
                 scheduleRetry(config)
             }
         }
         registrationListener = listener
         scope.launch(dispatcher) {
-            runCatching { nsdManager.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener) }
-                .onFailure { scheduleRetry(config) }
+            runCatching { 
+                android.util.Log.d("LanRegistrationManager", "🔄 Calling nsdManager.registerService()...")
+                nsdManager.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
+                android.util.Log.d("LanRegistrationManager", "✅ nsdManager.registerService() called successfully")
+            }
+                .onFailure { error ->
+                    android.util.Log.e("LanRegistrationManager", "❌ Failed to call registerService: ${error.message}", error)
+                    scheduleRetry(config)
+                }
         }
     }
 
@@ -129,7 +179,8 @@ data class LanRegistrationConfig(
     val fingerprint: String,
     val version: String,
     val protocols: List<String>,
-    val serviceType: String = SERVICE_TYPE
+    val serviceType: String = SERVICE_TYPE,
+    val deviceId: String? = null
 )
 
 interface LanRegistrationController {

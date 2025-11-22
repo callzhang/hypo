@@ -72,7 +72,7 @@
     <string name="status_connecting">Connecting…</string>
     <string name="status_disconnected">Disconnected</string>
     <string name="status_lan">LAN</string>
-    <string name="status_cloud">Cloud</string>
+    <string name="status_cloud">Connected</string>
     <string name="status_offline">Offline</string>
     
     <!-- Device Status -->

@@ -2,6 +2,34 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [0.2.1] - 2025-11-19 - Clipboard Sync Stability & Cloud Relay Support
+
+### Fixed
+- **Sync Broadcasting Timing Issue (Issue 11)**: Fixed clipboard sync not broadcasting when targets were empty
+  - Added target caching in `SyncCoordinator` to ensure paired device IDs are available before event processing
+  - Stabilized LAN discovery with connection-state persistence and periodic refresh (every 5 seconds)
+  - Targets now remain populated throughout clipboard event processing lifecycle
+  - Comprehensive logging added for duplicate check, repository save, and broadcast phases
+
+- **Cloud Relay Headers**: Added required `X-Device-Id` and `X-Device-Platform` headers to WebSocket handshake
+  - Cloud relay connections now succeed (previously returned 400 Bad Request)
+  - Enables cloud relay as fallback transport when LAN peers are offline
+  - Headers added in `LanWebSocketClient` connector for all cloud relay connections
+
+### Changed
+- **LAN Discovery Stability**: Improved peer discovery reliability
+  - Deduplication logic tightened to keep peer list stable
+  - Connection state persistence prevents targets from fluctuating (0→1→0)
+  - Periodic refresh ensures targets are computed before clipboard events are processed
+
+### Technical Details
+- `SyncCoordinator` now caches paired device IDs and refreshes proactively before broadcasts
+- LAN discovery dedupe + refresh job runs every 5 seconds to maintain stable peer list
+- Cloud relay headers include device identifier and platform for proper server routing
+- All clipboard sync issues (Issues 1-11) now resolved and verified end-to-end
+
+---
+
 ## [0.2.0] - 2025-11-18 - Connection Status & UI Improvements
 
 ### Added

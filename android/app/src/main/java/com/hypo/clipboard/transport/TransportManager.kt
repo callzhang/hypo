@@ -44,6 +44,8 @@ class TransportManager(
     private val stateLock = Any()
     private val peersByService = mutableMapOf<String, DiscoveredPeer>()
     private val lastSeenByService = mutableMapOf<String, Instant>()
+    // Keep track of pending removals for cancellation (but we don't actually remove peers anymore)
+    private val pendingPeerRemovalJobs = mutableMapOf<String, Job>()
 
     private val _peers = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
     private val _lastSeen = MutableStateFlow<Map<String, Instant>>(emptyMap())
@@ -157,8 +159,11 @@ class TransportManager(
     }
 
     fun start(config: LanRegistrationConfig) {
+        android.util.Log.d("TransportManager", "🚀 TransportManager.start() called: serviceName=${config.serviceName}, port=${config.port}, serviceType=${config.serviceType}")
+        android.util.Log.d("TransportManager", "📝 Calling registrationController.start()...")
         currentConfig = config
         registrationController.start(config)
+        android.util.Log.d("TransportManager", "✅ registrationController.start() called, isAdvertising=${_isAdvertising.value}")
         _isAdvertising.value = true
         if (discoveryJob == null) {
             discoveryJob = scope.launch {
@@ -352,6 +357,12 @@ class TransportManager(
     }
 
     fun addPeer(peer: DiscoveredPeer) {
+        // Cancel any pending removal job if peer is rediscovered
+        val pendingRemoval = synchronized(stateLock) { pendingPeerRemovalJobs.remove(peer.serviceName) }
+        pendingRemoval?.cancel()
+        if (pendingRemoval != null) {
+            android.util.Log.d("TransportManager", "✅ Peer ${peer.serviceName} rediscovered (was offline, now online)")
+        }
         synchronized(stateLock) {
             peersByService[peer.serviceName] = peer
             lastSeenByService[peer.serviceName] = peer.lastSeen
@@ -360,13 +371,14 @@ class TransportManager(
     }
 
     fun removePeer(serviceName: String) {
-        synchronized(stateLock) {
-            val removed = peersByService.remove(serviceName)
-            if (removed != null) {
-                lastSeenByService.remove(serviceName)
-                publishStateLocked()
-            }
-        }
+        // Peer removal is handled by ConnectionStatusProber based on network connectivity
+        // and discovery status. We don't remove peers here to avoid race conditions.
+        // ConnectionStatusProber will update peer status based on network state and discovery.
+        android.util.Log.d("TransportManager", "📴 Peer $serviceName reported as lost (status will be updated by ConnectionStatusProber)")
+        
+        // Cancel any pending removal job if peer is rediscovered
+        val pendingRemoval = synchronized(stateLock) { pendingPeerRemovalJobs.remove(serviceName) }
+        pendingRemoval?.cancel()
     }
 
     fun forgetPairedDevice(deviceId: String) {

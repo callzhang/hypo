@@ -83,11 +83,7 @@ fun DeviceStatusBadge(
             tint = visuals.contentColor,
             modifier = Modifier.size(14.dp)
         )
-        Text(
-            text = stringResource(id = visuals.textRes),
-            style = MaterialTheme.typography.labelSmall,
-            color = visuals.contentColor
-        )
+        // Text removed - only show icon for peer status badges
     }
 }
 

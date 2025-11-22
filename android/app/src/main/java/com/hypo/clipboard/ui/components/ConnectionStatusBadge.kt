@@ -34,8 +34,8 @@ fun ConnectionStatusBadge(connectionState: ConnectionState, modifier: Modifier =
         ConnectionState.ConnectedCloud -> StatusVisuals(
             icon = Icons.Filled.Cloud,
             textRes = R.string.status_cloud,
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+            containerColor = androidx.compose.ui.graphics.Color(0xFF2196F3), // Blue for cloud
+            contentColor = androidx.compose.ui.graphics.Color.White
         )
         ConnectionState.ConnectingLan, ConnectionState.ConnectingCloud -> StatusVisuals(
             icon = Icons.Filled.Sync,

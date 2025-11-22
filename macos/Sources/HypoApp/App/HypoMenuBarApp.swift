@@ -142,6 +142,12 @@ private struct MenuBarContentView: View {
         .onAppear {
             isVisible = true
             configureWindowBlur()
+            // Trigger connection status probe when window appears to refresh peer status
+            if let transportManager = viewModel.transportManager {
+                Task {
+                    await transportManager.probeConnectionStatus()
+                }
+            }
         }
         .onDisappear {
             isVisible = false
@@ -431,32 +437,6 @@ private struct SettingsSectionView: View {
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @State private var isPresentingPairing = false
     
-    private var versionString: String {
-        // Get the app bundle - when running as .app, Bundle.main should be the app bundle
-        let bundle = Bundle.main
-        
-        // Debug: log bundle info
-        print("📦 [SettingsSectionView] Bundle path: \(bundle.bundlePath)")
-        print("📦 [SettingsSectionView] Bundle identifier: \(bundle.bundleIdentifier ?? "nil")")
-        print("📦 [SettingsSectionView] Info dictionary keys: \(bundle.infoDictionary?.keys.sorted() ?? [])")
-        
-        if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String,
-           let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
-            print("📦 [SettingsSectionView] Found version: \(version), build: \(build)")
-            return "Version \(version) (Build \(build))"
-        } else if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String {
-            print("📦 [SettingsSectionView] Found version only: \(version)")
-            return "Version \(version)"
-        } else if let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
-            print("📦 [SettingsSectionView] Found build only: \(build)")
-            return "Build \(build)"
-        } else {
-            // Fallback: use Info.plist values directly
-            print("📦 [SettingsSectionView] No version found in bundle, using fallback")
-            return "Version 1.0.0"
-        }
-    }
-
     var body: some View {
         ScrollView {
             Form {
@@ -568,6 +548,11 @@ private struct SettingsSectionView: View {
                                     .frame(width: 10, height: 10)
                                     .accessibilityLabel(device.isOnline ? "Online" : "Offline")
                                     .id("\(device.id)-\(device.isOnline)") // Force re-render when isOnline changes
+                                    .onChange(of: device.isOnline) { newValue in
+                                        let debugMsg = "🔄 [UI] Device \(device.name) isOnline changed to: \(newValue)\n"
+                                        print(debugMsg)
+                                        try? debugMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                                    }
                                     .onAppear {
                                         let debugMsg = "🎨 [UI] Device \(device.name) rendered: isOnline=\(device.isOnline), id=\(device.id)\n"
                                         print(debugMsg)
@@ -584,6 +569,14 @@ private struct SettingsSectionView: View {
                         }
                     }
                     Button("Pair new device") { isPresentingPairing = true }
+                }
+                .onAppear {
+                    // Trigger connection status probe when settings section appears to refresh peer status
+                    if let transportManager = viewModel.transportManager {
+                        Task {
+                            await transportManager.probeConnectionStatus()
+                        }
+                    }
                 }
 
                 Section("About") {
@@ -603,6 +596,32 @@ private struct SettingsSectionView: View {
             PairDeviceSheet(viewModel: viewModel, isPresented: $isPresentingPairing)
         }
     }
+    
+    private var versionString: String {
+        // Get the app bundle - when running as .app, Bundle.main should be the app bundle
+        let bundle = Bundle.main
+        
+        // Debug: log bundle info
+        print("📦 [SettingsSectionView] Bundle path: \(bundle.bundlePath)")
+        print("📦 [SettingsSectionView] Bundle identifier: \(bundle.bundleIdentifier ?? "nil")")
+        print("📦 [SettingsSectionView] Info dictionary keys: \(bundle.infoDictionary?.keys.sorted() ?? [])")
+        
+        if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String,
+           let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
+            print("📦 [SettingsSectionView] Found version: \(version), build: \(build)")
+            return "Version \(version) (Build \(build))"
+        } else if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String {
+            print("📦 [SettingsSectionView] Found version only: \(version)")
+            return "Version \(version)"
+        } else if let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
+            print("📦 [SettingsSectionView] Found build only: \(build)")
+            return "Build \(build)"
+        } else {
+            // Fallback: use Info.plist values directly
+            print("📦 [SettingsSectionView] No version found in bundle, using fallback")
+            return "Version 1.0.0"
+        }
+    }
 
     private func appearanceTitle(for appearance: ClipboardHistoryViewModel.AppearancePreference) -> String {
         switch appearance {
@@ -615,7 +634,7 @@ private struct SettingsSectionView: View {
     private func connectionStatusIconName(for state: ConnectionState) -> String {
         switch state {
         case .idle:
-            return "wifi.slash"
+            return "cloud.slash.fill" // Cloud with slash when disconnected (not wifi)
         case .connectingLan, .connectingCloud:
             return "arrow.triangle.2.circlepath"
         case .connectedLan:
@@ -815,7 +834,7 @@ private struct ConnectionStatusView: View {
     private var iconName: String {
         switch state {
         case .idle:
-            return "wifi.slash"
+            return "cloud.slash.fill" // Cloud with slash when disconnected (not wifi)
         case .connectingLan, .connectingCloud:
             return "arrow.triangle.2.circlepath"
         case .connectedLan:

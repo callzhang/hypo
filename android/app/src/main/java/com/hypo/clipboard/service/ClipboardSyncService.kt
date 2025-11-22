@@ -66,6 +66,8 @@ class ClipboardSyncService : Service() {
     private var isAppInForeground: Boolean = false
     private var isAccessibilityServiceEnabled: Boolean = false
     private lateinit var screenStateReceiver: ScreenStateReceiver
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+    private lateinit var connectivityManager: android.net.ConnectivityManager
 
     override fun onCreate() {
         super.onCreate()
@@ -110,6 +112,10 @@ class ClipboardSyncService : Service() {
         android.util.Log.i("ClipboardSyncService", "📱 Registering screen state receiver...")
         registerScreenStateReceiver()
         
+        // Register network connectivity change callback
+        android.util.Log.i("ClipboardSyncService", "🌐 Registering network connectivity callback...")
+        registerNetworkChangeCallback()
+        
         // Start connection status prober
         android.util.Log.i("ClipboardSyncService", "🔍 Starting connection status prober...")
         connectionStatusProber.start()
@@ -135,6 +141,7 @@ class ClipboardSyncService : Service() {
     override fun onDestroy() {
         notificationJob?.cancel()
         unregisterScreenStateReceiver()
+        unregisterNetworkChangeCallback()
         listener.stop()
         syncCoordinator.stop()
         clipboardPermissionJob?.cancel()
@@ -340,6 +347,47 @@ class ClipboardSyncService : Service() {
             Log.d(TAG, "Screen state receiver unregistered")
         }
     }
+    
+    private fun registerNetworkChangeCallback() {
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                super.onAvailable(network)
+                android.util.Log.d(TAG, "🌐 Network became available - triggering immediate probe")
+                connectionStatusProber.probeNow()
+            }
+
+            override fun onLost(network: android.net.Network) {
+                super.onLost(network)
+                android.util.Log.d(TAG, "🌐 Network lost - triggering immediate probe")
+                connectionStatusProber.probeNow()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: android.net.Network,
+                networkCapabilities: android.net.NetworkCapabilities
+            ) {
+                super.onCapabilitiesChanged(network, networkCapabilities)
+                android.util.Log.d(TAG, "🌐 Network capabilities changed - triggering immediate probe")
+                connectionStatusProber.probeNow()
+            }
+        }
+        val request = android.net.NetworkRequest.Builder()
+            .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        connectivityManager.registerNetworkCallback(request, networkCallback!!)
+        android.util.Log.d(TAG, "Network connectivity callback registered")
+    }
+    
+    private fun unregisterNetworkChangeCallback() {
+        networkCallback?.let { callback ->
+            runCatching {
+                connectivityManager.unregisterNetworkCallback(callback)
+                android.util.Log.d(TAG, "Network connectivity callback unregistered")
+            }
+            networkCallback = null
+        }
+    }
 
     private fun handleScreenOff() {
         if (isScreenOff) return
@@ -541,7 +589,8 @@ class ClipboardSyncService : Service() {
             port = TransportManager.DEFAULT_PORT,
             fingerprint = TransportManager.DEFAULT_FINGERPRINT,
             version = version,
-            protocols = TransportManager.DEFAULT_PROTOCOLS
+            protocols = TransportManager.DEFAULT_PROTOCOLS,
+            deviceId = deviceIdentity.deviceId
         )
     }
 

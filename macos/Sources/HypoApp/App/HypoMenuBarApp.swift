@@ -45,20 +45,11 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                 )
                 
                 if err == noErr && hotKeyID.id == 1 {
-                    // Post notification to show history popup
                     DispatchQueue.main.async {
                         NSApp.activate(ignoringOtherApps: true)
                         if let viewModel = AppContext.shared.historyViewModel {
                             HistoryPopupPresenter.shared.show(with: viewModel)
                         }
-                        NotificationCenter.default.post(
-                            name: NSNotification.Name("ShowHistoryPopup"),
-                            object: nil
-                        )
-                        NotificationCenter.default.post(
-                            name: NSNotification.Name("ShowHistorySection"),
-                            object: nil
-                        )
                     }
                 }
                 return noErr

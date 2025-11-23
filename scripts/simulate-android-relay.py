@@ -18,7 +18,8 @@ import json
 import struct
 import time
 import uuid
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 import sys
 
 try:
@@ -29,48 +30,108 @@ except ImportError:
     print("   Install it with: pip3 install websocket-client")
     sys.exit(1)
 
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.backends import default_backend
+    ENCRYPTION_AVAILABLE = True
+except ImportError:
+    ENCRYPTION_AVAILABLE = False
+    print("⚠️  Warning: cryptography library not available - encryption disabled")
+    print("   Install it with: pip3 install cryptography")
+
 # Cloud relay URL
 RELAY_URL = "wss://hypo.fly.dev/ws"
 
-def create_sync_envelope(text: str, device_id: str = None, device_name: str = None, target: str = None):
+def encrypt_payload(plaintext: bytes, key: bytes, device_id: str) -> tuple[str, str, str]:
+    """Encrypt plaintext using AES-256-GCM.
+    
+    Returns: (ciphertext_base64, nonce_base64, tag_base64)
+    """
+    if not ENCRYPTION_AVAILABLE:
+        raise RuntimeError("Encryption not available - install cryptography library")
+    
+    if len(key) != 32:
+        raise ValueError(f"Key must be 32 bytes, got {len(key)}")
+    
+    # Generate 12-byte nonce (GCM standard)
+    nonce = os.urandom(12)
+    
+    # Create AESGCM cipher
+    aesgcm = AESGCM(key)
+    
+    # AAD = deviceId as UTF-8 bytes
+    aad = device_id.encode('utf-8')
+    
+    # Encrypt (returns ciphertext + tag)
+    encrypted = aesgcm.encrypt(nonce, plaintext, aad)
+    
+    # GCM returns ciphertext + tag (16 bytes at the end)
+    ciphertext = encrypted[:-16]
+    tag = encrypted[-16:]
+    
+    # Base64 encode (Android uses Base64.withoutPadding(), but standard base64 works too)
+    ciphertext_b64 = base64.b64encode(ciphertext).decode('utf-8')
+    nonce_b64 = base64.b64encode(nonce).decode('utf-8')
+    tag_b64 = base64.b64encode(tag).decode('utf-8')
+    
+    return ciphertext_b64, nonce_b64, tag_b64
+
+def create_sync_envelope(text: str, device_id: str = None, device_name: str = None, target: str = None, encrypted: bool = False, key: bytes = None):
     """Create a SyncEnvelope in the same format as Android."""
     if device_id is None:
         device_id = f"android-{uuid.uuid4()}"
     if device_name is None:
         device_name = "Test Android Device"
     
-    # Create plaintext payload (for testing, we'll use plaintext mode)
+    # Create plaintext payload
     plaintext = json.dumps({
         "content_type": "text",
         "data_base64": base64.b64encode(text.encode('utf-8')).decode('utf-8'),
         "metadata": {}
     }).encode('utf-8')
     
-    # For testing, use plaintext mode (empty nonce/tag)
-    ciphertext_base64 = base64.b64encode(plaintext).decode('utf-8')
+    # Encrypt or use plaintext mode
+    if encrypted and key:
+        if not ENCRYPTION_AVAILABLE:
+            print("⚠️  Warning: Encryption requested but cryptography library not available")
+            print("   Falling back to plaintext mode")
+            encrypted = False
+        
+        if encrypted:
+            ciphertext_b64, nonce_b64, tag_b64 = encrypt_payload(plaintext, key, device_id)
+        else:
+            # Plaintext mode
+            ciphertext_b64 = base64.b64encode(plaintext).decode('utf-8')
+            nonce_b64 = ""
+            tag_b64 = ""
+    else:
+        # Plaintext mode (default)
+        ciphertext_b64 = base64.b64encode(plaintext).decode('utf-8')
+        nonce_b64 = ""
+        tag_b64 = ""
     
     envelope = {
         "id": str(uuid.uuid4()),
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         "version": "1.0",
         "type": "clipboard",
         "payload": {
             "content_type": "text",
-            "ciphertext": ciphertext_base64,
+            "ciphertext": ciphertext_b64,
             "device_id": device_id,
             "device_name": device_name,
             "target": target,
             "encryption": {
                 "algorithm": "AES-256-GCM",
-                "nonce": "",  # Plaintext mode
-                "tag": ""     # Plaintext mode
+                "nonce": nonce_b64,
+                "tag": tag_b64
             }
         }
     }
     
     return envelope
 
-def send_via_relay(text: str, device_id: str = None, device_name: str = None, target: str = None):
+def send_via_relay(text: str, device_id: str = None, device_name: str = None, target: str = None, encrypted: bool = False, key: bytes = None):
     """Connect to cloud relay and send clipboard sync message."""
     print(f"🔌 Connecting to cloud relay: {RELAY_URL}...")
     
@@ -104,7 +165,7 @@ def send_via_relay(text: str, device_id: str = None, device_name: str = None, ta
         ws.settimeout(10)  # 10 second timeout for all operations
         
         # Create sync envelope
-        envelope = create_sync_envelope(text, device_id, device_name, target)
+        envelope = create_sync_envelope(text, device_id, device_name, target, encrypted=encrypted, key=key)
         print(f"📦 Created sync envelope: id={envelope['id'][:8]}...")
         print(f"   Target: {target or '(broadcast)'}")
         
@@ -124,10 +185,10 @@ def send_via_relay(text: str, device_id: str = None, device_name: str = None, ta
         print(f"   Text: {text}")
         print(f"   Device: {envelope['payload']['device_name']} ({envelope['payload']['device_id'][:20]}...)")
         
-        # Wait for reply with timeout
-        print(f"\n📥 Waiting for reply from relay (10s timeout)...")
+        # Optionally wait for reply (but don't fail if none received)
+        print(f"\n📥 Waiting for reply from relay (5s timeout, optional)...")
         try:
-            ws.settimeout(10)  # 10 second timeout
+            ws.settimeout(5)  # 5 second timeout
             reply = ws.recv()
             
             if isinstance(reply, bytes):
@@ -162,7 +223,8 @@ def send_via_relay(text: str, device_id: str = None, device_name: str = None, ta
             else:
                 print(f"📥 Received unknown reply type: {type(reply)}")
         except Exception as e:
-            print(f"⚠️ No reply received: {e}")
+            # Timeout is expected - message was sent, that's what matters
+            print(f"ℹ️  No reply received (timeout expected): {type(e).__name__}")
         
         # Close connection
         ws.close()
@@ -201,27 +263,101 @@ def main():
         "--target",
         help="Target device ID (required for relay routing - use macOS device ID)"
     )
+    parser.add_argument(
+        "--target-platform",
+        choices=["macos", "android"],
+        help="Target platform (macos or android). If specified, --target-device-id is required unless using default device IDs."
+    )
+    parser.add_argument(
+        "--target-device-id",
+        help="Target device ID for the specified platform (required if --target-platform is specified)"
+    )
+    parser.add_argument(
+        "--encrypted",
+        action="store_true",
+        help="Encrypt the message (requires --key or --key-file)"
+    )
+    parser.add_argument(
+        "--key",
+        help="Encryption key as hex string (32 bytes = 64 hex chars)"
+    )
+    parser.add_argument(
+        "--key-file",
+        help="Path to file containing encryption key (32 bytes binary or hex string)"
+    )
     
     args = parser.parse_args()
     
-    if not args.target:
+    # Handle target platform
+    target_device_id = args.target
+    if args.target_platform:
+        if args.target_device_id:
+            target_device_id = args.target_device_id
+        else:
+            # Use default device IDs based on platform
+            if args.target_platform == "macos":
+                target_device_id = "007E4A95-0E1A-4B10-91FA-87942EFAA68E"  # Default macOS device
+                print(f"ℹ️  Using default macOS device ID: {target_device_id}")
+            elif args.target_platform == "android":
+                target_device_id = "c7bd7e23-b5c1-4dfd-bb62-6a3b7c880760"  # Default Android device
+                print(f"ℹ️  Using default Android device ID: {target_device_id}")
+    
+    # Handle encryption key
+    key = None
+    if args.encrypted:
+        if args.key:
+            # Key provided as hex string
+            try:
+                key = bytes.fromhex(args.key)
+                if len(key) != 32:
+                    print(f"❌ Error: Key must be 32 bytes (64 hex chars), got {len(key)} bytes")
+                    sys.exit(1)
+            except ValueError as e:
+                print(f"❌ Error: Invalid hex key: {e}")
+                sys.exit(1)
+        elif args.key_file:
+            # Key from file
+            try:
+                with open(args.key_file, 'rb') as f:
+                    key_data = f.read()
+                # Try hex first, then binary
+                try:
+                    key = bytes.fromhex(key_data.decode('utf-8').strip())
+                except:
+                    key = key_data
+                if len(key) != 32:
+                    print(f"❌ Error: Key must be 32 bytes, got {len(key)} bytes from file")
+                    sys.exit(1)
+            except Exception as e:
+                print(f"❌ Error: Failed to read key file: {e}")
+                sys.exit(1)
+        else:
+            print("❌ Error: --encrypted requires --key or --key-file")
+            print("   Example: --encrypted --key $(security find-generic-password -w -s 'com.hypo.clipboard.keys' -a 'android-XXX' | xxd -p -c 32)")
+            sys.exit(1)
+    
+    if not target_device_id:
         print("⚠️  Warning: No target device ID specified")
         print("   The relay routes messages based on the 'target' field in the payload")
         print("   Without a target, the message will be broadcast to all connected devices")
-        print("   Use --target <macos-device-id> to send to a specific device")
+        print("   Use --target <device-id> or --target-platform <macos|android> to send to a specific device")
         print()
     
     print("🚀 Simulating Android clipboard copy via cloud relay")
     print(f"   Relay: {RELAY_URL}")
     print(f"   Text: {args.text}")
-    print(f"   Target: {args.target or '(broadcast)'}")
+    print(f"   Target: {target_device_id or '(broadcast)'}")
+    if args.target_platform:
+        print(f"   Target Platform: {args.target_platform}")
     print()
     
     success = send_via_relay(
         text=args.text,
         device_id=args.device_id,
         device_name=args.device_name,
-        target=args.target
+        target=target_device_id,
+        encrypted=args.encrypted,
+        key=key
     )
     
     sys.exit(0 if success else 1)

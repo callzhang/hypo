@@ -125,3 +125,5 @@ let deviceIdString = "\(platform)-\(uuid.uuidString)"
 
 While the current prefix approach works and is self-documenting, **separating UUID and platform is cleaner and more maintainable**. The platform prefix adds unnecessary complexity and breaks standard UUID handling. The recommended approach aligns with the existing backend structure and provides better type safety.
 
+
+

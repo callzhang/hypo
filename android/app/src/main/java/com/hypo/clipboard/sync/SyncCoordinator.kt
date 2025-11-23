@@ -25,7 +25,8 @@ class SyncCoordinator @Inject constructor(
     private val syncEngine: SyncEngine,
     private val identity: DeviceIdentity,
     private val transportManager: com.hypo.clipboard.transport.TransportManager,
-    private val deviceKeyStore: DeviceKeyStore
+    private val deviceKeyStore: DeviceKeyStore,
+    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
 ) {
     private var eventChannel: Channel<ClipboardEvent>? = null
     private var job: Job? = null
@@ -54,7 +55,12 @@ class SyncCoordinator @Inject constructor(
                 val deviceIds = peers.map { it.attributes["device_id"] ?: it.serviceName }.toSet()
                 autoTargets.value = deviceIds
                 recomputeTargets()
-                // Targets updated silently
+                
+                // When peers are discovered, start maintaining a connection to receive messages
+                if (peers.isNotEmpty()) {
+                    android.util.Log.d(TAG, "🔌 Peers discovered (${peers.size}), starting receiving connection...")
+                    lanWebSocketClient.startReceiving()
+                }
             }
         }
     }
@@ -129,29 +135,31 @@ class SyncCoordinator @Inject constructor(
                 val deviceId = event.sourceDeviceId ?: identity.deviceId
                 val deviceName = event.sourceDeviceName ?: identity.deviceName
                 
-                // New plan:
+                // Simplified duplicate detection (no time windows):
                 // 1. If new message matches the current clipboard (latest entry) → discard
                 // 2. If new message matches something in history → move that history item to the top
                 // 3. Otherwise → add new entry
+                
+                // Create ClipboardItem from event for matching
+                val eventItem = ClipboardItem(
+                    id = event.id,
+                    type = event.type,
+                    content = event.content,
+                    preview = event.preview,
+                    metadata = event.metadata.ifEmpty { emptyMap() },
+                    deviceId = deviceId,
+                    deviceName = deviceName,
+                    createdAt = event.createdAt,
+                    isPinned = false,
+                    isEncrypted = event.isEncrypted,
+                    transportOrigin = event.transportOrigin
+                )
                 
                 val latestEntry = repository.getLatestEntry()
                 
                 // Check if matches current clipboard (latest entry)
                 val matchesCurrentClipboard = latestEntry?.let { latest ->
-                    if (event.type == ClipboardType.IMAGE && 
-                        latest.type == ClipboardType.IMAGE) {
-                        // For images, compare by hash from metadata if available, otherwise by content
-                        val eventHash = event.metadata["hash"]
-                        val latestHash = latest.metadata?.get("hash")
-                        if (eventHash != null && latestHash != null) {
-                            eventHash == latestHash
-                        } else {
-                            event.content == latest.content
-                        }
-                    } else {
-                        // For other content types, use full content comparison
-                        event.content == latest.content && event.type == latest.type
-                    }
+                    eventItem.matchesContent(latest)
                 } ?: false
                 
                 if (matchesCurrentClipboard) {
@@ -160,7 +168,7 @@ class SyncCoordinator @Inject constructor(
                 }
                 
                 // Check if matches something in history (excluding the latest entry)
-                val matchingEntry = repository.findMatchingEntryInHistory(event.content, event.type)
+                val matchingEntry = repository.findMatchingEntryInHistory(eventItem)
                 
                 if (matchingEntry != null) {
                     // Found matching entry in history - move it to the top by updating timestamp

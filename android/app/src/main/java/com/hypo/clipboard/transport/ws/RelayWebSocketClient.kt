@@ -57,4 +57,13 @@ class RelayWebSocketClient @Inject constructor(
             handler(envelope, com.hypo.clipboard.domain.model.TransportOrigin.CLOUD)
         }
     }
+    
+    /**
+     * Start maintaining a persistent connection to receive incoming messages from cloud relay.
+     * This should be called when the app starts to ensure cloud messages can be received.
+     */
+    fun startReceiving() {
+        android.util.Log.d("RelayWebSocketClient", "👂 startReceiving() called - connecting to cloud relay: ${delegate.javaClass.simpleName}")
+        delegate.startReceiving()
+    }
 }

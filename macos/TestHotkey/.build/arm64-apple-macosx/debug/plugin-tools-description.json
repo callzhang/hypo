@@ -1,0 +1,243 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.TestHotkey-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "fileList" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/sources",
+      "importPath" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/TestHotkeyApp.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "TestHotkey",
+      "moduleOutputPath" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/Modules/TestHotkey.swiftmodule",
+      "objects" : [
+        "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "TestHotkey_main",
+        "-parse-as-library",
+        "-color-diagnostics",
+        "-swift-version",
+        "5",
+        "-I",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-L",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-plugin-path",
+        "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "testhotkey"
+      ],
+      "outputFileMapPath" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/Modules/TestHotkey.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/TestHotkeyApp.swift"
+      ],
+      "tempsPath" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "TestHotkey" : [
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "-module-name",
+      "TestHotkey",
+      "-package-name",
+      "testhotkey",
+      "-c",
+      "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/TestHotkeyApp.swift",
+      "-I",
+      "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "TestHotkey_main",
+      "-parse-as-library",
+      "-color-diagnostics",
+      "-swift-version",
+      "5",
+      "-I",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-L",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-plugin-path",
+      "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "testhotkey",
+      "-driver-use-frontend-path",
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "TestHotkey" : [
+
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey-entitlement.plist"
+    },
+    "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/TestHotkeyApp.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/sources"
+    },
+    "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.product/Objects.LinkFileList"
+    },
+    "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+    }
+  }
+}

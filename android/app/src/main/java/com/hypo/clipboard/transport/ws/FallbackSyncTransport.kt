@@ -43,14 +43,14 @@ class FallbackSyncTransport(
         // Launch both sends in parallel
         val lanJob = async {
             try {
-                // Try LAN with timeout (3 seconds)
+        // Try LAN with timeout (3 seconds)
                 withTimeoutOrNull(Duration.ofSeconds(3).toMillis()) {
-                    lanTransport.send(envelope)
-                    android.util.Log.d("FallbackSyncTransport", "✅ LAN transport succeeded")
-                    if (targetDeviceId != null) {
-                        transportManager.markDeviceConnected(targetDeviceId, com.hypo.clipboard.transport.ActiveTransport.LAN)
-                    }
-                    true
+                lanTransport.send(envelope)
+                android.util.Log.d("FallbackSyncTransport", "✅ LAN transport succeeded")
+                if (targetDeviceId != null) {
+                    transportManager.markDeviceConnected(targetDeviceId, com.hypo.clipboard.transport.ActiveTransport.LAN)
+                }
+                true
                 } ?: false
             } catch (e: CancellationException) {
                 throw e
@@ -60,16 +60,16 @@ class FallbackSyncTransport(
                 false
             }
         }
-        
+
         val cloudJob = async {
-            try {
-                cloudTransport.send(envelope)
+        try {
+            cloudTransport.send(envelope)
                 android.util.Log.d("FallbackSyncTransport", "✅ Cloud transport succeeded")
-                if (targetDeviceId != null) {
-                    transportManager.markDeviceConnected(targetDeviceId, com.hypo.clipboard.transport.ActiveTransport.CLOUD)
-                }
+            if (targetDeviceId != null) {
+                transportManager.markDeviceConnected(targetDeviceId, com.hypo.clipboard.transport.ActiveTransport.CLOUD)
+            }
                 true
-            } catch (e: Exception) {
+        } catch (e: Exception) {
                 android.util.Log.w("FallbackSyncTransport", "⚠️ Cloud transport failed: ${e.message}")
                 cloudError = e
                 false

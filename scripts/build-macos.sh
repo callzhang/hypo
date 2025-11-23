@@ -64,9 +64,9 @@ if [ ! -d "$APP_BUNDLE" ]; then
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>4</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>0.2.3</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
 </dict>
@@ -95,19 +95,9 @@ fi
 
 log_success "Build complete: $BUILT_BINARY"
 
-# Verify binary exists and is newer than app bundle (if it exists)
+# Always copy binary to app bundle to ensure it's updated
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$BINARY_NAME"
-if [ -f "$APP_BINARY" ]; then
-    BUILT_TIME=$(stat -f "%m" "$BUILT_BINARY" 2>/dev/null || echo "0")
-    APP_TIME=$(stat -f "%m" "$APP_BINARY" 2>/dev/null || echo "0")
-    
-    if [ "$BUILT_TIME" -le "$APP_TIME" ]; then
-        log_warn "Built binary is not newer than app bundle binary"
-        log_info "Forcing copy to ensure latest code is used..."
-    fi
-fi
 
-# Copy binary to app bundle (always copy to ensure latest)
 log_info "Copying binary to app bundle..."
 cp -f "$BUILT_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
@@ -129,6 +119,10 @@ else
     log_error "Failed to copy binary to app bundle"
     exit 1
 fi
+
+# Touch the app bundle to update its modification time
+touch "$APP_BUNDLE"
+log_info "App bundle updated: $(date -r "$APP_BUNDLE" '+%Y-%m-%d %H:%M:%S')"
 
 # Kill existing instances
 log_info "Stopping existing app instances..."

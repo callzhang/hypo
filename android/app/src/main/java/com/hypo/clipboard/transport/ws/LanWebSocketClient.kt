@@ -270,6 +270,10 @@ class LanWebSocketClient @Inject constructor(
         }
     }
 
+    /**
+     * Ensure a connection is established. This is called when sending messages,
+     * but can also be called proactively to maintain a connection for receiving messages.
+     */
     private suspend fun ensureConnection() {
         mutex.withLock {
             if (connectionJob == null || connectionJob?.isActive != true) {
@@ -290,7 +294,24 @@ class LanWebSocketClient @Inject constructor(
                     }
                 }
                 connectionJob = job
+                android.util.Log.d("LanWebSocketClient", "🔌 Started connection loop for receiving messages")
             }
+        }
+    }
+    
+    /**
+     * Start maintaining a persistent connection to receive incoming messages.
+     * This should be called when a peer is discovered to ensure we can receive messages.
+     */
+    fun startReceiving() {
+        android.util.Log.d("LanWebSocketClient", "👂 Starting to receive messages...")
+        android.util.Log.d("LanWebSocketClient", "   Config URL: ${config.url}")
+        android.util.Log.d("LanWebSocketClient", "   Current URL: $currentUrl")
+        android.util.Log.d("LanWebSocketClient", "   Transport origin: $transportOrigin")
+        android.util.Log.d("LanWebSocketClient", "   Has transportManager: ${transportManager != null}")
+        scope.launch {
+            android.util.Log.d("LanWebSocketClient", "🔌 Calling ensureConnection() for URL: $currentUrl")
+            ensureConnection()
         }
     }
 
@@ -309,7 +330,13 @@ class LanWebSocketClient @Inject constructor(
             }
             val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    android.util.Log.d("LanWebSocketClient", "✅ WebSocket connection opened: $currentUrl")
+                    android.util.Log.i("LanWebSocketClient", "✅ WebSocket connection opened: $currentUrl")
+                    android.util.Log.i("LanWebSocketClient", "   Device ID registered with backend: ${config.headers["X-Device-Id"]}")
+                    android.util.Log.d("LanWebSocketClient", "   Response headers: ${response.headers}")
+                    android.util.Log.d("LanWebSocketClient", "   Config URL: ${config.url}")
+                    android.util.Log.d("LanWebSocketClient", "   WebSocket instance: ${webSocket.hashCode()}")
+                    android.util.Log.d("LanWebSocketClient", "   Response code: ${response.code}")
+                    android.util.Log.d("LanWebSocketClient", "   Response message: ${response.message}")
                     scope.launch {
                         mutex.withLock {
                             this@LanWebSocketClient.webSocket = webSocket
@@ -322,6 +349,12 @@ class LanWebSocketClient @Inject constructor(
                             metricsRecorder.recordHandshake(duration, clock.instant())
                         }
                         handshakeStarted = null
+                        
+                        // Small delay to ensure backend registration is complete
+                        // This helps avoid race conditions where messages are sent
+                        // before the backend has fully registered the connection
+                        delay(500) // 500ms delay
+                        android.util.Log.d("LanWebSocketClient", "   Backend registration should be complete, connection ready")
                         
                         // Signal that connection is established
                         if (!handshakeSignal.isCompleted) {
@@ -342,7 +375,10 @@ class LanWebSocketClient @Inject constructor(
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    android.util.Log.e("LanWebSocketClient", "🔥🔥🔥 onMessage() CALLED! ${bytes.size} bytes from $currentUrl")
                     touch()
+                    android.util.Log.i("LanWebSocketClient", "📥 Received binary message: ${bytes.size} bytes from URL: $currentUrl")
+                    android.util.Log.d("LanWebSocketClient", "   First 100 bytes: ${bytes.utf8().take(100)}")
                     handleIncoming(bytes)
                 }
 
@@ -504,6 +540,36 @@ class LanWebSocketClient @Inject constructor(
     private fun startWatchdog() {
         watchdogJob?.cancel()
         val observedJob = connectionJob
+        
+        // For cloud relay connections, use ping/pong keepalive instead of idle timeout
+        val isCloudRelay = config.url.contains("fly.dev", ignoreCase = true) || config.url.startsWith("wss://", ignoreCase = true)
+        
+        if (isCloudRelay) {
+            android.util.Log.d("LanWebSocketClient", "⏰ Starting ping/pong keepalive for cloud relay connection")
+            watchdogJob = scope.launch {
+                while (isActive) {
+                    delay(20_000) // 20 seconds, same as macOS
+                    if (!isActive) return@launch
+                    val socket = mutex.withLock { webSocket }
+                    if (socket != null) {
+                        try {
+                            val sent = socket.send(okio.ByteString.EMPTY) // Ping frame
+                            if (sent) {
+                                android.util.Log.d("LanWebSocketClient", "🏓 Ping sent to keep connection alive")
+                                touch()
+                            } else {
+                                android.util.Log.w("LanWebSocketClient", "⚠️ Ping send failed, connection may be closed")
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("LanWebSocketClient", "⚠️ Ping failed: ${e.message}, connection may be dead")
+                        }
+                    }
+                }
+            }
+            return
+        }
+        
+        // For LAN connections, use idle timeout
         watchdogJob = scope.launch {
             val timeout = Duration.ofMillis(config.idleTimeoutMillis)
             while (isActive) {
@@ -529,11 +595,13 @@ class LanWebSocketClient @Inject constructor(
 
     private fun handleIncoming(bytes: ByteString) {
         val now = clock.instant()
+        android.util.Log.i("LanWebSocketClient", "🔍 handleIncoming: ${bytes.size} bytes, handler=${onIncomingClipboard != null}, transportOrigin=$transportOrigin")
         
         // Try to detect if this is a pairing ACK message (JSON with challenge_id and mac_device_id)
         val messageString = bytes.utf8()
         if (messageString.contains("\"challenge_id\"") && messageString.contains("\"mac_device_id\"")) {
             // This looks like a pairing ACK, route it to pairing handler
+            android.util.Log.d("LanWebSocketClient", "📋 Detected pairing ACK message")
             onPairingAck?.invoke(messageString)
             return
         }
@@ -541,10 +609,13 @@ class LanWebSocketClient @Inject constructor(
         // Otherwise, treat as clipboard envelope
         val envelope = try {
             frameCodec.decode(bytes.toByteArray())
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("LanWebSocketClient", "❌ Failed to decode frame: ${e.message}", e)
             synchronized(pendingLock) { prunePendingLocked(now) }
             return
         }
+        android.util.Log.d("LanWebSocketClient", "✅ Decoded envelope: type=${envelope.type}, id=${envelope.id.take(8)}...")
+        
         val started = synchronized(pendingLock) {
             val removed = pendingRoundTrips.remove(envelope.id)
             prunePendingLocked(now)
@@ -557,7 +628,10 @@ class LanWebSocketClient @Inject constructor(
         
         // Handle incoming clipboard messages
         if (envelope.type == com.hypo.clipboard.sync.MessageType.CLIPBOARD) {
+            android.util.Log.d("LanWebSocketClient", "📋 Invoking onIncomingClipboard handler: origin=$transportOrigin")
             onIncomingClipboard?.invoke(envelope, transportOrigin)
+        } else {
+            android.util.Log.w("LanWebSocketClient", "⚠️ Received non-clipboard message type: ${envelope.type}")
         }
     }
 

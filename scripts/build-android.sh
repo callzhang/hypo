@@ -154,11 +154,11 @@ if [ -f "$APK_PATH" ]; then
                         echo -e "${GREEN}✅ App opened on $DEVICE_ID${NC}"
                     else
                         echo -e "${YELLOW}⚠️  Could not auto-open app on $DEVICE_ID. Please open manually.${NC}"
-                    fi
-                else
+                fi
+            else
                     echo -e "${RED}❌ Installation failed on $DEVICE_ID${NC}"
                     echo "   Try manually: $ADB -s $DEVICE_ID install -r android/$APK_PATH"
-                fi
+            fi
             done
         else
             echo "No devices connected. To install manually:"

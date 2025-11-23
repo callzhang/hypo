@@ -5,8 +5,10 @@ import com.hypo.clipboard.data.local.ClipboardEntity
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import android.util.Log
+import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -40,18 +42,26 @@ class ClipboardRepositoryImpl @Inject constructor(
         dao.clear()
     }
     
-    override suspend fun hasRecentDuplicate(content: String, type: ClipboardType, deviceId: String, withinSeconds: Long): Boolean {
-        val since = java.time.Instant.now().minusSeconds(withinSeconds)
-        val count = dao.countRecentDuplicates(content, type.name, deviceId, since)
-        return count > 0
-    }
-    
     override suspend fun getLatestEntry(): ClipboardItem? {
         return dao.getLatestEntry()?.toDomain()
     }
     
-    override suspend fun findMatchingEntryInHistory(content: String, type: ClipboardType): ClipboardItem? {
-        return dao.findMatchingEntryInHistory(content, type.name)?.toDomain()
+    override suspend fun findMatchingEntryInHistory(item: ClipboardItem): ClipboardItem? {
+        // Get all entries except the latest one
+        val allEntries = dao.observe().firstOrNull() ?: return null
+        val latestEntry = allEntries.firstOrNull()
+        val historyEntries = if (latestEntry != null) {
+            allEntries.filter { it.id != latestEntry.id }
+        } else {
+            allEntries
+        }
+        
+        // Find matching entry using unified matching logic
+        return historyEntries
+            .map { it.toDomain() }
+            .firstOrNull { existingItem ->
+                item.matchesContent(existingItem)
+            }
     }
     
     override suspend fun updateTimestamp(id: String, newTimestamp: Instant) {

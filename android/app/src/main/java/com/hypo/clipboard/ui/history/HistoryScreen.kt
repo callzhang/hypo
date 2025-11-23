@@ -3,6 +3,7 @@ package com.hypo.clipboard.ui.history
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,10 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -222,18 +227,22 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
     }
     
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !isCopying, onClick = ::copyToClipboard),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Type icon
-                Text(
-                    text = item.type.icon,
-                    style = MaterialTheme.typography.titleLarge
+                // Type icon - minimalist line-based icon
+                Icon(
+                    imageVector = item.type.iconVector,
+                    contentDescription = item.type.name,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 // Content title and origin badge
                 Row(
@@ -241,12 +250,7 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(
-                        text = item.type.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    // Origin badge
+                    // Origin badge with cloud/encrypted info
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = if (isLocal) 
@@ -255,56 +259,40 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
                             MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.padding(horizontal = 2.dp)
                     ) {
-                        Text(
-                            text = originName,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isLocal)
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                    // Encryption icon (shield)
-                    if (item.isEncrypted) {
-                        Icon(
-                            imageVector = Icons.Filled.Shield,
-                            contentDescription = "Encrypted",
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    // Transport origin icon (cloud or wifi)
-                    when (item.transportOrigin) {
-                        com.hypo.clipboard.domain.model.TransportOrigin.CLOUD -> {
-                            Icon(
-                                imageVector = Icons.Filled.Cloud,
-                                contentDescription = "Cloud",
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.secondary
+                        ) {
+                            // Encryption icon (shield) - similar to macOS
+                            if (item.isEncrypted) {
+                                Icon(
+                                    imageVector = Icons.Filled.Shield,
+                                    contentDescription = "Encrypted",
+                                    modifier = Modifier.size(12.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            // Transport origin icon (cloud only - no icon for LAN, matching macOS)
+                            if (item.transportOrigin == com.hypo.clipboard.domain.model.TransportOrigin.CLOUD) {
+                                Icon(
+                                    imageVector = Icons.Filled.Cloud,
+                                    contentDescription = "Cloud",
+                                    modifier = Modifier.size(12.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+                            }
+                            // Origin name
+                            Text(
+                                text = originName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isLocal)
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        com.hypo.clipboard.domain.model.TransportOrigin.LAN -> {
-                            Icon(
-                                imageVector = Icons.Filled.Wifi,
-                                contentDescription = "LAN",
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-                        null -> { /* No icon for local or unknown origin */ }
                     }
-                }
-                // Copy button
-                IconButton(
-                    onClick = ::copyToClipboard,
-                    modifier = Modifier.width(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.ContentCopy,
-                        contentDescription = "Copy to clipboard",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
                 }
                 // Timestamp
                 Text(
@@ -365,12 +353,12 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
     }
 }
 
-private val ClipboardType.icon: String
+private val ClipboardType.iconVector: androidx.compose.ui.graphics.vector.ImageVector
     get() = when (this) {
-        ClipboardType.TEXT -> "📝"
-        ClipboardType.LINK -> "🔗"
-        ClipboardType.IMAGE -> "🖼️"
-        ClipboardType.FILE -> "📎"
+        ClipboardType.TEXT -> Icons.Outlined.TextFields
+        ClipboardType.LINK -> Icons.Outlined.Link
+        ClipboardType.IMAGE -> Icons.Outlined.Image
+        ClipboardType.FILE -> Icons.Outlined.Description
     }
 
 @Composable

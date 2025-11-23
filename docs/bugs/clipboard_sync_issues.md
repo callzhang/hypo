@@ -1,10 +1,10 @@
 # Clipboard Sync Bug Report: Android-to-macOS Clipboard Synchronization Issues
 
 **Date**: November 16, 2025  
-**Last Updated**: November 21, 2025 - 19:20 UTC  
-**Status**: 🔴 **BLOCKED** – Cloud relay delivers no frames; awaiting backend investigation  
-**Severity**: Critical – Cloud path unusable  
-**Priority**: P0 – Need backend routing analysis (envelope IDs below)
+**Last Updated**: November 23, 2025 - 16:50 UTC  
+**Status**: ✅ **RESOLVED** – Both plaintext and encrypted cloud sync working  
+**Severity**: Critical – Cloud path was unusable, now fixed  
+**Priority**: P0 – ✅ Complete
 
 ---
 
@@ -23,10 +23,12 @@
 
 ## Key Findings
 - LAN pipeline (plaintext + encrypted) works end-to-end.
-- Cloud WebSocket handshake succeeds, `handleOpen` and `receiveNext()` run, but no frames arrive; eventually the connection resets with “Connection reset by peer”.
-- Enhanced logging confirms no 4xx/5xx HTTP responses; the failure occurs after upgrade.
-
-Root hypothesis: relay accepts the connection but never routes Test 2/Test 4 envelopes to the macOS device. Either the backend can’t match the macOS `X-Device-Id`, or it’s broadcasting to LAN instead of the cloud socket.
+- **Root Cause Identified**: Server's `validate_encryption_block()` rejected plaintext messages (empty nonce/tag failed validation).
+- **Root Cause Identified**: macOS wasn't connecting to cloud relay (ConnectionStatusProber only checked health, didn't connect).
+- **Fixes Applied**:
+  1. Server: Updated `validate_encryption_block()` to handle plaintext (empty nonce/tag = plaintext, skip encryption validation).
+  2. macOS: Updated `ConnectionStatusProber` to actually call `cloudTransport.connect()` instead of just checking health.
+- **Status**: macOS now registered with relay server (device ID: `007E4A95-0E1A-4B10-91FA-87942EFAA68E`).
 
 ---
 
@@ -85,11 +87,18 @@ Root hypothesis: relay accepts the connection but never routes Test 2/Test 4 env
    - Query parameters kept for wss:// connections
    - Only removed for ws:// (LAN) where they break handshake
 
-### 🔄 Next Steps
-- [ ] Re-run Tests 2 & 4 with enhanced logging
-- [ ] Capture `/tmp/hypo_debug.log` with full HTTP/close code details
-- [ ] Share logs with backend team along with envelope IDs
-- [ ] Coordinate with backend to determine if fix is client-side or server-side
+### ✅ Completed
+- [x] Server: Fixed `validate_encryption_block()` to handle plaintext messages
+- [x] Server: Deployed to Fly.io
+- [x] macOS: Fixed `ConnectionStatusProber` to actually connect to cloud relay
+- [x] macOS: Registered with relay server (device ID: `007E4A95-0E1A-4B10-91FA-87942EFAA68E`)
+- [x] Test 1: Plaintext + Cloud ✅ PASS (Nov 23, 16:37 UTC)
+- [x] Test 2: Encrypted + Cloud ✅ PASS (Nov 23, 16:47 UTC)
+
+### ✅ Test Results (Nov 23, 2025)
+- **Test 1 (Plaintext Cloud)**: Message received, decoded, added to history. Origin correctly identified as `cloud`.
+- **Test 2 (Encrypted Cloud)**: Message received, decrypted, decoded, added to history. Origin correctly identified as `cloud`.
+- **Status**: Both tests passing. Cloud relay sync fully functional.
 
 ---
 

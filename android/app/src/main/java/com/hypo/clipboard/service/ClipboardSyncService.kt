@@ -51,6 +51,7 @@ class ClipboardSyncService : Service() {
     @Inject lateinit var repository: ClipboardRepository
     @Inject lateinit var incomingClipboardHandler: com.hypo.clipboard.sync.IncomingClipboardHandler
     @Inject lateinit var lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
+    @Inject lateinit var relayWebSocketClient: com.hypo.clipboard.transport.ws.RelayWebSocketClient
     @Inject lateinit var clipboardAccessChecker: com.hypo.clipboard.sync.ClipboardAccessChecker
     @Inject lateinit var connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber
 
@@ -106,6 +107,16 @@ class ClipboardSyncService : Service() {
         lanWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
             incomingClipboardHandler.handle(envelope, origin)
         }
+        relayWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
+            incomingClipboardHandler.handle(envelope, origin)
+        }
+        // Start receiving connections for both LAN and cloud
+        // NOTE: relayWebSocketClient creates its own LanWebSocketClient instance,
+        // so calling startReceiving() on both creates TWO separate connections.
+        // Only call startReceiving() on relayWebSocketClient for cloud relay.
+        // lanWebSocketClient.startReceiving() is for LAN connections only.
+        lanWebSocketClient.startReceiving()  // For LAN connections
+        relayWebSocketClient.startReceiving()  // For cloud relay (creates separate connection)
         ensureClipboardPermissionAndStartListener()
         observeLatestItem()
         registerScreenStateReceiver()

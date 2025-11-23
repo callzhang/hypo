@@ -16,9 +16,6 @@ import UniformTypeIdentifiers
 public actor HistoryStore {
     private var entries: [ClipboardEntry] = []
     private var maxEntries: Int
-    // Track recent entries by content signature to prevent duplicates from dual-send (LAN + cloud)
-    private var recentContentSignatures: [String: Date] = [:]
-    private let duplicateWindow: TimeInterval = 5.0 // 5 seconds window (same as Android)
     private let defaults: UserDefaults
     private static let entriesKey = "com.hypo.clipboard.history_entries"
 
@@ -57,71 +54,16 @@ public actor HistoryStore {
 
     @discardableResult
     public func insert(_ entry: ClipboardEntry) -> [ClipboardEntry] {
-        let contentSignature = entry.contentSignature()
         let now = Date()
         
-        // Clean up old signatures (older than duplicate window)
-        recentContentSignatures = recentContentSignatures.filter { now.timeIntervalSince($0.value) <= duplicateWindow }
-        
-        // Check if this content was recently added (within duplicate window)
-        if let lastSeen = recentContentSignatures[contentSignature],
-           now.timeIntervalSince(lastSeen) <= duplicateWindow {
-            // Duplicate detected - log and skip
-            let dupMsg = "⏭️ [HistoryStore] Duplicate content detected (recent signature), skipping: \(entry.previewText.prefix(50)), signature: \(contentSignature.prefix(50))\n"
-            print(dupMsg)
-            try? dupMsg.appendToFile(path: "/tmp/hypo_debug.log")
-            #if canImport(os)
-            let logger = Logger(subsystem: "com.hypo.clipboard", category: "history")
-            logger.debug("⏭️ Duplicate content detected (recent signature), skipping: \(entry.previewText.prefix(50))")
-            #endif
-            return entries
-        }
-        
-        // Check if this content matches a recent entry from a different device (remote device)
-        // This prevents ClipboardMonitor from creating a duplicate when remote clipboard is applied
-        // IMPORTANT: Check BEFORE removing existing entries to preserve remote origin
-        let recentThreshold: TimeInterval = 2.0
-        if let recentEntry = entries.first(where: { existingEntry in
-            existingEntry.content == entry.content &&
-            existingEntry.originDeviceId != entry.originDeviceId &&
-            now.timeIntervalSince(existingEntry.timestamp) <= recentThreshold
-        }) {
-            // Recent entry from remote device with same content - skip local entry
-            // Keep the remote device entry instead (don't replace it with local entry)
-            #if canImport(os)
-            let logger = Logger(subsystem: "com.hypo.clipboard", category: "history")
-            logger.debug("⏭️ Duplicate content from different device detected, preserving remote entry: \(entry.previewText.prefix(50))")
-            #endif
-            return entries
-        }
-        
-        // Check for duplicate by ID first (fast check)
-        if entries.contains(where: { $0.id == entry.id }) {
-            let dupMsg = "⏭️ [HistoryStore] Duplicate entry detected (same ID), skipping: \(entry.previewText.prefix(50))\n"
-            print(dupMsg)
-            try? dupMsg.appendToFile(path: "/tmp/hypo_debug.log")
-            return entries
-        }
-        
-        // New plan: 
+        // Simplified duplicate detection (no time windows):
         // 1. If new message matches the current clipboard (latest entry) → discard
         // 2. If new message matches something in history → move that history item to the top
         // 3. Otherwise → add new entry
         
         // Check if matches current clipboard (latest entry)
         if let latestEntry = entries.first {
-            let matchesCurrentClipboard: Bool
-            if case .image = entry.content, case .image = latestEntry.content {
-                // For images, compare by content signature (hash)
-                let entrySignature = entry.contentSignature()
-                let latestSignature = latestEntry.contentSignature()
-                matchesCurrentClipboard = entrySignature == latestSignature
-            } else {
-                // For other content types, use full content comparison
-                matchesCurrentClipboard = entry.content == latestEntry.content
-            }
-            
-            if matchesCurrentClipboard {
+            if entry.matchesContent(latestEntry) {
                 let discardMsg = "⏭️ [HistoryStore] New message matches current clipboard, discarding: \(entry.previewText.prefix(50))\n"
                 print(discardMsg)
                 try? discardMsg.appendToFile(path: "/tmp/hypo_debug.log")
@@ -132,13 +74,7 @@ public actor HistoryStore {
         // Check if matches something in history (excluding the latest entry)
         let historyEntries = Array(entries.dropFirst()) // Skip latest entry
         if let matchingEntry = historyEntries.first(where: { existingEntry in
-            if case .image = entry.content, case .image = existingEntry.content {
-                // For images, compare by content signature
-                return entry.contentSignature() == existingEntry.contentSignature()
-            } else {
-                // For other content types, use full content comparison
-                return entry.content == existingEntry.content
-            }
+            entry.matchesContent(existingEntry)
         }) {
             // Found matching entry in history - move it to the top
             if let index = entries.firstIndex(where: { $0.id == matchingEntry.id }) {
@@ -154,10 +90,9 @@ public actor HistoryStore {
             }
         }
         
-        // Not a duplicate - add to history and track signature
+        // Not a duplicate - add to history
         let beforeCount = entries.count
         entries.append(entry)
-        recentContentSignatures[contentSignature] = now
         sortEntries()
         trimIfNeeded()
         persistEntries()
@@ -220,7 +155,17 @@ public actor HistoryStore {
 
     private func trimIfNeeded() {
         if entries.count > maxEntries {
-            entries.removeLast(entries.count - maxEntries)
+            // Protect pinned items during trim (like Android)
+            let pinnedItems = entries.filter { $0.isPinned }
+            let unpinnedItems = entries.filter { !$0.isPinned }
+            
+            // Keep all pinned items + most recent unpinned items up to limit
+            let keepUnpinnedCount = max(0, maxEntries - pinnedItems.count)
+            let sortedUnpinned = unpinnedItems.sorted { $0.timestamp > $1.timestamp }
+            let keepUnpinned = Array(sortedUnpinned.prefix(keepUnpinnedCount))
+            
+            entries = pinnedItems + keepUnpinned
+            sortEntries() // Re-sort to maintain order
         }
     }
 }

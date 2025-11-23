@@ -203,66 +203,70 @@ public extension ClipboardEntry {
         }
     }
     
-    /// Generate a content signature for duplicate detection (matches Android's signature logic)
-    /// This signature is used to detect duplicates from dual-send (LAN + cloud)
-    func contentSignature() -> String {
-        let contentType: String
-        let contentString: String
-        
-        switch content {
-        case .text(let text):
-            contentType = "text"
-            contentString = text
-        case .link(let url):
-            contentType = "link"
-            contentString = url.absoluteString
-        case .image(let metadata):
-            contentType = "image"
-            // Use actual image data hash for accurate duplicate detection
-            // This prevents different images with same size from being treated as duplicates
-            if let imageData = metadata.data {
-                // Use a more robust hash: sample multiple points throughout the image
-                // This reduces collisions while still being fast
-                let sampleCount = min(16, max(4, imageData.count / 1000)) // Sample 4-16 points
-                let step = max(1, imageData.count / sampleCount)
-                var hash = 0
-                
-                // Hash first 2KB
-                let startSize = min(2048, imageData.count)
-                for byte in imageData.prefix(startSize) {
-                    hash = hash &* 31 &+ Int(byte)
-                }
-                
-                // Hash last 2KB
-                let endSize = min(2048, imageData.count)
-                for byte in imageData.suffix(endSize) {
-                    hash = hash &* 31 &+ Int(byte)
-                }
-                
-                // Hash evenly distributed samples throughout the image
-                for i in 0..<sampleCount {
-                    let offset = i * step
-                    if offset < imageData.count {
-                        hash = hash &* 31 &+ Int(imageData[offset])
-                    }
-                }
-                
-                // Include filename in signature if available (for file-based images)
-                let fileNamePart = metadata.altText ?? ""
-                contentString = "\(hash)|\(metadata.byteSize)|\(metadata.format)|\(fileNamePart)"
-            } else {
-                // Fallback to size+format if data is not available
-                let fileNamePart = metadata.altText ?? ""
-                contentString = "\(metadata.byteSize)|\(metadata.format)|\(fileNamePart)"
+    /// Unified content matching function: content length, then first 1KB hash
+    /// Returns true if entries match based on the unified matching criteria
+    /// Note: Metadata (device UUID, timestamp) is not used for matching - we match by content only
+    func matchesContent(_ other: ClipboardEntry) -> Bool {
+        // 1. Check content type
+        switch (content, other.content) {
+        case (.text(let text1), .text(let text2)):
+            // For text: compare length first, then first 1KB hash
+            if text1.count != text2.count {
+                return false
             }
-        case .file(let metadata):
-            contentType = "file"
-            // Use fileName and byteSize as signature for files
-            contentString = "\(metadata.fileName)|\(metadata.byteSize)"
+            let data1 = Data(text1.utf8)
+            let data2 = Data(text2.utf8)
+            let hash1 = hashFirst1KB(data1)
+            let hash2 = hashFirst1KB(data2)
+            return hash1 == hash2
+            
+        case (.link(let url1), .link(let url2)):
+            // For links: compare length first, then first 1KB hash
+            let str1 = url1.absoluteString
+            let str2 = url2.absoluteString
+            if str1.count != str2.count {
+                return false
+            }
+            let data1 = Data(str1.utf8)
+            let data2 = Data(str2.utf8)
+            let hash1 = hashFirst1KB(data1)
+            let hash2 = hashFirst1KB(data2)
+            return hash1 == hash2
+            
+        case (.image(let meta1), .image(let meta2)):
+            // For images: compare length (byteSize) first, then first 1KB hash
+            if meta1.byteSize != meta2.byteSize {
+                return false
+            }
+            let data1 = meta1.data ?? Data()
+            let data2 = meta2.data ?? Data()
+            let hash1 = hashFirst1KB(data1)
+            let hash2 = hashFirst1KB(data2)
+            return hash1 == hash2
+            
+        case (.file(let meta1), .file(let meta2)):
+            // For files: compare length (byteSize) first, then first 1KB hash
+            if meta1.byteSize != meta2.byteSize {
+                return false
+            }
+            let data1 = meta1.base64.flatMap { Data(base64Encoded: $0) } ?? Data()
+            let data2 = meta2.base64.flatMap { Data(base64Encoded: $0) } ?? Data()
+            let hash1 = hashFirst1KB(data1)
+            let hash2 = hashFirst1KB(data2)
+            return hash1 == hash2
+            
+        default:
+            return false
         }
-        
-        // Match Android's signature format: type||content||metadata
-        // For simplicity, we use originDeviceId as part of the signature to match Android's deviceId check
-        return "\(contentType)||\(contentString)||\(originDeviceId)"
+    }
+    
+    /// Hash first 1KB of data for content matching
+    private func hashFirst1KB(_ data: Data) -> Int {
+        let sampleSize = min(1024, data.count)
+        var hash = 0
+        for byte in data.prefix(sampleSize) {
+            hash = hash &* 31 &+ Int(byte)
+        }
+        return hash
     }
 }

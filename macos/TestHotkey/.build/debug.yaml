@@ -1,0 +1,81 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "TestHotkey-arm64-apple-macosx26.0-debug.exe": ["<TestHotkey-arm64-apple-macosx26.0-debug.exe>"]
+  "TestHotkey-arm64-apple-macosx26.0-debug.module": ["<TestHotkey-arm64-apple-macosx26.0-debug.module>"]
+  "main": ["<TestHotkey-arm64-apple-macosx26.0-debug.exe>","<TestHotkey-arm64-apple-macosx26.0-debug.module>"]
+  "test": ["<TestHotkey-arm64-apple-macosx26.0-debug.exe>","<TestHotkey-arm64-apple-macosx26.0-debug.module>"]
+default: "main"
+nodes:
+  "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey":
+    is-mutated: true
+commands:
+  "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey-entitlement.plist":
+    tool: write-auxiliary-file
+    inputs: ["<entitlement-plist>","<com.apple.security.get-task-allow>"]
+    outputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey-entitlement.plist"]
+    description: "Write auxiliary file /Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey-entitlement.plist"
+
+  "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/TestHotkeyApp.swift"]
+    outputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/sources"]
+    description: "Write auxiliary file /Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/sources"
+
+  "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.swift.o"]
+    outputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.product/Objects.LinkFileList"
+
+  "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Library/Developer/CommandLineTools/usr/bin/swiftc"]
+    outputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+
+  "<TestHotkey-arm64-apple-macosx26.0-debug.exe>":
+    tool: phony
+    inputs: ["<TestHotkey-arm64-apple-macosx26.0-debug.exe-CodeSigning>"]
+    outputs: ["<TestHotkey-arm64-apple-macosx26.0-debug.exe>"]
+
+  "<TestHotkey-arm64-apple-macosx26.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.swift.o","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/Modules/TestHotkey.swiftmodule"]
+    outputs: ["<TestHotkey-arm64-apple-macosx26.0-debug.module>"]
+
+  "C.TestHotkey-arm64-apple-macosx26.0-debug.exe":
+    tool: shell
+    inputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.swift.o","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.product/Objects.LinkFileList"]
+    outputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/TestHotkey"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-L","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug","-o","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey","-module-name","TestHotkey","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-alias","-Xlinker","_TestHotkey_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Library/Developer/CommandLineTools/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx13.0","-Xlinker","-add_ast_path","-Xlinker","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/Modules/TestHotkey.swiftmodule","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g"]
+
+  "C.TestHotkey-arm64-apple-macosx26.0-debug.exe-entitlements":
+    tool: shell
+    inputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey-entitlement.plist"]
+    outputs: ["<TestHotkey-arm64-apple-macosx26.0-debug.exe-CodeSigning>"]
+    description: "Applying debug entitlements to ./.build/arm64-apple-macosx/debug/TestHotkey"
+    args: ["codesign","--force","--sign","-","--entitlements","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey-entitlement.plist","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey"]
+
+  "C.TestHotkey-arm64-apple-macosx26.0-debug.module":
+    tool: shell
+    inputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/TestHotkeyApp.swift","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/sources"]
+    outputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.swift.o","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/Modules/TestHotkey.swiftmodule"]
+    description: "Compiling Swift Module 'TestHotkey' (1 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","TestHotkey","-emit-dependencies","-emit-module","-emit-module-path","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/Modules/TestHotkey.swiftmodule","-output-file-map","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/output-file-map.json","-incremental","-c","@/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/sources","-I","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","TestHotkey_main","-parse-as-library","-color-diagnostics","-swift-version","5","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","testhotkey"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/derek/Documents/Projects/hypo/macos/TestHotkey/","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/Package.swift","/Users/derek/Documents/Projects/hypo/macos/TestHotkey/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

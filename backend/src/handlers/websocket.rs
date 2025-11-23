@@ -37,22 +37,74 @@ pub async fn websocket_handler(
     let device_id = device_id.unwrap();
     let platform = platform.unwrap();
 
+    // Check for force registration header (for debugging/testing)
+    let force_register = req
+        .headers()
+        .get("X-Hypo-Force-Register")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
+    // Get peer address and user agent for logging
+    let peer_addr = req.peer_addr().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string());
+    let user_agent = req
+        .headers()
+        .get("User-Agent")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
     info!(
-        "WebSocket connection request from device: {} ({})",
-        device_id, platform
+        "WebSocket connection request from device: {} ({}) from {} (User-Agent: {})",
+        device_id, platform, peer_addr, user_agent
     );
+
+    // Check if device is already registered (unless force register is requested)
+    if !force_register && data.sessions.is_registered(&device_id).await {
+        warn!(
+            "Duplicate registration rejected for device: {} ({}). Peer: {}, User-Agent: {}. Use X-Hypo-Force-Register: true to force takeover.",
+            device_id, platform, peer_addr, user_agent
+        );
+        return Ok(HttpResponse::Conflict().json(serde_json::json!({
+            "error": "Device already connected",
+            "device_id": device_id,
+            "message": "Another connection with this device ID is already active. Disconnect the existing connection first, or use X-Hypo-Force-Register: true header to force takeover."
+        })));
+    }
 
     info!("About to call actix_ws::handle for {} ({})", device_id, platform);
     let (response, session, mut msg_stream) = actix_ws::handle(&req, body)?;
     info!("actix_ws::handle succeeded for {} ({})", device_id, platform);
 
     info!("Registering WebSocket session for device: {} ({})", device_id, platform);
-    let mut outbound = data.sessions.register(device_id.clone()).await;
-    info!("Session registered successfully for device: {}", device_id);
+    let registration = if force_register {
+        // Force register replaces existing session
+        data.sessions.register(device_id.clone()).await
+    } else {
+        // Safe register - should not fail since we checked above, but use register_if_absent for safety
+        match data.sessions.register_if_absent(device_id.clone()).await {
+            Ok(reg) => reg,
+            Err(_) => {
+                // This should not happen since we checked above, but handle it gracefully
+                warn!("Race condition: device {} registered between check and register", device_id);
+                return Ok(HttpResponse::Conflict().json(serde_json::json!({
+                    "error": "Device already connected",
+                    "device_id": device_id,
+                })));
+            }
+        }
+    };
+    let mut outbound = registration.receiver;
+    let session_token = registration.token;
+    info!(
+        "Session registered successfully for device: {} (token={})",
+        device_id, session_token
+    );
 
     let mut writer_session = session.clone();
     let writer_sessions = data.sessions.clone();
     let writer_device_id = device_id.clone();
+    let writer_token = session_token;
     actix_web::rt::spawn(async move {
         // Simple stateless relay: just forward messages, fail fast if connection is closed
         while let Some(message) = outbound.recv().await {
@@ -63,13 +115,23 @@ pub async fn websocket_handler(
                 break;
             }
         }
-        writer_sessions.unregister(&writer_device_id).await;
-        info!("Session closed for device: {}", writer_device_id);
+        let removed = writer_sessions
+            .unregister_with_token(&writer_device_id, writer_token)
+            .await;
+        if removed {
+            info!("Session closed for device: {}", writer_device_id);
+        } else {
+            info!(
+                "Stale writer task finished for device {} (token {}). Newer session remains active.",
+                writer_device_id, writer_token
+            );
+        }
     });
 
     let mut reader_session = session;
     let reader_sessions = data.sessions.clone();
     let reader_device_id = device_id.clone();
+    let reader_token = session_token;
     let key_store = data.device_keys.clone();
 
     actix_web::rt::spawn(async move {
@@ -108,8 +170,17 @@ pub async fn websocket_handler(
                 _ => {}
             }
         }
-        reader_sessions.unregister(&reader_device_id).await;
-        info!("WebSocket closed for device: {}", reader_device_id);
+        let removed = reader_sessions
+            .unregister_with_token(&reader_device_id, reader_token)
+            .await;
+        if removed {
+            info!("WebSocket closed for device: {}", reader_device_id);
+        } else {
+            info!(
+                "Skipped unregister for device {} (token {}) because a newer session is active",
+                reader_device_id, reader_token
+            );
+        }
     });
 
     Ok(response)
@@ -461,8 +532,8 @@ mod tests {
         let sessions = crate::services::session_manager::SessionManager::new();
         let key_store = crate::services::device_key_store::DeviceKeyStore::new();
 
-        let mut sender_rx = sessions.register("sender".into()).await;
-        let mut receiver_rx = sessions.register("receiver".into()).await;
+        let mut sender_rx = sessions.register("sender".into()).await.receiver;
+        let mut receiver_rx = sessions.register("receiver".into()).await.receiver;
 
         let payload = json!({
             "data": BASE64.encode(b"clipboard"),
@@ -492,9 +563,9 @@ mod tests {
         let sessions = crate::services::session_manager::SessionManager::new();
         let key_store = crate::services::device_key_store::DeviceKeyStore::new();
 
-        let mut sender_rx = sessions.register("sender".into()).await;
-        let mut receiver_rx = sessions.register("receiver".into()).await;
-        let mut other_rx = sessions.register("other".into()).await;
+        let mut sender_rx = sessions.register("sender".into()).await.receiver;
+        let mut receiver_rx = sessions.register("receiver".into()).await.receiver;
+        let mut other_rx = sessions.register("other".into()).await.receiver;
 
         let payload = json!({
             "data": BASE64.encode(b"clipboard"),
@@ -529,7 +600,7 @@ mod tests {
         let sessions = crate::services::session_manager::SessionManager::new();
         let key_store = crate::services::device_key_store::DeviceKeyStore::new();
 
-        let mut receiver_rx = sessions.register("receiver".into()).await;
+        let mut receiver_rx = sessions.register("receiver".into()).await.receiver;
 
         handle_text_message("sender", "not-json", &sessions, &key_store)
             .await
@@ -548,7 +619,7 @@ mod tests {
         let sessions = crate::services::session_manager::SessionManager::new();
         let key_store = crate::services::device_key_store::DeviceKeyStore::new();
 
-        let mut receiver_rx = sessions.register("receiver".into()).await;
+        let mut receiver_rx = sessions.register("receiver".into()).await.receiver;
 
         let payload = json!({
             "data": BASE64.encode(b"clipboard")
@@ -573,7 +644,7 @@ mod tests {
         let sessions = crate::services::session_manager::SessionManager::new();
         let key_store = crate::services::device_key_store::DeviceKeyStore::new();
 
-        let mut receiver_rx = sessions.register("receiver".into()).await;
+        let mut receiver_rx = sessions.register("receiver".into()).await.receiver;
 
         let payload = json!({
             "data": "not-base64!!",
@@ -618,8 +689,8 @@ mod tests {
         let sessions = crate::services::session_manager::SessionManager::new();
         let key_store = crate::services::device_key_store::DeviceKeyStore::new();
 
-        let mut sender_rx = sessions.register("sender".into()).await;
-        let mut receiver_rx = sessions.register("receiver".into()).await;
+        let mut sender_rx = sessions.register("sender".into()).await.receiver;
+        let mut receiver_rx = sessions.register("receiver".into()).await.receiver;
 
         let key = [9u8; 32];
         let aad = br#"{"type":"clipboard"}"#;

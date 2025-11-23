@@ -3,16 +3,153 @@ import SwiftUI
 #if canImport(AppKit)
 import AppKit
 import UniformTypeIdentifiers
+import Carbon
+import ApplicationServices
 #endif
 
+// AppDelegate to ensure hotkey setup runs at app launch (not waiting for UI)
+class HypoAppDelegate: NSObject, NSApplicationDelegate {
+    private var hotKeyRef: EventHotKeyRef?
+    private static var eventHandlerInstalled = false
+    
+    override init() {
+        super.init()
+        // Removed logging to reduce duplicates
+    }
+    
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Setup Hotkey using Carbon API (more reliable than CGEventTap)
+        // Note: Carbon RegisterEventHotKey does NOT require Accessibility permissions
+        setupCarbonHotkey()
+    }
+    
+    func setupCarbonHotkey() {
+        NSLog("🔧 [HypoAppDelegate] setupCarbonHotkey() called")
+        print("🔧 [HypoAppDelegate] setupCarbonHotkey() called")
+        
+        // Install event handler once (static check)
+        if !Self.eventHandlerInstalled {
+            var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyPressed))
+            
+            // Carbon event handler callback
+            let handlerProc: EventHandlerProcPtr = { (nextHandler, theEvent, userData) -> OSStatus in
+                var hotKeyID = EventHotKeyID()
+                let err = GetEventParameter(
+                    theEvent,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &hotKeyID
+                )
+                
+                if err == noErr && hotKeyID.id == 1 {
+                    // Post notification to show history popup
+                    DispatchQueue.main.async {
+                        NSApp.activate(ignoringOtherApps: true)
+                        if let viewModel = AppContext.shared.historyViewModel {
+                            HistoryPopupPresenter.shared.show(with: viewModel)
+                        }
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("ShowHistoryPopup"),
+                            object: nil
+                        )
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("ShowHistorySection"),
+                            object: nil
+                        )
+                    }
+                }
+                return noErr
+            }
+            
+            var eventHandler: EventHandlerRef?
+            let installStatus = InstallEventHandler(
+                GetApplicationEventTarget(),
+                handlerProc,
+                1,
+                &eventSpec,
+                nil,
+                &eventHandler
+            )
+            
+        if installStatus == noErr {
+            Self.eventHandlerInstalled = true
+        } else {
+            NSLog("❌ [HypoAppDelegate] Failed to install Carbon event handler: \(installStatus)")
+            return
+        }
+        }
+        
+        // Check if hotkey is already registered
+        if self.hotKeyRef != nil {
+            let skipMsg = "ℹ️ [HypoAppDelegate] Hotkey already registered, skipping"
+            NSLog(skipMsg)
+            print(skipMsg)
+            try? (skipMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+            return
+        }
+        
+        // Register hotkey: Shift+Cmd+V (keyCode 9 = 'V') to avoid system shortcut conflicts
+        var hotKeyID = EventHotKeyID()
+        hotKeyID.signature = OSType(0x4859504F) // "HYPO" signature
+        hotKeyID.id = 1
+        
+        var hotKeyRef: EventHotKeyRef?
+        let keyCode = UInt32(9) // 'V' key (not 'C' to avoid system conflicts)
+        let modifiers = UInt32(cmdKey | shiftKey) // Cmd+Shift
+        
+        let status = RegisterEventHotKey(
+            keyCode,
+            modifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKeyRef
+        )
+        
+        if status == noErr, let hotKey = hotKeyRef {
+            self.hotKeyRef = hotKey
+            let successMsg = "✅ [HypoAppDelegate] Carbon hotkey registered: Shift+Cmd+V (status: \(status))"
+            NSLog(successMsg)
+            print(successMsg)
+            try? (successMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+        } else if self.hotKeyRef == nil {
+            // Only log error if hotkey wasn't already registered
+            let errorMsg = "⚠️ [HypoAppDelegate] Hotkey registration returned status=\(status) (may already be registered)"
+            NSLog(errorMsg)
+            print(errorMsg)
+            try? (errorMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+        }
+    }
+    
+    func applicationWillTerminate(_ notification: Notification) {
+        // Clean up hotkey
+        if let hotKey = hotKeyRef {
+            UnregisterEventHotKey(hotKey)
+        }
+    }
+}
+
+// Global reference to prevent AppDelegate deallocation
+private var globalAppDelegate: HypoAppDelegate?
+
 public struct HypoMenuBarApp: App {
+    // Connect AppDelegate to ensure setup runs at launch
+    @NSApplicationDelegateAdaptor(HypoAppDelegate.self) var appDelegate
+    
     @StateObject private var viewModel: ClipboardHistoryViewModel
     @State private var monitor: ClipboardMonitor?
+    @State private var globalShortcutMonitor: Any?
+    @State private var eventTap: CFMachPort?
+    @State private var runLoopSource: CFRunLoopSource?
 
     public init() {
-        let initMsg = "🚀 [HypoMenuBarApp] Initializing app\n"
+        let initMsg = "🚀 [HypoMenuBarApp] Initializing app (viewModel setup)"
+        NSLog(initMsg)
         print(initMsg)
-        try? initMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        try? (initMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
         
         // Create shared dependencies
         let historyStore = HistoryStore()
@@ -42,6 +179,25 @@ public struct HypoMenuBarApp: App {
         try? afterSetMsg.appendToFile(path: "/tmp/hypo_debug.log")
         
         _viewModel = StateObject(wrappedValue: viewModel)
+        AppContext.shared.historyViewModel = viewModel
+
+        // CRITICAL: Start loading data immediately so popup has data when hotkey is pressed
+        Task { @MainActor in
+            await viewModel.start()
+        }
+
+        // CRITICAL: Set up AppDelegate immediately since @NSApplicationDelegateAdaptor
+        // doesn't work when App struct is in a library called from a different module
+        // Store strong reference in global variable to prevent deallocation
+        let delegate = HypoAppDelegate()
+        globalAppDelegate = delegate  // Store in global to prevent deallocation
+        
+        // Set up delegate after NSApp is ready
+        DispatchQueue.main.async {
+            NSApplication.shared.delegate = delegate
+            // Call applicationDidFinishLaunching manually
+            delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        }
     }
 
     public var body: some Scene {
@@ -51,15 +207,25 @@ public struct HypoMenuBarApp: App {
                 .environmentObject(viewModel)
                 .preferredColorScheme(viewModel.appearancePreference.colorScheme)
                 .onAppear {
+                    // CRITICAL FALLBACK: If @NSApplicationDelegateAdaptor didn't work, set up delegate manually
+                    if NSApplication.shared.delegate == nil || !(NSApplication.shared.delegate is HypoAppDelegate) {
+                        let delegate = HypoAppDelegate()
+                        globalAppDelegate = delegate
+                        NSApplication.shared.delegate = delegate
+                        // Call applicationDidFinishLaunching manually
+                        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+                    }
+                    
                     // CRITICAL: Ensure setHistoryViewModel is called when view appears
-                    // This is the most reliable place since SwiftUI might not call our custom init()
                     if let transportManager = viewModel.transportManager {
-                        let initMsg = "🚀 [HypoMenuBarApp] .onAppear: Ensuring setHistoryViewModel is called\n"
-                        print(initMsg)
-                        try? initMsg.appendToFile(path: "/tmp/hypo_debug.log")
                         transportManager.setHistoryViewModel(viewModel)
                     }
+                    
                     setupMonitor()
+                    // Global shortcut registration is handled by HypoAppDelegate (Carbon hotkey)
+                }
+                .onDisappear {
+                    // Keep the global shortcut active across menu open/close cycles.
                 }
                 .task {
                     // Also call it from .task as backup
@@ -90,6 +256,127 @@ public struct HypoMenuBarApp: App {
         monitor.start()
         self.monitor = monitor
     }
+    
+    private func setupGlobalShortcut() {
+        // Using Shift+Cmd+V (V for View/History) to avoid system shortcut conflicts
+        // Shift+Cmd+C conflicts with Terminal/Color Picker system shortcuts
+        
+        // Avoid duplicate setup
+        if globalShortcutMonitor != nil {
+            let skipMsg = "ℹ️ [HypoMenuBarApp] Global shortcut already set up, skipping\n"
+            print(skipMsg)
+            try? skipMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            return
+        }
+        
+        let startMsg = "🔧 [HypoMenuBarApp] setupGlobalShortcut() called - Using Shift+Cmd+V\n"
+        print(startMsg)
+        try? startMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
+        // Clean up existing monitors
+        if let monitor = globalShortcutMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalShortcutMonitor = nil
+        }
+        
+        // Clean up CGEventTap if exists (from previous attempts)
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+            eventTap = nil
+        }
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+            runLoopSource = nil
+        }
+        
+        // Use NSEvent monitors with Shift+Cmd+V (doesn't conflict with system shortcuts)
+        setupNSEventShortcut()
+    }
+    
+    private func setupNSEventShortcut() {
+        // Use NSEvent monitors with Shift+Cmd+V (V for View/History)
+        // This avoids conflicts with system shortcuts like Shift+Cmd+C (Color Picker)
+        
+        let setupMsg = "🔧 [HypoMenuBarApp] Setting up NSEvent shortcut for Shift+Cmd+V\n"
+        print(setupMsg)
+        try? setupMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
+        // Local monitor (works when app is active)
+        let localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            let hasCmd = event.modifierFlags.contains(.command)
+            let hasShift = event.modifierFlags.contains(.shift)
+            
+            // Debug log for all key events
+            if hasCmd && hasShift {
+                let debugMsg = "🔍 [NSEvent] Key pressed: '\(key)' (Cmd+Shift)\n"
+                print(debugMsg)
+                try? debugMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            }
+            
+            if hasCmd && hasShift && key == "v" {
+                let interceptMsg = "🎯 [NSEvent] Intercepted Shift+Cmd+V - showing popup\n"
+                print(interceptMsg)
+                try? interceptMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                
+                // Activate app first, then show popup
+                NSApp.activate(ignoringOtherApps: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.showHistoryPopup()
+                }
+                return nil  // Consume the event
+            }
+            return event
+        }
+        globalShortcutMonitor = localMonitor
+        
+        // Global monitor (works system-wide, requires accessibility permissions)
+        _ = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
+            let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            if event.modifierFlags.contains(.command) &&
+               event.modifierFlags.contains(.shift) &&
+               key == "v" {
+                let interceptMsg = "🎯 [NSEvent Global] Intercepted Shift+Cmd+V - showing popup\n"
+                print(interceptMsg)
+                try? interceptMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                
+                DispatchQueue.main.async {
+                    NSApp.activate(ignoringOtherApps: true)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self.showHistoryPopup()
+                    }
+                }
+            }
+        }
+        
+        let successMsg = "✅ [HypoMenuBarApp] NSEvent shortcut registered: Shift+Cmd+V\n"
+        print(successMsg)
+        try? successMsg.appendToFile(path: "/tmp/hypo_debug.log")
+    }
+    
+    private func showHistoryPopup() {
+        let showMsg = "📢 [HypoMenuBarApp] showHistoryPopup() called - posting notifications\n"
+        print(showMsg)
+        try? showMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
+        // Post notification to show history popup
+        // The MenuBarContentView will handle centering and showing the window
+        NotificationCenter.default.post(
+            name: NSNotification.Name("ShowHistoryPopup"),
+            object: nil
+        )
+        
+        // Also ensure history section is selected
+        NotificationCenter.default.post(
+            name: NSNotification.Name("ShowHistorySection"),
+            object: nil
+        )
+        
+        let postedMsg = "✅ [HypoMenuBarApp] Notifications posted: ShowHistoryPopup, ShowHistorySection\n"
+        print(postedMsg)
+        try? postedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+    }
 }
 
 private enum MenuSection: String, CaseIterable, Identifiable {
@@ -113,11 +400,15 @@ private enum MenuSection: String, CaseIterable, Identifiable {
     }
 }
 
-private struct MenuBarContentView: View {
+struct MenuBarContentView: View {
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @State private var selectedSection: MenuSection = .history
     @State private var search = ""
     @State private var isVisible = false
+    @State private var eventMonitor: Any?
+    @State private var isHandlingPopup = false
+    @State private var historySectionObserver: NSObjectProtocol?
+    @State private var historyPopupObserver: NSObjectProtocol?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -150,9 +441,164 @@ private struct MenuBarContentView: View {
                     await transportManager.probeConnectionStatus()
                 }
             }
+            // Setup keyboard shortcut monitor for Cmd+1 through Cmd+9
+            setupKeyboardShortcuts()
+        }
+        // Set up observers as soon as view is created (not waiting for onAppear)
+        // This ensures they're ready before Carbon hotkey can fire
+        .task {
+            setupHistorySectionListener()
         }
         .onDisappear {
             isVisible = false
+            // Remove keyboard shortcut monitor
+            if let monitor = eventMonitor {
+                NSEvent.removeMonitor(monitor)
+                eventMonitor = nil
+            }
+            // Note: We keep notification observers active even when view disappears
+            // so hotkey continues to work when menu is closed
+        }
+    }
+    
+    private func setupKeyboardShortcuts() {
+        // Remove existing monitor if any
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
+        }
+        
+        // Add global event monitor for Cmd+1 through Cmd+9
+        // These map to items 2-10 (skip first item which is already in clipboard)
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            // Only handle when history section is selected
+            guard selectedSection == .history else { return event }
+            
+            // Check for Cmd+number (1-9)
+            if event.modifierFlags.contains(.command) {
+                let keyCode = event.keyCode
+                // Key codes: 18=1, 19=2, 20=3, 21=4, 23=5, 22=6, 26=7, 28=8, 25=9
+                let numberKeyCodes: [UInt16: Int] = [
+                    18: 1, 19: 2, 20: 3, 21: 4, 23: 5,
+                    22: 6, 26: 7, 28: 8, 25: 9
+                ]
+                
+                if let num = numberKeyCodes[keyCode] {
+                    // Get filtered items (same logic as HistorySectionView)
+                    let filteredItems: [ClipboardEntry] = {
+                        if search.trimmingCharacters(in: .whitespaces).isEmpty {
+                            return viewModel.items
+                        }
+                        return viewModel.items.filter { $0.matches(query: search) }
+                    }()
+                    
+                    // Cmd+1 maps to item 2 (index 1), Cmd+2 maps to item 3 (index 2), etc.
+                    // Skip first item (index 0) as it's already in clipboard
+                    let itemIndex = num  // num is 1-9, maps to array index 1-9 (items 2-10)
+                    if itemIndex < filteredItems.count {
+                        let item = filteredItems[itemIndex]
+                        viewModel.copyToPasteboard(item)
+                        return nil  // Consume the event
+                    }
+                }
+            }
+            return event
+        }
+    }
+    
+    private func setupHistorySectionListener() {
+        // Remove existing observers to prevent duplicates
+        if let observer = historySectionObserver {
+            NotificationCenter.default.removeObserver(observer)
+            historySectionObserver = nil
+        }
+        if let observer = historyPopupObserver {
+            NotificationCenter.default.removeObserver(observer)
+            historyPopupObserver = nil
+        }
+        
+        let setupMsg = "🔧 [MenuBarContentView] Setting up notification observers"
+        NSLog(setupMsg)
+        print(setupMsg)
+        try? (setupMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+        
+        // Set up observer for history section switch
+        historySectionObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("ShowHistorySection"),
+            object: nil,
+            queue: .main
+        ) { [self] _ in
+            let receivedMsg = "📨 [MenuBarContentView] Received ShowHistorySection notification"
+            NSLog(receivedMsg)
+            print(receivedMsg)
+            try? (receivedMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+            // Switch to history section when shortcut is pressed
+            selectedSection = .history
+        }
+        
+        // Set up observer for showing popup - prevent duplicate calls
+        historyPopupObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("ShowHistoryPopup"),
+            object: nil,
+            queue: .main
+        ) { [self] _ in
+            guard !isHandlingPopup else { return }
+            let receivedMsg = "📨 [MenuBarContentView] Received ShowHistoryPopup notification"
+            NSLog(receivedMsg)
+            print(receivedMsg)
+            try? (receivedMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+            
+            isHandlingPopup = true
+            // Center and show the window
+            centerAndShowWindow()
+            // Reset flag after handling
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                isHandlingPopup = false
+            }
+        }
+        
+        let doneMsg = "✅ [MenuBarContentView] Notification observers set up"
+        NSLog(doneMsg)
+        print(doneMsg)
+        try? (doneMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+    }
+    
+    private func centerAndShowWindow() {
+        // Activate the app first to ensure it's in the foreground
+        NSApp.activate(ignoringOtherApps: true)
+        
+        // Switch to history section
+        selectedSection = .history
+        
+        // Wait a moment for the window to appear, then center it
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            // Find the MenuBarExtra window - it should be around 360x480 pixels
+            var foundWindow: NSWindow?
+            for window in NSApplication.shared.windows {
+                let width = window.frame.width
+                let height = window.frame.height
+                
+                // MenuBarExtra window should be around 360x480 (with some tolerance)
+                if width > 300 && width < 500 && height > 400 && height < 600 {
+                    foundWindow = window
+                    break
+                }
+            }
+            
+            if let window = foundWindow {
+                // Center the window on screen
+                if let screen = NSScreen.main {
+                    let screenFrame = screen.visibleFrame
+                    let windowSize = window.frame.size
+                    let centerX = screenFrame.midX - windowSize.width / 2
+                    let centerY = screenFrame.midY - windowSize.height / 2
+                    window.setFrameOrigin(NSPoint(x: centerX, y: centerY))
+                }
+                
+                // Make window visible and bring to front
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
         }
     }
     
@@ -297,8 +743,11 @@ private struct HistorySectionView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(filteredItems) { item in
-                            ClipboardRow(entry: item, viewModel: viewModel)
+                        ForEach(Array(filteredItems.enumerated()), id: \.element.id) { index, item in
+                            // Only show shortcut for items 2-10 (index 1-9)
+                            // Item 1 (index 0) doesn't need shortcut as it's already in clipboard
+                            let shortcutIndex = index > 0 && index <= 9 ? index : nil
+                            ClipboardRow(entry: item, viewModel: viewModel, shortcutIndex: shortcutIndex)
                                 .padding(8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -506,6 +955,7 @@ private struct ClipboardCard: View {
 private struct ClipboardRow: View {
     let entry: ClipboardEntry
     @ObservedObject var viewModel: ClipboardHistoryViewModel
+    let shortcutIndex: Int?  // Optional: 1-9 for items 2-10, nil for first item
     @State private var showFullContent = false
     
     private func openFileInFinder(entry: ClipboardEntry) {
@@ -588,9 +1038,26 @@ private struct ClipboardRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center) {
-                Image(systemName: entry.content.iconName)
-                    .foregroundStyle(.primary)
-                    .accessibilityHidden(true)
+                // Left column: Icon and keyboard shortcut index (only for items 2-10)
+                VStack(alignment: .center, spacing: 4) {
+                    Image(systemName: entry.content.iconName)
+                        .foregroundStyle(.primary)
+                        .accessibilityHidden(true)
+                    // Cmd+index shortcut label (only show for items 2-10)
+                    if let shortcutIndex = shortcutIndex {
+                        Text("⌘\(shortcutIndex)")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityLabel("Command \(shortcutIndex) shortcut")
+                    } else {
+                        // Spacer to maintain alignment
+                        Text("")
+                            .font(.system(size: 9))
+                    }
+                }
+                .frame(width: 32)
+                
+                // Middle column: Content description
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(entry.content.title)
@@ -623,64 +1090,16 @@ private struct ClipboardRow: View {
                         )
                         .foregroundStyle(isLocal ? .blue : .secondary)
                     }
-                    // Show preview text with magnetic icon if truncated or previewable
-                    HStack(alignment: .top, spacing: 4) {
-                        Text(entry.previewText)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                        // Show preview button for:
-                        // - Truncated text (long text)
-                        // - Images (always show detail view)
-                        // - Files (open in Finder)
-                        let shouldShowButton: Bool = {
-                            switch entry.content {
-                            case .text, .link:
-                                return isTruncated || isMarkdown
-                            case .image:
-                                return true  // Always show for images
-                            case .file:
-                                return true  // Always show for files
-                            }
-                        }()
-                        
-                        if shouldShowButton {
-                            Button(action: { 
-                                switch entry.content {
-                                case .file:
-                                    openFileInFinder(entry: entry)
-                                case .image, .text, .link:
-                                    showFullContent = true
-                                }
-                            }) {
-                                Image(systemName: {
-                                    switch entry.content {
-                                    case .file:
-                                        return "folder"  // Folder icon for "Open in Finder"
-                                    case .image, .text, .link:
-                                        return "eye"  // Eye icon for "View Detail/Preview"
-                                    }
-                                }())
-                                    .font(.caption)
-                                    .foregroundStyle(.blue)
-                            }
-                            .buttonStyle(.plain)
-                            .help({
-                                switch entry.content {
-                                case .file:
-                                    return "Open in Finder"
-                                case .image, .text, .link:
-                                    return "View Detail"
-                                }
-                            }())
-                        }
-                    }
-                    .popover(isPresented: $showFullContent, arrowEdge: .trailing) {
-                        ClipboardDetailWindow(entry: entry, isPresented: $showFullContent)
-                            .frame(width: 600, height: 500)
-                    }
+                    // Preview text (no icon here - moved to right column)
+                    Text(entry.previewText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
+                
                 Spacer()
+                
+                // Right column: Time, pinned status, and preview/finder icon
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(entry.timestamp, style: .time)
                         .font(.caption)
@@ -691,6 +1110,52 @@ private struct ClipboardRow: View {
                             .foregroundStyle(.orange)
                             .font(.caption)
                     }
+                    // Preview/finder icon moved here
+                    let shouldShowButton: Bool = {
+                        switch entry.content {
+                        case .text, .link:
+                            return isTruncated || isMarkdown
+                        case .image:
+                            return true  // Always show for images
+                        case .file:
+                            return true  // Always show for files
+                        }
+                    }()
+                    
+                    if shouldShowButton {
+                        Button(action: { 
+                            switch entry.content {
+                            case .file:
+                                openFileInFinder(entry: entry)
+                            case .image, .text, .link:
+                                showFullContent = true
+                            }
+                        }) {
+                            Image(systemName: {
+                                switch entry.content {
+                                case .file:
+                                    return "folder"  // Folder icon for "Open in Finder"
+                                case .image, .text, .link:
+                                    return "eye"  // Eye icon for "View Detail/Preview"
+                                }
+                            }())
+                                .font(.caption)
+                                .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                        .help({
+                            switch entry.content {
+                            case .file:
+                                return "Open in Finder"
+                            case .image, .text, .link:
+                                return "View Detail"
+                            }
+                        }())
+                    }
+                }
+                .popover(isPresented: $showFullContent, arrowEdge: .trailing) {
+                    ClipboardDetailWindow(entry: entry, isPresented: $showFullContent)
+                        .frame(width: 600, height: 500)
                 }
             }
         }

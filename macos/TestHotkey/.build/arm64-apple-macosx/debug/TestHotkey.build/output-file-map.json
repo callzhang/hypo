@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/master.swiftdeps"
+  },
+  "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/TestHotkeyApp.swift": {
+    "dependencies": "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.d",
+    "object": "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.swift.o",
+    "swiftmodule": "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp~partial.swiftmodule",
+    "swift-dependencies": "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.swiftdeps",
+    "diagnostics": "/Users/derek/Documents/Projects/hypo/macos/TestHotkey/.build/arm64-apple-macosx/debug/TestHotkey.build/TestHotkeyApp.dia"
+  }
+}

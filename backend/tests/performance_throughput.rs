@@ -4,11 +4,11 @@ use tokio::time::{timeout, Duration, Instant};
 #[tokio::test]
 async fn broadcast_throughput_for_hundred_messages() {
     let sessions = SessionManager::new();
-    let mut sender_rx = sessions.register("sender".into()).await;
+    let mut sender_rx = sessions.register("sender".into()).await.receiver;
     let mut receivers = Vec::new();
 
     for idx in 0..4 {
-        receivers.push(sessions.register(format!("receiver-{idx}")).await);
+        receivers.push(sessions.register(format!("receiver-{idx}")).await.receiver);
     }
 
     let start = Instant::now();
@@ -18,11 +18,13 @@ async fn broadcast_throughput_for_hundred_messages() {
         sessions.broadcast_except("sender", &payload).await;
 
         for rx in receivers.iter_mut() {
-            let received = timeout(Duration::from_millis(50), rx.recv())
+            let frame = timeout(Duration::from_millis(50), rx.recv())
                 .await
                 .expect("receiver should get broadcast")
                 .expect("channel open");
-            assert_eq!(received, payload);
+            // Decode binary frame (4-byte length + JSON payload)
+            let json_str = std::str::from_utf8(&frame[4..]).unwrap();
+            assert_eq!(json_str, payload);
         }
     }
 

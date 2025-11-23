@@ -69,6 +69,7 @@ final class HistoryPopupPresenter {
             panel.isReleasedWhenClosed = false
             panel.level = .floating
             panel.isMovableByWindowBackground = true
+            panel.animationBehavior = .none
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.contentViewController = hosting
 

@@ -47,4 +47,14 @@ class RelayWebSocketClient @Inject constructor(
     fun isConnected(): Boolean {
         return delegate.isConnected()
     }
+    
+    /**
+     * Set handler for incoming clipboard messages from cloud relay.
+     * Wraps the handler to mark messages as coming from cloud transport.
+     */
+    fun setIncomingClipboardHandler(handler: (com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit) {
+        delegate.setIncomingClipboardHandler { envelope ->
+            handler(envelope, com.hypo.clipboard.domain.model.TransportOrigin.CLOUD)
+        }
+    }
 }

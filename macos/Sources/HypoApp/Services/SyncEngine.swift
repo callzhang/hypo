@@ -55,7 +55,8 @@ public struct SyncEnvelope: Codable {
     public struct Payload: Codable {
         public let contentType: ClipboardPayload.ContentType
         public let ciphertext: Data
-        public let deviceId: String
+        public let deviceId: String  // UUID string (pure UUID, no prefix)
+        public let devicePlatform: String?  // Platform: "macos", "android", etc.
         public let deviceName: String?
         public let target: String?
         public let encryption: EncryptionMetadata
@@ -64,6 +65,7 @@ public struct SyncEnvelope: Codable {
             contentType: ClipboardPayload.ContentType,
             ciphertext: Data,
             deviceId: String,
+            devicePlatform: String? = nil,
             deviceName: String? = nil,
             target: String?,
             encryption: EncryptionMetadata
@@ -71,6 +73,7 @@ public struct SyncEnvelope: Codable {
             self.contentType = contentType
             self.ciphertext = ciphertext
             self.deviceId = deviceId
+            self.devicePlatform = devicePlatform
             self.deviceName = deviceName
             self.target = target
             self.encryption = encryption
@@ -85,7 +88,20 @@ public struct SyncEnvelope: Codable {
             let ciphertextString = try container.decode(String.self, forKey: .ciphertext)
             self.ciphertext = try decodeBase64Field(ciphertextString, forKey: .ciphertext, in: container)
             
-            deviceId = try container.decode(String.self, forKey: .deviceId)
+            // Decode deviceId - handle both old format (with prefix) and new format (pure UUID)
+            let rawDeviceId = try container.decode(String.self, forKey: .deviceId)
+            if rawDeviceId.hasPrefix("macos-") || rawDeviceId.hasPrefix("android-") {
+                // Old format: extract UUID from prefixed string
+                let prefix = rawDeviceId.hasPrefix("macos-") ? "macos-" : "android-"
+                self.deviceId = String(rawDeviceId.dropFirst(prefix.count))
+                // Infer platform from prefix if not provided
+                self.devicePlatform = rawDeviceId.hasPrefix("macos-") ? "macos" : "android"
+            } else {
+                // New format: pure UUID
+                self.deviceId = rawDeviceId
+                self.devicePlatform = try container.decodeIfPresent(String.self, forKey: .devicePlatform)
+            }
+            
             deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
             target = try container.decodeIfPresent(String.self, forKey: .target)
             encryption = try container.decode(EncryptionMetadata.self, forKey: .encryption)
@@ -196,7 +212,8 @@ public final actor SyncEngine {
     private let transport: SyncTransport
     private let cryptoService: CryptoService
     private let keyProvider: DeviceKeyProviding
-    private let localDeviceId: String
+    private let localDeviceId: String  // UUID string (pure UUID, no prefix)
+    private let localPlatform: DevicePlatform
     private let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -218,12 +235,14 @@ public final actor SyncEngine {
         cryptoService: CryptoService = CryptoService(),
         keyProvider: DeviceKeyProviding,
         localDeviceId: String,
+        localPlatform: DevicePlatform = .macOS,
         defaults: UserDefaults = .standard
     ) {
         self.transport = transport
         self.cryptoService = cryptoService
         self.keyProvider = keyProvider
         self.localDeviceId = localDeviceId
+        self.localPlatform = localPlatform
         self.defaults = defaults
     }
 
@@ -285,7 +304,8 @@ public final actor SyncEngine {
             payload: .init(
                 contentType: payload.contentType,
                 ciphertext: ciphertext,
-                deviceId: entry.originDeviceId,
+                deviceId: entry.originDeviceId,  // UUID string (pure UUID)
+                devicePlatform: entry.originPlatform?.rawValue ?? localPlatform.rawValue,  // Platform string (use local if not set)
                 deviceName: entry.originDeviceName,
                 target: targetDeviceId,
                 encryption: .init(nonce: nonce, tag: tag)

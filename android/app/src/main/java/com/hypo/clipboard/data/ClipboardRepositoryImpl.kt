@@ -45,6 +45,18 @@ class ClipboardRepositoryImpl @Inject constructor(
         val count = dao.countRecentDuplicates(content, type.name, deviceId, since)
         return count > 0
     }
+    
+    override suspend fun getLatestEntry(): ClipboardItem? {
+        return dao.getLatestEntry()?.toDomain()
+    }
+    
+    override suspend fun findMatchingEntryInHistory(content: String, type: ClipboardType): ClipboardItem? {
+        return dao.findMatchingEntryInHistory(content, type.name)?.toDomain()
+    }
+    
+    override suspend fun updateTimestamp(id: String, newTimestamp: Instant) {
+        dao.updateTimestamp(id, newTimestamp)
+    }
 
     private fun ClipboardItem.toEntity(): ClipboardEntity = ClipboardEntity(
         id = id.ifEmpty { UUID.randomUUID().toString() },
@@ -55,7 +67,9 @@ class ClipboardRepositoryImpl @Inject constructor(
         deviceId = deviceId,
         deviceName = deviceName,
         createdAt = createdAt,
-        isPinned = isPinned
+        isPinned = isPinned,
+        isEncrypted = isEncrypted,
+        transportOrigin = transportOrigin?.name
     )
 
     private fun ClipboardEntity.toDomain(): ClipboardItem = ClipboardItem(
@@ -67,6 +81,14 @@ class ClipboardRepositoryImpl @Inject constructor(
         deviceId = deviceId,
         deviceName = deviceName,
         createdAt = createdAt,
-        isPinned = isPinned
+        isPinned = isPinned,
+        isEncrypted = isEncrypted,
+        transportOrigin = transportOrigin?.let { 
+            try {
+                com.hypo.clipboard.domain.model.TransportOrigin.valueOf(it)
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+        }
     )
 }

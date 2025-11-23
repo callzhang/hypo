@@ -136,10 +136,29 @@ class SyncEngine @Inject constructor(
             )
         )
 
-        android.util.Log.d("SyncEngine", "📤 Calling transport.send() for device: $targetDeviceId")
+        // Check payload size before sending (transport limit is 10MB)
+        // Estimate JSON-encoded size: base64 string + metadata overhead (~500 bytes for JSON structure)
+        val estimatedPayloadSize = ciphertextBase64.length + 
+            (item.metadata?.values?.sumOf { it.toString().length } ?: 0) + 
+            500 // JSON structure overhead
+        val maxTransportPayload = 10 * 1024 * 1024 // 10MB limit from TransportFrameCodec
+        
+        if (estimatedPayloadSize > maxTransportPayload) {
+            android.util.Log.w("SyncEngine", "⚠️ Payload too large for transport: ${estimatedPayloadSize} bytes (limit: ${maxTransportPayload} bytes)")
+            android.util.Log.w("SyncEngine", "⚠️ Skipping sync for ${item.type} content (base64 length: ${ciphertextBase64.length} chars)")
+            throw TransportPayloadTooLargeException(
+                "Payload size ${estimatedPayloadSize} bytes exceeds transport limit of ${maxTransportPayload} bytes"
+            )
+        }
+
+        android.util.Log.d("SyncEngine", "📤 Calling transport.send() for device: $targetDeviceId (payload size: ~${estimatedPayloadSize} bytes)")
         try {
             transport.send(envelope)
             android.util.Log.d("SyncEngine", "✅ transport.send() completed successfully")
+        } catch (e: com.hypo.clipboard.transport.ws.TransportFrameException) {
+            // Re-throw as TransportPayloadTooLargeException for better error handling
+            android.util.Log.e("SyncEngine", "❌ Transport frame error: ${e.message}", e)
+            throw TransportPayloadTooLargeException("Payload exceeds transport frame size limit: ${e.message}", e)
         } catch (e: Exception) {
             // transport implementations (WebSocket, etc.) can throw IOException/timeout here;
             // we surface the error but avoid crashing the caller without context.

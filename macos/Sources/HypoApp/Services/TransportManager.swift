@@ -95,7 +95,8 @@ public final class TransportManager {
             let syncEngine = SyncEngine(
                 transport: transport,
                 keyProvider: keyProvider,
-                localDeviceId: deviceIdentity.deviceIdString
+                localDeviceId: deviceIdentity.deviceId.uuidString,
+                localPlatform: deviceIdentity.platform
             )
             // Create handler - callback will be set up later via setHistoryViewModel
             self.incomingHandler = IncomingClipboardHandler(
@@ -112,9 +113,12 @@ public final class TransportManager {
         // Set up cloud relay incoming message handler
         if let defaultProvider = provider as? DefaultTransportProvider,
            let handler = incomingHandler {
-            defaultProvider.setCloudIncomingMessageHandler { [weak handler] data in
-                await handler?.handle(data)
-            }
+           defaultProvider.setCloudIncomingMessageHandler { [weak handler] data, transportOrigin in
+               let cloudMsg = "☁️ [TransportManager] Cloud relay message received: \(data.count) bytes, origin: \(transportOrigin.rawValue)\n"
+               print(cloudMsg)
+               try? cloudMsg.appendToFile(path: "/tmp/hypo_debug.log")
+               await handler?.handle(data, transportOrigin: transportOrigin)
+           }
             let cloudHandlerMsg = "✅ [TransportManager] Cloud relay incoming message handler set\n"
             print(cloudHandlerMsg)
             try? cloudHandlerMsg.appendToFile(path: "/tmp/hypo_debug.log")
@@ -155,27 +159,21 @@ public final class TransportManager {
                 return
             }
             let logPath = "/tmp/hypo_debug.log"
-            do {
-                try? "🔷 [TransportManager] Init: Starting activation task\n".appendToFile(path: logPath)
-                await self.activateLanServices()
-                try? "🔷 [TransportManager] Init: Activation task completed\n".appendToFile(path: logPath)
-                
-                // CRITICAL: Add immediate logging to verify execution continues
-                let continueMsg = "➡️ [TransportManager] Execution continues after activateLanServices()\n"
-                print(continueMsg)
-                try? continueMsg.appendToFile(path: logPath)
-                
-                // Note: Auto-connect is now handled by ConnectionStatusProber
-                // which is initialized via setHistoryViewModel()
-                // This avoids duplicate connection attempts
-                let skipMsg = "ℹ️ [TransportManager] Skipping auto-connect (handled by ConnectionStatusProber)\n"
-                print(skipMsg)
-                try? skipMsg.appendToFile(path: logPath)
-            } catch {
-                let errorMsg = "❌ [TransportManager] Init task error: \(error.localizedDescription)\n"
-                print(errorMsg)
-                try? errorMsg.appendToFile(path: logPath)
-            }
+            try? "🔷 [TransportManager] Init: Starting activation task\n".appendToFile(path: logPath)
+            await self.activateLanServices()
+            try? "🔷 [TransportManager] Init: Activation task completed\n".appendToFile(path: logPath)
+            
+            // CRITICAL: Add immediate logging to verify execution continues
+            let continueMsg = "➡️ [TransportManager] Execution continues after activateLanServices()\n"
+            print(continueMsg)
+            try? continueMsg.appendToFile(path: logPath)
+            
+            // Note: Auto-connect is now handled by ConnectionStatusProber
+            // which is initialized via setHistoryViewModel()
+            // This avoids duplicate connection attempts
+            let skipMsg = "ℹ️ [TransportManager] Skipping auto-connect (handled by ConnectionStatusProber)\n"
+            print(skipMsg)
+            try? skipMsg.appendToFile(path: logPath)
         }
         #else
         Task { await activateLanServices() }
@@ -514,7 +512,7 @@ public final class TransportManager {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: interval)
                 if Task.isCancelled { break }
-                await self.pruneLanPeers(olderThan: self.stalePeerInterval)
+                self.pruneLanPeers(olderThan: self.stalePeerInterval)
             }
         }
     }
@@ -839,7 +837,7 @@ public final class TransportManager {
         
         // Load or generate persistent keys for auto-discovery pairing
         let signingKeyStore = PairingSigningKeyStore()
-        let keyProvider = KeychainDeviceKeyProvider()
+        let _ = KeychainDeviceKeyProvider() // Unused but kept for potential future use
         
         var signingPublicKeyBase64: String?
         var publicKeyBase64: String?
@@ -969,6 +967,7 @@ public enum TransportPreference: String, Codable {
     case cloudOnly
 }
 
+@MainActor
 public protocol TransportProvider {
     func preferredTransport(for preference: TransportPreference) -> SyncTransport
 }
@@ -1269,7 +1268,7 @@ extension TransportManager: LanWebSocketServerDelegate {
             if let handler = self.incomingHandler {
                 print("✅ [TransportManager] incomingHandler exists, calling handle()")
                 try? "✅ [TransportManager] incomingHandler exists, calling handle()\n".appendToFile(path: "/tmp/hypo_debug.log")
-                await handler.handle(data)
+                await handler.handle(data, transportOrigin: .lan)
                 print("✅ [TransportManager] incomingHandler.handle() completed")
                 try? "✅ [TransportManager] incomingHandler.handle() completed\n".appendToFile(path: "/tmp/hypo_debug.log")
             } else {

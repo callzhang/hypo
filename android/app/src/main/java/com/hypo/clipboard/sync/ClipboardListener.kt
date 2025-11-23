@@ -135,27 +135,32 @@ class ClipboardListener(
     }
 
     override fun onPrimaryClipChanged() {
-        try {
-            Log.i(TAG, "🔔 onPrimaryClipChanged TRIGGERED!")
+        // CRITICAL: This is called synchronously on the main thread when setPrimaryClip is called.
+        // We must return immediately and do all processing in a coroutine to avoid blocking the UI.
+        // Launch processing in a coroutine immediately to avoid blocking the main thread
+        scope.launch(Dispatchers.Default) {
             try {
-                val clip = clipboardManager.primaryClip
-                if (clip != null) {
-                    Log.i(TAG, "📋 Clipboard has content, processing...")
-                    process(clip)
-                } else {
-                    Log.w(TAG, "⚠️  Clipboard clip is null!")
+                Log.i(TAG, "🔔 onPrimaryClipChanged TRIGGERED!")
+                try {
+                    val clip = clipboardManager.primaryClip
+                    if (clip != null) {
+                        Log.i(TAG, "📋 Clipboard has content, processing...")
+                        process(clip)
+                    } else {
+                        Log.w(TAG, "⚠️  Clipboard clip is null!")
+                    }
+                } catch (e: SecurityException) {
+                    // Android 10+ may block clipboard access in background
+                    Log.d(TAG, "🔒 onPrimaryClipChanged: primaryClip access blocked: ${e.message}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error accessing primaryClip in onPrimaryClipChanged: ${e.message}", e)
                 }
             } catch (e: SecurityException) {
                 // Android 10+ may block clipboard access in background
-                Log.d(TAG, "🔒 onPrimaryClipChanged: primaryClip access blocked: ${e.message}")
+                Log.d(TAG, "🔒 onPrimaryClipChanged: Clipboard access blocked (background restriction): ${e.message}")
             } catch (e: Exception) {
-                Log.e(TAG, "❌ Error accessing primaryClip in onPrimaryClipChanged: ${e.message}", e)
+                Log.e(TAG, "❌ Error in onPrimaryClipChanged: ${e.message}", e)
             }
-        } catch (e: SecurityException) {
-            // Android 10+ may block clipboard access in background
-            Log.d(TAG, "🔒 onPrimaryClipChanged: Clipboard access blocked (background restriction): ${e.message}")
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error in onPrimaryClipChanged: ${e.message}", e)
         }
     }
 

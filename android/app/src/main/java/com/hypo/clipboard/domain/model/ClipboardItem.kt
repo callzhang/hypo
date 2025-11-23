@@ -2,6 +2,11 @@ package com.hypo.clipboard.domain.model
 
 import java.time.Instant
 
+enum class TransportOrigin {
+    LAN,
+    CLOUD
+}
+
 data class ClipboardItem(
     val id: String,
     val type: ClipboardType,
@@ -11,5 +16,7 @@ data class ClipboardItem(
     val deviceId: String,
     val deviceName: String? = null,
     val createdAt: Instant,
-    val isPinned: Boolean
+    val isPinned: Boolean,
+    val isEncrypted: Boolean = false,
+    val transportOrigin: TransportOrigin? = null
 )

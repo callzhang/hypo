@@ -210,3 +210,5 @@ TODO.txt
 
 .gradle/
 macos/HypoApp.app
+.pyc
+macos/HypoApp.app/*

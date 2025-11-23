@@ -3,6 +3,7 @@ package com.hypo.clipboard.sync
 import android.util.Log
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
+import com.hypo.clipboard.domain.model.ClipboardType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -127,19 +129,48 @@ class SyncCoordinator @Inject constructor(
                 val deviceId = event.sourceDeviceId ?: identity.deviceId
                 val deviceName = event.sourceDeviceName ?: identity.deviceName
                 
-                // Check for duplicate based on content (prevent duplicates from ClipboardListener + AccessibilityService)
-                val signature = event.signature()
-                val isDuplicate = repository.hasRecentDuplicate(
-                    content = event.content,
-                    type = event.type,
-                    deviceId = deviceId,
-                    withinSeconds = 5
-                )
+                // New plan:
+                // 1. If new message matches the current clipboard (latest entry) → discard
+                // 2. If new message matches something in history → move that history item to the top
+                // 3. Otherwise → add new entry
                 
-                if (isDuplicate) {
+                val latestEntry = repository.getLatestEntry()
+                
+                // Check if matches current clipboard (latest entry)
+                val matchesCurrentClipboard = latestEntry?.let { latest ->
+                    if (event.type == ClipboardType.IMAGE && 
+                        latest.type == ClipboardType.IMAGE) {
+                        // For images, compare by hash from metadata if available, otherwise by content
+                        val eventHash = event.metadata["hash"]
+                        val latestHash = latest.metadata?.get("hash")
+                        if (eventHash != null && latestHash != null) {
+                            eventHash == latestHash
+                        } else {
+                            event.content == latest.content
+                        }
+                    } else {
+                        // For other content types, use full content comparison
+                        event.content == latest.content && event.type == latest.type
+                    }
+                } ?: false
+                
+                if (matchesCurrentClipboard) {
+                    android.util.Log.i(TAG, "⏭️ New message matches current clipboard, discarding: ${event.preview.take(50)}")
                     continue
                 }
                 
+                // Check if matches something in history (excluding the latest entry)
+                val matchingEntry = repository.findMatchingEntryInHistory(event.content, event.type)
+                
+                if (matchingEntry != null) {
+                    // Found matching entry in history - move it to the top by updating timestamp
+                    val newTimestamp = Instant.now()
+                    repository.updateTimestamp(matchingEntry.id, newTimestamp)
+                    android.util.Log.i(TAG, "🔄 New message matches history item, moved to top: ${matchingEntry.preview.take(50)}")
+                    continue
+                }
+                
+                // Not a duplicate - add to history
                 val item = ClipboardItem(
                     id = event.id,
                     type = event.type,
@@ -149,7 +180,9 @@ class SyncCoordinator @Inject constructor(
                     deviceId = deviceId,
                     deviceName = deviceName,
                     createdAt = event.createdAt,
-                    isPinned = false
+                    isPinned = false,
+                    isEncrypted = event.isEncrypted,
+                    transportOrigin = event.transportOrigin
                 )
                 repository.upsert(item)
 
@@ -177,6 +210,9 @@ class SyncCoordinator @Inject constructor(
                             try {
                                 val envelope = syncEngine.sendClipboard(item, target)
                                 Log.i(TAG, "✅ Successfully sent clipboard to $target, envelope type: ${envelope.type}")
+                            } catch (error: TransportPayloadTooLargeException) {
+                                Log.w(TAG, "⚠️ Payload too large for $target, skipping sync: ${error.message}")
+                                // Don't crash - just skip this sync
                             } catch (error: Exception) {
                                 Log.e(TAG, "❌ Failed to sync to $target: ${error.message}", error)
                             }

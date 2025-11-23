@@ -191,8 +191,10 @@ class PairingHandshakeManager @Inject constructor(
                     "ACK timestamp out of range"
                 }
 
-                deviceKeyStore.saveKey(state.payload.macDeviceId, state.sharedKey)
-                PairingCompletionResult.Success(state.payload.macDeviceId, ack.macDeviceName)
+                // Migrate device ID to pure UUID format (remove prefix if present)
+                val migratedDeviceId = migrateDeviceId(state.payload.macDeviceId)
+                deviceKeyStore.saveKey(migratedDeviceId, state.sharedKey)
+                PairingCompletionResult.Success(migratedDeviceId, ack.macDeviceName)
             }.getOrElse { throwable ->
                 PairingCompletionResult.Failure(throwable.message ?: "Pairing failed")
             }
@@ -293,6 +295,10 @@ class PairingHandshakeManager @Inject constructor(
     private fun hash(data: ByteArray): ByteArray {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         return digest.digest(data)
+    }
+    
+    private fun migrateDeviceId(deviceId: String): String {
+        return deviceId.removePrefix("macos-").removePrefix("android-")
     }
 }
 

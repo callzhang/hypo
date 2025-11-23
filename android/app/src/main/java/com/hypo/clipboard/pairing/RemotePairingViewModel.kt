@@ -176,7 +176,13 @@ class RemotePairingViewModel @Inject constructor(
                 }
                 when (val completion = handshakeManager.complete(stateSnapshot, ackJson)) {
                     is PairingCompletionResult.Success -> {
-                        val deviceId = completion.macDeviceId
+                        // Migrate device ID from old format (with prefix) to new format (pure UUID)
+                        val rawDeviceId = completion.macDeviceId
+                        val deviceId = when {
+                            rawDeviceId.startsWith("macos-") -> rawDeviceId.removePrefix("macos-")
+                            rawDeviceId.startsWith("android-") -> rawDeviceId.removePrefix("android-")
+                            else -> rawDeviceId
+                        }
                         val deviceName = completion.macDeviceName
                         
                         android.util.Log.d("RemotePairingViewModel", "✅ Pairing handshake completed! Key saved for device: $deviceId")

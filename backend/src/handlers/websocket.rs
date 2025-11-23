@@ -15,49 +15,22 @@ pub async fn websocket_handler(
     body: web::Payload,
     data: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
-    // Try headers first, then fall back to query parameters
     let device_id = req
         .headers()
         .get("X-Device-Id")
         .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            req.uri().query().and_then(|q| {
-                q.split('&')
-                    .find_map(|pair| {
-                        let mut parts = pair.splitn(2, '=');
-                        if parts.next() == Some("device_id") {
-                            parts.next().map(|v| v.to_string())
-                        } else {
-                            None
-                        }
-                    })
-            })
-        });
+        .map(|s| s.to_string());
 
     let platform = req
         .headers()
         .get("X-Device-Platform")
         .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            req.uri().query().and_then(|q| {
-                q.split('&')
-                    .find_map(|pair| {
-                        let mut parts = pair.splitn(2, '=');
-                        if parts.next() == Some("platform") {
-                            parts.next().map(|v| v.to_string())
-                        } else {
-                            None
-                        }
-                    })
-            })
-        });
+        .map(|s| s.to_string());
 
     if device_id.is_none() || platform.is_none() {
-        warn!("WebSocket connection rejected: missing device headers or query params");
+        warn!("WebSocket connection rejected: missing device headers");
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Missing X-Device-Id or X-Device-Platform (header or query param)"
+            "error": "Missing X-Device-Id or X-Device-Platform header"
         })));
     }
 
@@ -69,18 +42,24 @@ pub async fn websocket_handler(
         device_id, platform
     );
 
+    info!("About to call actix_ws::handle for {} ({})", device_id, platform);
     let (response, session, mut msg_stream) = actix_ws::handle(&req, body)?;
+    info!("actix_ws::handle succeeded for {} ({})", device_id, platform);
 
+    info!("Registering WebSocket session for device: {} ({})", device_id, platform);
     let mut outbound = data.sessions.register(device_id.clone()).await;
+    info!("Session registered successfully for device: {}", device_id);
 
     let mut writer_session = session.clone();
     let writer_sessions = data.sessions.clone();
     let writer_device_id = device_id.clone();
     actix_web::rt::spawn(async move {
+        // Simple stateless relay: just forward messages, fail fast if connection is closed
         while let Some(message) = outbound.recv().await {
             // message is already in binary frame format (4-byte length + JSON)
             if let Err(err) = writer_session.binary(message).await {
-                error!("Failed to push message to {}: {:?}", writer_device_id, err);
+                // Connection closed or error - log and break (client will reconnect and retry)
+                warn!("Failed to relay message to {}: {:?}. Client should retry.", writer_device_id, err);
                 break;
             }
         }
@@ -207,8 +186,23 @@ async fn handle_binary_message(
 
     // Forward the binary frame as-is (already in correct format)
     if let Some(target) = target_device {
-        sessions.send_binary(&target, frame.to_vec()).await
+        info!("Routing message from {} to target device: {}", sender_id, target);
+        match sessions.send_binary(&target, frame.to_vec()).await {
+            Ok(()) => {
+                info!("Successfully routed message to {}", target);
+                Ok(())
+            }
+            Err(SessionError::DeviceNotConnected) => {
+                warn!("Target device {} not connected, message not delivered", target);
+                Err(SessionError::DeviceNotConnected)
+            }
+            Err(e) => {
+                error!("Failed to route message to {}: {:?}", target, e);
+                Err(e)
+            }
+        }
     } else {
+        info!("No target specified, broadcasting from {} to all other devices", sender_id);
         sessions.broadcast_except_binary(sender_id, frame.to_vec()).await;
         Ok(())
     }
@@ -322,6 +316,24 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
         .and_then(Value::as_str)
         .ok_or("missing tag")?;
 
+    // Handle plaintext messages: empty nonce/tag means plaintext
+    if nonce.is_empty() && tag.is_empty() {
+        // Plaintext message - validate data field exists and is base64 decodable
+        let data = payload
+            .get("ciphertext")
+            .or_else(|| payload.get("data"))
+            .and_then(Value::as_str)
+            .ok_or("missing data/ciphertext field")?;
+        
+        BASE64
+            .decode(data.as_bytes())
+            .map_err(|_| "invalid data encoding")
+            .map(|_| ())?;
+        
+        return Ok(());
+    }
+
+    // Encrypted message - validate nonce and tag
     BASE64
         .decode(nonce.as_bytes())
         .map_err(|_| "invalid nonce encoding")
@@ -344,10 +356,12 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
             }
         })?;
 
+    // Validate ciphertext/data field for encrypted messages
     let data = payload
-        .get("data")
+        .get("ciphertext")
+        .or_else(|| payload.get("data"))
         .and_then(Value::as_str)
-        .ok_or("missing data field")?;
+        .ok_or("missing data/ciphertext field")?;
 
     BASE64
         .decode(data.as_bytes())

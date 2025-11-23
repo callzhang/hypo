@@ -16,10 +16,13 @@ class IncomingClipboardHandler @Inject constructor(
     private val syncCoordinator: SyncCoordinator
 ) {
     private val scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
-    fun handle(envelope: SyncEnvelope) {
+    fun handle(envelope: SyncEnvelope, transportOrigin: com.hypo.clipboard.domain.model.TransportOrigin = com.hypo.clipboard.domain.model.TransportOrigin.LAN) {
         scope.launch {
             try {
-                Log.i(TAG, "📥 Received clipboard from deviceId=${envelope.payload.deviceId.take(20)}, deviceName=${envelope.payload.deviceName}")
+                Log.i(TAG, "📥 Received clipboard from deviceId=${envelope.payload.deviceId.take(20)}, deviceName=${envelope.payload.deviceName}, origin=${transportOrigin.name}")
+                
+                // Check if message was encrypted (non-empty nonce and tag)
+                val isEncrypted = envelope.payload.encryption.nonce.isNotEmpty() && envelope.payload.encryption.tag.isNotEmpty()
                 
                 // Decode the encrypted clipboard payload
                 val clipboardPayload = syncEngine.decode(envelope)
@@ -34,7 +37,9 @@ class IncomingClipboardHandler @Inject constructor(
                     createdAt = java.time.Instant.now(),
                     sourceDeviceId = envelope.payload.deviceId, // ✅ Preserve source device ID
                     sourceDeviceName = envelope.payload.deviceName, // ✅ Preserve source device name
-                    skipBroadcast = true // ✅ Don't re-broadcast received clipboard
+                    skipBroadcast = true, // ✅ Don't re-broadcast received clipboard
+                    isEncrypted = isEncrypted,
+                    transportOrigin = transportOrigin
                 )
                 
                 Log.i(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=${event.sourceDeviceName}")

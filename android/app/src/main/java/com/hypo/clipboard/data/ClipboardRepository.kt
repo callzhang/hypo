@@ -10,4 +10,7 @@ interface ClipboardRepository {
     suspend fun delete(id: String)
     suspend fun clear()
     suspend fun hasRecentDuplicate(content: String, type: ClipboardType, deviceId: String, withinSeconds: Long = 5): Boolean
+    suspend fun getLatestEntry(): ClipboardItem?
+    suspend fun findMatchingEntryInHistory(content: String, type: ClipboardType): ClipboardItem?
+    suspend fun updateTimestamp(id: String, newTimestamp: Instant)
 }

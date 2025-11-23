@@ -170,7 +170,6 @@ class SettingsViewModel @Inject constructor(
                 
                 SettingsUiState(
                     lanSyncEnabled = settings.lanSyncEnabled,
-                    cloudSyncEnabled = settings.cloudSyncEnabled,
                     historyLimit = settings.historyLimit,
                     autoDeleteDays = settings.autoDeleteDays,
                     plainTextModeEnabled = settings.plainTextModeEnabled,
@@ -195,10 +194,6 @@ class SettingsViewModel @Inject constructor(
 
     fun onLanSyncChanged(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setLanSyncEnabled(enabled) }
-    }
-
-    fun onCloudSyncChanged(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setCloudSyncEnabled(enabled) }
     }
 
     fun onHistoryLimitChanged(limit: Int) {
@@ -263,7 +258,6 @@ class SettingsViewModel @Inject constructor(
 
 data class SettingsUiState(
         val lanSyncEnabled: Boolean = true,
-        val cloudSyncEnabled: Boolean = true,
         val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT,
         val autoDeleteDays: Int = UserSettings.DEFAULT_AUTO_DELETE_DAYS,
         val plainTextModeEnabled: Boolean = false,

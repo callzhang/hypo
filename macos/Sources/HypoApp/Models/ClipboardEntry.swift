@@ -1,27 +1,41 @@
 import Foundation
 
+public enum TransportOrigin: String, Codable {
+    case lan
+    case cloud
+}
+
 public struct ClipboardEntry: Identifiable, Equatable, Codable {
     public let id: UUID
-    public let timestamp: Date
-    public let originDeviceId: String
+    public var timestamp: Date
+    public let originDeviceId: String  // UUID string (pure UUID, no prefix)
+    public let originPlatform: DevicePlatform?  // Platform: macOS, Android, etc.
     public let originDeviceName: String?
     public let content: ClipboardContent
     public var isPinned: Bool
+    public let isEncrypted: Bool  // Whether the message was encrypted
+    public let transportOrigin: TransportOrigin?  // LAN or cloud relay
 
     public init(
         id: UUID = UUID(),
         timestamp: Date = Date(),
         originDeviceId: String,
+        originPlatform: DevicePlatform? = nil,
         originDeviceName: String? = nil,
         content: ClipboardContent,
-        isPinned: Bool = false
+        isPinned: Bool = false,
+        isEncrypted: Bool = false,
+        transportOrigin: TransportOrigin? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
         self.originDeviceId = originDeviceId
+        self.originPlatform = originPlatform
         self.originDeviceName = originDeviceName
         self.content = content
         self.isPinned = isPinned
+        self.isEncrypted = isEncrypted
+        self.transportOrigin = transportOrigin
     }
 
     public func matches(query: String) -> Bool {
@@ -75,9 +89,22 @@ public enum ClipboardContent: Equatable, Codable {
             let absolute = url.absoluteString
             return absolute.count > 100 ? "\(absolute.prefix(100))…" : absolute
         case .image(let metadata):
+            if let fileName = metadata.altText, !fileName.isEmpty {
+                return "\(fileName) · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+            }
             return "Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
         case .file(let metadata):
             return "\(metadata.fileName) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+        }
+    }
+    
+    /// Returns true if this content type should show a preview button
+    public var isPreviewable: Bool {
+        switch self {
+        case .text, .link:
+            return false
+        case .image, .file:
+            return true
         }
     }
 }
@@ -174,5 +201,68 @@ public extension ClipboardEntry {
             }
             return nil
         }
+    }
+    
+    /// Generate a content signature for duplicate detection (matches Android's signature logic)
+    /// This signature is used to detect duplicates from dual-send (LAN + cloud)
+    func contentSignature() -> String {
+        let contentType: String
+        let contentString: String
+        
+        switch content {
+        case .text(let text):
+            contentType = "text"
+            contentString = text
+        case .link(let url):
+            contentType = "link"
+            contentString = url.absoluteString
+        case .image(let metadata):
+            contentType = "image"
+            // Use actual image data hash for accurate duplicate detection
+            // This prevents different images with same size from being treated as duplicates
+            if let imageData = metadata.data {
+                // Use a more robust hash: sample multiple points throughout the image
+                // This reduces collisions while still being fast
+                let sampleCount = min(16, max(4, imageData.count / 1000)) // Sample 4-16 points
+                let step = max(1, imageData.count / sampleCount)
+                var hash = 0
+                
+                // Hash first 2KB
+                let startSize = min(2048, imageData.count)
+                for byte in imageData.prefix(startSize) {
+                    hash = hash &* 31 &+ Int(byte)
+                }
+                
+                // Hash last 2KB
+                let endSize = min(2048, imageData.count)
+                for byte in imageData.suffix(endSize) {
+                    hash = hash &* 31 &+ Int(byte)
+                }
+                
+                // Hash evenly distributed samples throughout the image
+                for i in 0..<sampleCount {
+                    let offset = i * step
+                    if offset < imageData.count {
+                        hash = hash &* 31 &+ Int(imageData[offset])
+                    }
+                }
+                
+                // Include filename in signature if available (for file-based images)
+                let fileNamePart = metadata.altText ?? ""
+                contentString = "\(hash)|\(metadata.byteSize)|\(metadata.format)|\(fileNamePart)"
+            } else {
+                // Fallback to size+format if data is not available
+                let fileNamePart = metadata.altText ?? ""
+                contentString = "\(metadata.byteSize)|\(metadata.format)|\(fileNamePart)"
+            }
+        case .file(let metadata):
+            contentType = "file"
+            // Use fileName and byteSize as signature for files
+            contentString = "\(metadata.fileName)|\(metadata.byteSize)"
+        }
+        
+        // Match Android's signature format: type||content||metadata
+        // For simplicity, we use originDeviceId as part of the signature to match Android's deviceId check
+        return "\(contentType)||\(contentString)||\(originDeviceId)"
     }
 }

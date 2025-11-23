@@ -49,12 +49,12 @@ public struct PairingPayload: Codable, Equatable {
         case signature
     }
     
-    // Custom encoder to include platform prefix in device ID
+    // Custom encoder - use pure UUID (no prefix) to match migration to UUID+platform approach
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(version, forKey: .version)
-        // Encode device ID with platform prefix for consistency (macos-{UUID})
-        let macDeviceIdString = "macos-\(macDeviceId.uuidString.lowercased())"
+        // Encode device ID as pure UUID (no prefix) - platform is handled separately
+        let macDeviceIdString = macDeviceId.uuidString.lowercased()
         try container.encode(macDeviceIdString, forKey: .macDeviceId)
         try container.encode(macPublicKey.base64EncodedString(), forKey: .macPublicKey)
         try container.encode(macSigningPublicKey.base64EncodedString(), forKey: .macSigningPublicKey)
@@ -205,18 +205,74 @@ public struct PairingAckMessage: Codable, Equatable {
         case tag
     }
     
+    // Memberwise initializer for creating instances directly
+    public init(challengeId: UUID, macDeviceId: UUID, macDeviceName: String, nonce: Data, ciphertext: Data, tag: Data) {
+        self.challengeId = challengeId
+        self.macDeviceId = macDeviceId
+        self.macDeviceName = macDeviceName
+        self.nonce = nonce
+        self.ciphertext = ciphertext
+        self.tag = tag
+    }
+    
     // Custom encoder to convert Data to Base64 strings for Android
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         // Use lowercase UUID string to match Android's UUID.randomUUID().toString() format
         try container.encode(challengeId.uuidString.lowercased(), forKey: .challengeId)
-        // Encode device ID with platform prefix for consistency (macos-{UUID})
-        let macDeviceIdString = "macos-\(macDeviceId.uuidString.lowercased())"
+        // Encode device ID as pure UUID (no prefix) to match migration to UUID+platform approach
+        let macDeviceIdString = macDeviceId.uuidString.lowercased()
         try container.encode(macDeviceIdString, forKey: .macDeviceId)
         try container.encode(macDeviceName, forKey: .macDeviceName)
         try container.encode(nonce.base64EncodedString(), forKey: .nonce)
         try container.encode(ciphertext.base64EncodedString(), forKey: .ciphertext)
         try container.encode(tag.base64EncodedString(), forKey: .tag)
+    }
+    
+    // Custom decoder to handle both prefixed and non-prefixed formats (backward compatibility)
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Decode challenge ID
+        let challengeIdString = try container.decode(String.self, forKey: .challengeId)
+        guard let challengeIdUUID = UUID(uuidString: challengeIdString) else {
+            throw DecodingError.dataCorruptedError(forKey: .challengeId, in: container, debugDescription: "Invalid UUID format: \(challengeIdString)")
+        }
+        challengeId = challengeIdUUID
+        
+        // Decode device ID - handle both "macos-{UUID}" and pure UUID formats
+        let macDeviceIdString = try container.decode(String.self, forKey: .macDeviceId)
+        let uuidString: String
+        if macDeviceIdString.hasPrefix("macos-") {
+            uuidString = String(macDeviceIdString.dropFirst(6)) // Remove "macos-" prefix
+        } else {
+            uuidString = macDeviceIdString // Pure UUID format
+        }
+        guard let uuid = UUID(uuidString: uuidString) else {
+            throw DecodingError.dataCorruptedError(forKey: .macDeviceId, in: container, debugDescription: "Invalid UUID format: \(macDeviceIdString)")
+        }
+        macDeviceId = uuid
+        
+        macDeviceName = try container.decode(String.self, forKey: .macDeviceName)
+        
+        // Decode Base64 strings to Data
+        let nonceString = try container.decode(String.self, forKey: .nonce)
+        guard let nonceData = Data(base64Encoded: nonceString) else {
+            throw DecodingError.dataCorruptedError(forKey: .nonce, in: container, debugDescription: "Invalid Base64 string for nonce")
+        }
+        nonce = nonceData
+        
+        let ciphertextString = try container.decode(String.self, forKey: .ciphertext)
+        guard let ciphertextData = Data(base64Encoded: ciphertextString) else {
+            throw DecodingError.dataCorruptedError(forKey: .ciphertext, in: container, debugDescription: "Invalid Base64 string for ciphertext")
+        }
+        ciphertext = ciphertextData
+        
+        let tagString = try container.decode(String.self, forKey: .tag)
+        guard let tagData = Data(base64Encoded: tagString) else {
+            throw DecodingError.dataCorruptedError(forKey: .tag, in: container, debugDescription: "Invalid Base64 string for tag")
+        }
+        tag = tagData
     }
 }
 

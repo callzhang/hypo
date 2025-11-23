@@ -128,14 +128,27 @@ class LanWebSocketClient @Inject constructor(
     private val pendingLock = Any()
     private val pendingRoundTrips = mutableMapOf<String, Instant>()
     private val pendingTtl = Duration.ofMillis(max(0L, config.roundTripTimeoutMillis))
-    private var onIncomingClipboard: ((SyncEnvelope) -> Unit)? = null
+    private var onIncomingClipboard: ((SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit)? = null
     private var onPairingAck: ((String) -> Unit)? = null  // ACK as JSON string
     @Volatile private var connectionSignal = CompletableDeferred<Unit>()
     @Volatile private var currentConnector: WebSocketConnector = connector
     @Volatile private var currentUrl: String = config.url
     
-    fun setIncomingClipboardHandler(handler: (SyncEnvelope) -> Unit) {
+    // Determine transport origin based on URL (cloud relay URLs contain "fly.dev" or are wss://)
+    private val transportOrigin: com.hypo.clipboard.domain.model.TransportOrigin = 
+        if (config.url.contains("fly.dev", ignoreCase = true) || config.url.startsWith("wss://", ignoreCase = true)) {
+            com.hypo.clipboard.domain.model.TransportOrigin.CLOUD
+        } else {
+            com.hypo.clipboard.domain.model.TransportOrigin.LAN
+        }
+    
+    fun setIncomingClipboardHandler(handler: (SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit) {
         onIncomingClipboard = handler
+    }
+    
+    // Backward compatibility: handler without transport origin (defaults to LAN)
+    fun setIncomingClipboardHandler(handler: (SyncEnvelope) -> Unit) {
+        onIncomingClipboard = { envelope, _ -> handler(envelope) }
     }
     
     fun setPairingAckHandler(handler: (String) -> Unit) {
@@ -544,7 +557,7 @@ class LanWebSocketClient @Inject constructor(
         
         // Handle incoming clipboard messages
         if (envelope.type == com.hypo.clipboard.sync.MessageType.CLIPBOARD) {
-            onIncomingClipboard?.invoke(envelope)
+            onIncomingClipboard?.invoke(envelope, transportOrigin)
         }
     }
 

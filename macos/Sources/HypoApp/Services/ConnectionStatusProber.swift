@@ -228,13 +228,13 @@ public final class ConnectionStatusProber {
         
         // Check network connectivity - update status immediately if disconnected
         if !hasNetworkConnectivity {
-            await transportManager?.updateConnectionState(.idle)
+            transportManager?.updateConnectionState(.idle)
         } else {
             // Verify network with HTTP check
             let hasNetwork = await checkNetworkConnectivity()
             if !hasNetwork {
                 hasNetworkConnectivity = false
-                await transportManager?.updateConnectionState(.idle)
+                transportManager?.updateConnectionState(.idle)
             } else {
                 hasNetworkConnectivity = true
             }
@@ -248,27 +248,46 @@ public final class ConnectionStatusProber {
             }
             
             if cloudTransportConnected {
-                await transportManager?.updateConnectionState(.connectedCloud)
+                transportManager?.updateConnectionState(.connectedCloud)
             } else if !isConnecting {
                 // Try to connect to cloud if not already connecting
                 isConnecting = true
-                await transportManager?.updateConnectionState(.connectingCloud)
+                transportManager?.updateConnectionState(.connectingCloud)
                 
-                // Check server health via HTTP (fast check)
-                let serverReachable = await checkServerHealth()
-                if serverReachable {
-                    await transportManager?.updateConnectionState(.connectedCloud)
+                // Actually connect to cloud relay (not just check health)
+                if let transportProvider = transportProvider as? DefaultTransportProvider {
+                    let cloudTransport = transportProvider.getCloudTransport()
+                    do {
+                        try await cloudTransport.connect()
+                        transportManager?.updateConnectionState(.connectedCloud)
+                        let connectMsg = "✅ [ConnectionStatusProber] Successfully connected to cloud relay\n"
+                        print(connectMsg)
+                        try? connectMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    } catch {
+                        // Connection failed, check if we have LAN connections
+                        let hasLanConnection = !onlineDeviceIds.isEmpty || !discoveredDeviceIds.isEmpty
+                        transportManager?.updateConnectionState(hasLanConnection ? .connectedLan : .idle)
+                        let errorMsg = "❌ [ConnectionStatusProber] Cloud connection failed: \(error.localizedDescription)\n"
+                        print(errorMsg)
+                        try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    }
                 } else {
-                    // No cloud, check if we have LAN connections
-                    let hasLanConnection = !onlineDeviceIds.isEmpty || !discoveredDeviceIds.isEmpty
-                    await transportManager?.updateConnectionState(hasLanConnection ? .connectedLan : .idle)
+                    // No transport provider, check server health as fallback
+                    let serverReachable = await checkServerHealth()
+                    if serverReachable {
+                        transportManager?.updateConnectionState(.connectedCloud)
+                    } else {
+                        // No cloud, check if we have LAN connections
+                        let hasLanConnection = !onlineDeviceIds.isEmpty || !discoveredDeviceIds.isEmpty
+                        transportManager?.updateConnectionState(hasLanConnection ? .connectedLan : .idle)
+                    }
                 }
                 isConnecting = false
             }
         }
         
         // Get current connection state to determine if server is available
-        let currentConnectionState = await transportManager?.connectionState ?? .idle
+        let currentConnectionState = transportManager?.connectionState ?? .idle
         
         // Update status for each paired device - MIRROR ANDROID LOGIC
         let checkDevicesMsg = "🔍 [ConnectionStatusProber] Checking \(pairedDevices.count) paired devices\n"
@@ -285,7 +304,7 @@ public final class ConnectionStatusProber {
                 if let peer = discoveredPeers.first(where: { $0.endpoint.metadata["device_id"] == device.id }) {
                     // Update device with discovery info
                     let updatedDevice = device.updating(from: peer)
-                    await historyViewModel.registerPairedDevice(updatedDevice)
+                    historyViewModel.registerPairedDevice(updatedDevice)
                 }
             }
             

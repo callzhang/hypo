@@ -16,24 +16,164 @@ import UniformTypeIdentifiers
 public actor HistoryStore {
     private var entries: [ClipboardEntry] = []
     private var maxEntries: Int
+    // Track recent entries by content signature to prevent duplicates from dual-send (LAN + cloud)
+    private var recentContentSignatures: [String: Date] = [:]
+    private let duplicateWindow: TimeInterval = 5.0 // 5 seconds window (same as Android)
+    private let defaults: UserDefaults
+    private static let entriesKey = "com.hypo.clipboard.history_entries"
 
-    public init(maxEntries: Int = 200) {
+    public init(maxEntries: Int = 200, defaults: UserDefaults = .standard) {
         self.maxEntries = max(1, maxEntries)
+        self.defaults = defaults
+        // Load persisted entries on init (nonisolated context, so we do it synchronously)
+        if let data = defaults.data(forKey: Self.entriesKey),
+           let decoded = try? JSONDecoder().decode([ClipboardEntry].self, from: data) {
+            let count = decoded.count
+            self.entries = decoded
+            // Note: sortEntries() and trimIfNeeded() are actor-isolated, so we'll call them in the first insert/query
+            #if canImport(os)
+            let logger = Logger(subsystem: "com.hypo.clipboard", category: "history")
+            logger.info("✅ Loaded \(count) clipboard entries from persistence")
+            #endif
+        }
+    }
+    
+    private func persistEntries() {
+        if let encoded = try? JSONEncoder().encode(self.entries) {
+            defaults.set(encoded, forKey: Self.entriesKey)
+            let persistMsg = "💾 [HistoryStore] Persisted \(self.entries.count) clipboard entries\n"
+            print(persistMsg)
+            try? persistMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            #if canImport(os)
+            let logger = Logger(subsystem: "com.hypo.clipboard", category: "history")
+            logger.debug("💾 Persisted \(self.entries.count) clipboard entries")
+            #endif
+        } else {
+            let errorMsg = "❌ [HistoryStore] Failed to encode entries for persistence\n"
+            print(errorMsg)
+            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        }
     }
 
     @discardableResult
     public func insert(_ entry: ClipboardEntry) -> [ClipboardEntry] {
-        if let index = entries.firstIndex(where: { $0.id == entry.id || $0.content == entry.content }) {
-            entries.remove(at: index)
+        let contentSignature = entry.contentSignature()
+        let now = Date()
+        
+        // Clean up old signatures (older than duplicate window)
+        recentContentSignatures = recentContentSignatures.filter { now.timeIntervalSince($0.value) <= duplicateWindow }
+        
+        // Check if this content was recently added (within duplicate window)
+        if let lastSeen = recentContentSignatures[contentSignature],
+           now.timeIntervalSince(lastSeen) <= duplicateWindow {
+            // Duplicate detected - log and skip
+            let dupMsg = "⏭️ [HistoryStore] Duplicate content detected (recent signature), skipping: \(entry.previewText.prefix(50)), signature: \(contentSignature.prefix(50))\n"
+            print(dupMsg)
+            try? dupMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            #if canImport(os)
+            let logger = Logger(subsystem: "com.hypo.clipboard", category: "history")
+            logger.debug("⏭️ Duplicate content detected (recent signature), skipping: \(entry.previewText.prefix(50))")
+            #endif
+            return entries
         }
+        
+        // Check if this content matches a recent entry from a different device (remote device)
+        // This prevents ClipboardMonitor from creating a duplicate when remote clipboard is applied
+        // IMPORTANT: Check BEFORE removing existing entries to preserve remote origin
+        let recentThreshold: TimeInterval = 2.0
+        if let recentEntry = entries.first(where: { existingEntry in
+            existingEntry.content == entry.content &&
+            existingEntry.originDeviceId != entry.originDeviceId &&
+            now.timeIntervalSince(existingEntry.timestamp) <= recentThreshold
+        }) {
+            // Recent entry from remote device with same content - skip local entry
+            // Keep the remote device entry instead (don't replace it with local entry)
+            #if canImport(os)
+            let logger = Logger(subsystem: "com.hypo.clipboard", category: "history")
+            logger.debug("⏭️ Duplicate content from different device detected, preserving remote entry: \(entry.previewText.prefix(50))")
+            #endif
+            return entries
+        }
+        
+        // Check for duplicate by ID first (fast check)
+        if entries.contains(where: { $0.id == entry.id }) {
+            let dupMsg = "⏭️ [HistoryStore] Duplicate entry detected (same ID), skipping: \(entry.previewText.prefix(50))\n"
+            print(dupMsg)
+            try? dupMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            return entries
+        }
+        
+        // New plan: 
+        // 1. If new message matches the current clipboard (latest entry) → discard
+        // 2. If new message matches something in history → move that history item to the top
+        // 3. Otherwise → add new entry
+        
+        // Check if matches current clipboard (latest entry)
+        if let latestEntry = entries.first {
+            let matchesCurrentClipboard: Bool
+            if case .image = entry.content, case .image = latestEntry.content {
+                // For images, compare by content signature (hash)
+                let entrySignature = entry.contentSignature()
+                let latestSignature = latestEntry.contentSignature()
+                matchesCurrentClipboard = entrySignature == latestSignature
+            } else {
+                // For other content types, use full content comparison
+                matchesCurrentClipboard = entry.content == latestEntry.content
+            }
+            
+            if matchesCurrentClipboard {
+                let discardMsg = "⏭️ [HistoryStore] New message matches current clipboard, discarding: \(entry.previewText.prefix(50))\n"
+                print(discardMsg)
+                try? discardMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                return entries
+            }
+        }
+        
+        // Check if matches something in history (excluding the latest entry)
+        let historyEntries = Array(entries.dropFirst()) // Skip latest entry
+        if let matchingEntry = historyEntries.first(where: { existingEntry in
+            if case .image = entry.content, case .image = existingEntry.content {
+                // For images, compare by content signature
+                return entry.contentSignature() == existingEntry.contentSignature()
+            } else {
+                // For other content types, use full content comparison
+                return entry.content == existingEntry.content
+            }
+        }) {
+            // Found matching entry in history - move it to the top
+            if let index = entries.firstIndex(where: { $0.id == matchingEntry.id }) {
+                // Update timestamp to now to move it to top
+                entries[index].timestamp = now
+                sortEntries()
+                persistEntries()
+                
+                let moveMsg = "🔄 [HistoryStore] New message matches history item, moved to top: \(matchingEntry.previewText.prefix(50))\n"
+                print(moveMsg)
+                try? moveMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                return entries
+            }
+        }
+        
+        // Not a duplicate - add to history and track signature
+        let beforeCount = entries.count
         entries.append(entry)
+        recentContentSignatures[contentSignature] = now
         sortEntries()
         trimIfNeeded()
+        persistEntries()
+        let afterCount = entries.count
+        let insertMsg = "✅ [HistoryStore] Inserted entry: \(entry.previewText.prefix(50)), before: \(beforeCount), after: \(afterCount)\n"
+        print(insertMsg)
+        try? insertMsg.appendToFile(path: "/tmp/hypo_debug.log")
         return entries
     }
 
     public func all() -> [ClipboardEntry] {
-        entries
+        // Ensure entries are sorted after loading from persistence
+        if !entries.isEmpty {
+            sortEntries()
+        }
+        return entries
     }
 
     public func entry(withID id: UUID) -> ClipboardEntry? {
@@ -42,10 +182,12 @@ public actor HistoryStore {
 
     public func remove(id: UUID) {
         entries.removeAll { $0.id == id }
+        persistEntries()
     }
 
     public func clear() {
         entries.removeAll()
+        persistEntries()
     }
 
     @discardableResult
@@ -53,6 +195,7 @@ public actor HistoryStore {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return entries }
         entries[index].isPinned = isPinned
         sortEntries()
+        persistEntries()
         return entries
     }
 
@@ -60,6 +203,7 @@ public actor HistoryStore {
     public func updateLimit(_ newLimit: Int) -> [ClipboardEntry] {
         maxEntries = max(1, newLimit)
         trimIfNeeded()
+        persistEntries()
         return entries
     }
 
@@ -98,6 +242,16 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     @Published public var plainTextModeEnabled: Bool
     @Published public private(set) var pairedDevices: [PairedDevice] = []
     @Published public private(set) var encryptionKeySummary: String
+    
+    // Message queue for sync messages with 1-minute window
+    private struct QueuedSyncMessage {
+        let entry: ClipboardEntry
+        let payload: ClipboardPayload
+        let queuedAt: Date
+        let targetDeviceId: String
+    }
+    private var syncMessageQueue: [QueuedSyncMessage] = []
+    private var queueProcessingTask: Task<Void, Never>?
     @Published public private(set) var connectionState: ConnectionState = .idle
 
     private let store: HistoryStore
@@ -411,15 +565,36 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func add(_ entry: ClipboardEntry) async {
+        let addMsg = "📥 [ClipboardHistoryViewModel] add() called for entry: \(entry.previewText.prefix(50))\n"
+        print(addMsg)
+        try? addMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
         if autoDeleteAfterHours > 0 {
             let expireDate = Date().addingTimeInterval(TimeInterval(autoDeleteAfterHours) * 3600)
             scheduleExpiry(for: entry.id, date: expireDate)
         }
-        let updated = await store.insert(entry)
+        
+        // Insert entry into store (for local entries from ClipboardMonitor)
+        // Remote entries are already inserted by IncomingClipboardHandler, but local entries need to be inserted here
+        let insertedEntries = await store.insert(entry)
+        let insertMsg = "💾 [ClipboardHistoryViewModel] Inserted entry into store: \(insertedEntries.count) total entries\n"
+        print(insertMsg)
+        try? insertMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
+        // Reload all entries from store to get the latest state including any sorting/trimming that happened
+        let updated = await store.all()
+        let updateMsg = "🔄 [ClipboardHistoryViewModel] Reloading items from store: current=\(self.items.count), store=\(updated.count) entries\n"
+        print(updateMsg)
+        try? updateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        
         await MainActor.run {
             self.items = updated
             self.latestItem = updated.first
         }
+        
+        let doneMsg = "✅ [ClipboardHistoryViewModel] items array updated: \(updated.count) entries\n"
+        print(doneMsg)
+        try? doneMsg.appendToFile(path: "/tmp/hypo_debug.log")
 #if canImport(UserNotifications)
         notificationController?.deliverNotification(for: entry)
 #endif
@@ -429,7 +604,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
     
     private func syncToPairedDevices(_ entry: ClipboardEntry) async {
-        guard !pairedDevices.isEmpty, let transportManager = transportManager else { return }
+        guard transportManager != nil else { return }
         
         // Convert clipboard entry to payload
         let payload: ClipboardPayload
@@ -451,33 +626,97 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             return
         }
         
-        // Get sync engine with transport
-        let transport = transportManager.loadTransport()
-        let keyProvider = KeychainDeviceKeyProvider()
-        let syncEngine = SyncEngine(
-            transport: transport,
-            keyProvider: keyProvider,
-            localDeviceId: deviceIdentity.deviceIdString
-        )
-        
-        // Ensure transport is connected
-        await syncEngine.establishConnection()
-        
-        // Send to each paired device
+        // Queue messages for all paired devices (best-effort practice - sync regardless of status)
+        // If no devices are paired, queue will be empty and nothing will happen
         for device in pairedDevices {
-            guard device.isOnline else { continue }
-            do {
-                try await syncEngine.transmit(entry: entry, payload: payload, targetDeviceId: device.id)
-#if canImport(os)
-                logger.info("✅ Synced clipboard to device: \(device.name, privacy: .public)")
-#endif
-                // Update lastSeen timestamp after successful sync
-                await updateDeviceLastSeen(deviceId: device.id)
-            } catch {
-#if canImport(os)
-                logger.error("❌ Failed to sync to \(device.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-#endif
+            let queuedMessage = QueuedSyncMessage(
+                entry: entry,
+                payload: payload,
+                queuedAt: Date(),
+                targetDeviceId: device.id
+            )
+            syncMessageQueue.append(queuedMessage)
+        }
+        
+        // Start queue processor if not running
+        if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
+            queueProcessingTask = Task { [weak self] in
+                await self?.processSyncQueue()
             }
+        }
+    }
+    
+    /// Process the sync message queue, retrying messages until sent or expired (1 minute)
+    private func processSyncQueue() async {
+        while !Task.isCancelled {
+            let now = Date()
+            guard let transportManager = transportManager else {
+                // If transport manager is not available, wait and retry
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                continue
+            }
+            
+            // Process queue
+            var remainingMessages: [QueuedSyncMessage] = []
+            for message in syncMessageQueue {
+                // Expire messages older than 1 minute
+                if now.timeIntervalSince(message.queuedAt) > 60 {
+#if canImport(os)
+                    logger.info("⏭️ Expired sync message for device \(message.targetDeviceId) (queued \(Int(now.timeIntervalSince(message.queuedAt)))s ago)")
+#endif
+                    continue // Drop expired message
+                }
+                
+                // Try to send message
+                if await trySendMessage(message, transportManager: transportManager) {
+                    // Success - message cleared from queue
+#if canImport(os)
+                    logger.info("✅ Successfully sent queued message to device \(message.targetDeviceId)")
+#endif
+                    continue
+                } else {
+                    // Failed - keep in queue for retry
+                    remainingMessages.append(message)
+                }
+            }
+            
+            syncMessageQueue = remainingMessages
+            
+            // Wait 5 seconds before next retry
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+    }
+    
+    /// Attempt to send a queued sync message
+    private func trySendMessage(_ message: QueuedSyncMessage, transportManager: TransportManager) async -> Bool {
+        do {
+            // Get sync engine with transport
+            let transport = transportManager.loadTransport()
+            let keyProvider = KeychainDeviceKeyProvider()
+            let syncEngine = SyncEngine(
+                transport: transport,
+                keyProvider: keyProvider,
+                localDeviceId: deviceIdentity.deviceId.uuidString,
+                localPlatform: deviceIdentity.platform
+            )
+            
+            // Ensure transport is connected
+            await syncEngine.establishConnection()
+            
+            // Attempt to send (best-effort - try regardless of device online status)
+            try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
+            
+            // Update lastSeen timestamp after successful sync
+            if let device = pairedDevices.first(where: { $0.id == message.targetDeviceId }) {
+                await updateDeviceLastSeen(deviceId: device.id)
+            }
+            
+            return true // Success
+        } catch {
+#if canImport(os)
+            logger.debug("⏳ Failed to send queued message to \(message.targetDeviceId): \(error.localizedDescription, privacy: .public) - will retry")
+#endif
+            return false // Failed, will retry
         }
     }
 
@@ -527,10 +766,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         transportPreference = preference
     }
 
-    public func setAllowsCloudFallback(_ allowed: Bool) {
-        allowsCloudFallback = allowed
-        defaults.set(allowed, forKey: DefaultsKey.allowsCloudFallback)
-    }
+    // Note: allowsCloudFallback is deprecated - we always dual-send now
+    // Keeping the property for backward compatibility but it's no longer used
 
     public func setAutoDelete(hours: Int) {
         autoDeleteAfterHours = max(0, hours)
@@ -789,7 +1026,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     
     /// Returns the local device ID for comparing entry origins
     public var localDeviceId: String {
-        deviceIdentity.deviceIdString
+        deviceIdentity.deviceId.uuidString  // UUID string (pure UUID, no prefix)
     }
     #endif
 

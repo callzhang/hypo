@@ -47,9 +47,21 @@ async fn main() -> std::io::Result<()> {
         error!("Failed to initialize metrics: {}", e);
     }
 
-    let redis_client = RedisClient::new(&redis_url)
-        .await
-        .expect("Failed to connect to Redis");
+    let redis_client = match RedisClient::new(&redis_url).await {
+        Ok(client) => {
+            info!("Successfully connected to Redis at {}", redis_url);
+            client
+        }
+        Err(e) => {
+            error!("Failed to connect to Redis at {}: {:?}", redis_url, e);
+            error!("Server will continue without Redis (sessions will be in-memory only)");
+            // For now, we'll still require Redis, but log the error clearly
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                format!("Redis connection failed: {:?}", e)
+            ));
+        }
+    };
 
     let app_state = AppState {
         redis: redis_client,

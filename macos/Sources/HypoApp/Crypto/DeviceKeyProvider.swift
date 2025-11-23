@@ -28,10 +28,30 @@ public final class KeychainDeviceKeyProvider: DeviceKeyProviding {
     }
 
     public func key(for deviceId: String) async throws -> SymmetricKey {
-        guard let key = try keychain.load(for: deviceId) else {
-            throw DeviceKeyProviderError.missingKey(deviceId)
+        // Try exact deviceId first (should be pure UUID now after system upgrade)
+        if let key = try keychain.load(for: deviceId) {
+            return key
         }
-        return key
+        
+        // Fallback: Try removing any platform prefix (for backward compatibility during migration)
+        // This handles old keys that might still have "android-" prefix
+        if deviceId.hasPrefix("android-") {
+            let unprefixedId = String(deviceId.dropFirst("android-".count))
+            if let key = try keychain.load(for: unprefixedId) {
+                return key
+            }
+        }
+        
+        // Fallback: If deviceId is pure UUID, try with "android-" prefix (for old keys)
+        // This handles the case where keys were stored with the prefix before upgrade
+        if deviceId.count == 36 && !deviceId.hasPrefix("android-") && !deviceId.hasPrefix("macos-") {
+            let prefixedId = "android-\(deviceId)"
+            if let key = try keychain.load(for: prefixedId) {
+                return key
+            }
+        }
+        
+        throw DeviceKeyProviderError.missingKey(deviceId)
     }
 
     public func store(key: SymmetricKey, for deviceId: String) throws {

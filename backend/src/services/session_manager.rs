@@ -29,7 +29,14 @@ impl SessionManager {
 
     pub async fn register(&self, device_id: String) -> mpsc::UnboundedReceiver<BinaryFrame> {
         let (tx, rx) = mpsc::unbounded_channel();
-        self.inner.write().await.insert(device_id, tx);
+        let mut sessions = self.inner.write().await;
+        if sessions.contains_key(&device_id) {
+            tracing::warn!("Device {} already registered, replacing previous session", device_id);
+        }
+        sessions.insert(device_id.clone(), tx);
+        let count = sessions.len();
+        tracing::info!("Registered device: {}. Total sessions: {}", device_id, count);
+        drop(sessions);
         rx
     }
 
@@ -59,12 +66,20 @@ impl SessionManager {
 
     pub async fn send_binary(&self, device_id: &str, frame: BinaryFrame) -> Result<(), SessionError> {
         let sessions = self.inner.read().await;
+        let registered_devices: Vec<String> = sessions.keys().cloned().collect();
+        tracing::info!("Attempting to send to device: {}. Registered devices: {:?}", device_id, registered_devices);
         let sender = sessions
             .get(device_id)
-            .ok_or(SessionError::DeviceNotConnected)?;
+            .ok_or_else(|| {
+                tracing::warn!("Device {} not found in sessions. Available: {:?}", device_id, registered_devices);
+                SessionError::DeviceNotConnected
+            })?;
         sender
             .send(frame)
-            .map_err(|err| SessionError::SendError(err.to_string()))
+            .map_err(|err| {
+                tracing::error!("Failed to send to device {}: {}", device_id, err);
+                SessionError::SendError(err.to_string())
+            })
     }
 }
 

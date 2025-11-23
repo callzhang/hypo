@@ -2,6 +2,7 @@
 import SwiftUI
 #if canImport(AppKit)
 import AppKit
+import UniformTypeIdentifiers
 #endif
 
 public struct HypoMenuBarApp: App {
@@ -82,6 +83,7 @@ public struct HypoMenuBarApp: App {
         let deviceIdentity = DeviceIdentity()
         let monitor = ClipboardMonitor(
             deviceId: deviceIdentity.deviceId,
+            platform: deviceIdentity.platform,
             deviceName: deviceIdentity.deviceName
         )
         monitor.delegate = viewModel
@@ -317,6 +319,31 @@ private struct HistorySectionView: View {
 private struct ClipboardCard: View {
     let entry: ClipboardEntry
     let localDeviceId: String
+    @State private var showFullContent = false
+    
+    private func openFileInFinder(entry: ClipboardEntry) {
+        guard case .file(let fileMetadata) = entry.content else { return }
+        guard let base64 = fileMetadata.base64,
+              let data = Data(base64Encoded: base64) else { return }
+        
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileName = fileMetadata.fileName
+        let fileExtension = (fileName as NSString).pathExtension
+        let fullFileName = fileExtension.isEmpty ? fileName : "\(fileName).\(fileExtension)"
+        let tempURL = tempDir.appendingPathComponent(fullFileName)
+        
+        do {
+            try data.write(to: tempURL)
+            // Open in Finder
+            NSWorkspace.shared.selectFile(tempURL.path, inFileViewerRootedAtPath: "")
+            // Clean up temp file after a delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+        } catch {
+            print("Failed to create temp file for Finder: \(error)")
+        }
+    }
     
     private var originName: String {
         entry.originDisplayName(localDeviceId: localDeviceId)
@@ -324,6 +351,51 @@ private struct ClipboardCard: View {
     
     private var isLocal: Bool {
         entry.isLocal(localDeviceId: localDeviceId)
+    }
+    
+    private var isTruncated: Bool {
+        switch entry.content {
+        case .text(let text):
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.count > 100
+        case .link(let url):
+            return url.absoluteString.count > 100
+        case .image:
+            return true  // Images always show detail view
+        case .file:
+            return false  // Files open in Finder, not detail view
+        }
+    }
+    
+    private var isMarkdown: Bool {
+        switch entry.content {
+        case .text(let text):
+            // Simple markdown detection: check for common markdown patterns
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.contains("# ") || 
+                   trimmed.contains("## ") || 
+                   trimmed.contains("### ") ||
+                   trimmed.contains("**") ||
+                   trimmed.contains("* ") ||
+                   trimmed.contains("- ") ||
+                   trimmed.contains("```") ||
+                   trimmed.contains("`")
+        default:
+            return false
+        }
+    }
+    
+    private var fullContentText: String {
+        switch entry.content {
+        case .text(let text):
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .link(let url):
+            return url.absoluteString
+        case .image(let metadata):
+            return "Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+        case .file(let metadata):
+            return "\(metadata.fileName) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+        }
     }
 
     var body: some View {
@@ -335,21 +407,90 @@ private struct ClipboardCard: View {
                     HStack(spacing: 6) {
                         Text(entry.content.title)
                             .font(.headline)
-                        // Origin badge
-                        Text(originName)
-                            .font(.caption)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(isLocal ? Color.blue.opacity(0.2) : Color.secondary.opacity(0.2))
-                            )
-                            .foregroundStyle(isLocal ? .blue : .secondary)
+                        // Origin badge with icons
+                        HStack(spacing: 4) {
+                            // Encryption icon (shield)
+                            if entry.isEncrypted {
+                                Image(systemName: "shield.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.blue)
+                                    .help("Encrypted")
+                            }
+                            // Transport origin icon (cloud only - no icon for LAN)
+                            if let transportOrigin = entry.transportOrigin, transportOrigin == .cloud {
+                                Image(systemName: "cloud.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .help("Via cloud relay")
+                            }
+                            // Origin name
+                            Text(originName)
+                                .font(.caption)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(isLocal ? Color.blue.opacity(0.2) : Color.secondary.opacity(0.2))
+                        )
+                        .foregroundStyle(isLocal ? .blue : .secondary)
                     }
-                    Text(entry.previewText)
-                        .lineLimit(3)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    // Show preview text with magnetic icon if truncated or previewable
+                    HStack(alignment: .top, spacing: 4) {
+                        Text(entry.previewText)
+                            .lineLimit(3)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        // Show preview button for:
+                        // - Truncated text (long text)
+                        // - Images (always show detail view)
+                        // - Files (open in Finder)
+                        let shouldShowButton: Bool = {
+                            switch entry.content {
+                            case .text, .link:
+                                return isTruncated || isMarkdown
+                            case .image:
+                                return true  // Always show for images
+                            case .file:
+                                return true  // Always show for files
+                            }
+                        }()
+                        
+                        if shouldShowButton {
+                            Button(action: { 
+                                switch entry.content {
+                                case .file:
+                                    openFileInFinder(entry: entry)
+                                case .image, .text, .link:
+                                    showFullContent = true
+                                }
+                            }) {
+                                Image(systemName: {
+                                    switch entry.content {
+                                    case .file:
+                                        return "folder"  // Folder icon for "Open in Finder"
+                                    case .image, .text, .link:
+                                        return "eye"  // Eye icon for "View Detail/Preview"
+                                    }
+                                }())
+                                    .font(.caption)
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                            .help({
+                                switch entry.content {
+                                case .file:
+                                    return "Open in Finder"
+                                case .image, .text, .link:
+                                    return "View Detail"
+                                }
+                            }())
+                        }
+                    }
+                    .popover(isPresented: $showFullContent, arrowEdge: .trailing) {
+                        ClipboardDetailWindow(entry: entry, isPresented: $showFullContent)
+                            .frame(width: 600, height: 500)
+                    }
                 }
                 Spacer()
             }
@@ -365,6 +506,31 @@ private struct ClipboardCard: View {
 private struct ClipboardRow: View {
     let entry: ClipboardEntry
     @ObservedObject var viewModel: ClipboardHistoryViewModel
+    @State private var showFullContent = false
+    
+    private func openFileInFinder(entry: ClipboardEntry) {
+        guard case .file(let fileMetadata) = entry.content else { return }
+        guard let base64 = fileMetadata.base64,
+              let data = Data(base64Encoded: base64) else { return }
+        
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileName = fileMetadata.fileName
+        let fileExtension = (fileName as NSString).pathExtension
+        let fullFileName = fileExtension.isEmpty ? fileName : "\(fileName).\(fileExtension)"
+        let tempURL = tempDir.appendingPathComponent(fullFileName)
+        
+        do {
+            try data.write(to: tempURL)
+            // Open in Finder
+            NSWorkspace.shared.selectFile(tempURL.path, inFileViewerRootedAtPath: "")
+            // Clean up temp file after a delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+        } catch {
+            print("Failed to create temp file for Finder: \(error)")
+        }
+    }
     
     private var originName: String {
         entry.originDisplayName(localDeviceId: viewModel.localDeviceId)
@@ -372,6 +538,51 @@ private struct ClipboardRow: View {
     
     private var isLocal: Bool {
         entry.isLocal(localDeviceId: viewModel.localDeviceId)
+    }
+    
+    private var isTruncated: Bool {
+        switch entry.content {
+        case .text(let text):
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.count > 100
+        case .link(let url):
+            return url.absoluteString.count > 100
+        case .image:
+            return true  // Images always show detail view
+        case .file:
+            return false  // Files open in Finder, not detail view
+        }
+    }
+    
+    private var isMarkdown: Bool {
+        switch entry.content {
+        case .text(let text):
+            // Simple markdown detection: check for common markdown patterns
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.contains("# ") || 
+                   trimmed.contains("## ") || 
+                   trimmed.contains("### ") ||
+                   trimmed.contains("**") ||
+                   trimmed.contains("* ") ||
+                   trimmed.contains("- ") ||
+                   trimmed.contains("```") ||
+                   trimmed.contains("`")
+        default:
+            return false
+        }
+    }
+    
+    private var fullContentText: String {
+        switch entry.content {
+        case .text(let text):
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .link(let url):
+            return url.absoluteString
+        case .image(let metadata):
+            return "Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+        case .file(let metadata):
+            return "\(metadata.fileName) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+        }
     }
 
     var body: some View {
@@ -384,21 +595,90 @@ private struct ClipboardRow: View {
                     HStack(spacing: 6) {
                         Text(entry.content.title)
                             .font(.headline)
-                        // Origin badge
-                        Text(originName)
-                            .font(.caption)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(isLocal ? Color.blue.opacity(0.2) : Color.secondary.opacity(0.2))
-                            )
-                            .foregroundStyle(isLocal ? .blue : .secondary)
+                        // Origin badge with icons
+                        HStack(spacing: 4) {
+                            // Encryption icon (shield)
+                            if entry.isEncrypted {
+                                Image(systemName: "shield.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.blue)
+                                    .help("Encrypted")
+                            }
+                            // Transport origin icon (cloud only - no icon for LAN)
+                            if let transportOrigin = entry.transportOrigin, transportOrigin == .cloud {
+                                Image(systemName: "cloud.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .help("Via cloud relay")
+                            }
+                            // Origin name
+                            Text(originName)
+                                .font(.caption)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(isLocal ? Color.blue.opacity(0.2) : Color.secondary.opacity(0.2))
+                        )
+                        .foregroundStyle(isLocal ? .blue : .secondary)
                     }
-                    Text(entry.previewText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                    // Show preview text with magnetic icon if truncated or previewable
+                    HStack(alignment: .top, spacing: 4) {
+                        Text(entry.previewText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        // Show preview button for:
+                        // - Truncated text (long text)
+                        // - Images (always show detail view)
+                        // - Files (open in Finder)
+                        let shouldShowButton: Bool = {
+                            switch entry.content {
+                            case .text, .link:
+                                return isTruncated || isMarkdown
+                            case .image:
+                                return true  // Always show for images
+                            case .file:
+                                return true  // Always show for files
+                            }
+                        }()
+                        
+                        if shouldShowButton {
+                            Button(action: { 
+                                switch entry.content {
+                                case .file:
+                                    openFileInFinder(entry: entry)
+                                case .image, .text, .link:
+                                    showFullContent = true
+                                }
+                            }) {
+                                Image(systemName: {
+                                    switch entry.content {
+                                    case .file:
+                                        return "folder"  // Folder icon for "Open in Finder"
+                                    case .image, .text, .link:
+                                        return "eye"  // Eye icon for "View Detail/Preview"
+                                    }
+                                }())
+                                    .font(.caption)
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                            .help({
+                                switch entry.content {
+                                case .file:
+                                    return "Open in Finder"
+                                case .image, .text, .link:
+                                    return "View Detail"
+                                }
+                            }())
+                        }
+                    }
+                    .popover(isPresented: $showFullContent, arrowEdge: .trailing) {
+                        ClipboardDetailWindow(entry: entry, isPresented: $showFullContent)
+                            .frame(width: 600, height: 500)
+                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
@@ -442,12 +722,9 @@ private struct SettingsSectionView: View {
             Form {
                 Section("Connection") {
                     HStack {
-                        Toggle("Allow cloud relay fallback", isOn: Binding(
-                            get: { viewModel.allowsCloudFallback },
-                            set: { viewModel.setAllowsCloudFallback($0) }
-                        ))
+                        Text("Status")
                         Spacer()
-                        // Connection Status Icon - inline with toggle
+                        // Connection Status Icon
                         Image(systemName: connectionStatusIconName(for: viewModel.connectionState))
                             .foregroundColor(connectionStatusIconColor(for: viewModel.connectionState))
                             .font(.system(size: 14, weight: .medium))
@@ -964,5 +1241,246 @@ private struct ConnectionStatusView: View {
         }
     }
 }
+
+// Detail window for showing full clipboard content
+private struct ClipboardDetailWindow: View {
+    let entry: ClipboardEntry
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text(entry.content.title)
+                    .font(.headline)
+                Spacer()
+                Button("Close") {
+                    // Close the popover - this won't dismiss the parent window
+                    isPresented = false
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .keyboardShortcut(.escape, modifiers: [])
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            
+            Divider()
+            
+            // Content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    switch entry.content {
+                    case .text(let text):
+                        Text(text)
+                            .textSelection(.enabled)
+                            .font(.body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                        
+                    case .link(let url):
+                        Link(url.absoluteString, destination: url)
+                            .font(.body)
+                            .padding()
+                        
+                    case .image(let metadata):
+                        if let imageData = metadata.data {
+                            // Try to create NSImage from raw data
+                            if let nsImage = NSImage(data: imageData) {
+                                Image(nsImage: nsImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: 800, maxHeight: 600)
+                                    .padding()
+                            } else {
+                                // Failed to decode - show error with format info
+                                VStack(spacing: 8) {
+                                    Text("⚠️ Failed to display image")
+                                        .font(.headline)
+                                    Text("Format: \(metadata.format.uppercased())")
+                                    Text("Size: \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
+                                    Text("Data length: \(imageData.count) bytes")
+                                }
+                                .padding()
+                            }
+                        } else {
+                            // No image data available
+                            Text("Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
+                                .padding()
+                        }
+                        
+                    case .file(let metadata):
+                        FileDetailView(metadata: metadata)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(minWidth: 500, minHeight: 400)
+    }
+}
+
+// File detail view with save functionality
+private struct FileDetailView: View {
+    let metadata: FileMetadata
+    @State private var isSaving = false
+    @State private var saveError: String?
+    
+    private var isTextFile: Bool {
+        let fileName = metadata.fileName.lowercased()
+        let textExtensions = ["txt", "md", "json", "xml", "html", "css", "js", "py", "swift", "kt", "java", "c", "cpp", "h", "hpp", "sh", "yaml", "yml", "log", "csv"]
+        return textExtensions.contains { fileName.hasSuffix(".\($0)") }
+    }
+    
+    private var fileData: Data? {
+        guard let base64 = metadata.base64 else { return nil }
+        return Data(base64Encoded: base64)
+    }
+    
+    private var fileContent: String? {
+        guard let data = fileData else { return nil }
+        // Try UTF-8 first
+        if let utf8 = String(data: data, encoding: .utf8), utf8.range(of: "\0") == nil {
+            return utf8
+        }
+        // Try other encodings for text files
+        if isTextFile {
+            if let utf16 = String(data: data, encoding: .utf16) {
+                return utf16
+            }
+        }
+        return nil
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // File info
+            VStack(alignment: .leading, spacing: 8) {
+                Text(metadata.fileName)
+                    .font(.headline)
+                Text("Size: \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let uti = metadata.uti as String? {
+                    Text("Type: \(uti)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            
+            // Save button
+            Button(action: saveFile) {
+                HStack {
+                    if isSaving {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "square.and.arrow.down")
+                    }
+                    Text(isSaving ? "Saving..." : "Save File")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isSaving)
+            
+            if let error = saveError {
+                Text("Error: \(error)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            
+            Divider()
+            
+            // Content display
+            if let content = fileContent, isTextFile {
+                // Text file - show content
+                ScrollView {
+                    Text(content)
+                        .textSelection(.enabled)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else if let data = fileData {
+                // Binary file - show hex preview
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Binary file content (hex preview):")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    ScrollView {
+                        Text(hexDump(data: data, maxBytes: 1024))
+                            .textSelection(.enabled)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if data.count > 1024 {
+                        Text("(Showing first 1KB of \(data.count) bytes)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            } else {
+                Text("Unable to decode file data")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+    }
+    
+    private func saveFile() {
+        guard let data = fileData else {
+            saveError = "No file data available"
+            return
+        }
+        
+        isSaving = true
+        saveError = nil
+        
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.data]
+        savePanel.nameFieldStringValue = metadata.fileName
+        savePanel.canCreateDirectories = true
+        
+        savePanel.begin { response in
+            if response == .OK, let url = savePanel.url {
+                do {
+                    try data.write(to: url)
+                    saveError = nil
+                } catch {
+                    saveError = error.localizedDescription
+                }
+            }
+            isSaving = false
+        }
+    }
+    
+    private func hexDump(data: Data, maxBytes: Int) -> String {
+        let bytesToShow = min(data.count, maxBytes)
+        var result = ""
+        for i in stride(from: 0, to: bytesToShow, by: 16) {
+            let end = min(i + 16, bytesToShow)
+            let chunk = data[i..<end]
+            
+            // Hex representation
+            let hex = chunk.map { String(format: "%02x", $0) }.joined(separator: " ")
+            let padding = String(repeating: "   ", count: max(0, 16 - chunk.count))
+            
+            // ASCII representation
+            let ascii = chunk.map { byte -> String in
+                let char = Character(UnicodeScalar(byte))
+                return char.isPrintable ? String(char) : "."
+            }.joined()
+            
+            result += String(format: "%08x  %@%@  |%@|\n", i, hex, padding, ascii)
+        }
+        return result
+    }
+}
+
+private extension Character {
+    var isPrintable: Bool {
+        return self.isASCII && (32...126).contains(self.asciiValue ?? 0)
+    }
+}
+
 
 #endif

@@ -2,6 +2,54 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [0.2.3] - 2025-01-21 - Transport Origin & Icon Display Fixes
+
+### Fixed
+- **macOS Transport Origin Display**: Fixed cloud messages showing incorrect origin
+  - Updated `LanWebSocketTransport.handleIncoming()` to determine `TransportOrigin` based on configuration
+  - Cloud messages now correctly identified as `.cloud` instead of `.lan`
+  - `CloudRelayTransport` wraps handler to mark messages as `.cloud` origin
+  - `TransportManager.setCloudIncomingMessageHandler()` passes `.cloud` origin correctly
+
+- **macOS History Icon Display**: Fixed icon display for encryption and transport origin
+  - Removed network icon for LAN messages (no icon shown for LAN)
+  - Cloud icon (☁️) only shown for cloud messages
+  - Shield icon (🔒) shown for encrypted messages
+  - Icons are small (10pt) with tooltips for clarity
+
+- **macOS Connection Status Display**: Fixed connection status text to show actual IP address instead of Bonjour hostname
+  - Extracts IP address from `NetService.addresses` using `getnameinfo()`
+  - Now displays "Connected via 10.0.0.137:7010 and server" instead of "Connected via Android_NOLKQLA2.local.:7010 and server"
+  - Falls back to hostname if IP extraction fails
+
+- **macOS Device Discovery Info Preservation**: Fixed `bonjourHost` and `bonjourPort` being lost when updating device online status
+  - `updateDeviceOnlineStatus` now preserves all discovery fields (serviceName, bonjourHost, bonjourPort, fingerprint)
+  - Ensures connection status text can display IP:PORT information correctly
+
+### Changed
+- **Android SettingsViewModel Refactoring**: Removed synthetic peers approach in favor of direct storage-based model
+  - Loads paired devices directly from `DeviceKeyStore` instead of creating fake `DiscoveredPeer` objects
+  - Simpler logic: Storage → Check Discovery/Connection Status → Display
+  - More maintainable and easier to understand code flow
+  - Eliminates unnecessary object creation and merging logic
+
+### Known Issues
+- **Cloud Relay Message Routing**: Cloud messages are being received but routed through LAN server path instead of cloud transport path
+  - Messages marked as `origin: lan` instead of `origin: cloud`
+  - "Connection reset by peer" error preventing cloud WebSocket from receiving messages
+  - LAN sync working correctly (plaintext and encrypted)
+  - See `docs/bugs/clipboard_sync_issues.md` Issue 14 for details
+
+### Technical Details
+- `LanWebSocketTransport.handleIncoming()` determines `transportOrigin` based on `configuration.environment` or `configuration.url.scheme`
+- `ClipboardEntry` model extended with `isEncrypted: Bool` and `transportOrigin: TransportOrigin?`
+- `ClipboardCard` and `ClipboardRow` display icons based on entry properties
+- `BonjourBrowser` now extracts IP addresses from resolved `NetService` addresses
+- `HistoryStore.updateDeviceOnlineStatus` preserves all `PairedDevice` fields when updating status
+- `SettingsViewModel` uses `PairedDeviceInfo` internal model for cleaner data flow
+
+---
+
 ## [0.2.2] - 2025-01-21 - UI Improvements & Code Refactoring
 
 ### Fixed

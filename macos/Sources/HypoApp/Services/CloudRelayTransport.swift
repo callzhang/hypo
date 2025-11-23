@@ -32,8 +32,14 @@ public final class CloudRelayTransport: SyncTransport {
         analytics: TransportAnalytics = NoopTransportAnalytics(),
         sessionFactory: @escaping @Sendable (URLSessionDelegate, TimeInterval) -> URLSessionProviding = { delegate, timeout in
             let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = timeout
-            config.timeoutIntervalForResource = timeout
+            // WebSocket connections should stay open indefinitely
+            // Use a very long timeout (1 year) instead of greatestFiniteMagnitude which may not work
+            let oneYear: TimeInterval = 365 * 24 * 60 * 60
+            config.timeoutIntervalForRequest = oneYear
+            config.timeoutIntervalForResource = oneYear
+            config.waitsForConnectivity = true
+            config.isDiscretionary = false
+            config.allowsCellularAccess = true
             return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         }
     ) {
@@ -77,7 +83,7 @@ public final class CloudRelayTransport: SyncTransport {
     }
     
     /// Set handler for incoming messages from cloud relay
-    public func setOnIncomingMessage(_ handler: @escaping (Data) async -> Void) {
+    public func setOnIncomingMessage(_ handler: @escaping (Data, TransportOrigin) async -> Void) {
         delegate.setOnIncomingMessage(handler)
     }
 }

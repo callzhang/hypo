@@ -83,7 +83,13 @@ class ClipboardSyncService : Service() {
         }
 
         val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        val parser = ClipboardParser(contentResolver)
+        val parser = ClipboardParser(
+            contentResolver = contentResolver,
+            onFileTooLarge = { filename, size ->
+                // Show warning notification when file exceeds 10MB
+                showFileTooLargeWarning(filename, size)
+            }
+        )
         val clipboardCallback: suspend (com.hypo.clipboard.sync.ClipboardEvent) -> Unit = { event ->
             syncCoordinator.onClipboardEvent(event)
         }
@@ -97,8 +103,8 @@ class ClipboardSyncService : Service() {
 
         syncCoordinator.start(scope)
         transportManager.start(buildLanRegistrationConfig())
-        lanWebSocketClient.setIncomingClipboardHandler { envelope ->
-            incomingClipboardHandler.handle(envelope)
+        lanWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
+            incomingClipboardHandler.handle(envelope, origin)
         }
         ensureClipboardPermissionAndStartListener()
         observeLatestItem()
@@ -153,6 +159,8 @@ class ClipboardSyncService : Service() {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
+            
+            // Main sync channel
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.service_notification_channel_name),
@@ -164,6 +172,19 @@ class ClipboardSyncService : Service() {
                 enableVibration(false)
             }
             manager.createNotificationChannel(channel)
+            
+            // Warning channel (for file size warnings)
+            val warningChannel = NotificationChannel(
+                WARNING_CHANNEL_ID,
+                getString(R.string.warning_notification_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = getString(R.string.warning_notification_channel_description)
+                setShowBadge(true)
+                enableLights(true)
+                enableVibration(true)
+            }
+            manager.createNotificationChannel(warningChannel)
         }
     }
 
@@ -577,10 +598,42 @@ class ClipboardSyncService : Service() {
         )
     }
 
+    private fun showFileTooLargeWarning(filename: String, size: Long) {
+        val sizeMB = size / (1024.0 * 1024.0)
+        val maxMB = 10.0
+        val message = getString(R.string.file_too_large_warning, filename, String.format("%.1f", sizeMB), String.format("%.0f", maxMB))
+        
+        val contentIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val notification = NotificationCompat.Builder(this, WARNING_CHANNEL_ID)
+            .setContentTitle(getString(R.string.file_too_large_title))
+            .setContentText(message)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(contentPendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .build()
+        
+        notificationManager.notify(WARNING_NOTIFICATION_ID, notification)
+        Log.w(TAG, "⚠️ File too large: $filename (${size / (1024 * 1024)}MB)")
+    }
+
     companion object {
         private const val TAG = "ClipboardSyncService"
         private const val CHANNEL_ID = "clipboard-sync"
+        private const val WARNING_CHANNEL_ID = "clipboard-warnings"
         private const val NOTIFICATION_ID = 42
+        private const val WARNING_NOTIFICATION_ID = 43
         private const val DEFAULT_VERSION = "1.0.0"
         private const val ACTION_PAUSE = "com.hypo.clipboard.action.PAUSE"
         private const val ACTION_RESUME = "com.hypo.clipboard.action.RESUME"

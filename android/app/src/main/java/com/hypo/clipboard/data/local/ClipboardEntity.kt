@@ -35,5 +35,9 @@ data class ClipboardEntity(
     @ColumnInfo(name = "created_at")
     val createdAt: Instant,
     @ColumnInfo(name = "is_pinned")
-    val isPinned: Boolean
+    val isPinned: Boolean,
+    @ColumnInfo(name = "is_encrypted")
+    val isEncrypted: Boolean = false,
+    @ColumnInfo(name = "transport_origin")
+    val transportOrigin: String? = null  // "LAN" or "CLOUD" as string
 )

@@ -24,33 +24,10 @@ class FallbackSyncTransport(
     override suspend fun send(envelope: SyncEnvelope) {
         val targetDeviceId = envelope.payload.target
         
-        // Check if device is discovered on LAN
-        val peers = transportManager.currentPeers()
-        val peer = peers.find {
-            val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
-            peerDeviceId == targetDeviceId || peerDeviceId.equals(targetDeviceId, ignoreCase = true)
-        }
-        
-        val hasLanPeer = peer != null && peer.host != "unknown" && peer.host != "127.0.0.1"
-        
-        if (hasLanPeer) {
-            // Device is on LAN, send to both LAN and cloud simultaneously
-            android.util.Log.d("FallbackSyncTransport", "📡 Device $targetDeviceId found on LAN, sending to both LAN and cloud simultaneously...")
-            sendToBoth(envelope, targetDeviceId)
-        } else {
-            // Device not on LAN, send to cloud only
-            android.util.Log.d("FallbackSyncTransport", "☁️ Device $targetDeviceId not on LAN, using cloud transport only...")
-            try {
-                cloudTransport.send(envelope)
-                android.util.Log.d("FallbackSyncTransport", "✅ Cloud transport succeeded")
-                if (targetDeviceId != null) {
-                    transportManager.markDeviceConnected(targetDeviceId, com.hypo.clipboard.transport.ActiveTransport.CLOUD)
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("FallbackSyncTransport", "❌ Cloud transport failed: ${e.message}", e)
-                throw e
-            }
-        }
+        // Always send to both LAN and cloud simultaneously (best-effort practice)
+        // This ensures maximum reliability regardless of discovery status
+        android.util.Log.d("FallbackSyncTransport", "📡 Always dual-sending to $targetDeviceId (best-effort practice)")
+        sendToBoth(envelope, targetDeviceId)
     }
 
     /**

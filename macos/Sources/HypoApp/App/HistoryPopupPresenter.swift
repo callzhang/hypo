@@ -19,7 +19,7 @@ final class HistoryPopupPresenter {
             if let window = self.window {
                 // Center before showing to avoid visible movement
                 self.center(window)
-                
+
                 // Fade in animation if window is already visible
                 if window.isVisible {
                     window.alphaValue = 0.0
@@ -107,17 +107,18 @@ final class HistoryPopupPresenter {
     }
 
     private func center(_ window: NSWindow) {
-        if let screen = NSScreen.main {
-            // Calculate center position without calling window.center() first
-            // to avoid visible movement
-            let visible = screen.visibleFrame
-            var frame = window.frame
-            frame.origin.x = visible.midX - frame.width / 2
-            frame.origin.y = visible.midY - frame.height / 2
-            window.setFrame(frame, display: false)  // display: false to avoid flicker
-        } else {
+        guard let screen = NSScreen.main else {
             window.center()
+            return
         }
+
+        let visible = screen.visibleFrame
+        var frame = window.frame
+        frame.origin.x = visible.midX - frame.width / 2
+        frame.origin.y = visible.midY - frame.height / 2
+
+        // Move before showing to avoid on-screen jump; no animation.
+        window.setFrame(frame, display: false, animate: false)
     }
 }
 #endif

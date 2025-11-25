@@ -10,17 +10,22 @@ This directory contains automation scripts for building, testing, and managing t
 - **`build-all.sh`** - Build both Android and macOS apps
 
 ### Testing Scripts
-- **`test-clipboard.sh`** - **Unified clipboard sync testing** (recommended)
+All test scripts are now in the `tests/` directory:
+
+- **`tests/test-sync.sh`** - **Main comprehensive sync testing suite** (recommended)
   ```bash
-  ./scripts/test-clipboard.sh          # Quick test (15s wait window)
-  ./scripts/test-clipboard.sh quick    # Quick test
-  ./scripts/test-clipboard.sh full     # Full comprehensive test
-  ./scripts/test-clipboard.sh pairing  # Pairing + sync test
-  ./scripts/test-clipboard.sh duplicate # Duplicate detection test
+  ./tests/test-sync.sh                # Full comprehensive test
   ```
-- **`test-sync.sh`** - Comprehensive sync testing suite (used by `test-clipboard.sh full`)
-- **`test-pairing-and-sync.sh`** - Pairing flow + sync test (used by `test-clipboard.sh pairing`)
-- **`test-server-all.sh`** - Backend server API testing
+- **`tests/test-sync-matrix.sh`** - **Comprehensive matrix test** (tests all 8 combinations: Plaintext/Encrypted × Cloud/LAN × macOS/Android)
+  ```bash
+  ./tests/test-sync-matrix.sh         # Run all 8 test combinations
+  ```
+- **`tests/test-server-all.sh`** - Backend server API testing
+- **`tests/test-clipboard-sync-emulator-auto.sh`** - Automated emulator testing
+- **`tests/test-clipboard-polling.sh`** - Tests clipboard polling implementation
+- **`tests/test-transport-persistence.sh`** - Tests transport status persistence
+
+**Test runner scripts (in `scripts/` directory):**
 - **`run-transport-regression.sh`** - Cross-platform transport metrics regression tests
 
 ### Monitoring Scripts
@@ -42,17 +47,22 @@ This directory contains automation scripts for building, testing, and managing t
 - **`reopen-android-app.sh`** - Reopen Android app
 - **`timeout.sh`** - Timeout wrapper for long-running commands
 
-### Specialized Scripts
-- **`test-clipboard-sync-emulator-auto.sh`** - Automated emulator testing (starts emulator, builds, installs, tests)
+### Simulation & Testing Tools
 - **`simulate-android-copy.py`** - Simulate Android clipboard sync for testing (see `README-simulate.md`)
+  ```bash
+  python3 scripts/simulate-android-copy.py --text "Test message"
+  ```
 - **`simulate-android-relay.py`** - Simulate clipboard sync via cloud relay
 
 ### Development/Debugging Tools
 These scripts are for specific debugging scenarios and can be kept for ad-hoc use:
-- **`capture-crash.sh`**, **`capture-window-auto.sh`** - Screen capture utilities
-- **`screenshot-*.sh`**, **`analyze-screenshot.sh`** - Screenshot analysis tools
-- **`focus-cast-window.sh`**, **`list-windows.sh`** - Window management utilities
-- **`find-cast-window.py`**, **`get-window-bounds.py`** - Python utilities for window operations
+- **`screenshot-android.sh`** - Capture Android device cast window screenshots
+- **`analyze-screenshot.sh`** - Analyze screenshots with OCR (requires tesseract)
+- **`capture-crash.sh`** - Monitor and capture crash logs when manually copying text
+- **`focus-cast-window.sh`** - Focus Android cast window for screenshots
+- **`list-windows.sh`** - List all macOS windows (debugging utility)
+- **`find-cast-window.py`** - Find Android cast window using Python
+- **`get-window-bounds.py`** - Get window bounds for screenshot automation
 
 ## Usage Examples
 
@@ -61,8 +71,8 @@ These scripts are for specific debugging scenarios and can be kept for ad-hoc us
 # Build both apps
 ./scripts/build-all.sh
 
-# Run quick sync test
-./scripts/test-clipboard.sh quick
+# Run comprehensive sync test
+./tests/test-sync.sh
 
 # Monitor pairing during test
 ./scripts/monitor-pairing.sh debug
@@ -92,7 +102,7 @@ These scripts are for specific debugging scenarios and can be kept for ad-hoc us
 ### Backend Testing
 ```bash
 # Test all backend endpoints
-./scripts/test-server-all.sh
+./tests/test-server-all.sh
 
 # Run transport regression tests
 ./scripts/run-transport-regression.sh
@@ -111,12 +121,22 @@ These scripts are for specific debugging scenarios and can be kept for ad-hoc us
 
 ## Script Consolidation
 
-The following scripts have been consolidated into `test-clipboard.sh`:
-- ✅ `test-clipboard-sync-15s.sh` → `test-clipboard.sh quick` (removed)
-- ✅ `test-clipboard-polling.sh` → Merged into test suite (removed)
-- ✅ `test-transport-persistence.sh` → Covered by `test-sync.sh` (removed)
-- ✅ `watch-and-build.sh` → Use IDE features (removed)
-- ✅ `automate-android-test.sh` → Use `test-clipboard.sh` (removed)
+The following scripts have been consolidated or removed:
+- ✅ `test-clipboard.sh` → Merged into `test-sync.sh` (removed - was just a wrapper)
+- ✅ `test-clipboard-sync-15s.sh` → Removed (consolidated)
+- ✅ `test-pairing-and-sync.sh` → Removed (consolidated)
+- ✅ `watch-and-build.sh` → Removed (use IDE features for auto-build)
+- ✅ `automate-android-test.sh` → Removed (functionality available via `screenshot-android.sh` + `analyze-screenshot.sh`)
+- ✅ `screenshot-simple.sh` → Removed (redundant with `screenshot-android.sh`)
+- ✅ `capture-window-auto.sh` → Removed (redundant with `screenshot-android.sh`)
+
+**All test scripts are now in the `tests/` directory:**
+- `tests/test-sync.sh` - Comprehensive sync testing suite
+- `tests/test-sync-matrix.sh` - Comprehensive matrix test (all 8 combinations)
+- `tests/test-server-all.sh` - Backend API testing
+- `tests/test-clipboard-sync-emulator-auto.sh` - Automated emulator testing
+- `tests/test-clipboard-polling.sh` - Tests clipboard polling implementation
+- `tests/test-transport-persistence.sh` - Tests transport status persistence
 
 ## Notes
 

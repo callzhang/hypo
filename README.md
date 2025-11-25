@@ -1,6 +1,6 @@
 # Hypo - Cross-Platform Clipboard Sync
 
-> Real-time, secure clipboard synchronization between Android/HyperOS and macOS
+> Real-time, secure clipboard synchronization between any devices (Android, macOS, iOS, etc.)
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20Android%208%2B-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
@@ -10,7 +10,7 @@
 
 ## 🎯 Overview
 
-Hypo enables seamless clipboard synchronization between your Xiaomi/HyperOS device and macOS machine. Copy on one device, paste on another—instantly.
+Hypo enables seamless clipboard synchronization between any devices. Copy on one device, paste on another—instantly. Supports Android↔Android, macOS↔macOS, Android↔macOS, and other cross-platform combinations.
 
 ### Key Features
 
@@ -69,6 +69,7 @@ For now, see [Development Setup](#development-setup) to build from source.
 |----------|-------------|
 | [`docs/architecture.mermaid`](docs/architecture.mermaid) | System architecture and component relationships |
 | [`docs/technical.md`](docs/technical.md) | Technical specifications and implementation details |
+| [`docs/LOGGING.md`](docs/LOGGING.md) | **How to view and filter logs** (Console.app, `log` command) |
 | [`tasks/tasks.md`](tasks/tasks.md) | Development roadmap and task breakdown |
 | [`docs/status.md`](docs/status.md) | Current project status and progress tracking |
 | [`changelog.md`](changelog.md) | Version history and release notes |
@@ -100,13 +101,6 @@ hypo/
 
 # Build macOS only
 ./scripts/build-macos.sh
-
-# Watch for changes and auto-build (requires fswatch)
-./scripts/watch-and-build.sh
-# Options:
-#   --no-android    Skip Android builds
-#   --no-macos      Skip macOS builds
-#   --no-install    Don't auto-install on devices
 ```
 
 ### macOS Client
@@ -213,7 +207,7 @@ docker-compose up
 **Testing Server**:
 ```bash
 # Test all server functions
-./scripts/test-server-all.sh
+./tests/test-server-all.sh
 ```
 
 ### Build Verification
@@ -330,10 +324,10 @@ cargo test
 
 ```bash
 # Test all backend server endpoints and functions
-./scripts/test-server-all.sh
+./tests/test-server-all.sh
 
 # Test with local server (if running locally)
-USE_LOCAL=true ./scripts/test-server-all.sh
+USE_LOCAL=true ./tests/test-server-all.sh
 ```
 
 The server test script validates:
@@ -348,13 +342,13 @@ The server test script validates:
 
 ```bash
 # Comprehensive sync testing (macOS + Android)
-./scripts/test-sync.sh
+./tests/test-sync.sh
 
 # Automated clipboard sync test (emulator)
-./scripts/test-clipboard-sync-emulator-auto.sh
+./tests/test-clipboard-sync-emulator-auto.sh
 
 # Pairing and sync flow
-./scripts/test-pairing-and-sync.sh
+./tests/test-sync.sh
 ```
 
 **Test Coverage Target**: 80% for clients, 90% for backend

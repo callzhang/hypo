@@ -50,6 +50,26 @@ impl SessionManager {
         self.inner.read().await.contains_key(device_id)
     }
 
+    /// Get the number of active connections (devices).
+    pub async fn get_active_count(&self) -> usize {
+        self.inner.read().await.len()
+    }
+
+    /// Get the list of connected device IDs.
+    pub async fn get_connected_devices(&self) -> Vec<String> {
+        self.inner.read().await.keys().cloned().collect()
+    }
+
+    /// Get detailed information about all registered sessions (for debugging).
+    pub async fn get_session_info(&self) -> Vec<(String, u64)> {
+        self.inner
+            .read()
+            .await
+            .iter()
+            .map(|(device_id, entry)| (device_id.clone(), entry.token))
+            .collect()
+    }
+
     /// Register a new session, replacing any existing session for the device.
     /// This is the original behavior - use with caution.
     pub async fn register(&self, device_id: String) -> Registration {
@@ -151,20 +171,42 @@ impl SessionManager {
     pub async fn send_binary(&self, device_id: &str, frame: BinaryFrame) -> Result<(), SessionError> {
         let sessions = self.inner.read().await;
         let registered_devices: Vec<String> = sessions.keys().cloned().collect();
-        tracing::info!("Attempting to send to device: {}. Registered devices: {:?}", device_id, registered_devices);
-        let sender = sessions
-            .get(device_id)
-            .ok_or_else(|| {
-                tracing::warn!("Device {} not found in sessions. Available: {:?}", device_id, registered_devices);
-                SessionError::DeviceNotConnected
-            })?;
-        sender
-            .sender
-            .send(frame)
-            .map_err(|err| {
-                tracing::error!("Failed to send to device {}: {}", device_id, err);
-                SessionError::SendError(err.to_string())
-            })
+        tracing::info!("[SEND_BINARY] Attempting to send to device: {} (frame size: {} bytes). Registered devices: {:?}", device_id, frame.len(), registered_devices);
+        
+        // Exact match only - device IDs are UUIDs and must match exactly
+        // No case-insensitive matching to avoid routing to wrong devices
+        // CRITICAL: Only send to ONE device - the exact match
+        if let Some(sender) = sessions.get(device_id) {
+            tracing::info!("[SEND_BINARY] ✅ Found exact match for device: {} (token={}). Sending to THIS device ONLY.", device_id, sender.token);
+            
+            // Verify we're only sending to one device
+            let match_count = registered_devices.iter().filter(|&id| id == device_id).count();
+            if match_count != 1 {
+                tracing::error!("[SEND_BINARY] ⚠️ CRITICAL: Found {} matches for device_id {} (expected 1)! This should never happen!", match_count, device_id);
+            }
+            
+            sender
+                .sender
+                .send(frame)
+                .map_err(|err| {
+                    tracing::error!("[SEND_BINARY] ❌ Failed to send to device {}: {}", device_id, err);
+                    SessionError::SendError(err.to_string())
+                })
+        } else {
+            tracing::warn!("[SEND_BINARY] ❌ Device {} not found in sessions. Available devices: {:?}", device_id, registered_devices);
+            
+            // Check for potential case-insensitive matches (for debugging)
+            let case_insensitive_matches: Vec<&String> = registered_devices
+                .iter()
+                .filter(|&registered_id| registered_id.eq_ignore_ascii_case(device_id))
+                .collect();
+            
+            if !case_insensitive_matches.is_empty() {
+                tracing::warn!("[SEND_BINARY] ⚠️ Found case-insensitive matches for {}: {:?} (but exact match required)", device_id, case_insensitive_matches);
+            }
+            
+            Err(SessionError::DeviceNotConnected)
+        }
     }
 }
 

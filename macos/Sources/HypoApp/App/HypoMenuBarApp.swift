@@ -9,7 +9,9 @@ import ApplicationServices
 
 // AppDelegate to ensure hotkey setup runs at app launch (not waiting for UI)
 class HypoAppDelegate: NSObject, NSApplicationDelegate {
+    private let logger = HypoLogger(category: "HypoAppDelegate")
     private var hotKeyRef: EventHotKeyRef?
+    private var altNumberHotKeys: [Int: EventHotKeyRef] = [:]
     private static var eventHandlerInstalled = false
     
     override init() {
@@ -18,21 +20,25 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        logger.info("🚀 [HypoAppDelegate] applicationDidFinishLaunching called")
+        
         // Setup Hotkey using Carbon API (more reliable than CGEventTap)
         // Note: Carbon RegisterEventHotKey does NOT require Accessibility permissions
         setupCarbonHotkey()
     }
     
     func setupCarbonHotkey() {
-        NSLog("🔧 [HypoAppDelegate] setupCarbonHotkey() called")
-        print("🔧 [HypoAppDelegate] setupCarbonHotkey() called")
+        logger.info("🔧 setupCarbonHotkey() called")
         
         // Install event handler once (static check)
         if !Self.eventHandlerInstalled {
+            logger.info("🔧 [HypoAppDelegate] Installing Carbon event handler...")
+            
             var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyPressed))
             
             // Carbon event handler callback
             let handlerProc: EventHandlerProcPtr = { (nextHandler, theEvent, userData) -> OSStatus in
+                // Log ALL hotkey events to see if we're receiving any
                 var hotKeyID = EventHotKeyID()
                 let err = GetEventParameter(
                     theEvent,
@@ -44,13 +50,77 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                     &hotKeyID
                 )
                 
-                if err == noErr && hotKeyID.id == 1 {
-                    DispatchQueue.main.async {
-                        NSApp.activate(ignoringOtherApps: true)
-                        if let viewModel = AppContext.shared.historyViewModel {
-                            HistoryPopupPresenter.shared.show(with: viewModel)
+                // Note: Can't use logger here as it's a C callback, use NSLog instead
+                NSLog("🔔 [HypoAppDelegate] Event handler callback invoked: err=\(err), id=\(hotKeyID.id), signature=\(hotKeyID.signature)")
+                
+                if err == noErr {
+                    if hotKeyID.id == 1 {
+                        // Alt+V - Show history popup
+                        // Note: Can't use logger here as this is a C callback, use NSLog
+                        NSLog("🎯 [HypoAppDelegate] HOTKEY TRIGGERED: Alt+V pressed")
+                        
+                        DispatchQueue.main.async {
+                            NSApp.activate(ignoringOtherApps: true)
+                            
+                            if let viewModel = AppContext.shared.historyViewModel {
+                                HistoryPopupPresenter.shared.show(with: viewModel)
+                            }
+                        }
+                    } else if hotKeyID.id >= 10 && hotKeyID.id <= 18 {
+                        // Alt+1 through Alt+9 (id 10-18)
+                        let num = Int(hotKeyID.id - 9)  // 10->1, 11->2, ..., 18->9
+                        // Note: Can't use logger here as this is a C callback, use NSLog
+                        NSLog("🎯 [HypoAppDelegate] HOTKEY TRIGGERED: Alt+\(num) pressed")
+                        
+                        DispatchQueue.main.async {
+                            if let viewModel = AppContext.shared.historyViewModel {
+                                // Get filtered items
+                                let filteredItems = viewModel.items
+                                
+                                // Alt+1 maps to item 2 (index 1), Alt+2 maps to item 3 (index 2), etc.
+                                let itemIndex = num  // num is 1-9, maps to array index 1-9 (items 2-10)
+                                if itemIndex < filteredItems.count {
+                                    let item = filteredItems[itemIndex]
+                                    
+                                    // Note: Can't use logger here as this is called from C callback context
+                                    // Use NSLog for critical debugging, but minimize
+                                    NSLog("🎯 [HypoAppDelegate] Alt+\(num) pressed, item: \(item.content.title)")
+                                    
+                                    // Highlight the item before copying (post notification for view to update)
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("HighlightHistoryItem"),
+                                        object: nil,
+                                        userInfo: ["itemId": item.id]
+                                    )
+                                    
+                                    // Copy to clipboard first
+                                    viewModel.copyToPasteboard(item)
+                                    
+                                    // Wait a moment for clipboard to be ready, then hide and paste
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                        // Hide popup and restore focus, then paste
+                                        HistoryPopupPresenter.shared.hideAndRestoreFocus {
+                                            // Paste to cursor position after focus is restored
+                                            pasteToCursorAtCurrentPosition()
+                                        }
+                                    }
+                                    
+                                    // Clear highlight after brief delay
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        NotificationCenter.default.post(
+                                            name: NSNotification.Name("ClearHighlightHistoryItem"),
+                                            object: nil
+                                        )
+                                    }
+                                } else {
+                                    // Note: Can't use logger here as this is a C callback
+                                    NSLog("⚠️ [HypoAppDelegate] Item index \(itemIndex) out of range (count: \(filteredItems.count))")
+                                }
+                            }
                         }
                     }
+                } else if err != noErr {
+                    NSLog("⚠️ [HypoAppDelegate] GetEventParameter failed: \(err)")
                 }
                 return noErr
             }
@@ -67,29 +137,29 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             
         if installStatus == noErr {
             Self.eventHandlerInstalled = true
+            logger.info("✅ [HypoAppDelegate] Event handler installed successfully")
         } else {
-            NSLog("❌ [HypoAppDelegate] Failed to install Carbon event handler: \(installStatus)")
+            logger.error("❌ [HypoAppDelegate] Failed to install Carbon event handler: \(installStatus)")
             return
         }
         }
         
         // Check if hotkey is already registered
         if self.hotKeyRef != nil {
-            let skipMsg = "ℹ️ [HypoAppDelegate] Hotkey already registered, skipping"
-            NSLog(skipMsg)
-            print(skipMsg)
-            try? (skipMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("ℹ️ [HypoAppDelegate] Hotkey already registered, skipping")
             return
         }
         
-        // Register hotkey: Shift+Cmd+V (keyCode 9 = 'V') to avoid system shortcut conflicts
+        // Register hotkey: Alt+V (keyCode 9 = 'V')
         var hotKeyID = EventHotKeyID()
         hotKeyID.signature = OSType(0x4859504F) // "HYPO" signature
         hotKeyID.id = 1
         
         var hotKeyRef: EventHotKeyRef?
-        let keyCode = UInt32(9) // 'V' key (not 'C' to avoid system conflicts)
-        let modifiers = UInt32(cmdKey | shiftKey) // Cmd+Shift
+        let keyCode = UInt32(9) // 'V' key
+        let modifiers = UInt32(optionKey) // Alt/Option
+        
+        logger.info("🔧 [HypoAppDelegate] Registering hotkey: keyCode=\(keyCode), modifiers=\(modifiers), signature=\(hotKeyID.signature), id=\(hotKeyID.id)")
         
         let status = RegisterEventHotKey(
             keyCode,
@@ -102,31 +172,118 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         
         if status == noErr, let hotKey = hotKeyRef {
             self.hotKeyRef = hotKey
-            let successMsg = "✅ [HypoAppDelegate] Carbon hotkey registered: Shift+Cmd+V (status: \(status))"
-            NSLog(successMsg)
-            print(successMsg)
-            try? (successMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+V (status: \(status), ref: \(hotKey))")
         } else if self.hotKeyRef == nil {
             // Only log error if hotkey wasn't already registered
-            let errorMsg = "⚠️ [HypoAppDelegate] Hotkey registration returned status=\(status) (may already be registered)"
-            NSLog(errorMsg)
-            print(errorMsg)
-            try? (errorMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+            logger.warning("⚠️ [HypoAppDelegate] Hotkey registration returned status=\(status) (may already be registered). Ref: \(hotKeyRef != nil ? "exists" : "nil")")
+            
+            // If registration failed but we don't have a ref, try to unregister any existing hotkey first
+            if status == -9878 { // eventHotKeyExistsErr
+                logger.info("🔄 [HypoAppDelegate] Hotkey already exists, attempting to unregister and re-register...")
+                // Note: We can't unregister without the ref, so we'll just log this
+            }
+        }
+        
+        // Register Alt+1 through Alt+9 hotkeys
+        registerAltNumberHotkeys()
+    }
+    
+    private func registerAltNumberHotkeys() {
+        // Key codes: 18=1, 19=2, 20=3, 21=4, 23=5, 22=6, 26=7, 28=8, 25=9
+        let numberKeyCodes: [Int: UInt32] = [
+            1: 18, 2: 19, 3: 20, 4: 21, 5: 23,
+            6: 22, 7: 26, 8: 28, 9: 25
+        ]
+        
+        for (num, keyCode) in numberKeyCodes {
+            var hotKeyID = EventHotKeyID()
+            hotKeyID.signature = OSType(0x4859504F) // "HYPO" signature
+            hotKeyID.id = UInt32(9 + num) // IDs 10-18 for Alt+1 through Alt+9
+            
+            var hotKeyRef: EventHotKeyRef?
+            let modifiers = UInt32(optionKey) // Alt/Option
+            
+            let status = RegisterEventHotKey(
+                keyCode,
+                modifiers,
+                hotKeyID,
+                GetApplicationEventTarget(),
+                0,
+                &hotKeyRef
+            )
+            
+            if status == noErr, let hotKey = hotKeyRef {
+                altNumberHotKeys[num] = hotKey
+                logger.info("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+\(num) (status: \(status))")
+            } else {
+                logger.warning("⚠️ [HypoAppDelegate] Failed to register Alt+\(num): status=\(status)")
+            }
+        }
+    }
+    
+    private func pasteToCursor() {
+        // Simulate Cmd+V to paste at cursor position
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            guard let keyDownEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true) else { return }
+            keyDownEvent.flags = .maskCommand
+            keyDownEvent.post(tap: .cghidEventTap)
+            
+            guard let keyUpEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else { return }
+            keyUpEvent.flags = .maskCommand
+            keyUpEvent.post(tap: .cghidEventTap)
         }
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        // Clean up hotkey
+        // Clean up hotkeys
         if let hotKey = hotKeyRef {
             UnregisterEventHotKey(hotKey)
         }
+        for (_, hotKey) in altNumberHotKeys {
+            UnregisterEventHotKey(hotKey)
+        }
+        altNumberHotKeys.removeAll()
     }
 }
 
 // Global reference to prevent AppDelegate deallocation
 private var globalAppDelegate: HypoAppDelegate?
 
+// Standalone function to paste at cursor (can be called from C callbacks)
+private func pasteToCursorAtCurrentPosition() {
+    let logger = HypoLogger(category: "pasteToCursor")
+    
+    // Additional delay to ensure focus is fully restored and clipboard is ready
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        logger.info("📋 Attempting to paste...")
+        
+        // Use global event tap - more reliable than postToPid
+        // Create key down event for 'V' with Cmd modifier
+        guard let keyDownEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true) else {
+            logger.error("❌ Failed to create keyDown event")
+            return
+        }
+        keyDownEvent.flags = .maskCommand
+        
+        // Post to HID event tap (this sends to the frontmost app)
+        _ = keyDownEvent.post(tap: .cghidEventTap)
+        logger.info("📋 KeyDown posted")
+        
+        // Small delay between key down and key up
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+            guard let keyUpEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
+                logger.error("❌ Failed to create keyUp event")
+                return
+            }
+            keyUpEvent.flags = .maskCommand
+            _ = keyUpEvent.post(tap: .cghidEventTap)
+            logger.info("✅ KeyUp posted")
+        }
+    }
+}
+
 public struct HypoMenuBarApp: App {
+    private let logger = HypoLogger(category: "HypoMenuBarApp")
     // Connect AppDelegate to ensure setup runs at launch
     @NSApplicationDelegateAdaptor(HypoAppDelegate.self) var appDelegate
     
@@ -137,10 +294,7 @@ public struct HypoMenuBarApp: App {
     @State private var runLoopSource: CFRunLoopSource?
 
     public init() {
-        let initMsg = "🚀 [HypoMenuBarApp] Initializing app (viewModel setup)"
-        NSLog(initMsg)
-        print(initMsg)
-        try? (initMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🚀 [HypoMenuBarApp] Initializing app (viewModel setup)")
         
         // Create shared dependencies
         let historyStore = HistoryStore()
@@ -159,15 +313,11 @@ public struct HypoMenuBarApp: App {
             transportManager: transportManager
         )
         
-        let beforeSetMsg = "🚀 [HypoMenuBarApp] About to call setHistoryViewModel\n"
-        print(beforeSetMsg)
-        try? beforeSetMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🚀 [HypoMenuBarApp] About to call setHistoryViewModel")
         
         transportManager.setHistoryViewModel(viewModel)
         
-        let afterSetMsg = "🚀 [HypoMenuBarApp] setHistoryViewModel completed\n"
-        print(afterSetMsg)
-        try? afterSetMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🚀 [HypoMenuBarApp] setHistoryViewModel completed")
         
         _viewModel = StateObject(wrappedValue: viewModel)
         AppContext.shared.historyViewModel = viewModel
@@ -192,11 +342,10 @@ public struct HypoMenuBarApp: App {
     }
 
     public var body: some Scene {
-        MenuBarExtra("📋", systemImage: "doc.on.clipboard.fill") {
-            MenuBarContentView(viewModel: viewModel)
+        MenuBarExtra("Hypo", systemImage: "clipboard") {
+            MenuBarContentView(viewModel: viewModel, applySwiftUIBackground: false)
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)
-                .preferredColorScheme(viewModel.appearancePreference.colorScheme)
                 .onAppear {
                     // CRITICAL FALLBACK: If @NSApplicationDelegateAdaptor didn't work, set up delegate manually
                     if NSApplication.shared.delegate == nil || !(NSApplication.shared.delegate is HypoAppDelegate) {
@@ -221,9 +370,7 @@ public struct HypoMenuBarApp: App {
                 .task {
                     // Also call it from .task as backup
                     if let transportManager = viewModel.transportManager {
-                        let taskMsg = "🚀 [HypoMenuBarApp] .task: Ensuring setHistoryViewModel is called\n"
-                        print(taskMsg)
-                        try? taskMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                        logger.info("🚀 [HypoMenuBarApp] .task: Ensuring setHistoryViewModel is called")
                         transportManager.setHistoryViewModel(viewModel)
                     }
                     await viewModel.start()
@@ -231,8 +378,14 @@ public struct HypoMenuBarApp: App {
                 .onOpenURL { url in
                     Task { await viewModel.handleDeepLink(url) }
                 }
+                .background(MenuBarIconRightClickHandler(viewModel: viewModel))
         }
         .menuBarExtraStyle(.window)
+    }
+    
+    private func setupRightClickMenu() {
+        // Set up right-click menu after MenuBarExtra creates the status item
+        // Right-click handling disabled (status item uses default behavior)
     }
 
     private func setupMonitor() {
@@ -254,15 +407,11 @@ public struct HypoMenuBarApp: App {
         
         // Avoid duplicate setup
         if globalShortcutMonitor != nil {
-            let skipMsg = "ℹ️ [HypoMenuBarApp] Global shortcut already set up, skipping\n"
-            print(skipMsg)
-            try? skipMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("ℹ️ [HypoMenuBarApp] Global shortcut already set up, skipping")
             return
         }
         
-        let startMsg = "🔧 [HypoMenuBarApp] setupGlobalShortcut() called - Using Shift+Cmd+V\n"
-        print(startMsg)
-        try? startMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🔧 [HypoMenuBarApp] setupGlobalShortcut() called - Using Shift+Cmd+V")
         
         // Clean up existing monitors
         if let monitor = globalShortcutMonitor {
@@ -281,7 +430,7 @@ public struct HypoMenuBarApp: App {
             runLoopSource = nil
         }
         
-        // Use NSEvent monitors with Shift+Cmd+V (doesn't conflict with system shortcuts)
+        // Use NSEvent monitors with Alt+V (doesn't conflict with system shortcuts)
         setupNSEventShortcut()
     }
     
@@ -289,9 +438,7 @@ public struct HypoMenuBarApp: App {
         // Use NSEvent monitors with Shift+Cmd+V (V for View/History)
         // This avoids conflicts with system shortcuts like Shift+Cmd+C (Color Picker)
         
-        let setupMsg = "🔧 [HypoMenuBarApp] Setting up NSEvent shortcut for Shift+Cmd+V\n"
-        print(setupMsg)
-        try? setupMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🔧 [HypoMenuBarApp] Setting up NSEvent shortcut for Shift+Cmd+V")
         
         // Local monitor (works when app is active)
         let localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
@@ -301,15 +448,11 @@ public struct HypoMenuBarApp: App {
             
             // Debug log for all key events
             if hasCmd && hasShift {
-                let debugMsg = "🔍 [NSEvent] Key pressed: '\(key)' (Cmd+Shift)\n"
-                print(debugMsg)
-                try? debugMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.debug("🔍 [NSEvent] Key pressed: '\(key)' (Cmd+Shift)")
             }
             
             if hasCmd && hasShift && key == "v" {
-                let interceptMsg = "🎯 [NSEvent] Intercepted Shift+Cmd+V - showing popup\n"
-                print(interceptMsg)
-                try? interceptMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("🎯 [NSEvent] Intercepted Shift+Cmd+V - showing popup")
                 
                 // Activate app first, then show popup
                 NSApp.activate(ignoringOtherApps: true)
@@ -328,9 +471,7 @@ public struct HypoMenuBarApp: App {
             if event.modifierFlags.contains(.command) &&
                event.modifierFlags.contains(.shift) &&
                key == "v" {
-                let interceptMsg = "🎯 [NSEvent Global] Intercepted Shift+Cmd+V - showing popup\n"
-                print(interceptMsg)
-                try? interceptMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("🎯 [NSEvent Global] Intercepted Shift+Cmd+V - showing popup")
                 
                 DispatchQueue.main.async {
                     NSApp.activate(ignoringOtherApps: true)
@@ -341,15 +482,11 @@ public struct HypoMenuBarApp: App {
             }
         }
         
-        let successMsg = "✅ [HypoMenuBarApp] NSEvent shortcut registered: Shift+Cmd+V\n"
-        print(successMsg)
-        try? successMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("✅ [HypoMenuBarApp] NSEvent shortcut registered: Shift+Cmd+V")
     }
     
     private func showHistoryPopup() {
-        let showMsg = "📢 [HypoMenuBarApp] showHistoryPopup() called - posting notifications\n"
-        print(showMsg)
-        try? showMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("📢 [HypoMenuBarApp] showHistoryPopup() called - posting notifications")
         
         // Post notification to show history popup
         // The MenuBarContentView will handle centering and showing the window
@@ -364,9 +501,7 @@ public struct HypoMenuBarApp: App {
             object: nil
         )
         
-        let postedMsg = "✅ [HypoMenuBarApp] Notifications posted: ShowHistoryPopup, ShowHistorySection\n"
-        print(postedMsg)
-        try? postedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("✅ [HypoMenuBarApp] Notifications posted: ShowHistoryPopup, ShowHistorySection")
     }
 }
 
@@ -392,7 +527,11 @@ private enum MenuSection: String, CaseIterable, Identifiable {
 }
 
 struct MenuBarContentView: View {
+    private let logger = HypoLogger(category: "MenuBarContentView")
     @ObservedObject var viewModel: ClipboardHistoryViewModel
+    var historyOnly: Bool = false
+    var applySwiftUIBackground: Bool = true
+    @State private var windowPinned = HistoryPopupPresenter.shared.pinned
     @State private var selectedSection: MenuSection = .history
     @State private var search = ""
     @State private var isVisible = false
@@ -400,32 +539,60 @@ struct MenuBarContentView: View {
     @State private var isHandlingPopup = false
     @State private var historySectionObserver: NSObjectProtocol?
     @State private var historyPopupObserver: NSObjectProtocol?
+    @State private var settingsSectionObserver: NSObjectProtocol?
+    @State private var highlightedItemId: UUID?
 
     var body: some View {
         VStack(spacing: 12) {
-            Picker("Section", selection: $selectedSection) {
-                ForEach(MenuSection.allCases) { section in
-                    Label(section.title, systemImage: section.icon).tag(section)
+            if historyOnly {
+                HStack {
+                    Spacer()
+                    Text("Hypo")
+                        .font(.headline)
+                    Spacer()
+                    Button(action: toggleWindowPin) {
+                        Image(systemName: windowPinned ? "pin.fill" : "pin")
+                            .foregroundStyle(windowPinned ? .orange : .primary)
+                            .padding(8)
+                    }
+                    .buttonStyle(.plain)
+                    .help(windowPinned ? "Unpin window (allow other apps on top)" : "Pin window on top")
                 }
+                .padding(.top, 4)
             }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("Menu sections")
             
-            switch selectedSection {
+            if !historyOnly {
+                Picker("Section", selection: $selectedSection) {
+                    ForEach(MenuSection.allCases) { section in
+                        Label(section.title, systemImage: section.icon).tag(section)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityLabel("Menu sections")
+            }
+            
+            let section = historyOnly ? MenuSection.history : selectedSection
+            switch section {
             case .history:
-                HistorySectionView(viewModel: viewModel, search: $search)
+                HistorySectionView(
+                    viewModel: viewModel,
+                    search: $search,
+                    highlightedItemId: $highlightedItemId
+                )
             case .settings:
                 SettingsSectionView(viewModel: viewModel)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.ultraThinMaterial)
+        .background(applySwiftUIBackground ? AnyView(Color.clear.background(.ultraThinMaterial)) : AnyView(Color.clear))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .opacity(isVisible ? 1.0 : 0.0)
         .animation(.easeInOut(duration: 0.2), value: isVisible)
         .onAppear {
             isVisible = true
-            configureWindowBlur()
+            windowPinned = HistoryPopupPresenter.shared.pinned
+            if historyOnly { selectedSection = .history }
             // Trigger connection status probe when window appears to refresh peer status
             if let transportManager = viewModel.transportManager {
                 Task {
@@ -439,6 +606,7 @@ struct MenuBarContentView: View {
         // This ensures they're ready before Carbon hotkey can fire
         .task {
             setupHistorySectionListener()
+            setupHighlightObserver()
         }
         .onDisappear {
             isVisible = false
@@ -451,6 +619,11 @@ struct MenuBarContentView: View {
             // so hotkey continues to work when menu is closed
         }
     }
+
+    private func toggleWindowPin() {
+        HistoryPopupPresenter.shared.togglePinned()
+        windowPinned = HistoryPopupPresenter.shared.pinned
+    }
     
     private func setupKeyboardShortcuts() {
         // Remove existing monitor if any
@@ -459,14 +632,15 @@ struct MenuBarContentView: View {
             eventMonitor = nil
         }
         
-        // Add global event monitor for Cmd+1 through Cmd+9
+        // Add global event monitor for Alt+1 through Alt+9
         // These map to items 2-10 (skip first item which is already in clipboard)
+        // Use both local and global monitors to ensure events are captured
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
             // Only handle when history section is selected
-            guard selectedSection == .history else { return event }
+            guard self.selectedSection == .history else { return event }
             
-            // Check for Cmd+number (1-9)
-            if event.modifierFlags.contains(.command) {
+            // Check for Alt+number (1-9)
+            if event.modifierFlags.contains(.option) {
                 let keyCode = event.keyCode
                 // Key codes: 18=1, 19=2, 20=3, 21=4, 23=5, 22=6, 26=7, 28=8, 25=9
                 let numberKeyCodes: [UInt16: Int] = [
@@ -475,25 +649,135 @@ struct MenuBarContentView: View {
                 ]
                 
                 if let num = numberKeyCodes[keyCode] {
+                    self.logger.info("🎯 [MenuBarContentView] Alt+\(num) pressed")
+                    
                     // Get filtered items (same logic as HistorySectionView)
                     let filteredItems: [ClipboardEntry] = {
-                        if search.trimmingCharacters(in: .whitespaces).isEmpty {
-                            return viewModel.items
+                        if self.search.trimmingCharacters(in: .whitespaces).isEmpty {
+                            return self.viewModel.items
                         }
-                        return viewModel.items.filter { $0.matches(query: search) }
+                        return self.viewModel.items.filter { $0.matches(query: self.search) }
                     }()
                     
-                    // Cmd+1 maps to item 2 (index 1), Cmd+2 maps to item 3 (index 2), etc.
+                    // Alt+1 maps to item 2 (index 1), Alt+2 maps to item 3 (index 2), etc.
                     // Skip first item (index 0) as it's already in clipboard
                     let itemIndex = num  // num is 1-9, maps to array index 1-9 (items 2-10)
                     if itemIndex < filteredItems.count {
                         let item = filteredItems[itemIndex]
-                        viewModel.copyToPasteboard(item)
+                        
+                        // Highlight the item before copying
+                        self.highlightedItemId = item.id
+                        
+                        // Copy to clipboard first
+                        self.viewModel.copyToPasteboard(item)
+                        
+                        // Wait a moment for clipboard to be ready, then hide and paste
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            // Hide popup and restore focus, then paste
+                            HistoryPopupPresenter.shared.hideAndRestoreFocus {
+                                // Paste to cursor position after focus is restored
+                                self.pasteToCursor()
+                            }
+                        }
+                        
+                        // Clear highlight after brief delay
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            if self.highlightedItemId == item.id {
+                                self.highlightedItemId = nil
+                            }
+                        }
+                        
                         return nil  // Consume the event
+                    } else {
+                        self.logger.info("⚠️ [MenuBarContentView] Item index \(itemIndex) out of range (count: \(filteredItems.count))")
                     }
                 }
             }
             return event
+        }
+        
+        // Also add a global monitor as fallback (requires accessibility permissions)
+        _ = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
+            // Only handle when history section is selected and popup is visible
+            guard self.selectedSection == .history else { return }
+            
+            // Check for Alt+number (1-9)
+            if event.modifierFlags.contains(.option) {
+                let keyCode = event.keyCode
+                let numberKeyCodes: [UInt16: Int] = [
+                    18: 1, 19: 2, 20: 3, 21: 4, 23: 5,
+                    22: 6, 26: 7, 28: 8, 25: 9
+                ]
+                
+                if let num = numberKeyCodes[keyCode] {
+                    DispatchQueue.main.async {
+                        self.logger.info("🎯 [MenuBarContentView] Alt+\(num) pressed (global monitor)")
+                        
+                        let filteredItems: [ClipboardEntry] = {
+                            if self.search.trimmingCharacters(in: .whitespaces).isEmpty {
+                                return self.viewModel.items
+                            }
+                            return self.viewModel.items.filter { $0.matches(query: self.search) }
+                        }()
+                        
+                        let itemIndex = num
+                        if itemIndex < filteredItems.count {
+                            let item = filteredItems[itemIndex]
+                            
+                            // Highlight the item before copying
+                            self.highlightedItemId = item.id
+                            
+                            // Copy to clipboard first
+                            self.viewModel.copyToPasteboard(item)
+                            
+                            // Wait a moment for clipboard to be ready, then hide and paste
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                // Hide popup and restore focus, then paste
+                                HistoryPopupPresenter.shared.hideAndRestoreFocus {
+                                    // Paste to cursor position after focus is restored
+                                    self.pasteToCursor()
+                                }
+                            }
+                            
+                            // Clear highlight after brief delay
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                if self.highlightedItemId == item.id {
+                                    self.highlightedItemId = nil
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func pasteToCursor() {
+        // Use a delay to ensure clipboard is updated and focus is restored
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            self.logger.info("📋 Attempting to paste...")
+            
+            // Use global event tap - more reliable than postToPid
+            guard let keyDownEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true) else {
+                self.logger.error("❌ Failed to create keyDown event")
+                return
+            }
+            keyDownEvent.flags = .maskCommand
+            
+            // Post to HID event tap (this sends to the frontmost app)
+            _ = keyDownEvent.post(tap: .cghidEventTap)
+            self.logger.info("📋 KeyDown posted")
+            
+            // Small delay between key down and key up
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                guard let keyUpEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
+                    self.logger.error("❌ Failed to create keyUp event")
+                    return
+                }
+                keyUpEvent.flags = .maskCommand
+                _ = keyUpEvent.post(tap: .cghidEventTap)
+                self.logger.info("✅ KeyUp posted")
+            }
         }
     }
     
@@ -508,10 +792,7 @@ struct MenuBarContentView: View {
             historyPopupObserver = nil
         }
         
-        let setupMsg = "🔧 [MenuBarContentView] Setting up notification observers"
-        NSLog(setupMsg)
-        print(setupMsg)
-        try? (setupMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🔧 [MenuBarContentView] Setting up notification observers")
         
         // Set up observer for history section switch
         historySectionObserver = NotificationCenter.default.addObserver(
@@ -519,10 +800,7 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { [self] _ in
-            let receivedMsg = "📨 [MenuBarContentView] Received ShowHistorySection notification"
-            NSLog(receivedMsg)
-            print(receivedMsg)
-            try? (receivedMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("📨 [MenuBarContentView] Received ShowHistorySection notification")
             // Switch to history section when shortcut is pressed
             selectedSection = .history
         }
@@ -534,127 +812,52 @@ struct MenuBarContentView: View {
             queue: .main
         ) { [self] _ in
             guard !isHandlingPopup else { return }
-            let receivedMsg = "📨 [MenuBarContentView] Received ShowHistoryPopup notification"
-            NSLog(receivedMsg)
-            print(receivedMsg)
-            try? (receivedMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("📨 [MenuBarContentView] Received ShowHistoryPopup notification")
             
             isHandlingPopup = true
-            // Center and show the window
-            centerAndShowWindow()
             // Reset flag after handling
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 isHandlingPopup = false
             }
         }
         
-        let doneMsg = "✅ [MenuBarContentView] Notification observers set up"
-        NSLog(doneMsg)
-        print(doneMsg)
-        try? (doneMsg + "\n").appendToFile(path: "/tmp/hypo_debug.log")
+        // Set up observer for settings section switch
+        settingsSectionObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("ShowSettingsSection"),
+            object: nil,
+            queue: .main
+        ) { [self] _ in
+            logger.info("📨 [MenuBarContentView] Received ShowSettingsSection notification")
+            // Switch to settings section
+            selectedSection = .settings
+        }
+        
+        logger.info("✅ [MenuBarContentView] Notification observers set up")
     }
     
-    private func centerAndShowWindow() {
-        // Activate the app first to ensure it's in the foreground
-        NSApp.activate(ignoringOtherApps: true)
-        
-        // Switch to history section
-        selectedSection = .history
-        
-        // Wait a moment for the window to appear, then center it
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            // Find the MenuBarExtra window - it should be around 360x480 pixels
-            var foundWindow: NSWindow?
-            for window in NSApplication.shared.windows {
-                let width = window.frame.width
-                let height = window.frame.height
-                
-                // MenuBarExtra window should be around 360x480 (with some tolerance)
-                if width > 300 && width < 500 && height > 400 && height < 600 {
-                    foundWindow = window
-                    break
-                }
+    private func setupHighlightObserver() {
+        // Set up observer for highlighting items when Alt+index is pressed
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("HighlightHistoryItem"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let itemId = notification.userInfo?["itemId"] as? UUID {
+                self.logger.info("✨ [MenuBarContentView] Highlighting item: \(itemId)")
+                self.highlightedItemId = itemId
             }
-            
-            if let window = foundWindow {
-                // Center the window on screen
-                if let screen = NSScreen.main {
-                    let screenFrame = screen.visibleFrame
-                    let windowSize = window.frame.size
-                    let centerX = screenFrame.midX - windowSize.width / 2
-                    let centerY = screenFrame.midY - windowSize.height / 2
-                    window.setFrameOrigin(NSPoint(x: centerX, y: centerY))
-                }
-                
-                // Make window visible and bring to front
-                window.makeKeyAndOrderFront(nil)
-                NSApp.activate(ignoringOtherApps: true)
-            }
+        }
+        
+        // Set up observer for clearing highlight
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("ClearHighlightHistoryItem"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            self.highlightedItemId = nil
         }
     }
     
-    private func configureWindowBlur() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            // Find the MenuBarExtra window
-            for window in NSApplication.shared.windows {
-                if window.isVisible && 
-                   (window.styleMask.contains(.borderless) || window.title.isEmpty) &&
-                   window.frame.width < 500 && window.frame.height < 600 {
-                    
-                    // Configure window for native blurred modal appearance
-                    window.backgroundColor = .clear
-                    window.isOpaque = false
-                    window.hasShadow = true
-                    window.titlebarAppearsTransparent = true
-                    window.titleVisibility = .hidden
-                    
-                    // Set up visual effect view as the window's background
-                    if let contentView = window.contentView {
-                        // Check if visual effect view already exists
-                        var visualEffect: NSVisualEffectView?
-                        for subview in contentView.subviews {
-                            if let effectView = subview as? NSVisualEffectView {
-                                visualEffect = effectView
-                                break
-                            }
-                        }
-                        
-                        // Create visual effect view if it doesn't exist
-                        if visualEffect == nil {
-                            visualEffect = NSVisualEffectView()
-                            visualEffect?.material = .hudWindow
-                            visualEffect?.blendingMode = .behindWindow
-                            visualEffect?.state = .active
-                            visualEffect?.frame = contentView.bounds
-                            visualEffect?.autoresizingMask = [.width, .height]
-                            
-                            // Insert at the very bottom, behind all content
-                            contentView.addSubview(visualEffect!, positioned: .below, relativeTo: nil)
-                        } else {
-                            // Update existing one
-                            visualEffect?.frame = contentView.bounds
-                        }
-                        
-                        // Ensure content view and all subviews are transparent
-                        contentView.wantsLayer = true
-                        contentView.layer?.backgroundColor = NSColor.clear.cgColor
-                        contentView.layer?.isOpaque = false
-                        
-                        // Make all SwiftUI hosting views transparent
-                        for subview in contentView.subviews {
-                            if String(describing: type(of: subview)).contains("HostingView") || 
-                               String(describing: type(of: subview)).contains("NSHostingView") {
-                                subview.wantsLayer = true
-                                subview.layer?.backgroundColor = NSColor.clear.cgColor
-                                subview.layer?.isOpaque = false
-                            }
-                        }
-                    }
-                    break
-                }
-            }
-        }
-    }
 }
 
 
@@ -676,6 +879,14 @@ private struct LatestClipboardView: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Copy latest clipboard item")
+
+                    Button {
+                        viewModel.togglePin(entry)
+                    } label: {
+                        Label(entry.isPinned ? "Unpin" : "Pin", systemImage: entry.isPinned ? "pin.fill" : "pin")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(entry.isPinned ? "Unpin latest item" : "Pin latest item")
                 }
             }
 
@@ -695,6 +906,7 @@ private struct LatestClipboardView: View {
 private struct HistorySectionView: View {
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @Binding var search: String
+    @Binding var highlightedItemId: UUID?
 
     private var filteredItems: [ClipboardEntry] {
         if search.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -732,31 +944,43 @@ private struct HistorySectionView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(filteredItems.enumerated()), id: \.element.id) { index, item in
-                            // Only show shortcut for items 2-10 (index 1-9)
-                            // Item 1 (index 0) doesn't need shortcut as it's already in clipboard
-                            let shortcutIndex = index > 0 && index <= 9 ? index : nil
-                            ClipboardRow(entry: item, viewModel: viewModel, shortcutIndex: shortcutIndex)
-                                .padding(8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(Color(nsColor: .controlBackgroundColor))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .stroke(item.isPinned ? Color.accentColor : Color.clear, lineWidth: 1)
-                                )
-                        }
-                    }
+                itemList
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var itemList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(filteredItems.enumerated()), id: \.element.id) { index, item in
+                    // Only show shortcut for items 2-10 (index 1-9)
+                    // Item 1 (index 0) doesn't need shortcut as it's already in clipboard
+                    let shortcutIndex = index > 0 && index <= 9 ? index : nil
+                    rowView(item: item, shortcutIndex: shortcutIndex)
                 }
             }
         }
     }
+
+    @ViewBuilder
+    private func rowView(item: ClipboardEntry, shortcutIndex: Int?) -> some View {
+        let isKeyboardHighlighted = highlightedItemId == item.id
+        ClipboardRow(
+            entry: item,
+            viewModel: viewModel,
+            shortcutIndex: shortcutIndex,
+            isHighlighted: isKeyboardHighlighted,
+            onHighlight: {
+                highlightedItemId = item.id
+            }
+        )
+        .padding(8)
+    }
 }
 
 private struct ClipboardCard: View {
+    private let logger = HypoLogger(category: "ClipboardCard")
     let entry: ClipboardEntry
     let localDeviceId: String
     @State private var showFullContent = false
@@ -781,7 +1005,7 @@ private struct ClipboardCard: View {
                 try? FileManager.default.removeItem(at: tempURL)
             }
         } catch {
-            print("Failed to create temp file for Finder: \(error)")
+            logger.info("Failed to create temp file for Finder: \(error)")
         }
     }
     
@@ -944,10 +1168,14 @@ private struct ClipboardCard: View {
 }
 
 private struct ClipboardRow: View {
+    private let logger = HypoLogger(category: "ClipboardRow")
     let entry: ClipboardEntry
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     let shortcutIndex: Int?  // Optional: 1-9 for items 2-10, nil for first item
+    let isHighlighted: Bool  // For keyboard shortcuts (Alt+index)
+    let onHighlight: () -> Void
     @State private var showFullContent = false
+    @State private var isHovered = false
     
     private func openFileInFinder(entry: ClipboardEntry) {
         guard case .file(let fileMetadata) = entry.content else { return }
@@ -969,7 +1197,7 @@ private struct ClipboardRow: View {
                 try? FileManager.default.removeItem(at: tempURL)
             }
         } catch {
-            print("Failed to create temp file for Finder: \(error)")
+            logger.info("Failed to create temp file for Finder: \(error)")
         }
     }
     
@@ -1034,12 +1262,12 @@ private struct ClipboardRow: View {
                     Image(systemName: entry.content.iconName)
                         .foregroundStyle(.primary)
                         .accessibilityHidden(true)
-                    // Cmd+index shortcut label (only show for items 2-10)
+                    // Alt+index shortcut label (only show for items 2-10)
                     if let shortcutIndex = shortcutIndex {
-                        Text("⌘\(shortcutIndex)")
+                        Text("⌥\(shortcutIndex)")
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(.tertiary)
-                            .accessibilityLabel("Command \(shortcutIndex) shortcut")
+                            .accessibilityLabel("Option \(shortcutIndex) shortcut")
                     } else {
                         // Spacer to maintain alignment
                         Text("")
@@ -1095,12 +1323,13 @@ private struct ClipboardRow: View {
                     Text(entry.timestamp, style: .time)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
-                    if entry.isPinned {
-                        Label("Pinned", systemImage: "pin.fill")
+                    Button(action: { viewModel.togglePin(entry) }) {
+                        Label(entry.isPinned ? "Unpin" : "Pin", systemImage: entry.isPinned ? "pin.fill" : "pin")
                             .labelStyle(.iconOnly)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(entry.isPinned ? .orange : .secondary)
                             .font(.caption)
                     }
+                    .buttonStyle(.plain)
                     // Preview/finder icon moved here
                     let shouldShowButton: Bool = {
                         switch entry.content {
@@ -1150,6 +1379,17 @@ private struct ClipboardRow: View {
                 }
             }
         }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill((isHovered || isHighlighted) ? Color.accentColor.opacity(0.2) : Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke((isHovered || isHighlighted) ? Color.accentColor : (entry.isPinned ? Color.accentColor : Color.clear), lineWidth: (isHovered || isHighlighted) ? 2 : 1)
+        )
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        .animation(.easeInOut(duration: 0.15), value: isHighlighted)
         .contextMenu {
             Button("Copy") { viewModel.copyToPasteboard(entry) }
             Button(entry.isPinned ? "Unpin" : "Pin") { viewModel.togglePin(entry) }
@@ -1157,7 +1397,12 @@ private struct ClipboardRow: View {
                 Task { await viewModel.remove(id: entry.id) }
             }
         }
-        .onTapGesture { viewModel.copyToPasteboard(entry) }
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .onTapGesture {
+            viewModel.copyToPasteboard(entry)
+        }
         .onDrag {
             if let provider = viewModel.itemProvider(for: entry) {
                 return provider
@@ -1170,6 +1415,7 @@ private struct ClipboardRow: View {
 }
 
 private struct SettingsSectionView: View {
+    private let logger = HypoLogger(category: "SettingsSectionView")
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @State private var isPresentingPairing = false
     
@@ -1282,14 +1528,10 @@ private struct SettingsSectionView: View {
                                     .accessibilityLabel(device.isOnline ? "Online" : "Offline")
                                     .id("\(device.id)-\(device.isOnline)") // Force re-render when isOnline changes
                                     .onChange(of: device.isOnline) { newValue in
-                                        let debugMsg = "🔄 [UI] Device \(device.name) isOnline changed to: \(newValue)\n"
-                                        print(debugMsg)
-                                        try? debugMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                                        logger.debug("🔄 [UI] Device \(device.name) isOnline changed to: \(newValue)")
                                     }
                                     .onAppear {
-                                        let debugMsg = "🎨 [UI] Device \(device.name) rendered: isOnline=\(device.isOnline), id=\(device.id)\n"
-                                        print(debugMsg)
-                                        try? debugMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                                        logger.debug("🎨 [UI] Device \(device.name) rendered: isOnline=\(device.isOnline), id=\(device.id)")
                                     }
                                 Button(role: .destructive) {
                                     viewModel.removePairedDevice(device)
@@ -1335,23 +1577,23 @@ private struct SettingsSectionView: View {
         let bundle = Bundle.main
         
         // Debug: log bundle info
-        print("📦 [SettingsSectionView] Bundle path: \(bundle.bundlePath)")
-        print("📦 [SettingsSectionView] Bundle identifier: \(bundle.bundleIdentifier ?? "nil")")
-        print("📦 [SettingsSectionView] Info dictionary keys: \(bundle.infoDictionary?.keys.sorted() ?? [])")
+        logger.info("📦 [SettingsSectionView] Bundle path: \(bundle.bundlePath)")
+        logger.info("📦 [SettingsSectionView] Bundle identifier: \(bundle.bundleIdentifier ?? "nil")")
+        logger.info("📦 [SettingsSectionView] Info dictionary keys: \(bundle.infoDictionary?.keys.sorted() ?? [])")
         
         if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String,
            let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
-            print("📦 [SettingsSectionView] Found version: \(version), build: \(build)")
+            logger.info("📦 [SettingsSectionView] Found version: \(version), build: \(build)")
             return "Version \(version) (Build \(build))"
         } else if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String {
-            print("📦 [SettingsSectionView] Found version only: \(version)")
+            logger.info("📦 [SettingsSectionView] Found version only: \(version)")
             return "Version \(version)"
         } else if let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
-            print("📦 [SettingsSectionView] Found build only: \(build)")
+            logger.info("📦 [SettingsSectionView] Found build only: \(build)")
             return "Build \(build)"
         } else {
             // Fallback: use Info.plist values directly
-            print("📦 [SettingsSectionView] No version found in bundle, using fallback")
+            logger.info("📦 [SettingsSectionView] No version found in bundle, using fallback")
             return "Version 1.0.0"
         }
     }

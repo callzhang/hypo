@@ -36,7 +36,7 @@ class SecureKeyStore @Inject constructor(
     }
 
     override suspend fun loadKey(deviceId: String): ByteArray? = withContext(Dispatchers.IO) {
-        // Try new format first (pure UUID)
+        // Try exact match first (as-is, no preprocessing)
         var encoded = prefs.getString(deviceId, null)
         
         // If not found and deviceId has prefix, try without prefix
@@ -45,6 +45,19 @@ class SecureKeyStore @Inject constructor(
             encoded = prefs.getString(migratedId, null)
             if (encoded != null) {
                 android.util.Log.d("SecureKeyStore", "🔄 Found key using migrated ID: $deviceId -> $migratedId")
+            }
+        }
+        
+        // If still not found, try lowercase version for backward compatibility
+        // (Old keys may have been stored as lowercase from PairingPayload)
+        // UUIDs are case-insensitive, so this is safe
+        if (encoded == null && deviceId.length == 36 && deviceId.matches(Regex("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"))) {
+            val lowercased = deviceId.lowercase()
+            if (lowercased != deviceId) {
+                encoded = prefs.getString(lowercased, null)
+                if (encoded != null) {
+                    android.util.Log.d("SecureKeyStore", "🔄 Found key using lowercase (backward compatibility): $deviceId -> $lowercased")
+                }
             }
         }
         

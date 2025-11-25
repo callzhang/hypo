@@ -123,12 +123,15 @@ object AppModule {
         deviceIdentity: DeviceIdentity
     ): TlsWebSocketConfig =
         TlsWebSocketConfig(
-            url = "wss://127.0.0.1:${TransportManager.DEFAULT_PORT}/ws",
+            // Use ws:// (not wss://) for LAN connections - macOS server uses plain WebSocket
+            // The URL will be updated dynamically when peers are discovered via TransportManager
+            url = "ws://127.0.0.1:${TransportManager.DEFAULT_PORT}",
             fingerprintSha256 = null,
             headers = mapOf(
                 "X-Device-Id" to deviceIdentity.deviceId,
                 "X-Device-Platform" to "android"
-            )
+            ),
+            environment = "lan"
         )
 
     @Provides

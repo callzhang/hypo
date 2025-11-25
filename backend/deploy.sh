@@ -189,8 +189,9 @@ main() {
     log_info "App: $APP_NAME"
     echo ""
     
-    # Confirm deployment
-    if [ "${SKIP_CONFIRM:-}" != "1" ]; then
+    # Confirm deployment (skip by default)
+    SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+    if [ "$SKIP_CONFIRM" != "1" ]; then
         read -p "Continue with deployment? (y/N) " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -243,5 +244,6 @@ case "${1:-deploy}" in
         exit 1
         ;;
 esac
+
 
 

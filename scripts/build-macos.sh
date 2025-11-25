@@ -80,16 +80,79 @@ fi
 log_info "Building macOS app..."
 cd "$MACOS_DIR"
 
-if ! swift build 2>&1 | tee /tmp/hypo_build.log; then
-    log_error "Build failed. Check /tmp/hypo_build.log for details"
+# Check for corrupted package checkouts and fix them
+if [ -d ".build/checkouts" ]; then
+    # Check if any checkout directory is missing critical files
+    CORRUPTED=0
+    for checkout in .build/checkouts/*; do
+        if [ -d "$checkout" ] && [ ! -f "$checkout/Package.swift" ] && [ ! -d "$checkout/Sources" ]; then
+            CORRUPTED=1
+            break
+        fi
+    done
+    
+    if [ "$CORRUPTED" -eq 1 ]; then
+        log_warn "Detected corrupted package checkouts, resetting..."
+        swift package reset 2>/dev/null || rm -rf .build/checkouts
+        log_success "Package checkouts reset"
+    fi
+fi
+
+# Check if we need to force a rebuild
+# Swift Package Manager should detect changes, but we can help by checking timestamps
+FORCE_REBUILD=false
+if [ -d ".build" ] && [ -d "$APP_BUNDLE" ]; then
+    # Find any Swift source file newer than the built binary
+    BUILT_BINARY_CHECK=$(find .build -name "$BINARY_NAME" -type f 2>/dev/null | head -1)
+    if [ -n "$BUILT_BINARY_CHECK" ]; then
+        NEWER_FILES=$(find Sources -name "*.swift" -newer "$BUILT_BINARY_CHECK" 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$NEWER_FILES" -gt 0 ]; then
+            log_info "Found $NEWER_FILES source file(s) newer than built binary - rebuild needed"
+            FORCE_REBUILD=true
+        fi
+    else
+        # No binary found, definitely need to build
+        FORCE_REBUILD=true
+    fi
+fi
+
+# Force rebuild if needed by touching a source file (triggers SPM to rebuild)
+if [ "$FORCE_REBUILD" = true ] && [ -d ".build" ]; then
+    log_info "Forcing rebuild by touching Package.swift..."
+    touch Package.swift
+fi
+
+# Build the app and capture exit status
+log_info "Running 'swift build'..."
+swift build 2>&1 | tee /tmp/hypo_build.log
+BUILD_EXIT_CODE=${PIPESTATUS[0]}
+
+# Check if build failed
+if [ $BUILD_EXIT_CODE -ne 0 ]; then
+    log_error "Build failed"
+    # Check if it's a dependency issue
+    if grep -q "error opening input file.*checkouts" /tmp/hypo_build.log; then
+        log_warn "Dependency checkout issue detected. Try: cd macos && swift package reset"
+    fi
+    # Show compilation errors
+    ERROR_COUNT=$(grep -c "error:" /tmp/hypo_build.log || echo "0")
+    if [ "$ERROR_COUNT" -gt 0 ]; then
+        log_error "Found $ERROR_COUNT compilation error(s). Last few errors:"
+        grep -E "error:" /tmp/hypo_build.log | tail -10 | sed 's/^/  /'
+    fi
+    log_error "Full build log: /tmp/hypo_build.log"
     exit 1
 fi
 
 # Find the built binary (prefer debug, fallback to release)
-BUILT_BINARY=$(find "$MACOS_DIR/.build" -name "$BINARY_NAME" -type f | head -1)
+BUILT_BINARY=$(find "$MACOS_DIR/.build" -name "$BINARY_NAME" -type f 2>/dev/null | head -1)
 
 if [ -z "$BUILT_BINARY" ]; then
     log_error "Built binary not found in .build directory"
+    log_error "Build may have succeeded but binary was not produced"
+    log_info "Searching for any binaries in .build:"
+    find "$MACOS_DIR/.build" -name "*MenuBar*" -type f 2>/dev/null | head -5 | sed 's/^/  /'
+    log_info "Build log location: /tmp/hypo_build.log"
     exit 1
 fi
 

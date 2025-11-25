@@ -29,6 +29,8 @@ import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.sync.SyncCoordinator
 import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.LanRegistrationConfig
+import com.google.crypto.tink.subtle.X25519
+import com.google.crypto.tink.subtle.Ed25519Sign
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -54,6 +56,7 @@ class ClipboardSyncService : Service() {
     @Inject lateinit var relayWebSocketClient: com.hypo.clipboard.transport.ws.RelayWebSocketClient
     @Inject lateinit var clipboardAccessChecker: com.hypo.clipboard.sync.ClipboardAccessChecker
     @Inject lateinit var connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber
+    @Inject lateinit var pairingHandshakeManager: com.hypo.clipboard.pairing.PairingHandshakeManager
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var listener: ClipboardListener
@@ -103,13 +106,61 @@ class ClipboardSyncService : Service() {
         )
 
         syncCoordinator.start(scope)
-        transportManager.start(buildLanRegistrationConfig())
+        val lanConfig = buildLanRegistrationConfig()
+        transportManager.start(lanConfig)
+        
+        // Set up pairing challenge handler for WebSocket server (incoming connections)
+        transportManager.setPairingChallengeHandler { challengeJson ->
+            Log.d(TAG, "📱 Received pairing challenge, handling...")
+            Log.d(TAG, "   Challenge JSON length: ${challengeJson.length}")
+            Log.d(TAG, "   Challenge JSON preview: ${challengeJson.take(200)}")
+            try {
+                // Load persistent LAN pairing private key
+                val prefs = getSharedPreferences("hypo_pairing_keys", Context.MODE_PRIVATE)
+                val privateKeyBase64 = prefs.getString("lan_agreement_private_key", null)
+                if (privateKeyBase64 == null) {
+                    Log.e(TAG, "❌ No LAN pairing private key found, cannot handle challenge")
+                    Log.e(TAG, "   Available keys in prefs: ${prefs.all.keys}")
+                    return@setPairingChallengeHandler null
+                }
+                Log.d(TAG, "   Loaded private key (base64 length: ${privateKeyBase64.length})")
+                val privateKey = android.util.Base64.decode(privateKeyBase64, android.util.Base64.NO_WRAP)
+                Log.d(TAG, "   Decoded private key size: ${privateKey.size} bytes")
+                
+                // Handle challenge and generate ACK (this is a suspend function)
+                Log.d(TAG, "   Calling pairingHandshakeManager.handleChallenge...")
+                val ackJson = pairingHandshakeManager.handleChallenge(challengeJson, privateKey)
+                if (ackJson != null) {
+                    Log.d(TAG, "✅ Generated pairing ACK (${ackJson.length} chars), sending response")
+                    Log.d(TAG, "   ACK JSON preview: ${ackJson.take(200)}")
+                } else {
+                    Log.e(TAG, "❌ Failed to generate pairing ACK")
+                }
+                ackJson
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error handling pairing challenge: ${e.message}", e)
+                Log.e(TAG, "   Exception type: ${e.javaClass.simpleName}")
+                e.printStackTrace()
+                null
+            }
+        }
+        
+        // Set up warning callback for decryption failures
+        incomingClipboardHandler.onDecryptionWarning = { deviceId, deviceName, reason ->
+            showDecryptionWarning(deviceId, deviceName, reason)
+        }
+        
         lanWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
             incomingClipboardHandler.handle(envelope, origin)
         }
         relayWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
             incomingClipboardHandler.handle(envelope, origin)
         }
+        // Set handler for LAN WebSocket server (incoming connections from other devices)
+        transportManager.setIncomingClipboardHandler { envelope, origin ->
+            incomingClipboardHandler.handle(envelope, origin)
+        }
+        
         // Start receiving connections for both LAN and cloud
         // NOTE: relayWebSocketClient creates its own LanWebSocketClient instance,
         // so calling startReceiving() on both creates TWO separate connections.
@@ -599,14 +650,69 @@ class ClipboardSyncService : Service() {
             packageInfo.versionName ?: DEFAULT_VERSION
         }.getOrDefault(DEFAULT_VERSION)
 
+        // Load or generate persistent pairing keys for LAN auto-discovery
+        val (publicKeyBase64, signingPublicKeyBase64) = loadOrCreatePairingKeys()
+
         return LanRegistrationConfig(
             serviceName = deviceIdentity.deviceId,
             port = TransportManager.DEFAULT_PORT,
             fingerprint = TransportManager.DEFAULT_FINGERPRINT,
             version = version,
             protocols = TransportManager.DEFAULT_PROTOCOLS,
-            deviceId = deviceIdentity.deviceId
+            deviceId = deviceIdentity.deviceId,
+            publicKey = publicKeyBase64,
+            signingPublicKey = signingPublicKeyBase64
         )
+    }
+    
+    private fun loadOrCreatePairingKeys(): Pair<String?, String?> {
+        return try {
+            val prefs = getSharedPreferences("hypo_pairing_keys", Context.MODE_PRIVATE)
+            
+            // Load or create Curve25519 key agreement key
+            val agreementKeyBase64 = prefs.getString("lan_agreement_public_key", null)
+            val agreementPublicKey = if (agreementKeyBase64 != null) {
+                agreementKeyBase64
+            } else {
+                // Generate new key pair
+                val privateKey = X25519.generatePrivateKey()
+                val publicKey = X25519.publicFromPrivate(privateKey)
+                val publicKeyBase64 = android.util.Base64.encodeToString(publicKey, android.util.Base64.NO_WRAP)
+                // Store private key (for later use during pairing)
+                val privateKeyBase64 = android.util.Base64.encodeToString(privateKey, android.util.Base64.NO_WRAP)
+                prefs.edit()
+                    .putString("lan_agreement_public_key", publicKeyBase64)
+                    .putString("lan_agreement_private_key", privateKeyBase64)
+                    .apply()
+                Log.d(TAG, "🔑 Generated new LAN pairing agreement key")
+                publicKeyBase64
+            }
+            
+            // Load or create Ed25519 signing key
+            val signingKeyBase64 = prefs.getString("lan_signing_public_key", null)
+            val signingPublicKey = if (signingKeyBase64 != null) {
+                signingKeyBase64
+            } else {
+                // Generate new signing key pair using Ed25519Sign.KeyPair
+                val keyPair = Ed25519Sign.KeyPair.newKeyPair()
+                val publicKey = keyPair.publicKey
+                val privateKey = keyPair.privateKey
+                val publicKeyBase64 = android.util.Base64.encodeToString(publicKey, android.util.Base64.NO_WRAP)
+                // Store private key (for signing QR payloads)
+                val privateKeyBase64 = android.util.Base64.encodeToString(privateKey, android.util.Base64.NO_WRAP)
+                prefs.edit()
+                    .putString("lan_signing_public_key", publicKeyBase64)
+                    .putString("lan_signing_private_key", privateKeyBase64)
+                    .apply()
+                Log.d(TAG, "🔑 Generated new LAN pairing signing key")
+                publicKeyBase64
+            }
+            
+            Pair(agreementPublicKey, signingPublicKey)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load/create pairing keys: ${e.message}", e)
+            Pair(null, null)
+        }
     }
 
     private fun showFileTooLargeWarning(filename: String, size: Long) {
@@ -637,6 +743,38 @@ class ClipboardSyncService : Service() {
         
         notificationManager.notify(WARNING_NOTIFICATION_ID, notification)
         Log.w(TAG, "⚠️ File too large: $filename (${size / (1024 * 1024)}MB)")
+    }
+
+    private fun showDecryptionWarning(deviceId: String, deviceName: String, reason: String) {
+        val message = "Cannot decrypt message from $deviceName: $reason"
+        val fullMessage = "Device: $deviceName\nID: ${deviceId.take(36)}\nReason: $reason\n\nPlease ensure the device is paired and the encryption key is available."
+        
+        val contentIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        // Use unique notification ID based on device ID to avoid overwriting warnings from different devices
+        val notificationId = WARNING_NOTIFICATION_ID + deviceId.hashCode().mod(1000)
+        
+        val notification = NotificationCompat.Builder(this, WARNING_CHANNEL_ID)
+            .setContentTitle("⚠️ Decryption Failed")
+            .setContentText(message)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(contentPendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(fullMessage))
+            .build()
+        
+        notificationManager.notify(notificationId, notification)
+        Log.w(TAG, "⚠️ Decryption warning: $message")
     }
 
     companion object {

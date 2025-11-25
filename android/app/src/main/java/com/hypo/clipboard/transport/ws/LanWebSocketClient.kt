@@ -124,12 +124,14 @@ class LanWebSocketClient @Inject constructor(
     private var watchdogJob: Job? = null
     private var lastActivity: Instant = clock.instant()
     private val isClosed = AtomicBoolean(false)
+    private val isOpen = AtomicBoolean(false) // Track if onOpen was actually called
     @Volatile private var handshakeStarted: Instant? = null
     private val pendingLock = Any()
     private val pendingRoundTrips = mutableMapOf<String, Instant>()
     private val pendingTtl = Duration.ofMillis(max(0L, config.roundTripTimeoutMillis))
     private var onIncomingClipboard: ((SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit)? = null
     private var onPairingAck: ((String) -> Unit)? = null  // ACK as JSON string
+    private var onPairingChallenge: (suspend (String) -> String?)? = null  // Challenge as JSON string -> ACK JSON or null
     @Volatile private var connectionSignal = CompletableDeferred<Unit>()
     @Volatile private var currentConnector: WebSocketConnector = connector
     @Volatile private var currentUrl: String = config.url
@@ -155,6 +157,10 @@ class LanWebSocketClient @Inject constructor(
         onPairingAck = handler
     }
     
+    fun setPairingChallengeHandler(handler: (suspend (String) -> String?)) {
+        onPairingChallenge = handler
+    }
+    
     /**
      * Check if the WebSocket is currently connected.
      * This is used to determine connection status in the UI.
@@ -162,7 +168,24 @@ class LanWebSocketClient @Inject constructor(
     fun isConnected(): Boolean {
         return mutex.tryLock().let { locked ->
             try {
-                webSocket != null && !isClosed.get()
+                // Check if WebSocket exists, is open (onOpen was called), and is not closed
+                val hasWebSocket = webSocket != null
+                val isOpenState = isOpen.get()
+                val isClosedState = isClosed.get()
+                if (!hasWebSocket || !isOpenState || isClosedState) {
+                    return false
+                }
+                // For cloud connections, also verify we're connected to the cloud URL
+                // (not a LAN connection that was switched)
+                val isCloudConnection = config.url.contains("fly.dev", ignoreCase = true) || config.url.startsWith("wss://", ignoreCase = true)
+                if (isCloudConnection) {
+                    // For cloud, verify current URL matches config URL (cloud URL)
+                    val isCloudUrl = currentUrl.contains("fly.dev", ignoreCase = true) || currentUrl.startsWith("wss://", ignoreCase = true)
+                    if (!isCloudUrl) {
+                        return false
+                    }
+                }
+                true
             } finally {
                 if (locked) mutex.unlock()
             }
@@ -211,6 +234,7 @@ class LanWebSocketClient @Inject constructor(
                 mutex.withLock {
                     webSocket?.close(1000, "Switching to peer IP")
                     webSocket = null
+                    isOpen.set(false)
                     connectionJob?.cancel()
                     connectionJob = null
                     currentConnector = newConnector
@@ -259,6 +283,7 @@ class LanWebSocketClient @Inject constructor(
             mutex.withLock {
                 webSocket?.close(1000, "client shutdown")
                 webSocket = null
+                isOpen.set(false)
             }
             sendQueue.close()
             watchdogJob?.cancelAndJoin()
@@ -302,6 +327,7 @@ class LanWebSocketClient @Inject constructor(
     /**
      * Start maintaining a persistent connection to receive incoming messages.
      * This should be called when a peer is discovered to ensure we can receive messages.
+     * If transportManager is available, it will discover peers and connect to the first discovered peer.
      */
     fun startReceiving() {
         android.util.Log.d("LanWebSocketClient", "👂 Starting to receive messages...")
@@ -309,18 +335,95 @@ class LanWebSocketClient @Inject constructor(
         android.util.Log.d("LanWebSocketClient", "   Current URL: $currentUrl")
         android.util.Log.d("LanWebSocketClient", "   Transport origin: $transportOrigin")
         android.util.Log.d("LanWebSocketClient", "   Has transportManager: ${transportManager != null}")
+        
         scope.launch {
+            // Check if this is a cloud relay connection - never switch URLs for cloud connections
+            val isCloudConnection = config.url.contains("fly.dev", ignoreCase = true) || config.url.startsWith("wss://", ignoreCase = true)
+            
+            // If we have a transport manager AND this is NOT a cloud connection, try to discover peers
+            if (transportManager != null && !isCloudConnection) {
+                val peers = transportManager.currentPeers()
+                android.util.Log.d("LanWebSocketClient", "   Discovered peers: ${peers.size}")
+                
+                if (peers.isNotEmpty()) {
+                    // Use the first discovered peer's IP address
+                    val peer = peers.first()
+                    val peerUrl = when {
+                        peer.host != "unknown" && peer.host != "127.0.0.1" -> {
+                            "ws://${peer.host}:${peer.port}"
+                        }
+                        peer.host == "127.0.0.1" -> {
+                            // Emulator case: replace localhost with host IP
+                            val emulatorHost = "10.0.2.2"
+                            "ws://$emulatorHost:${peer.port}"
+                        }
+                        else -> {
+                            android.util.Log.w("LanWebSocketClient", "⚠️ Peer has invalid host: ${peer.host}, using default URL")
+                            currentUrl
+                        }
+                    }
+                    
+                    if (peerUrl != currentUrl && peerUrl.startsWith("ws://", ignoreCase = true)) {
+                        android.util.Log.d("LanWebSocketClient", "   Updating URL to discovered peer: $peerUrl")
+                        val peerConfig = TlsWebSocketConfig(
+                            url = peerUrl,
+                            fingerprintSha256 = null, // No pinning for ws://
+                            headers = config.headers,
+                            environment = "lan",
+                            idleTimeoutMillis = config.idleTimeoutMillis,
+                            roundTripTimeoutMillis = config.roundTripTimeoutMillis
+                        )
+                        val newConnector = OkHttpWebSocketConnector(peerConfig)
+                        
+                        mutex.withLock {
+                            webSocket?.close(1000, "Switching to discovered peer")
+                            webSocket = null
+                            isOpen.set(false)
+                            connectionJob?.cancel()
+                            connectionJob = null
+                            currentConnector = newConnector
+                            currentUrl = peerUrl
+                        }
+                    }
+                } else {
+                    android.util.Log.w("LanWebSocketClient", "⚠️ No peers discovered, using default URL: $currentUrl")
+                }
+            } else if (isCloudConnection) {
+                // For cloud connections, ensure we're using the config URL (never switch to LAN)
+                android.util.Log.d("LanWebSocketClient", "   Cloud connection detected - using config URL: ${config.url}")
+                mutex.withLock {
+                    if (currentUrl != config.url) {
+                        android.util.Log.w("LanWebSocketClient", "   ⚠️ URL mismatch! Resetting to config URL: ${config.url}")
+                        currentUrl = config.url
+                        currentConnector = connector
+                    }
+                }
+            }
+            
             android.util.Log.d("LanWebSocketClient", "🔌 Calling ensureConnection() for URL: $currentUrl")
+            ensureConnection()
+        }
+    }
+    
+    /**
+     * Force an immediate connection attempt (for debugging/testing).
+     * Useful for verifying connectivity from ADB or UI.
+     */
+    fun forceConnectOnce() {
+        scope.launch {
+            android.util.Log.d("LanWebSocketClient", "🔌 forceConnectOnce() @${System.currentTimeMillis()} url=$currentUrl")
             ensureConnection()
         }
     }
 
     private suspend fun runConnectionLoop() {
         var retryCount = 0
-        val maxRetryDelay = 30_000L // 30 seconds max delay
+        val maxRetryDelay = 128_000L // 128 seconds max delay (after exponential backoff)
         val baseRetryDelay = 1_000L // 1 second base delay
         
         while (!sendQueue.isClosedForReceive) {
+            android.util.Log.d("LanWebSocketClient", "🚀 connection attempt #${retryCount + 1} url=$currentUrl")
+            
             val closedSignal = CompletableDeferred<Unit>()
             val handshakeSignal = mutex.withLock {
                 if (connectionSignal.isCompleted) {
@@ -340,6 +443,8 @@ class LanWebSocketClient @Inject constructor(
                     scope.launch {
                         mutex.withLock {
                             this@LanWebSocketClient.webSocket = webSocket
+                            isOpen.set(true) // Mark as open
+                            isClosed.set(false) // Clear closed flag
                             touch()
                             startWatchdog()
                         }
@@ -368,8 +473,31 @@ class LanWebSocketClient @Inject constructor(
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     touch()
                     // Check if this is a pairing ACK (text message)
-                    if (text.contains("\"challenge_id\"") && text.contains("\"mac_device_id\"")) {
+                    val isPairingAck = text.contains("\"challenge_id\"") && 
+                                      text.contains("\"responder_device_id\"")
+                    if (isPairingAck) {
+                        android.util.Log.d("LanWebSocketClient", "📋 Detected pairing ACK message (text)")
                         onPairingAck?.invoke(text)
+                        return
+                    }
+                    // Check if this is a pairing challenge (text message)
+                    val isPairingChallenge = text.contains("\"initiator_device_id\"") && 
+                                           text.contains("\"initiator_pub_key\"")
+                    if (isPairingChallenge) {
+                        android.util.Log.d("LanWebSocketClient", "📋 Detected pairing challenge message (text)")
+                        scope.launch {
+                            val ackJson = onPairingChallenge?.invoke(text)
+                            if (ackJson != null) {
+                                android.util.Log.d("LanWebSocketClient", "📤 Sending pairing ACK response (text)")
+                                try {
+                                    webSocket.send(ackJson)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("LanWebSocketClient", "❌ Failed to send pairing ACK: ${e.message}", e)
+                                }
+                            } else {
+                                android.util.Log.w("LanWebSocketClient", "⚠️ Pairing challenge handler returned null ACK")
+                            }
+                        }
                         return
                     }
                 }
@@ -378,11 +506,75 @@ class LanWebSocketClient @Inject constructor(
                     android.util.Log.e("LanWebSocketClient", "🔥🔥🔥 onMessage() CALLED! ${bytes.size} bytes from $currentUrl")
                     touch()
                     android.util.Log.i("LanWebSocketClient", "📥 Received binary message: ${bytes.size} bytes from URL: $currentUrl")
-                    android.util.Log.d("LanWebSocketClient", "   First 100 bytes: ${bytes.utf8().take(100)}")
-                    handleIncoming(bytes)
+                    
+                    // Decode the binary frame first (handles 4-byte length prefix)
+                    // Then check if it's a pairing message or clipboard message
+                    try {
+                        val envelope = frameCodec.decode(bytes.toByteArray())
+                        android.util.Log.d("LanWebSocketClient", "✅ Decoded envelope: type=${envelope.type}, id=${envelope.id.take(8)}...")
+                        
+                        // Check if this is a pairing challenge by looking at envelope payload
+                        // Re-encode to JSON string to check for pairing message structure
+                        val payloadJson = try {
+                            // Re-encode the envelope to get JSON string (for pairing check)
+                            val tempFrame = frameCodec.encode(envelope)
+                            // Extract JSON from frame (skip 4-byte length prefix)
+                            if (tempFrame.size >= 4) {
+                                val length = java.nio.ByteBuffer.wrap(tempFrame, 0, 4).order(java.nio.ByteOrder.BIG_ENDIAN).int
+                                if (tempFrame.size >= 4 + length) {
+                                    String(tempFrame, 4, length, Charsets.UTF_8)
+                                } else {
+                                    envelope.payload.toString() // Fallback
+                                }
+                            } else {
+                                envelope.payload.toString() // Fallback
+                            }
+                        } catch (e: Exception) {
+                            envelope.payload.toString() // Fallback
+                        }
+                        val isPairingChallenge = payloadJson.contains("initiator_device_id") && 
+                                                payloadJson.contains("initiator_pub_key")
+                        android.util.Log.d("LanWebSocketClient", "   Pairing challenge check: isPairingChallenge=$isPairingChallenge")
+                        
+                        if (isPairingChallenge) {
+                            android.util.Log.d("LanWebSocketClient", "📋 Detected pairing challenge message (binary in onMessage)")
+                            scope.launch {
+                                try {
+                                    android.util.Log.d("LanWebSocketClient", "   Calling onPairingChallenge handler...")
+                                    val ackJson = onPairingChallenge?.invoke(payloadJson)
+                                    android.util.Log.d("LanWebSocketClient", "   Handler returned: ackJson=${if (ackJson != null) "${ackJson.length} chars" else "null"}")
+                                    if (ackJson != null) {
+                                        android.util.Log.d("LanWebSocketClient", "📤 Sending pairing ACK response (binary in onMessage)")
+                                        android.util.Log.d("LanWebSocketClient", "   ACK JSON: $ackJson")
+                                        try {
+                                            val sent = webSocket.send(ackJson)
+                                            android.util.Log.d("LanWebSocketClient", "   ACK send result: $sent")
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("LanWebSocketClient", "❌ Failed to send pairing ACK: ${e.message}", e)
+                                        }
+                                    } else {
+                                        android.util.Log.w("LanWebSocketClient", "⚠️ Pairing challenge handler returned null ACK")
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("LanWebSocketClient", "❌ Error in pairing challenge handler: ${e.message}", e)
+                                }
+                            }
+                            return
+                        }
+                        
+                        // Not a pairing message, handle as clipboard envelope
+                        handleIncoming(bytes)
+                    } catch (e: Exception) {
+                        android.util.Log.e("LanWebSocketClient", "❌ Failed to decode frame in onMessage: ${e.message}", e)
+                        // Fallback: try to handle as raw bytes (might be legacy format)
+                        handleIncoming(bytes)
+                    }
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    android.util.Log.w("LanWebSocketClient", "🔴 WebSocket closed: code=$code, reason=$reason, url=$currentUrl")
+                    isOpen.set(false) // Mark as not open
+                    isClosed.set(true) // Mark as closed
                     if (!closedSignal.isCompleted) {
                         closedSignal.complete(Unit)
                     }
@@ -449,7 +641,13 @@ class LanWebSocketClient @Inject constructor(
                 socket.cancel()
                 shutdownSocket(socket)
                 retryCount++
-                val retryDelay = minOf(baseRetryDelay * (1 shl min(retryCount - 1, 5)), maxRetryDelay)
+                // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
+                val retryDelay = if (retryCount <= 8) {
+                    baseRetryDelay * (1 shl (retryCount - 1))
+                } else {
+                    maxRetryDelay // Keep retrying every 128s indefinitely
+                }
+                android.util.Log.w("LanWebSocketClient", "⚠️ Connection failed, retrying in ${retryDelay}ms (attempt $retryCount)")
                 delay(retryDelay)
                 continue
             }
@@ -458,7 +656,13 @@ class LanWebSocketClient @Inject constructor(
                 socket.cancel()
                 shutdownSocket(socket)
                 retryCount++
-                val retryDelay = minOf(baseRetryDelay * (1 shl min(retryCount - 1, 5)), maxRetryDelay)
+                // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
+                val retryDelay = if (retryCount <= 8) {
+                    baseRetryDelay * (1 shl (retryCount - 1))
+                } else {
+                    maxRetryDelay // Keep retrying every 128s indefinitely
+                }
+                android.util.Log.w("LanWebSocketClient", "⚠️ Connection not established, retrying in ${retryDelay}ms (attempt $retryCount)")
                 delay(retryDelay)
                 continue
             }
@@ -528,6 +732,7 @@ class LanWebSocketClient @Inject constructor(
             mutex.withLock {
                 if (expected == null || webSocket === expected) {
                     webSocket = null
+                    isOpen.set(false)
                 }
             }
         }
@@ -582,6 +787,7 @@ class LanWebSocketClient @Inject constructor(
                         mutex.withLock {
                             if (webSocket === socket) {
                                 webSocket = null
+                                isOpen.set(false)
                             }
                         }
                     }
@@ -597,12 +803,44 @@ class LanWebSocketClient @Inject constructor(
         val now = clock.instant()
         android.util.Log.i("LanWebSocketClient", "🔍 handleIncoming: ${bytes.size} bytes, handler=${onIncomingClipboard != null}, transportOrigin=$transportOrigin")
         
-        // Try to detect if this is a pairing ACK message (JSON with challenge_id and mac_device_id)
         val messageString = bytes.utf8()
-        if (messageString.contains("\"challenge_id\"") && messageString.contains("\"mac_device_id\"")) {
+        
+        // Try to detect if this is a pairing ACK message (JSON with challenge_id and responder_device_id)
+        val isPairingAck = messageString.contains("\"challenge_id\"") && 
+                          messageString.contains("\"responder_device_id\"")
+        if (isPairingAck) {
             // This looks like a pairing ACK, route it to pairing handler
-            android.util.Log.d("LanWebSocketClient", "📋 Detected pairing ACK message")
+            android.util.Log.d("LanWebSocketClient", "📋 Detected pairing ACK message (binary)")
             onPairingAck?.invoke(messageString)
+            return
+        }
+        
+        // Try to detect if this is a pairing challenge (JSON with initiator_device_id and initiator_pub_key)
+        val isPairingChallenge = messageString.contains("\"initiator_device_id\"") && 
+                                messageString.contains("\"initiator_pub_key\"")
+        if (isPairingChallenge) {
+            // This looks like a pairing challenge, route it to pairing challenge handler
+            android.util.Log.d("LanWebSocketClient", "📋 Detected pairing challenge message (binary)")
+            scope.launch {
+                val ackJson = onPairingChallenge?.invoke(messageString)
+                if (ackJson != null) {
+                    android.util.Log.d("LanWebSocketClient", "📤 Sending pairing ACK response (binary)")
+                    mutex.withLock {
+                        val socket = webSocket
+                        if (socket != null) {
+                            try {
+                                socket.send(okio.ByteString.of(*ackJson.toByteArray(Charsets.UTF_8)))
+                            } catch (e: Exception) {
+                                android.util.Log.e("LanWebSocketClient", "❌ Failed to send pairing ACK: ${e.message}", e)
+                            }
+                        } else {
+                            android.util.Log.w("LanWebSocketClient", "⚠️ WebSocket is null, cannot send pairing ACK")
+                        }
+                    }
+                } else {
+                    android.util.Log.w("LanWebSocketClient", "⚠️ Pairing challenge handler returned null ACK")
+                }
+            }
             return
         }
         
@@ -615,6 +853,9 @@ class LanWebSocketClient @Inject constructor(
             return
         }
         android.util.Log.d("LanWebSocketClient", "✅ Decoded envelope: type=${envelope.type}, id=${envelope.id.take(8)}...")
+        
+        // No target filtering - process all messages and verify with UUID/key pairs only
+        // The message handler will verify decryption using the sender's device ID and stored keys
         
         val started = synchronized(pendingLock) {
             val removed = pendingRoundTrips.remove(envelope.id)

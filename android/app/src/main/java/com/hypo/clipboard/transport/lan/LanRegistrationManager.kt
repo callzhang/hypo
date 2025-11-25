@@ -101,10 +101,19 @@ class LanRegistrationManager(
             setAttribute("fingerprint_sha256", config.fingerprint)
             setAttribute("version", config.version)
             setAttribute("protocols", config.protocols.joinToString(","))
-            // Add device_id attribute so macOS can match discovered devices
+            // Add device_id attribute so devices can match discovered peers
             config.deviceId?.let { deviceId ->
                 setAttribute("device_id", deviceId)
                 android.util.Log.d("LanRegistrationManager", "📝 Added device_id attribute: $deviceId")
+            }
+            // Add public keys for device-agnostic pairing
+            config.publicKey?.let { pubKey ->
+                setAttribute("pub_key", pubKey)
+                android.util.Log.d("LanRegistrationManager", "📝 Added pub_key attribute (${pubKey.length} chars)")
+            }
+            config.signingPublicKey?.let { signingKey ->
+                setAttribute("signing_pub_key", signingKey)
+                android.util.Log.d("LanRegistrationManager", "📝 Added signing_pub_key attribute (${signingKey.length} chars)")
             }
         }
         android.util.Log.d("LanRegistrationManager", "📝 Service info created: name=${info.serviceName}, type=${info.serviceType}, port=${info.port}")
@@ -180,7 +189,9 @@ data class LanRegistrationConfig(
     val version: String,
     val protocols: List<String>,
     val serviceType: String = SERVICE_TYPE,
-    val deviceId: String? = null
+    val deviceId: String? = null,
+    val publicKey: String? = null, // Base64-encoded Curve25519 public key for pairing
+    val signingPublicKey: String? = null // Base64-encoded Ed25519 public key for signature verification
 )
 
 interface LanRegistrationController {

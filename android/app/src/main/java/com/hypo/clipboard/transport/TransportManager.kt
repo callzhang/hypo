@@ -41,6 +41,7 @@ class TransportManager(
     private val staleThreshold: Duration = Duration.ofMinutes(5),
     private val analytics: TransportAnalytics = NoopTransportAnalytics
 ) {
+    private var webSocketServer: com.hypo.clipboard.transport.ws.LanWebSocketServer? = null
     private val stateLock = Any()
     private val peersByService = mutableMapOf<String, DiscoveredPeer>()
     private val lastSeenByService = mutableMapOf<String, Instant>()
@@ -85,7 +86,6 @@ class TransportManager(
             android.util.Log.w("TransportManager", "⚠️ No SharedPreferences available, cannot persist transport status for device: $deviceId")
             return
         }
-        android.util.Log.d("TransportManager", "💾 Persisting transport status: device=$deviceId, transport=$transport")
         val key = "transport_$deviceId"
         try {
             val editor = prefs?.edit()
@@ -96,13 +96,6 @@ class TransportManager(
             editor.putString(key, transport.name)
             val success = editor.commit()
             if (success) {
-                android.util.Log.d("TransportManager", "✅ Transport status persisted successfully: key=$key, value=${transport.name}")
-                // Verify it was saved immediately
-                val saved = prefs?.getString(key, null)
-                android.util.Log.d("TransportManager", "🔍 Verification: saved value=$saved")
-                // Also verify all entries
-                val allEntries = prefs?.all
-                android.util.Log.d("TransportManager", "🔍 All SharedPreferences entries: ${allEntries?.keys}")
                 // Update the StateFlow to ensure it reflects the persisted value
                 _lastSuccessfulTransport.update { current ->
                     val updated = HashMap(current)
@@ -144,6 +137,8 @@ class TransportManager(
     private var currentConfig: LanRegistrationConfig? = null
     private val manualRetryRequested = AtomicBoolean(false)
     private val networkChangeDetected = AtomicBoolean(false)
+    private var onPairingChallenge: (suspend (String) -> String?)? = null
+    private var onIncomingClipboard: ((com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit)? = null
 
     val peers: StateFlow<List<DiscoveredPeer>> = _peers.asStateFlow()
     val isAdvertising: StateFlow<Boolean> = _isAdvertising.asStateFlow()
@@ -165,10 +160,78 @@ class TransportManager(
         registrationController.start(config)
         android.util.Log.d("TransportManager", "✅ registrationController.start() called, isAdvertising=${_isAdvertising.value}")
         _isAdvertising.value = true
+        
+        // Start WebSocket server to accept incoming connections
+        if (webSocketServer == null && config.port > 0) {
+            android.util.Log.d("TransportManager", "🚀 Starting WebSocket server on port ${config.port}")
+            webSocketServer = com.hypo.clipboard.transport.ws.LanWebSocketServer(config.port, scope)
+            webSocketServer?.delegate = object : com.hypo.clipboard.transport.ws.LanWebSocketServerDelegate {
+                override fun onPairingChallenge(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, challenge: com.hypo.clipboard.pairing.PairingChallengeMessage, connectionId: String) {
+                    android.util.Log.d("TransportManager", "📱 Received pairing challenge from $connectionId")
+                    // Delegate to service-level handler (set via setPairingChallengeHandler)
+                    scope.launch {
+                        val challengeJson = com.hypo.clipboard.transport.ws.LanWebSocketServer.json.encodeToString(
+                            com.hypo.clipboard.pairing.PairingChallengeMessage.serializer(),
+                            challenge
+                        )
+                        val ackJson = onPairingChallenge?.invoke(challengeJson)
+                        if (ackJson != null) {
+                            android.util.Log.d("TransportManager", "📤 Sending pairing ACK to $connectionId")
+                            server.sendPairingAck(ackJson, connectionId)
+                        } else {
+                            android.util.Log.w("TransportManager", "⚠️ Pairing challenge handler returned null ACK")
+                        }
+                    }
+                }
+                
+                override fun onClipboardData(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, data: ByteArray, connectionId: String) {
+                    android.util.Log.d("TransportManager", "📋 Received clipboard data from $connectionId (${data.size} bytes)")
+                    // Decode the binary frame and process clipboard data
+                    scope.launch {
+                        try {
+                            // Decode the binary frame (4-byte length prefix + JSON payload)
+                            val frameCodec = com.hypo.clipboard.transport.ws.TransportFrameCodec()
+                            val envelope = frameCodec.decode(data)
+                            android.util.Log.d("TransportManager", "✅ Decoded envelope: type=${envelope.type}, id=${envelope.id.take(8)}...")
+                            
+                            // No target filtering - process all messages and verify with UUID/key pairs only
+                            // The message handler will verify decryption using the sender's device ID and stored keys
+                            
+                            // Pass to handler if set
+                            if (envelope.type == com.hypo.clipboard.sync.MessageType.CLIPBOARD) {
+                                if (onIncomingClipboard != null) {
+                                    android.util.Log.d("TransportManager", "📤 Invoking incoming clipboard handler")
+                                    onIncomingClipboard?.invoke(envelope, com.hypo.clipboard.domain.model.TransportOrigin.LAN)
+                                } else {
+                                    android.util.Log.w("TransportManager", "⚠️ No incoming clipboard handler set, message dropped")
+                                }
+                            } else {
+                                android.util.Log.w("TransportManager", "⚠️ Received non-clipboard message type: ${envelope.type}")
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("TransportManager", "❌ Failed to decode clipboard data: ${e.message}", e)
+                        }
+                    }
+                }
+                
+                override fun onConnectionAccepted(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, connectionId: String) {
+                    android.util.Log.d("TransportManager", "✅ Connection accepted: $connectionId")
+                }
+                
+                override fun onConnectionClosed(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, connectionId: String) {
+                    android.util.Log.d("TransportManager", "🔌 Connection closed: $connectionId")
+                }
+            }
+            webSocketServer?.start()
+        }
         if (discoveryJob == null) {
             discoveryJob = scope.launch {
-                discoverySource.discover().collect { event ->
-                    handleEvent(event)
+                try {
+                    discoverySource.discover().collect { event ->
+                        handleEvent(event)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("TransportManager", "❌ Discovery job error: ${e.message}", e)
                 }
             }
         }
@@ -193,6 +256,8 @@ class TransportManager(
             registrationController.stop()
             _isAdvertising.value = false
         }
+        webSocketServer?.stop()
+        webSocketServer = null
         synchronized(stateLock) {
             peersByService.clear()
             lastSeenByService.clear()
@@ -564,9 +629,19 @@ class TransportManager(
      * This is useful after pairing when a WebSocket connection is already established.
      */
     fun markDeviceConnected(deviceId: String, transport: ActiveTransport) {
-        android.util.Log.d("TransportManager", "🔵 markDeviceConnected called: deviceId=$deviceId, transport=$transport")
         updateLastSuccessfulTransport(deviceId, transport)
-        android.util.Log.d("TransportManager", "🔵 markDeviceConnected completed")
+    }
+    
+    fun setPairingChallengeHandler(handler: (suspend (String) -> String?)) {
+        onPairingChallenge = handler
+    }
+    
+    fun setIncomingClipboardHandler(handler: (com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit) {
+        onIncomingClipboard = handler
+    }
+    
+    fun sendPairingAck(ackJson: String, to: String): Boolean {
+        return webSocketServer?.sendPairingAck(ackJson, to) ?: false
     }
 
     companion object {

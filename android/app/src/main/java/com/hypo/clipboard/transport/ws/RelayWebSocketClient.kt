@@ -29,7 +29,8 @@ class RelayWebSocketClient @Inject constructor(
         scope = scope,
         clock = clock,
         metricsRecorder = metricsRecorder,
-        analytics = analytics
+        analytics = analytics,
+        transportManager = null  // Explicitly set to null for cloud relay (no peer discovery)
     )
 
     override suspend fun send(envelope: SyncEnvelope) {
@@ -63,7 +64,19 @@ class RelayWebSocketClient @Inject constructor(
      * This should be called when the app starts to ensure cloud messages can be received.
      */
     fun startReceiving() {
-        android.util.Log.d("RelayWebSocketClient", "👂 startReceiving() called - connecting to cloud relay: ${delegate.javaClass.simpleName}")
+        android.util.Log.d(
+            "RelayWebSocketClient",
+            "👂 startReceiving() called @${System.currentTimeMillis()} – connecting to cloud relay"
+        )
         delegate.startReceiving()
+    }
+    
+    /**
+     * Force an immediate connection attempt (for debugging/testing).
+     * Useful for verifying connectivity from ADB or UI.
+     */
+    fun probeNow() {
+        android.util.Log.d("RelayWebSocketClient", "🔍 probeNow(): forcing ensureConnection at ${System.currentTimeMillis()}")
+        delegate.forceConnectOnce()
     }
 }

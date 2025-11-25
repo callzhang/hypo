@@ -81,21 +81,22 @@ class FallbackSyncTransport(
         lanSuccess = results[0]
         cloudSuccess = results[1]
         
-        // At least one must succeed
+        // Always send to both - no fallback logic, both are attempted simultaneously
+        // Log results but throw error only if both failed (best-effort dual send)
         when {
             lanSuccess && cloudSuccess -> {
                 android.util.Log.d("FallbackSyncTransport", "✅ Both LAN and cloud transports succeeded")
             }
             lanSuccess -> {
-                android.util.Log.d("FallbackSyncTransport", "✅ LAN transport succeeded (cloud failed)")
+                android.util.Log.d("FallbackSyncTransport", "✅ LAN transport succeeded (cloud failed, but both were attempted)")
             }
             cloudSuccess -> {
-                android.util.Log.d("FallbackSyncTransport", "✅ Cloud transport succeeded (LAN failed)")
+                android.util.Log.d("FallbackSyncTransport", "✅ Cloud transport succeeded (LAN failed, but both were attempted)")
             }
             else -> {
-                // Both failed - throw the most informative error
-                val error = cloudError ?: lanError ?: Exception("Both LAN and cloud transports failed")
-                android.util.Log.e("FallbackSyncTransport", "❌ Both LAN and cloud transports failed", error)
+                // Both failed - throw the most informative error (but both were attempted)
+                val error = cloudError ?: lanError ?: Exception("Both LAN and cloud transports failed (but both were attempted)")
+                android.util.Log.e("FallbackSyncTransport", "❌ Both LAN and cloud transports failed (but both were attempted)", error)
                 throw error
             }
         }

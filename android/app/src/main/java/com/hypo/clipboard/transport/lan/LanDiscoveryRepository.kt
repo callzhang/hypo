@@ -49,12 +49,7 @@ class LanDiscoveryRepository(
 
                     override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                         android.util.Log.d("LanDiscoveryRepository", "✅ Service resolved: ${serviceInfo.serviceName} at ${serviceInfo.host?.hostAddress}:${serviceInfo.port}")
-                        android.util.Log.d("LanDiscoveryRepository", "   Attributes count: ${serviceInfo.attributes?.size ?: 0}")
-                        serviceInfo.attributes?.forEach { (key, value) ->
-                            android.util.Log.d("LanDiscoveryRepository", "   Attr: $key = ${value?.let { String(it).take(50) } ?: "null"}")
-                        }
                         toPeer(serviceInfo)?.let { peer ->
-                            android.util.Log.d("LanDiscoveryRepository", "✅ Converted to DiscoveredPeer: ${peer.serviceName}")
                             trySend(LanDiscoveryEvent.Added(peer))
                         } ?: run {
                             android.util.Log.w("LanDiscoveryRepository", "⚠️ Failed to convert serviceInfo to DiscoveredPeer")

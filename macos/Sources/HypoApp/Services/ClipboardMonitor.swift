@@ -22,6 +22,7 @@ extension NSPasteboard: PasteboardProviding {
 }
 
 public final class ClipboardMonitor {
+    private let logger = HypoLogger(category: "ClipboardMonitor")
     private let pasteboard: PasteboardProviding
     private var changeCount: Int
     private var timer: Timer?
@@ -64,10 +65,12 @@ public final class ClipboardMonitor {
 
     public func start(interval: TimeInterval = 0.5) {
         stop()
+        logger.info("🚀 [ClipboardMonitor] Starting clipboard monitoring (interval: \(interval)s)")
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             self?.evaluatePasteboard()
         }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
+        logger.info("✅ [ClipboardMonitor] Timer started, delegate: \(delegate != nil ? "set" : "nil")")
     }
 
     public func stop() {
@@ -77,10 +80,23 @@ public final class ClipboardMonitor {
 
     @discardableResult
     func evaluatePasteboard() -> ClipboardEntry? {
-        guard pasteboard.changeCount != changeCount else { return nil }
-        changeCount = pasteboard.changeCount
-        guard throttle.consume() else { return nil }
-        guard let types = pasteboard.types else { return nil }
+        let currentChangeCount = pasteboard.changeCount
+        guard currentChangeCount != changeCount else { return nil }
+        
+        logger.debug("📋 [ClipboardMonitor] Clipboard changed: \(changeCount) -> \(currentChangeCount)")
+        changeCount = currentChangeCount
+        
+        guard throttle.consume() else {
+            logger.debug("⏭️ [ClipboardMonitor] Throttled, skipping")
+            return nil
+        }
+        
+        guard let types = pasteboard.types else {
+            logger.debug("⏭️ [ClipboardMonitor] No pasteboard types")
+            return nil
+        }
+        
+        logger.debug("📋 [ClipboardMonitor] Processing clipboard types: \(types.map { $0.rawValue }.joined(separator: ", "))")
 
         // Check for images FIRST - images copied from files have both .tiff/.png AND .fileURL types,
         // so we need to prioritize image detection before file detection
@@ -97,14 +113,30 @@ public final class ClipboardMonitor {
 
         // Check for URLs (links)
         if types.contains(.URL), let urlString = pasteboard.string(forType: .URL), let url = URL(string: urlString) {
-            let entry = ClipboardEntry(originDeviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .link(url))
+            let entry = ClipboardEntry(
+                originDeviceId: deviceId.uuidString,
+                originPlatform: platform,
+                originDeviceName: deviceName,
+                content: .link(url),
+                isEncrypted: false,
+                transportOrigin: nil  // Explicitly nil for local copies
+            )
+            logger.info("📋 [ClipboardMonitor] Captured local link: \(url.absoluteString.prefix(50))")
             delegate?.clipboardMonitor(self, didCapture: entry)
             return entry
         }
 
         // Check for plain text LAST - this catches text that isn't a file path or URL
         if types.contains(.string), let string = pasteboard.string(forType: .string), !string.isEmpty {
-            let entry = ClipboardEntry(originDeviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .text(string))
+            let entry = ClipboardEntry(
+                originDeviceId: deviceId.uuidString,
+                originPlatform: platform,
+                originDeviceName: deviceName,
+                content: .text(string),
+                isEncrypted: false,
+                transportOrigin: nil  // Explicitly nil for local copies
+            )
+            logger.info("📋 [ClipboardMonitor] Captured local text: \(string.prefix(50))")
             delegate?.clipboardMonitor(self, didCapture: entry)
             return entry
         }
@@ -119,9 +151,6 @@ public final class ClipboardMonitor {
     }
 
     private func captureImage(types: [NSPasteboard.PasteboardType]) -> ClipboardEntry? {
-        let imgMsg = "🖼️ [ClipboardMonitor] captureImage called, types: \(types.map { $0.rawValue })\n"
-        print(imgMsg)
-        try? imgMsg.appendToFile(path: "/tmp/hypo_debug.log")
         
         // Priority order for image types (most specific first)
         // Read raw data directly from pasteboard to preserve original format
@@ -148,9 +177,6 @@ public final class ClipboardMonitor {
                 
                 // Verify it's actually image data by trying to create NSImage
                 guard let image = NSImage(data: rawData) else {
-                    let verifyMsg = "⚠️ [ClipboardMonitor] Data for type \(imageType.rawValue) is not valid image data\n"
-                    print(verifyMsg)
-                    try? verifyMsg.appendToFile(path: "/tmp/hypo_debug.log")
                     continue
                 }
                 
@@ -162,9 +188,7 @@ public final class ClipboardMonitor {
                 
                 // Check size limit on original data
                 if rawData.count > maxAttachmentSize {
-                    let tooLargeMsg = "⚠️ [ClipboardMonitor] Image too large: \(rawData.count) bytes (limit: \(maxAttachmentSize))\n"
-                    print(tooLargeMsg)
-                    try? tooLargeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.warning("⚠️", "Image too large: \(rawData.count) bytes (limit: \(maxAttachmentSize))")
                     return nil
                 }
                 
@@ -179,9 +203,6 @@ public final class ClipboardMonitor {
                     thumbnail: thumbnail
                 )
                 
-                let successMsg = "✅ [ClipboardMonitor] Image captured: \(pixels.width)×\(pixels.height), \(rawData.count) bytes, format: \(format)\n"
-                print(successMsg)
-                try? successMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 
                 return ClipboardEntry(originDeviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .image(metadata), isEncrypted: false, transportOrigin: nil)
             }
@@ -189,34 +210,18 @@ public final class ClipboardMonitor {
         
         // No fallback - if we can't get original format from pasteboard types, fail
         // This surfaces issues instead of silently converting to TIFF
-        let noFormatMsg = "❌ [ClipboardMonitor] No supported image format found in pasteboard types: \(types.map { $0.rawValue }.joined(separator: ", "))\n"
-        print(noFormatMsg)
-        try? noFormatMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.error("❌ [ClipboardMonitor] No supported image format found in pasteboard types: \(types.map { $0.rawValue }.joined(separator: ", "))")
         return nil
     }
 
     private func captureFile(types: [NSPasteboard.PasteboardType]) -> ClipboardEntry? {
-        let fileMsg = "📁 [ClipboardMonitor] captureFile called, types: \(types.map { $0.rawValue })\n"
-        print(fileMsg)
-        try? fileMsg.appendToFile(path: "/tmp/hypo_debug.log")
-        
         guard types.contains(.fileURL) else {
-            let noFileMsg = "⏭️ [ClipboardMonitor] No fileURL type found\n"
-            print(noFileMsg)
-            try? noFileMsg.appendToFile(path: "/tmp/hypo_debug.log")
             return nil
         }
         let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: nil).compactMap { $0 as? URL }
         guard let fileURL = objects.first else {
-            let noURLMsg = "⏭️ [ClipboardMonitor] No file URL found in pasteboard\n"
-            print(noURLMsg)
-            try? noURLMsg.appendToFile(path: "/tmp/hypo_debug.log")
             return nil
         }
-        
-        let fileURLMsg = "📁 [ClipboardMonitor] Found file URL: \(fileURL.path)\n"
-        print(fileURLMsg)
-        try? fileURLMsg.appendToFile(path: "/tmp/hypo_debug.log")
         
         // Check if this is an image file - if so, try to capture it as an image instead
         let uti = fileURL.typeIdentifier ?? "public.data"
@@ -226,15 +231,8 @@ public final class ClipboardMonitor {
             "com.adobe.photoshop-image", "com.adobe.illustrator.ai-image"
         ]
         
-        let utiMsg = "📁 [ClipboardMonitor] File UTI: \(uti), extension: \(fileURL.pathExtension)\n"
-        print(utiMsg)
-        try? utiMsg.appendToFile(path: "/tmp/hypo_debug.log")
-        
         if imageUTIs.contains(uti) || uti.hasPrefix("public.image") {
             // This is an image file - try to read it as an image
-            let imageFileMsg = "🖼️ [ClipboardMonitor] Detected image file: \(fileURL.lastPathComponent), UTI: \(uti)\n"
-            print(imageFileMsg)
-            try? imageFileMsg.appendToFile(path: "/tmp/hypo_debug.log")
             
             // Try to read as image
             if let imageData = try? Data(contentsOf: fileURL),
@@ -266,9 +264,7 @@ public final class ClipboardMonitor {
                 
                 // Check size limit
                 if imageData.count > maxAttachmentSize {
-                    let tooLargeMsg = "⚠️ [ClipboardMonitor] Image file too large: \(imageData.count) bytes (limit: \(maxAttachmentSize))\n"
-                    print(tooLargeMsg)
-                    try? tooLargeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.warning("⚠️ [ClipboardMonitor] Image file too large: \(imageData.count) bytes (limit: \(maxAttachmentSize))")
                     return nil
                 }
                 
@@ -283,9 +279,6 @@ public final class ClipboardMonitor {
                     thumbnail: thumbnail
                 )
                 
-                let successMsg = "✅ [ClipboardMonitor] Image file captured: \(fileName), \(pixels.width)×\(pixels.height), \(imageData.count) bytes, format: \(format)\n"
-                print(successMsg)
-                try? successMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 
                 return ClipboardEntry(originDeviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .image(metadata), isEncrypted: false, transportOrigin: nil)
             }

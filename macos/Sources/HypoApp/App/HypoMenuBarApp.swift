@@ -361,6 +361,7 @@ public struct HypoMenuBarApp: App {
                         transportManager.setHistoryViewModel(viewModel)
                     }
                     
+                    // Start clipboard monitor - this is the primary place it should start
                     setupMonitor()
                     // Global shortcut registration is handled by HypoAppDelegate (Carbon hotkey)
                 }
@@ -374,6 +375,8 @@ public struct HypoMenuBarApp: App {
                         transportManager.setHistoryViewModel(viewModel)
                     }
                     await viewModel.start()
+                    // Ensure monitor is started in .task as well (runs even if .onAppear doesn't)
+                    setupMonitor()
                 }
                 .onOpenURL { url in
                     Task { await viewModel.handleDeepLink(url) }
@@ -390,14 +393,21 @@ public struct HypoMenuBarApp: App {
 
     private func setupMonitor() {
         guard monitor == nil else { return }
+        // Use the same device identity as the viewModel to ensure device IDs match
+        let deviceId = viewModel.localDeviceId
+        guard let uuid = UUID(uuidString: deviceId) else {
+            logger.error("❌ [HypoMenuBarApp] Failed to parse deviceId as UUID: \(deviceId)")
+            return
+        }
         let deviceIdentity = DeviceIdentity()
         let monitor = ClipboardMonitor(
-            deviceId: deviceIdentity.deviceId,
+            deviceId: uuid,
             platform: deviceIdentity.platform,
             deviceName: deviceIdentity.deviceName
         )
         monitor.delegate = viewModel
         monitor.start()
+        logger.info("📋 [HypoMenuBarApp] ClipboardMonitor started, deviceId: \(deviceId), delegate set: \(monitor.delegate != nil)")
         self.monitor = monitor
     }
     

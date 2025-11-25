@@ -2,6 +2,23 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [Unreleased] - Device-Agnostic Pairing
+
+### Added
+- **Device-Agnostic Pairing**: Pairing system now supports pairing between any devices (Android↔Android, macOS↔macOS, Android↔macOS, etc.), not just Android↔macOS. Any device can act as initiator (QR code creator) or responder (QR code scanner) in LAN pairing, and any device can create or claim pairing codes in remote pairing.
+
+### Changed
+- **Pairing Protocol**: Refactored pairing models to use role-based field names (`peer_device_id`, `initiator_device_id`, `responder_device_id`) instead of platform-specific names (`mac_device_id`, `android_device_id`). Backward compatibility maintained through dual field support.
+- **Platform Detection**: Platform is now automatically detected from device ID prefixes or metadata during pairing, rather than being hard-coded. Supports detection of Android, macOS, iOS, Windows, and Linux platforms.
+- **Discovery Filtering**: Removed platform-specific filtering in Android discovery - all discovered devices are now shown regardless of platform.
+- **Device ID Migration**: Enhanced device ID migration to handle any platform prefix (macos-, android-, ios-, windows-, linux-), not just macos-/android-.
+
+### Technical Details
+- Updated `PairingPayload`, `PairingChallengeMessage`, and `PairingAckMessage` models across Swift and Kotlin
+- Backend Redis client and handlers updated to use `initiator_*` and `responder_*` field names
+- Relay clients updated to support device-agnostic pairing flows
+- Platform detection logic added to `PairingSession.swift` with `detectPlatform()` helper function
+
 ## [0.2.3] - 2025-01-21 - Transport Origin & Icon Display Fixes
 
 ### Fixed

@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
@@ -74,6 +75,8 @@ fun PairingRoute(
         onRemoteCodeChanged = remoteViewModel::onCodeChanged,
         onRemoteSubmit = remoteViewModel::submitCode,
         onRemoteReset = remoteViewModel::reset,
+        onRemoteGenerateCode = { remoteViewModel.generateCode() },
+        onRemoteSwitchToEnterCode = { remoteViewModel.switchToEnterCode() },
         onLanDeviceTap = lanViewModel::pairWithDevice,
         onLanReset = lanViewModel::reset
     )
@@ -90,6 +93,8 @@ fun PairingScreen(
     onRemoteCodeChanged: (String) -> Unit,
     onRemoteSubmit: () -> Unit,
     onRemoteReset: () -> Unit,
+    onRemoteGenerateCode: () -> Unit,
+    onRemoteSwitchToEnterCode: () -> Unit,
     onLanDeviceTap: (com.hypo.clipboard.transport.lan.DiscoveredPeer) -> Unit,
     onLanReset: () -> Unit,
     modifier: Modifier = Modifier
@@ -129,7 +134,9 @@ fun PairingScreen(
                         state = remoteState,
                         onCodeChanged = onRemoteCodeChanged,
                         onSubmit = onRemoteSubmit,
-                        onReset = onRemoteReset
+                        onReset = onRemoteReset,
+                        onGenerateCode = onRemoteGenerateCode,
+                        onSwitchToEnterCode = onRemoteSwitchToEnterCode
                     )
                 }
             }
@@ -170,7 +177,9 @@ private fun RemotePairingView(
     state: RemotePairingUiState,
     onCodeChanged: (String) -> Unit,
     onSubmit: () -> Unit,
-    onReset: () -> Unit
+    onReset: () -> Unit,
+    onGenerateCode: () -> Unit,
+    onSwitchToEnterCode: () -> Unit
 ) {
     when (state.phase) {
         RemotePairingPhase.Completed -> {
@@ -178,6 +187,78 @@ private fun RemotePairingView(
         }
         RemotePairingPhase.Error -> {
             ErrorView(message = state.error ?: "Pairing failed", onReset = onReset)
+        }
+        RemotePairingPhase.Idle -> {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Cloud Pairing",
+                    style = MaterialTheme.typography.titleLarge
+                )
+                Text(
+                    text = "Choose how you want to pair",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Button(
+                    onClick = onGenerateCode,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = "Generate Code")
+                }
+                Text(
+                    text = "OR",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Button(
+                    onClick = onSwitchToEnterCode,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = "Enter Code")
+                }
+            }
+        }
+        RemotePairingPhase.GeneratingCode -> {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CircularProgressIndicator()
+                Text(text = state.status, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        RemotePairingPhase.DisplayingCode -> {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = state.status,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                state.generatedCode?.let { code ->
+                    Text(
+                        text = code,
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                }
+                state.countdownSeconds?.let { seconds ->
+                    Text(
+                        text = "Expires in ${seconds}s",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                Text(
+                    text = "Waiting for peer device to enter this code...",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
         else -> {
             Column(
@@ -219,7 +300,7 @@ private fun RemotePairingView(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                        Text(text = "Completing secure handshake…", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = state.status, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -304,11 +385,11 @@ private fun AutoDiscoveryContent(
                 ) {
                     CircularProgressIndicator()
                     Text(
-                        text = "Searching for macOS devices...",
+                        text = "Searching for devices...",
                         style = MaterialTheme.typography.bodyLarge
                     )
                     Text(
-                        text = "Make sure your macOS device is on the same network",
+                        text = "Make sure your other device is on the same network",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -335,7 +416,7 @@ private fun AutoDiscoveryContent(
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            text = "Make sure your macOS device is running Hypo",
+                            text = "Make sure your other device is running Hypo",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

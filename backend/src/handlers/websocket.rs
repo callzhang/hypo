@@ -54,9 +54,11 @@ pub async fn websocket_handler(
         .unwrap_or("unknown")
         .to_string();
 
+    // Log all currently registered devices before registration
+    let currently_registered = data.sessions.get_connected_devices().await;
     info!(
-        "WebSocket connection request from device: {} ({}) from {} (User-Agent: {})",
-        device_id, platform, peer_addr, user_agent
+        "WebSocket connection request from device: {} ({}) from {} (User-Agent: {}). Currently registered devices: {:?}",
+        device_id, platform, peer_addr, user_agent, currently_registered
     );
 
     // Check if device is already registered (unless force register is requested)
@@ -122,7 +124,7 @@ pub async fn websocket_handler(
             info!("Session closed for device: {}", writer_device_id);
         } else {
             info!(
-                "Stale writer task finished for device {} (token {}). Newer session remains active.",
+                "Stale writer task finished for device {} (token {}). Newer session remains active or already removed.",
                 writer_device_id, writer_token
             );
         }
@@ -177,7 +179,7 @@ pub async fn websocket_handler(
             info!("WebSocket closed for device: {}", reader_device_id);
         } else {
             info!(
-                "Skipped unregister for device {} (token {}) because a newer session is active",
+                "Skipped unregister for device {} (token {}) because a newer session is active or already removed",
                 reader_device_id, reader_token
             );
         }
@@ -250,31 +252,58 @@ async fn handle_binary_message(
         return Ok(());
     }
 
+    // Extract target device ID
+    // All messages MUST have a valid target - no broadcasting
+    // If target is null, missing, or target device not found, drop the message
     let target_device = payload
         .get("target")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
+        .and_then(|v| {
+            // If target is null, treat as invalid (drop the message)
+            if v.is_null() {
+                warn!("[ROUTING] Message from {} has null target field, dropping message", sender_id);
+                None
+            } else {
+                v.as_str().map(ToOwned::to_owned)
+            }
+        });
 
     // Forward the binary frame as-is (already in correct format)
     if let Some(target) = target_device {
-        info!("Routing message from {} to target device: {}", sender_id, target);
+        info!("[ROUTING] Message from {} targeting device: {} (frame size: {} bytes)", sender_id, target, frame.len());
+        
+        // Check if target device is registered before attempting to send
+        let is_target_registered = sessions.is_registered(&target).await;
+        let registered_devices = sessions.get_connected_devices().await;
+        
+        if !is_target_registered {
+            warn!("[ROUTING] ❌ Target device {} not connected. Registered devices: {:?}. Sending failure message to sender {}", target, registered_devices, sender_id);
+            send_routing_failure_message(sessions, sender_id, &target, "Target device not connected", &registered_devices).await;
+            return Ok(());
+        }
+        
         match sessions.send_binary(&target, frame.to_vec()).await {
             Ok(()) => {
-                info!("Successfully routed message to {}", target);
+                info!("[ROUTING] ✅ Successfully routed message from {} to target device: {}", sender_id, target);
                 Ok(())
             }
             Err(SessionError::DeviceNotConnected) => {
-                warn!("Target device {} not connected, message not delivered", target);
-                Err(SessionError::DeviceNotConnected)
+                warn!("[ROUTING] ❌ Target device {} not connected (race condition), dropping message from {}", target, sender_id);
+                let registered_devices = sessions.get_connected_devices().await;
+                send_routing_failure_message(sessions, sender_id, &target, "Target device disconnected", &registered_devices).await;
+                Ok(())
             }
             Err(e) => {
-                error!("Failed to route message to {}: {:?}", target, e);
+                error!("[ROUTING] ❌ Failed to route message from {} to {}: {:?}", sender_id, target, e);
+                let registered_devices = sessions.get_connected_devices().await;
+                send_routing_failure_message(sessions, sender_id, &target, &format!("Routing error: {:?}", e), &registered_devices).await;
                 Err(e)
             }
         }
     } else {
-        info!("No target specified, broadcasting from {} to all other devices", sender_id);
-        sessions.broadcast_except_binary(sender_id, frame.to_vec()).await;
+        // Target field is null or missing - drop the message (no broadcasting)
+        warn!("[ROUTING] Message from {} has no valid target field, dropping message", sender_id);
+        let registered_devices = sessions.get_connected_devices().await;
+        send_routing_failure_message(sessions, sender_id, "", "Missing or null target field", &registered_devices).await;
         Ok(())
     }
 }
@@ -305,19 +334,99 @@ async fn handle_text_message(
         return Ok(());
     }
 
+    // Extract target device ID
+    // All messages MUST have a valid target - no broadcasting
+    // If target is null, missing, or target device not found, drop the message
     let target_device = payload
         .get("target")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
+        .and_then(|v| {
+            // If target is null, treat as invalid (drop the message)
+            if v.is_null() {
+                warn!("Message from {} has null target field, dropping message", sender_id);
+                None
+            } else {
+                v.as_str().map(ToOwned::to_owned)
+            }
+        });
 
     // Convert text message to binary frame format for forwarding
     let binary_frame = encode_binary_frame(message);
     
     if let Some(target) = target_device {
-        sessions.send_binary(&target, binary_frame).await
+        info!("Routing message from {} to target device: {}", sender_id, target);
+        
+        // Check if target device is registered before attempting to send
+        let is_target_registered = sessions.is_registered(&target).await;
+        let registered_devices = sessions.get_connected_devices().await;
+        
+        if !is_target_registered {
+            warn!("[ROUTING] ❌ Target device {} not connected. Registered devices: {:?}. Sending failure message to sender {}", target, registered_devices, sender_id);
+            send_routing_failure_message(sessions, sender_id, &target, "Target device not connected", &registered_devices).await;
+            return Ok(());
+        }
+        
+        match sessions.send_binary(&target, binary_frame).await {
+            Ok(()) => {
+                info!("Successfully routed message to {}", target);
+                Ok(())
+            }
+            Err(SessionError::DeviceNotConnected) => {
+                warn!("Target device {} not connected (race condition), dropping message", target);
+                let registered_devices = sessions.get_connected_devices().await;
+                send_routing_failure_message(sessions, sender_id, &target, "Target device disconnected", &registered_devices).await;
+                Ok(())
+            }
+            Err(e) => {
+                error!("Failed to route message to {}: {:?}", target, e);
+                let registered_devices = sessions.get_connected_devices().await;
+                send_routing_failure_message(sessions, sender_id, &target, &format!("Routing error: {:?}", e), &registered_devices).await;
+                Err(e)
+            }
+        }
     } else {
-        sessions.broadcast_except_binary(sender_id, binary_frame).await;
+        // Target field is null or missing - drop the message (no broadcasting)
+        warn!("Message from {} has no valid target field, dropping message", sender_id);
+        let registered_devices = sessions.get_connected_devices().await;
+        send_routing_failure_message(sessions, sender_id, "", "Missing or null target field", &registered_devices).await;
         Ok(())
+    }
+}
+
+/// Send a routing failure message back to the sender
+async fn send_routing_failure_message(
+    sessions: &crate::services::session_manager::SessionManager,
+    sender_id: &str,
+    target_device_id: &str,
+    reason: &str,
+    registered_devices: &[String],
+) {
+    let control_message = serde_json::json!({
+        "msg_type": "control",
+        "payload": {
+            "action": "routing_failure",
+            "target_device_id": target_device_id,
+            "reason": reason,
+            "registered_devices": registered_devices,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        }
+    });
+    
+    let message_str = serde_json::to_string(&control_message).unwrap_or_else(|_| {
+        serde_json::json!({
+            "msg_type": "control",
+            "payload": {
+                "action": "routing_failure",
+                "error": "Failed to serialize failure message"
+            }
+        }).to_string()
+    });
+    
+    let binary_frame = encode_binary_frame(&message_str);
+    
+    if let Err(e) = sessions.send_binary(sender_id, binary_frame).await {
+        error!("Failed to send routing failure message to sender {}: {:?}", sender_id, e);
+    } else {
+        info!("[ROUTING] Sent failure message to sender {}: target={}, reason={}", sender_id, target_device_id, reason);
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public enum TransportOrigin: String, Codable {
     case lan
@@ -203,25 +204,25 @@ public extension ClipboardEntry {
         }
     }
     
-    /// Unified content matching function: content length, then first 1KB hash
+    /// Unified content matching function: content length, then SHA-256 hash of full content
     /// Returns true if entries match based on the unified matching criteria
     /// Note: Metadata (device UUID, timestamp) is not used for matching - we match by content only
     func matchesContent(_ other: ClipboardEntry) -> Bool {
         // 1. Check content type
         switch (content, other.content) {
         case (.text(let text1), .text(let text2)):
-            // For text: compare length first, then first 1KB hash
+            // For text: compare length first, then full-content SHA-256
             if text1.count != text2.count {
                 return false
             }
             let data1 = Data(text1.utf8)
             let data2 = Data(text2.utf8)
-            let hash1 = hashFirst1KB(data1)
-            let hash2 = hashFirst1KB(data2)
+            let hash1 = sha256(data1)
+            let hash2 = sha256(data2)
             return hash1 == hash2
             
         case (.link(let url1), .link(let url2)):
-            // For links: compare length first, then first 1KB hash
+            // For links: compare length first, then full-content SHA-256
             let str1 = url1.absoluteString
             let str2 = url2.absoluteString
             if str1.count != str2.count {
@@ -229,30 +230,30 @@ public extension ClipboardEntry {
             }
             let data1 = Data(str1.utf8)
             let data2 = Data(str2.utf8)
-            let hash1 = hashFirst1KB(data1)
-            let hash2 = hashFirst1KB(data2)
+            let hash1 = sha256(data1)
+            let hash2 = sha256(data2)
             return hash1 == hash2
             
         case (.image(let meta1), .image(let meta2)):
-            // For images: compare length (byteSize) first, then first 1KB hash
+            // For images: compare length (byteSize) first, then full-content SHA-256
             if meta1.byteSize != meta2.byteSize {
                 return false
             }
             let data1 = meta1.data ?? Data()
             let data2 = meta2.data ?? Data()
-            let hash1 = hashFirst1KB(data1)
-            let hash2 = hashFirst1KB(data2)
+            let hash1 = sha256(data1)
+            let hash2 = sha256(data2)
             return hash1 == hash2
             
         case (.file(let meta1), .file(let meta2)):
-            // For files: compare length (byteSize) first, then first 1KB hash
+            // For files: compare length (byteSize) first, then full-content SHA-256
             if meta1.byteSize != meta2.byteSize {
                 return false
             }
             let data1 = meta1.base64.flatMap { Data(base64Encoded: $0) } ?? Data()
             let data2 = meta2.base64.flatMap { Data(base64Encoded: $0) } ?? Data()
-            let hash1 = hashFirst1KB(data1)
-            let hash2 = hashFirst1KB(data2)
+            let hash1 = sha256(data1)
+            let hash2 = sha256(data2)
             return hash1 == hash2
             
         default:
@@ -260,13 +261,9 @@ public extension ClipboardEntry {
         }
     }
     
-    /// Hash first 1KB of data for content matching
-    private func hashFirst1KB(_ data: Data) -> Int {
-        let sampleSize = min(1024, data.count)
-        var hash = 0
-        for byte in data.prefix(sampleSize) {
-            hash = hash &* 31 &+ Int(byte)
-        }
-        return hash
+    /// Cryptographic hash (SHA-256) of the full content for content matching
+    private func sha256(_ data: Data) -> Data {
+        let digest = SHA256.hash(data: data)
+        return Data(digest)
     }
 }

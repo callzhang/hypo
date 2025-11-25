@@ -15,7 +15,7 @@ public final class IncomingClipboardHandler {
     private var onEntryAdded: ((ClipboardEntry) async -> Void)?
     
     #if canImport(os)
-    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "incoming")
+    private let logger = HypoLogger(category: "incoming")
     #endif
     
     public init(
@@ -39,14 +39,7 @@ public final class IncomingClipboardHandler {
     ///   - data: The clipboard data (frame-encoded)
     ///   - transportOrigin: Whether the message came via LAN or cloud relay
     public func handle(_ data: Data, transportOrigin: TransportOrigin = .lan) async {
-        let receivedMsg = "📥 [IncomingClipboardHandler] CLIPBOARD RECEIVED: \(data.count) bytes, origin: \(transportOrigin.rawValue)\n"
-        print(receivedMsg)
-        try? receivedMsg.appendToFile(path: "/tmp/hypo_debug.log")
         do {
-            #if canImport(os)
-            logger.info("📥 CLIPBOARD RECEIVED: Processing incoming clipboard data (\(data.count) bytes)")
-            #endif
-            
             // Decode envelope to get device info
             let envelope = try frameCodec.decode(data)
             let deviceId = envelope.payload.deviceId  // UUID string (pure UUID)
@@ -67,27 +60,10 @@ public final class IncomingClipboardHandler {
             // It will decode the envelope, decrypt the ciphertext, and decode the ClipboardPayload
             let payload = try await syncEngine.decode(data)
             
-            #if canImport(os)
-            logger.info("📋 Envelope decoded: from device \(deviceId), name: \(deviceName ?? "unknown")")
-            #endif
-            let decodedMsg = "📋 [IncomingClipboardHandler] Envelope decoded: deviceId=\(deviceId), deviceName=\(deviceName ?? "unknown")\n"
-            print(decodedMsg)
-            try? decodedMsg.appendToFile(path: "/tmp/hypo_debug.log")
-            #if canImport(os)
-            logger.info("✅ CLIPBOARD DECODED: type=\(payload.contentType.rawValue)")
-            #endif
-            let typeMsg = "✅ [IncomingClipboardHandler] CLIPBOARD DECODED: type=\(payload.contentType.rawValue)\n"
-            print(typeMsg)
-            try? typeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("📥 Received clipboard: \(payload.contentType.rawValue) from \(deviceName ?? "unknown")")
             
             // Check if incoming content matches current clipboard - skip if same to avoid unnecessary processing
             if await matchesCurrentClipboard(payload) {
-                let skipMsg = "⏭️ [IncomingClipboardHandler] Skipping - incoming content matches current clipboard\n"
-                print(skipMsg)
-                try? skipMsg.appendToFile(path: "/tmp/hypo_debug.log")
-                #if canImport(os)
-                logger.info("⏭️ Skipping - incoming content matches current clipboard")
-                #endif
                 return
             }
             
@@ -116,14 +92,12 @@ public final class IncomingClipboardHandler {
             )
             
         } catch {
-            let errorMsg = "❌ [IncomingClipboardHandler] CLIPBOARD ERROR: \(error.localizedDescription), type: \(String(describing: type(of: error)))\n"
-            print(errorMsg)
-            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.error("❌ [IncomingClipboardHandler] CLIPBOARD ERROR: \(error.localizedDescription), type: \(String(describing: type(of: error)))")
             #if canImport(os)
             logger.error("❌ CLIPBOARD ERROR: Failed to handle incoming clipboard: \(error.localizedDescription)")
             #endif
             if let decodingError = error as? DecodingError {
-                print("❌ [IncomingClipboardHandler] DecodingError details: \(decodingError)")
+                logger.info("❌ [IncomingClipboardHandler] DecodingError details: \(decodingError)")
             }
         }
     }
@@ -263,28 +237,10 @@ public final class IncomingClipboardHandler {
         )
         
         let insertedEntries = await historyStore.insert(entry)
-        let insertMsg = "✅ [IncomingClipboardHandler] Added to history: \(finalDeviceName) (id: \(finalDeviceId.prefix(8))), total entries: \(insertedEntries.count)\n"
-        print(insertMsg)
-        try? insertMsg.appendToFile(path: "/tmp/hypo_debug.log")
-        
         // Notify callback if provided (e.g., to update viewModel)
         if let onEntryAdded = onEntryAdded {
-            let callbackMsg = "📞 [IncomingClipboardHandler] Calling onEntryAdded callback\n"
-            print(callbackMsg)
-            try? callbackMsg.appendToFile(path: "/tmp/hypo_debug.log")
             await onEntryAdded(entry)
-            let callbackDoneMsg = "✅ [IncomingClipboardHandler] onEntryAdded callback completed\n"
-            print(callbackDoneMsg)
-            try? callbackDoneMsg.appendToFile(path: "/tmp/hypo_debug.log")
-        } else {
-            let noCallbackMsg = "⚠️ [IncomingClipboardHandler] onEntryAdded callback is nil!\n"
-            print(noCallbackMsg)
-            try? noCallbackMsg.appendToFile(path: "/tmp/hypo_debug.log")
         }
-        
-        #if canImport(os)
-        logger.info("✅ Added to history from device: \(finalDeviceName) (id: \(finalDeviceId)), total: \(insertedEntries.count)")
-        #endif
     }
 }
 

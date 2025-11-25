@@ -57,6 +57,7 @@ extension URLSession: URLSessionProviding {
 }
 
 public final class LanWebSocketTransport: NSObject, SyncTransport {
+    private let logger = HypoLogger(category: "LanWebSocketTransport")
     private enum ConnectionState {
         case idle
         case connecting
@@ -129,20 +130,14 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
     }
 
     public func connect() async throws {
-        let connectStartMsg = "🔌 [LanWebSocketTransport] connect() called, state: \(state), url: \(configuration.url)\n"
-        print(connectStartMsg)
-        try? connectStartMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🔌 [LanWebSocketTransport] connect() called, state: \(state), url: \(configuration.url)")
         
         switch state {
         case .connected:
-            let alreadyMsg = "✅ [LanWebSocketTransport] Already connected\n"
-            print(alreadyMsg)
-            try? alreadyMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("✅ [LanWebSocketTransport] Already connected")
             return
         case .connecting:
-            let waitingMsg = "⏳ [LanWebSocketTransport] Already connecting, waiting...\n"
-            print(waitingMsg)
-            try? waitingMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("⏳ [LanWebSocketTransport] Already connecting, waiting...")
             try await withCheckedThrowingContinuation { continuation in
                 handshakeContinuation = continuation
             }
@@ -160,10 +155,8 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         
         var request = URLRequest(url: configuration.url)
         if configuration.headers.isEmpty {
-            let emptyMsg = "⚠️ [LanWebSocketTransport] WARNING: Headers dictionary is EMPTY!\n"
-            print(emptyMsg)
+            logger.warning("⚠️ [LanWebSocketTransport] WARNING: Headers dictionary is EMPTY!")
             fflush(stdout)
-            try? emptyMsg.appendToFile(path: "/tmp/hypo_debug.log")
         }
         configuration.headers.forEach { key, value in
             request.setValue(value, forHTTPHeaderField: key)
@@ -182,42 +175,30 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         if isCloudConnection {
             // For cloud connections, preserve query parameters if present
             finalURL = originalURL
-            let cloudURLMsg = "☁️ [LanWebSocketTransport] Cloud connection - preserving query parameters: \(originalURL.absoluteString)\n"
-            print(cloudURLMsg)
-            try? cloudURLMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("☁️ [LanWebSocketTransport] Cloud connection - preserving query parameters: \(originalURL.absoluteString)")
         } else {
             // For LAN connections, remove query parameters
             let cleanURLString = "\(scheme)://\(host)\(path)"
             guard let url = URL(string: cleanURLString) else {
-                let errorMsg = "❌ [LanWebSocketTransport] Failed to create clean URL from: \(cleanURLString)\n"
-                print(errorMsg)
-                try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.error("❌ [LanWebSocketTransport] Failed to create clean URL from: \(cleanURLString)")
                 throw NSError(domain: "LanWebSocketTransport", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create clean URL"])
             }
             finalURL = url
-            let lanURLMsg = "📡 [LanWebSocketTransport] LAN connection - removed query parameters: \(cleanURLString)\n"
-            print(lanURLMsg)
-            try? lanURLMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("📡 [LanWebSocketTransport] LAN connection - removed query parameters: \(cleanURLString)")
         }
         request.url = finalURL
         // Verify the URL was set correctly (log only if mismatch)
         if let requestURL = request.url?.absoluteString, requestURL != finalURL.absoluteString {
-            let verifyMsg = "⚠️ [LanWebSocketTransport] URL mismatch! Expected: \(finalURL.absoluteString), Got: \(requestURL)\n"
-            print(verifyMsg)
+            logger.warning("⚠️ [LanWebSocketTransport] URL mismatch! Expected: \(finalURL.absoluteString), Got: \(requestURL)")
             fflush(stdout)
-            try? verifyMsg.appendToFile(path: "/tmp/hypo_debug.log")
         }
-        let requestHeadersMsg = "📋 [LanWebSocketTransport] Request headers: \(request.allHTTPHeaderFields ?? [:])\n"
-        print(requestHeadersMsg)
+        logger.info("📋 [LanWebSocketTransport] Request headers: \(request.allHTTPHeaderFields ?? [:])")
         fflush(stdout)
-        try? requestHeadersMsg.appendToFile(path: "/tmp/hypo_debug.log")
 
         let task = session.webSocketTask(with: request)
         state = .connecting
         
-        let resumeMsg = "🚀 [LanWebSocketTransport] Resuming WebSocket task\n"
-        print(resumeMsg)
-        try? resumeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🚀 [LanWebSocketTransport] Resuming WebSocket task")
 
         // CRITICAL: Retain self and session during connection to prevent deallocation
         let retainedSelf = self
@@ -233,12 +214,10 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                 task.resume()
             }
             let successMsg = "✅ [LanWebSocketTransport] Connection established successfully\n"
-            print(successMsg)
-            try? successMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("✅ [LanWebSocketTransport] Connection established successfully")
         } catch {
             let errorMsg = "❌ [LanWebSocketTransport] Connection failed: \(error.localizedDescription)\n"
-            print(errorMsg)
-            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("❌ [LanWebSocketTransport] Connection failed: \(error.localizedDescription)")
             throw error
         }
     }
@@ -257,8 +236,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         messageQueue.append(queuedMessage)
         
         let queueMsg = "📥 [LanWebSocketTransport] Queued message (queue size: \(messageQueue.count))\n"
-        print(queueMsg)
-        try? queueMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("📥 [LanWebSocketTransport] Queued message (queue size: \(messageQueue.count))")
         
         // Start queue processor if not already running
         if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
@@ -283,8 +261,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             // Check timeout (10 minutes from queue time)
             if Date().timeIntervalSince(queuedMessage.queuedAt) > maxTimeout {
                 let timeoutMsg = "❌ [LanWebSocketTransport] Message timeout after \(queuedMessage.retryCount) retries (10 min elapsed), dropping\n"
-                print(timeoutMsg)
-                try? timeoutMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("❌ [LanWebSocketTransport] Message timeout after \(queuedMessage.retryCount) retries (10 min elapsed), dropping")
                 await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 continue
             }
@@ -295,8 +272,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             // Wait before retry (skip wait on first attempt)
             if queuedMessage.retryCount > 0 {
                 let backoffMsg = "⏳ [LanWebSocketTransport] Retry \(queuedMessage.retryCount)/\(maxRetries) after \(Int(backoff))s backoff\n"
-                print(backoffMsg)
-                try? backoffMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("⏳ [LanWebSocketTransport] Retry \(queuedMessage.retryCount)/\(maxRetries) after \(Int(backoff))s backoff")
                 try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
             }
             
@@ -305,15 +281,13 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                 try await ensureConnected()
             } catch {
                 let connectErrorMsg = "⚠️ [LanWebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)\n"
-                print(connectErrorMsg)
-                try? connectErrorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("⚠️ [LanWebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
                 } else {
                     let maxRetriesMsg = "❌ [LanWebSocketTransport] Max retries reached, dropping message\n"
-                    print(maxRetriesMsg)
-                    try? maxRetriesMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("❌ [LanWebSocketTransport] Max retries reached, dropping message")
                     await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
                 continue
@@ -321,15 +295,13 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             
             guard case .connected(let task) = state else {
                 let stateErrorMsg = "⚠️ [LanWebSocketTransport] Not connected after ensureConnected() on retry \(queuedMessage.retryCount)\n"
-                print(stateErrorMsg)
-                try? stateErrorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("⚠️ [LanWebSocketTransport] Not connected after ensureConnected() on retry \(queuedMessage.retryCount)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
                 } else {
                     let maxRetriesMsg = "❌ [LanWebSocketTransport] Max retries reached, dropping message\n"
-                    print(maxRetriesMsg)
-                    try? maxRetriesMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("❌ [LanWebSocketTransport] Max retries reached, dropping message")
                     await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
                 continue
@@ -354,21 +326,18 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                 
                 // Success!
                 let successMsg = "✅ [LanWebSocketTransport] Message sent successfully after \(queuedMessage.retryCount) retries (queue size: \(messageQueue.count))\n"
-                print(successMsg)
-                try? successMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                self.logger.info("✅ [LanWebSocketTransport] Message sent successfully after \(queuedMessage.retryCount) retries (queue size: \(messageQueue.count))")
                 await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 
             } catch {
                 let errorMsg = "❌ [LanWebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(error.localizedDescription)\n"
-                print(errorMsg)
-                try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                self.logger.info("❌ [LanWebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(error.localizedDescription)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
                 } else {
                     let maxRetriesMsg = "❌ [LanWebSocketTransport] Max retries reached, dropping message\n"
-                    print(maxRetriesMsg)
-                    try? maxRetriesMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("❌ [LanWebSocketTransport] Max retries reached, dropping message")
                     await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
             }
@@ -377,8 +346,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         // Queue is empty, stop processing
         queueProcessingTask = nil
         let emptyMsg = "✅ [LanWebSocketTransport] Message queue empty, stopping processor\n"
-        print(emptyMsg)
-        try? emptyMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("✅ [LanWebSocketTransport] Message queue empty, stopping processor")
     }
 
     public func disconnect() async {
@@ -408,8 +376,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         let queueSize = messageQueue.count
         if queueSize > 0 {
             let clearMsg = "🧹 [LanWebSocketTransport] Clearing \(queueSize) queued messages on disconnect\n"
-            print(clearMsg)
-            try? clearMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("🧹 [LanWebSocketTransport] Clearing \(queueSize) queued messages on disconnect")
             for queuedMessage in messageQueue {
                 _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
             }
@@ -443,8 +410,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         // For cloud relay connections, use ping/pong keepalive instead of idle timeout
         if configuration.environment == "cloud" || configuration.url.scheme == "wss" {
             let watchdogMsg = "⏰ [LanWebSocketTransport] Starting ping/pong keepalive for cloud relay connection\n"
-            print(watchdogMsg)
-            try? watchdogMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("⏰ [LanWebSocketTransport] Starting ping/pong keepalive for cloud relay connectio")
             fflush(stdout)
             // Send ping every 20 seconds to keep connection alive
             watchdogTask = Task.detached { [weak self] in
@@ -457,22 +423,47 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                     }
                     // Send ping to keep connection alive
                     currentTask.sendPing(pongReceiveHandler: { [weak self] error in
+                        guard let self = self else { return }
                         if let error {
-                            let pingErrorMsg = "❌ [LanWebSocketTransport] Ping failed: \(error.localizedDescription)\n"
-                            print(pingErrorMsg)
-                            try? pingErrorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                            self.logger.info("❌ [LanWebSocketTransport] Ping failed: \(error.localizedDescription)")
                             // If ping fails, the connection is likely dead - disconnect and reconnect
+                            // Use exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
                             Task { @MainActor [weak self] in
-                                await self?.disconnect()
-                                // Try to reconnect after a short delay
-                                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-                                try? await self?.connect()
+                                guard let self = self else { return }
+                                await self.disconnect()
+                                
+                                // Calculate backoff based on ping retry count
+                                let initialBackoff: TimeInterval = 1.0
+                                let maxBackoff: TimeInterval = 128.0
+                                let backoff: TimeInterval
+                                if self.receiveRetryCount < 8 {
+                                    backoff = initialBackoff * pow(2.0, Double(self.receiveRetryCount))
+                                } else {
+                                    backoff = maxBackoff // Keep retrying every 128s indefinitely
+                                }
+                                
+                                self.receiveRetryCount += 1
+                                let reconnectMsg = "🔄 [LanWebSocketTransport] Ping failed, reconnecting after \(Int(backoff))s backoff (attempt \(self.receiveRetryCount))...\n"
+                                self.logger.info("🔄 [LanWebSocketTransport] Ping failed, reconnecting after \(Int(backoff))s backoff (attempt \(self.receiveRetryCount))...")
+                                
+                                try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+                                do {
+                                    try await self.connect()
+                                    // Reset retry count on successful connection
+                                    self.receiveRetryCount = 0
+                                } catch {
+                                    let connectErrorMsg = "❌ [LanWebSocketTransport] Reconnect after ping failure failed: \(error.localizedDescription)\n"
+                                    logger.info("❌ [LanWebSocketTransport] Reconnect after ping failure failed: \(error.localizedDescription)")
+                                    // Will retry again on next ping failure
+                                }
                             }
                         } else {
-                            let pingSuccessMsg = "🏓 [LanWebSocketTransport] Ping sent successfully\n"
-                            print(pingSuccessMsg)
-                            try? pingSuccessMsg.appendToFile(path: "/tmp/hypo_debug.log")
-                            self?.touch()
+                            self.logger.info("🏓 [LanWebSocketTransport] Ping sent successfully")
+                            self.touch()
+                            // Reset retry count on successful ping
+                            Task { @MainActor [weak self] in
+                                self?.receiveRetryCount = 0
+                            }
                         }
                     })
                 }
@@ -511,9 +502,7 @@ extension LanWebSocketTransport: @unchecked Sendable {}
 
 extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocolName: String?) {
-        let delegateMsg = "🎉 [LanWebSocketTransport] didOpenWithProtocol called! protocol: \(protocolName ?? "nil")\n"
-        print(delegateMsg)
-        try? delegateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🎉 [LanWebSocketTransport] didOpenWithProtocol called! protocol: \(protocolName ?? "nil")")
         handleOpen(task: webSocketTask)
     }
 
@@ -582,10 +571,7 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
             let timeSinceFailure = Date().timeIntervalSince(failureTime)
             closeMsg += "   Last receive failure: \(Int(timeSinceFailure))s ago\n"
         }
-        closeMsg += "   Receive retry count: \(receiveRetryCount)\n"
-        
-        print(closeMsg)
-        try? closeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🔌 [LanWebSocketTransport] close() called: state=\(state), receive retry count=\(receiveRetryCount)")
         fflush(stdout)
         
         state = .idle
@@ -660,8 +646,7 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
             completeMsg += "   Request Headers: \(request.allHTTPHeaderFields ?? [:])\n"
         }
         
-        print(completeMsg)
-        try? completeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("✅ [LanWebSocketTransport] Connection complete")
         fflush(stdout)
         
         if let continuation = handshakeContinuation {
@@ -676,31 +661,25 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
 
     private func receiveNext(on task: WebSocketTasking) {
         let receiveMsg = "📡 [LanWebSocketTransport] receiveNext() called, setting up receive callback\n"
-        print(receiveMsg)
-        try? receiveMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("📡 [LanWebSocketTransport] receiveNext() called, setting up receive callback")
         task.receive { [weak self] result in
             guard let self else {
-                let nilMsg = "⚠️ [LanWebSocketTransport] Self is nil in receive callback\n"
-                print(nilMsg)
-                try? nilMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                NSLog("⚠️ [LanWebSocketTransport] Self is nil in receive callback")
                 return
             }
             let callbackMsg = "📡 [LanWebSocketTransport] receive callback triggered\n"
-            print(callbackMsg)
-            try? callbackMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            self.logger.info("📡 [LanWebSocketTransport] receive callback triggered")
             fflush(stdout)
             
             let resultTypeMsg = "🔍 [LanWebSocketTransport] Result type: \(String(describing: result))\n"
-            print(resultTypeMsg)
-            try? resultTypeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            self.logger.info("🔍 [LanWebSocketTransport] Result type: \(String(describing: result))")
             fflush(stdout)
             
             switch result {
             case .success(let message):
                 // Log success immediately to catch messages before any processing
                 let successImmediateMsg = "✅ [LanWebSocketTransport] Receive SUCCESS - message arrived!\n"
-                print(successImmediateMsg)
-                try? successImmediateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                self.logger.info("✅ [LanWebSocketTransport] Receive SUCCESS - message arrived!")
                 fflush(stdout)
                 
                 self.touch()
@@ -714,73 +693,63 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                     messageType = "unknown"
                 }
                 let successMsg = "✅ [LanWebSocketTransport] Message received: \(messageType)\n"
-                print(successMsg)
-                try? successMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("✅ [LanWebSocketTransport] Message received: \(messageType)")
                 fflush(stdout)
                 if case .data(let data) = message {
                     let dataMsg = "📦 [LanWebSocketTransport] Binary data received: \(data.count) bytes\n"
-                    print(dataMsg)
-                    try? dataMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("📦 [LanWebSocketTransport] Binary data received: \(data.count) bytes")
                     fflush(stdout)
                     self.handleIncoming(data: data)
                 } else if case .string(let str) = message {
                     let textMsg = "📝 [LanWebSocketTransport] Text message received: \(str.prefix(100))\n"
-                    print(textMsg)
-                    try? textMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("📝 [LanWebSocketTransport] Text message received: \(str.prefix(100))")
                     fflush(stdout)
                 } else {
                     let nonDataMsg = "⚠️ [LanWebSocketTransport] Non-binary message received\n"
-                    print(nonDataMsg)
-                    try? nonDataMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("⚠️ [LanWebSocketTransport] Non-binary message received")
                     fflush(stdout)
                 }
                 self.receiveNext(on: task)
             case .failure(let error):
                 let errorMsg = "❌ [LanWebSocketTransport] Receive failed: \(error.localizedDescription)\n"
-                print(errorMsg)
-                try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("❌ [LanWebSocketTransport] Receive failed: \(error.localizedDescription)")
                 fflush(stdout)
                 
                 // For cloud connections, try to reconnect with exponential backoff
                 // This handles the case where the server closes the connection
                 if self.configuration.environment == "cloud" || self.configuration.url.scheme == "wss" {
-                    // Calculate exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s
-                    let maxRetries: UInt = 8
+                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
                     let initialBackoff: TimeInterval = 1.0 // 1 second
-                    let backoff = initialBackoff * pow(2.0, Double(self.receiveRetryCount))
-                    let cappedBackoff = min(backoff, 128.0) // Cap at 128 seconds
+                    let maxBackoff: TimeInterval = 128.0 // 128 seconds
+                    let backoff: TimeInterval
+                    if self.receiveRetryCount < 8 {
+                        backoff = initialBackoff * pow(2.0, Double(self.receiveRetryCount))
+                    } else {
+                        backoff = maxBackoff // Keep retrying every 128s indefinitely
+                    }
                     
                     self.receiveRetryCount += 1
                     self.lastReceiveFailure = Date()
                     
-                    if self.receiveRetryCount <= maxRetries {
-                        let reconnectMsg = "🔄 [LanWebSocketTransport] Cloud connection reset (retry \(self.receiveRetryCount)/\(maxRetries)), reconnecting after \(Int(cappedBackoff))s backoff...\n"
-                        print(reconnectMsg)
-                        try? reconnectMsg.appendToFile(path: "/tmp/hypo_debug.log")
-                        fflush(stdout)
-                        
-                        Task { @MainActor [weak self] in
-                            guard let self else { return }
-                            await self.disconnect()
-                            // Reconnect after exponential backoff
-                            try? await Task.sleep(nanoseconds: UInt64(cappedBackoff * 1_000_000_000))
-                            do {
-                                try await self.connect()
-                                // Reset retry count on successful connection
-                                self.receiveRetryCount = 0
-                                self.lastReceiveFailure = nil
-                            } catch {
-                                let connectErrorMsg = "❌ [LanWebSocketTransport] Reconnect failed: \(error.localizedDescription)\n"
-                                print(connectErrorMsg)
-                                try? connectErrorMsg.appendToFile(path: "/tmp/hypo_debug.log")
-                            }
+                    let reconnectMsg = "🔄 [LanWebSocketTransport] Cloud connection reset (retry \(self.receiveRetryCount)), reconnecting after \(Int(backoff))s backoff...\n"
+                    logger.info("🔄 [LanWebSocketTransport] Cloud connection reset (retry \(self.receiveRetryCount)), reconnecting after \(Int(backoff))s backoff...")
+                    fflush(stdout)
+                    
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        await self.disconnect()
+                        // Reconnect after exponential backoff
+                        try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+                        do {
+                            try await self.connect()
+                            // Reset retry count on successful connection
+                            self.receiveRetryCount = 0
+                            self.lastReceiveFailure = nil
+                        } catch {
+                            let connectErrorMsg = "❌ [LanWebSocketTransport] Reconnect failed: \(error.localizedDescription)\n"
+                            self.logger.info("❌ [LanWebSocketTransport] Reconnect failed: \(error.localizedDescription)")
+                            // Will retry again on next receive failure
                         }
-                    } else {
-                        let maxRetriesMsg = "❌ [LanWebSocketTransport] Max receive retries (\(maxRetries)) reached, giving up on cloud connection\n"
-                        print(maxRetriesMsg)
-                        try? maxRetriesMsg.appendToFile(path: "/tmp/hypo_debug.log")
-                        fflush(stdout)
-                        Task { await self.disconnect() }
                     }
                 } else {
                     // For LAN connections, just disconnect
@@ -792,8 +761,7 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
 
     private func handleIncoming(data: Data) {
         let handleMsg = "📥 [LanWebSocketTransport] handleIncoming: \(data.count) bytes\n"
-        print(handleMsg)
-        try? handleMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("📥 [LanWebSocketTransport] handleIncoming: \(data.count) bytes")
         
         do {
             let envelope = try frameCodec.decode(data)
@@ -810,21 +778,15 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
             // Determine transport origin based on configuration
             let transportOrigin: TransportOrigin = (configuration.environment == "cloud" || configuration.url.scheme == "wss") ? .cloud : .lan
             if let handler = onIncomingMessage {
-                let forwardMsg = "📤 [LanWebSocketTransport] Forwarding to onIncomingMessage handler (origin: \(transportOrigin.rawValue))\n"
-                print(forwardMsg)
-                try? forwardMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("📤 [LanWebSocketTransport] Forwarding to onIncomingMessage handler (origin: \(transportOrigin.rawValue))")
                 Task {
                     await handler(data, transportOrigin)
                 }
             } else {
-                let noHandlerMsg = "⚠️ [LanWebSocketTransport] No onIncomingMessage handler set\n"
-                print(noHandlerMsg)
-                try? noHandlerMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.warning("⚠️ [LanWebSocketTransport] No onIncomingMessage handler set")
             }
         } catch {
-            let errorMsg = "❌ [LanWebSocketTransport] Failed to decode incoming data: \(error)\n"
-            print(errorMsg)
-            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.error("❌ [LanWebSocketTransport] Failed to decode incoming data: \(error)")
             Task {
                 await pendingRoundTrips.pruneExpired(referenceDate: Date())
             }
@@ -832,9 +794,7 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     func handleOpen(task: WebSocketTasking) {
-        let openMsg = "✅ [LanWebSocketTransport] handleOpen() called, connection established\n"
-        print(openMsg)
-        try? openMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("✅ [LanWebSocketTransport] handleOpen() called, connection established")
         state = .connected(task)
         touch()
         // Reset receive retry count on successful connection
@@ -848,9 +808,7 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
         handshakeStartedAt = nil
         handshakeContinuation?.resume(returning: ())
         handshakeContinuation = nil
-        let receiveNextMsg = "📡 [LanWebSocketTransport] handleOpen: Starting receiveNext()\n"
-        print(receiveNextMsg)
-        try? receiveNextMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("📡 [LanWebSocketTransport] handleOpen: Starting receiveNext()")
         receiveNext(on: task)
     }
 }

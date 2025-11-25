@@ -209,6 +209,7 @@ public final actor SyncEngine {
         case failed(String)
     }
 
+    private let logger = HypoLogger(category: "SyncEngine")
     private let transport: SyncTransport
     private let cryptoService: CryptoService
     private let keyProvider: DeviceKeyProviding
@@ -270,10 +271,19 @@ public final actor SyncEngine {
         }
 
         // Check if plain text mode is enabled
-        let plainTextMode = defaults.bool(forKey: "plain_text_mode_enabled")
+        // Use the same UserDefaults domain as the app (com.hypo.clipboard)
+        let appDefaults = UserDefaults.standard
+        let plainTextMode = appDefaults.bool(forKey: "plain_text_mode_enabled")
+        
+        // Also check the defaults instance passed to SyncEngine for debugging
+        let engineDefaultsValue = defaults.bool(forKey: "plain_text_mode_enabled")
+        
+        logger.info("🔍 [SyncEngine] Plaintext mode check: appDefaults=\(plainTextMode), engineDefaults=\(engineDefaultsValue), using=\(plainTextMode)")
         
         if plainTextMode {
-            print("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending without encryption")
+            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending without encryption")
+        } else {
+            logger.info("🔒 [SyncEngine] Encryption mode: Sending encrypted")
         }
 
         let plaintext = try encoder.encode(payload)
@@ -284,11 +294,13 @@ public final actor SyncEngine {
         
         if plainTextMode {
             // Plain text mode: use plaintext directly as "ciphertext", with empty nonce/tag
-            print("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending unencrypted payload")
-            print("   Plaintext content: \(String(data: plaintext.prefix(100), encoding: .utf8) ?? "binary")")
+            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending unencrypted payload")
+            logger.info("   Plaintext content: \(String(data: plaintext.prefix(100), encoding: .utf8) ?? "binary")")
             ciphertext = plaintext
             nonce = Data()
             tag = Data()
+            
+            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes")
         } else {
             // Normal encryption mode
             let key = try await keyProvider.key(for: targetDeviceId)
@@ -297,6 +309,8 @@ public final actor SyncEngine {
             ciphertext = sealed.ciphertext
             nonce = sealed.nonce
             tag = sealed.tag
+            
+            logger.info("🔒 [SyncEngine] ENCRYPTED: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes")
         }
 
         let envelope = SyncEnvelope(
@@ -311,6 +325,10 @@ public final actor SyncEngine {
                 encryption: .init(nonce: nonce, tag: tag)
             )
         )
+        
+        // Log final envelope state before sending
+        logger.info("📦 [SyncEngine] Envelope before send: nonce=\(envelope.payload.encryption.nonce.count) bytes, tag=\(envelope.payload.encryption.tag.count) bytes, ciphertext=\(envelope.payload.ciphertext.count) bytes")
+        
         try await transport.send(envelope)
     }
 
@@ -325,27 +343,49 @@ public final actor SyncEngine {
         
         let plaintext: Data
         if isPlainText {
-            print("⚠️ [SyncEngine] PLAIN TEXT MODE: Receiving unencrypted payload")
+            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: Receiving unencrypted payload")
             // Use ciphertext directly as plaintext (it's not actually encrypted)
             plaintext = envelope.payload.ciphertext
         } else {
             let key = try await keyProvider.key(for: senderId)
+            let keyData = key.withUnsafeBytes { Data($0) }
+            logger.info("🔑 [SyncEngine] Loaded key for device \(senderId): \(keyData.count) bytes")
+            logger.info("   Key hex (first 16): \(keyData.prefix(16).map { String(format: "%02x", $0) }.joined())")
+            
             let aad = Data(senderId.utf8)
-            plaintext = try await cryptoService.decrypt(
-                ciphertext: envelope.payload.ciphertext,
-                key: key,
-                nonce: envelope.payload.encryption.nonce,
-                tag: envelope.payload.encryption.tag,
-                aad: aad
-            )
-            print("🔍 [SyncEngine] Decrypted plaintext: \(plaintext.count) bytes")
-            if let plaintextString = String(data: plaintext, encoding: .utf8) {
-                print("🔍 [SyncEngine] Decrypted plaintext JSON: \(plaintextString)")
+            logger.info("🔑 [SyncEngine] AAD: \(senderId) (\(aad.count) bytes)")
+            logger.info("   AAD hex: \(aad.map { String(format: "%02x", $0) }.joined())")
+            
+            logger.info("🔑 [SyncEngine] Ciphertext: \(envelope.payload.ciphertext.count) bytes")
+            logger.info("   Ciphertext hex (first 16): \(envelope.payload.ciphertext.prefix(16).map { String(format: "%02x", $0) }.joined())")
+            
+            logger.info("🔑 [SyncEngine] Nonce: \(envelope.payload.encryption.nonce.count) bytes")
+            logger.info("   Nonce hex: \(envelope.payload.encryption.nonce.map { String(format: "%02x", $0) }.joined())")
+            
+            logger.info("🔑 [SyncEngine] Tag: \(envelope.payload.encryption.tag.count) bytes")
+            logger.info("   Tag hex: \(envelope.payload.encryption.tag.map { String(format: "%02x", $0) }.joined())")
+            
+            do {
+                plaintext = try await cryptoService.decrypt(
+                    ciphertext: envelope.payload.ciphertext,
+                    key: key,
+                    nonce: envelope.payload.encryption.nonce,
+                    tag: envelope.payload.encryption.tag,
+                    aad: aad
+                )
+                logger.info("✅ [SyncEngine] Decrypted plaintext: \(plaintext.count) bytes")
+                if let plaintextString = String(data: plaintext, encoding: .utf8) {
+                    logger.info("🔍 [SyncEngine] Decrypted plaintext JSON: \(plaintextString)")
+                }
+            } catch {
+                logger.info("❌ [SyncEngine] Decryption failed: \(error)")
+                logger.info("   Error type: \(String(describing: type(of: error)))")
+                throw error
             }
         }
         
         let payload = try decoder.decode(ClipboardPayload.self, from: plaintext)
-        print("✅ [SyncEngine] ClipboardPayload decoded successfully: type=\(payload.contentType.rawValue), data=\(payload.data.count) bytes")
+        logger.info("✅ [SyncEngine] ClipboardPayload decoded successfully: type=\(payload.contentType.rawValue), data=\(payload.data.count) bytes")
         return payload
     }
 }

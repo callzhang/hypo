@@ -63,7 +63,6 @@ class ConnectionStatusProber @Inject constructor(
             }
         }
         
-        Log.i(TAG, "Connection status prober started - will probe every 10 seconds")
     }
     
     /**
@@ -135,13 +134,7 @@ class ConnectionStatusProber @Inject constructor(
                 val responseCode = connection.responseCode
                 connection.disconnect()
                 
-                val isHealthy = responseCode == 200
-                if (isHealthy) {
-                    Log.d(TAG, "🏥 Server health check passed (HTTP $responseCode)")
-                } else {
-                    Log.w(TAG, "🏥 Server health check failed (HTTP $responseCode)")
-                }
-                isHealthy
+                responseCode == 200
             } catch (e: Exception) {
                 Log.w(TAG, "🏥 Server health check failed: ${e.message}")
                 false
@@ -173,13 +166,14 @@ class ConnectionStatusProber @Inject constructor(
                     // WebSocket is connected - we're definitely online
                     transportManager.updateConnectionState(ConnectionState.ConnectedCloud)
                 } else {
-                    // WebSocket is not connected - check if server is reachable via HTTP
-                    // If server is reachable, show as ConnectedCloud (WebSocket will connect on demand)
+                    // WebSocket is not connected - don't show as connected just because server is reachable
+                    // The WebSocket must actually be connected for cloud sync to work
+                    transportManager.updateConnectionState(ConnectionState.Idle)
+                    // Try to establish connection if server is reachable
                     val serverReachable = checkServerHealth()
                     if (serverReachable) {
-                        transportManager.updateConnectionState(ConnectionState.ConnectedCloud)
-                    } else {
-                        transportManager.updateConnectionState(ConnectionState.Idle)
+                        // Force connection attempt
+                        cloudWebSocketClient.startReceiving()
                     }
                 }
             }
@@ -215,25 +209,16 @@ class ConnectionStatusProber @Inject constructor(
                         it.key.replace("-", "").equals(deviceId.replace("-", ""), ignoreCase = true)
                     }?.value
                 
+                // Get current cloud connection state for accurate status
+                val cloudConnected = cloudWebSocketClient.isConnected()
+                
                 val isOnline = when {
-                    // Device is discovered AND has LAN transport → online
-                    // For LAN, we consider it online if discovered (WebSocket will be established on-demand during sync)
-                    isDiscovered && transport == ActiveTransport.LAN -> {
-                        true // Device is on LAN, connection will be established when needed
-                    }
-                    // Device has CLOUD transport → online
-                    transport == ActiveTransport.CLOUD -> {
-                        // Cloud transport is considered online if we have transport status
-                        // (RelayWebSocketClient manages its own connection lifecycle)
-                        true
-                    }
-                    // Device is discovered but no transport → might be connecting, but still consider online
-                    // This handles the case where device was just paired and transport status hasn't been set yet
-                    isDiscovered -> {
-                        // If device is discovered, mark it as LAN-connected (it's on the same network)
-                        transportManager.markDeviceConnected(deviceId, ActiveTransport.LAN)
-                        true
-                    }
+                    // Device is discovered on LAN → online (LAN connection will be established on-demand during sync)
+                    isDiscovered -> true
+                    // Device has CLOUD transport AND cloud server is connected → online via cloud
+                    transport == ActiveTransport.CLOUD && cloudConnected -> true
+                    // Device has CLOUD transport but cloud server not connected → offline
+                    transport == ActiveTransport.CLOUD -> false
                     // Device not discovered and no transport → offline
                     else -> false
                 }
@@ -246,6 +231,10 @@ class ConnectionStatusProber @Inject constructor(
                     } else if (transport != null) {
                         transportManager.markDeviceConnected(deviceId, transport)
                     }
+                } else if (!isDiscovered && transport == null && cloudConnected) {
+                    // Device is not discovered on LAN, has no transport, but cloud is connected
+                    // Mark it with CLOUD transport so it shows as online via cloud
+                    transportManager.markDeviceConnected(deviceId, ActiveTransport.CLOUD)
                 }
             }
         } catch (e: Exception) {

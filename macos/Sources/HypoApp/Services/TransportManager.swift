@@ -12,6 +12,7 @@ import os
 
 @MainActor
 public final class TransportManager {
+    private let logger = HypoLogger(category: "TransportManager")
     private let provider: TransportProvider
     private let preferenceStorage: PreferenceStorage
     private let browser: BonjourBrowser
@@ -82,16 +83,18 @@ public final class TransportManager {
         // Restore persisted peers from cache
         let cachedPeers = discoveryCache.loadPeers()
         self.lanPeers = cachedPeers
-        let restoreMsg = "🔄 [TransportManager] Restored \(cachedPeers.count) peers from cache\n"
-        print(restoreMsg)
-        try? restoreMsg.appendToFile(path: "/tmp/hypo_debug.log")
         self.webSocketServer = webSocketServer
         
+        // Initialize incomingHandler first to avoid "used before initialized" error
         // Set up incoming clipboard handler if history store is provided
         if let historyStore = historyStore {
-            let transport = LanSyncTransport(server: webSocketServer)
             let keyProvider = KeychainDeviceKeyProvider()
             let deviceIdentity = DeviceIdentity()
+            // Set local device ID in WebSocket server for target filtering
+            webSocketServer.setLocalDeviceId(deviceIdentity.deviceId.uuidString)
+            
+            // Create transport without closure (will be set later)
+            let transport = LanSyncTransport(server: webSocketServer)
             let syncEngine = SyncEngine(
                 transport: transport,
                 keyProvider: keyProvider,
@@ -103,6 +106,10 @@ public final class TransportManager {
                 syncEngine: syncEngine,
                 historyStore: historyStore
             )
+            // Set discovered peers closure after self is fully initialized
+            transport.setGetDiscoveredPeers { [weak self] in
+                self?.lanDiscoveredPeers() ?? []
+            }
         } else {
             self.incomingHandler = nil
         }
@@ -114,14 +121,10 @@ public final class TransportManager {
         if let defaultProvider = provider as? DefaultTransportProvider,
            let handler = incomingHandler {
            defaultProvider.setCloudIncomingMessageHandler { [weak handler] data, transportOrigin in
-               let cloudMsg = "☁️ [TransportManager] Cloud relay message received: \(data.count) bytes, origin: \(transportOrigin.rawValue)\n"
-               print(cloudMsg)
-               try? cloudMsg.appendToFile(path: "/tmp/hypo_debug.log")
+               NSLog("☁️ [TransportManager] Cloud relay message received: \(data.count) bytes, origin: \(transportOrigin.rawValue)")
                await handler?.handle(data, transportOrigin: transportOrigin)
            }
-            let cloudHandlerMsg = "✅ [TransportManager] Cloud relay incoming message handler set\n"
-            print(cloudHandlerMsg)
-            try? cloudHandlerMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("✅ [TransportManager] Cloud relay incoming message handler set")
         }
         
         // Connection status prober will be initialized after historyViewModel is set
@@ -153,27 +156,16 @@ public final class TransportManager {
         // Start LAN services immediately (menu bar apps don't trigger didBecomeActive on launch)
         initTask = Task { @MainActor [weak self] in
             guard let self = self else {
-                let deallocMsg = "⚠️ [TransportManager] Self deallocated in initTask\n"
-                print(deallocMsg)
-                try? deallocMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                NSLog("⚠️ [TransportManager] Self deallocated in initTask")
                 return
             }
             let logPath = "/tmp/hypo_debug.log"
-            try? "🔷 [TransportManager] Init: Starting activation task\n".appendToFile(path: logPath)
             await self.activateLanServices()
-            try? "🔷 [TransportManager] Init: Activation task completed\n".appendToFile(path: logPath)
             
             // CRITICAL: Add immediate logging to verify execution continues
-            let continueMsg = "➡️ [TransportManager] Execution continues after activateLanServices()\n"
-            print(continueMsg)
-            try? continueMsg.appendToFile(path: logPath)
-            
             // Note: Auto-connect is now handled by ConnectionStatusProber
             // which is initialized via setHistoryViewModel()
             // This avoids duplicate connection attempts
-            let skipMsg = "ℹ️ [TransportManager] Skipping auto-connect (handled by ConnectionStatusProber)\n"
-            print(skipMsg)
-            try? skipMsg.appendToFile(path: logPath)
         }
         #else
         Task { await activateLanServices() }
@@ -192,15 +184,10 @@ public final class TransportManager {
     public func setHistoryViewModel(_ viewModel: ClipboardHistoryViewModel) {
         // Prevent duplicate initialization
         guard self.historyViewModel == nil || connectionStatusProber == nil else {
-            let skipMsg = "🔧 [TransportManager] setHistoryViewModel already called, skipping\n"
-            print(skipMsg)
-            try? skipMsg.appendToFile(path: "/tmp/hypo_debug.log")
             return
         }
         
-        let msg = "🔧 [TransportManager] setHistoryViewModel called\n"
-        print(msg)
-        try? msg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🔧 [TransportManager] setHistoryViewModel called")
         
         self.historyViewModel = viewModel
         // Set up callback for incoming clipboard handler
@@ -208,12 +195,16 @@ public final class TransportManager {
             await self?.historyViewModel?.add(entry)
         }
         
+        // Set discovered peers closure for DefaultTransportProvider's LanSyncTransport
+        if let defaultProvider = provider as? DefaultTransportProvider {
+            defaultProvider.setGetDiscoveredPeers { [weak self] in
+                self?.lanDiscoveredPeers() ?? []
+            }
+        }
+        
         // Initialize connection status prober now that we have the ViewModel
         #if canImport(AppKit)
         if connectionStatusProber == nil {
-            let initMsg = "🔧 [TransportManager] Initializing ConnectionStatusProber\n"
-            print(initMsg)
-            try? initMsg.appendToFile(path: "/tmp/hypo_debug.log")
             
             connectionStatusProber = ConnectionStatusProber(
                 historyViewModel: viewModel,
@@ -224,13 +215,7 @@ public final class TransportManager {
             // Start event-driven checking (no periodic polling)
             connectionStatusProber?.start()
             
-            let startedMsg = "🔧 [TransportManager] ConnectionStatusProber started (event-driven)\n"
-            print(startedMsg)
-            try? startedMsg.appendToFile(path: "/tmp/hypo_debug.log")
         } else {
-            let alreadyMsg = "🔧 [TransportManager] ConnectionStatusProber already initialized\n"
-            print(alreadyMsg)
-            try? alreadyMsg.appendToFile(path: "/tmp/hypo_debug.log")
         }
         #endif
     }
@@ -244,8 +229,7 @@ public final class TransportManager {
     public func updateConnectionState(_ newState: ConnectionState) {
         if connectionState != newState {
             let msg = "🔄 [TransportManager] Updating connectionState: \(connectionState) → \(newState)\n"
-            print(msg)
-            try? msg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info(msg)
             connectionState = newState
         }
     }
@@ -253,69 +237,49 @@ public final class TransportManager {
     /// Start auto-connect to cloud relay
     @MainActor
     private func startAutoConnect() async {
-        let startFuncMsg = "🚀 [TransportManager] startAutoConnect() called\n"
-        print(startFuncMsg)
-        try? startFuncMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🚀 [TransportManager] startAutoConnect() called")
         
         autoConnectTask = Task { @MainActor in
-            let taskStartMsg = "🚀 [TransportManager] Auto-connect Task started\n"
-            print(taskStartMsg)
-            try? taskStartMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("🚀 [TransportManager] Auto-connect Task started")
             let logPath = "/tmp/hypo_debug.log"
             do {
                 // Auto-connect to cloud relay after a delay to show server availability
-                let delayMsg = "⏳ [TransportManager] Waiting 3 seconds before cloud connection attempt\n"
-                print(delayMsg)
-                try? delayMsg.appendToFile(path: logPath)
+                logger.info("⏳ [TransportManager] Waiting 3 seconds before cloud connection attempt")
                 
                 try await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
                 
-                let afterDelayMsg = "⏰ [TransportManager] Delay completed, proceeding with cloud connection\n"
-                print(afterDelayMsg)
-                try? afterDelayMsg.appendToFile(path: logPath)
+                logger.info("⏰ [TransportManager] Delay completed, proceeding with cloud connection")
                 
-                let checkMsg = "🔍 [TransportManager] Checking cloud transport provider\n"
-                print(checkMsg)
-                try? checkMsg.appendToFile(path: logPath)
+                logger.info("🔍 [TransportManager] Checking cloud transport provider")
                 
                 if let provider = provider as? DefaultTransportProvider {
-                    let providerMsg = "✅ [TransportManager] Provider is DefaultTransportProvider\n"
-                    print(providerMsg)
-                    try? providerMsg.appendToFile(path: logPath)
+                    logger.info("✅ [TransportManager] Provider is DefaultTransportProvider")
                     let cloudTransport = provider.getCloudTransport()
                     if !cloudTransport.isConnected() {
-                        let autoMsg = "☁️ [TransportManager] Auto-connecting to cloud relay\n"
-                        print(autoMsg)
-                        try? autoMsg.appendToFile(path: logPath)
+                        logger.info("☁️ [TransportManager] Auto-connecting to cloud relay")
                         
                         connectionState = .connectingCloud
                         do {
                             try await cloudTransport.connect()
                             connectionState = .connectedCloud
                             let successMsg = "✅ [TransportManager] Successfully connected to cloud relay\n"
-                            print(successMsg)
-                            try? successMsg.appendToFile(path: logPath)
+                            logger.info("✅ [TransportManager] Successfully connected to cloud relay")
                         } catch {
                             connectionState = .idle
                             let errorMsg = "❌ [TransportManager] Cloud connection failed: \(error.localizedDescription)\n"
-                            print(errorMsg)
-                            try? errorMsg.appendToFile(path: logPath)
+                            logger.info("❌ [TransportManager] Cloud connection failed: \(error.localizedDescription)")
                         }
                     } else {
                         connectionState = .connectedCloud
                         let alreadyMsg = "☁️ [TransportManager] Cloud relay already connected\n"
-                        print(alreadyMsg)
-                        try? alreadyMsg.appendToFile(path: logPath)
+                        logger.info("☁️ [TransportManager] Cloud relay already connected")
                     }
                 } else {
                     let noProviderMsg = "⚠️ [TransportManager] Provider is not DefaultTransportProvider: \(type(of: provider))\n"
-                    print(noProviderMsg)
-                    try? noProviderMsg.appendToFile(path: logPath)
+                    logger.info("⚠️ [TransportManager] Provider is not DefaultTransportProvider: \(type(of: provider))")
                 }
             } catch {
-                let errorMsg = "❌ [TransportManager] Auto-connect task error: \(error.localizedDescription)\n"
-                print(errorMsg)
-                try? errorMsg.appendToFile(path: logPath)
+                logger.error("❌ [TransportManager] Auto-connect task error: \(error.localizedDescription)")
             }
         }
     }
@@ -335,9 +299,6 @@ public final class TransportManager {
 
     public func lanDiscoveredPeers() -> [DiscoveredPeer] {
         let peers = lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
-        let peersMsg = "🔍 [TransportManager] lanDiscoveredPeers() returning \(peers.count) peers: \(peers.map { "\($0.serviceName):\($0.endpoint.metadata["device_id"] ?? "none")" }.joined(separator: ", "))\n"
-        print(peersMsg)
-        try? peersMsg.appendToFile(path: "/tmp/hypo_debug.log")
         return peers
     }
 
@@ -447,25 +408,19 @@ public final class TransportManager {
 
     private func activateLanServices() async {
         let msg = "🔵 [TransportManager] activateLanServices called, port=\(lanConfiguration.port), isServerRunning=\(isServerRunning)\n"
-        try? msg.appendToFile(path: "/tmp/hypo_debug.log")
         if !isAdvertising, lanConfiguration.port > 0 {
             publisher.start(with: lanConfiguration)
             isAdvertising = true
-            try? "🟢 [TransportManager] Bonjour publisher started\n".appendToFile(path: "/tmp/hypo_debug.log")
         }
         
         // Start WebSocket server
-        try? "🟡 [TransportManager] About to check server: isServerRunning=\(isServerRunning), port=\(lanConfiguration.port)\n".appendToFile(path: "/tmp/hypo_debug.log")
         if !isServerRunning, lanConfiguration.port > 0 {
-            try? "🟡 [TransportManager] Attempting to start WebSocket server...\n".appendToFile(path: "/tmp/hypo_debug.log")
             do {
                 try webSocketServer.start(port: lanConfiguration.port)
                 isServerRunning = true
-                try? "✅ [TransportManager] WebSocket server started successfully!\n".appendToFile(path: "/tmp/hypo_debug.log")
             } catch {
-                try? "❌ [TransportManager] Failed to start WebSocket server: \(error.localizedDescription)\n".appendToFile(path: "/tmp/hypo_debug.log")
                 #if canImport(os)
-                let serverLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
+                let serverLogger = HypoLogger(category: "transport")
                 serverLogger.error("Failed to start WebSocket server: \(error.localizedDescription)")
                 #endif
             }
@@ -481,7 +436,6 @@ public final class TransportManager {
         }
         await browser.start()
         let browserMsg = "🔍 [TransportManager] Bonjour browser started, waiting for peers...\n"
-        try? browserMsg.appendToFile(path: "/tmp/hypo_debug.log")
         startPruneTaskIfNeeded()
     }
 
@@ -803,22 +757,16 @@ public final class TransportManager {
     private func handle(event: LanDiscoveryEvent) {
         switch event {
         case .added(let peer):
-            let eventMsg = "🔍 [TransportManager] Peer discovered: \(peer.serviceName) at \(peer.endpoint.host):\(peer.endpoint.port), device_id=\(peer.endpoint.metadata["device_id"] ?? "none")\n"
-            print(eventMsg)
-            try? eventMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("🔍 [TransportManager] Peer discovered: \(peer.serviceName) at \(peer.endpoint.host):\(peer.endpoint.port), device_id=\(peer.endpoint.metadata["device_id"] ?? "none")")
             lanPeers[peer.serviceName] = peer
             lastSeen[peer.serviceName] = peer.lastSeen
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
             let afterMsg = "🔍 [TransportManager] After adding peer, lanPeers.count=\(lanPeers.count), serviceName=\(peer.serviceName)\n"
-            print(afterMsg)
-            try? afterMsg.appendToFile(path: "/tmp/hypo_debug.log")
             // Trigger connection status probe when peer is discovered
             connectionStatusProber?.probeNow()
         case .removed(let serviceName):
             let eventMsg = "🔍 [TransportManager] Peer removed: \(serviceName)\n"
-            print(eventMsg)
-            try? eventMsg.appendToFile(path: "/tmp/hypo_debug.log")
             lanPeers.removeValue(forKey: serviceName)
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
@@ -855,10 +803,10 @@ public final class TransportManager {
             let agreementKey = try loadOrCreateLanPairingKey()
             publicKeyBase64 = agreementKey.publicKey.rawRepresentation.base64EncodedString()
             if let preview = publicKeyBase64?.prefix(16) {
-                print("🔑 [TransportManager] Bonjour config: Using public key \(preview)...")
+                NSLog("🔑 [TransportManager] Bonjour config: Using public key \(preview)...")
             }
         } catch {
-            print("❌ [TransportManager] Failed to load/create LAN pairing key for Bonjour: \(error)")
+            NSLog("❌ [TransportManager] Failed to load/create LAN pairing key for Bonjour: \(error)")
             publicKeyBase64 = nil
         }
         
@@ -874,26 +822,23 @@ public final class TransportManager {
         )
     }
     private static func loadOrCreateLanPairingKey() throws -> Curve25519.KeyAgreement.PrivateKey {
+        let logger = HypoLogger(category: "TransportManager")
         let keychain = KeychainKeyStore()
         if let stored = try keychain.load(for: lanPairingKeyIdentifier) {
             let data = stored.withUnsafeBytes { Data($0) }
-            print("🔑 [TransportManager] Loading existing LAN pairing key from keychain (size: \(data.count) bytes)")
             do {
                 let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data)
-                print("🔑 [TransportManager] Successfully loaded existing key, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
                 return key
             } catch {
-                print("❌ [TransportManager] Failed to reconstruct key from keychain data: \(error)")
+                logger.error("❌ [TransportManager] Failed to reconstruct key from keychain data: \(error)")
                 // If key reconstruction fails, delete the corrupted entry and create a new one
                 try? keychain.delete(for: lanPairingKeyIdentifier)
                 throw error
             }
         }
 
-        print("🔑 [TransportManager] Creating new LAN pairing key")
         let key = Curve25519.KeyAgreement.PrivateKey()
         try keychain.save(key: SymmetricKey(data: key.rawRepresentation), for: lanPairingKeyIdentifier)
-        print("🔑 [TransportManager] Saved new key to keychain, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
         return key
     }
 }
@@ -1099,27 +1044,34 @@ private final class ApplicationLifecycleObserver {
 
 extension TransportManager: LanWebSocketServerDelegate {
     nonisolated public func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {
+        logger.info("🔵 [TransportManager] didReceivePairingChallenge called from connection: \(connection.uuidString.prefix(8))")
         #if canImport(os)
-        let pairingLogger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
-        pairingLogger.info("📱 Received pairing challenge from: \(challenge.androidDeviceName)")
+        let pairingLogger = HypoLogger(category: "pairing")
+        pairingLogger.info("📱 Received pairing challenge from: \(challenge.initiatorDeviceName)")
         #endif
         
         // Auto-accept pairing for LAN auto-discovery
         Task { @MainActor in
+            logger.info("🔵 [TransportManager] Inside Task, about to call handlePairingChallenge")
             await self.handlePairingChallenge(challenge, connectionId: connection)
+            logger.info("✅ [TransportManager] handlePairingChallenge completed")
         }
     }
     
     private func handlePairingChallenge(_ challenge: PairingChallengeMessage, connectionId: UUID) async {
+        logger.info("🔵 [TransportManager] handlePairingChallenge START: device=\(challenge.initiatorDeviceName), connection=\(connectionId.uuidString.prefix(8))")
         // Remove try-catch to let errors propagate
         #if canImport(os)
-        let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
-        logger.info("🔄 Processing pairing challenge from: \(challenge.androidDeviceName)")
+        let logger = HypoLogger(category: "pairing")
+        logger.info("🔄 Processing pairing challenge from: \(challenge.initiatorDeviceName)")
         #endif
         
         do {
+            logger.info("🔵 [TransportManager] Inside do block, creating pairing session...")
             // Create a pairing session
+            logger.info("🔵 [TransportManager] Creating DeviceIdentity...")
             let deviceIdentity = DeviceIdentity()
+            logger.info("🔵 [TransportManager] Creating PairingSession.Configuration...")
             let configuration = PairingSession.Configuration(
                 service: lanConfiguration.serviceName,
                 port: lanConfiguration.port,
@@ -1130,157 +1082,117 @@ extension TransportManager: LanWebSocketServerDelegate {
             #if canImport(os)
             logger.info("📝 Starting pairing session...")
             #endif
-            print("🔑 [TransportManager] Loading LAN pairing key for challenge handling...")
+            // Always use ephemeral key for pairing to ensure key rotation
+            // This ensures a new shared key is derived each time, even for re-pairing
+            // Note: Android uses the persistent public key from Bonjour, but since Android
+            // generates a new ephemeral private key each time, the shared key will still be
+            // different each pairing. macOS uses ephemeral key here for consistency and
+            // to ensure forward secrecy even if Android's key generation changes.
+            logger.info("🔑 [TransportManager] Setting up pairing session for key rotation...")
+            // Use persistent key for initial shared key derivation (to decrypt challenge)
+            // PairingSession will generate a separate ephemeral key for ACK
             let persistentKey = try Self.loadOrCreateLanPairingKey()
-            print("🔑 [TransportManager] Loaded key, public key: \(persistentKey.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
+            logger.info("🔑 [TransportManager] Using persistent key for initial challenge decryption")
+            logger.info("🔵 [TransportManager] Creating PairingSession...")
             let pairingSession = PairingSession(identity: deviceIdentity.deviceId)
+            logger.info("🔵 [TransportManager] Calling pairingSession.start()...")
+            // Pass persistent key for initial shared key derivation (to decrypt challenge)
+            // PairingSession will generate a separate ephemeral key for ACK
             try pairingSession.start(with: configuration, keyAgreementKey: persistentKey)
-            print("🔑 [TransportManager] Pairing session started with persistent key")
+            logger.info("🔑 [TransportManager] Pairing session started with persistent key (ephemeral key will be generated for ACK)")
             
             #if canImport(os)
             logger.info("🔐 Handling challenge to generate ACK...")
             #endif
+            logger.info("🔵 [TransportManager] About to call pairingSession.handleChallenge()...")
             // Handle the challenge and generate ACK - let errors propagate
-            guard let ack = await pairingSession.handleChallenge(challenge) else {
+            let ackResult = await pairingSession.handleChallenge(challenge)
+            logger.info("🔵 [TransportManager] handleChallenge returned, result is \(ackResult == nil ? "nil" : "non-nil")")
+            guard let ack = ackResult else {
                 #if canImport(os)
                 logger.error("❌ Failed to generate pairing ACK - handleChallenge returned nil")
                 #endif
-                print("❌ [TransportManager] Failed to generate pairing ACK - handleChallenge returned nil")
+                logger.info("❌ [TransportManager] Failed to generate pairing ACK - handleChallenge returned nil")
                 return
             }
             
-            #if canImport(os)
-            logger.info("✅ Generated ACK with challengeId: \(ack.challengeId.uuidString)")
-            #endif
-            print("✅ [TransportManager] Generated ACK with challengeId: \(ack.challengeId.uuidString)")
-            
-            #if canImport(os)
-            logger.info("📤 Sending ACK to Android device...")
-            #endif
-            // Send ACK back to Android - let errors propagate
+            // Send ACK back to Android
             try webSocketServer.sendPairingAck(ack, to: connectionId)
-            
-            #if canImport(os)
-            logger.info("✅ Pairing completed with \(challenge.androidDeviceName)")
-            #endif
+            logger.info("✅ Pairing completed with \(challenge.initiatorDeviceName)")
             
             // Update connection metadata with device ID
-            webSocketServer.updateConnectionMetadata(connectionId: connectionId, deviceId: challenge.androidDeviceId)
-            let metadataMsg = "✅ [TransportManager] Updated connection metadata: connectionId=\(connectionId.uuidString.prefix(8)), deviceId=\(challenge.androidDeviceId)\n"
-            print(metadataMsg)
-            try? metadataMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            webSocketServer.updateConnectionMetadata(connectionId: connectionId, deviceId: challenge.initiatorDeviceId)
             
             // Notify about successful pairing (for UI/history updates)
-            print("📤 [TransportManager] Posting PairingCompleted notification")
-            print("   deviceId: \(challenge.androidDeviceId)")
-            print("   deviceName: \(challenge.androidDeviceName)")
-            
-            // Write to debug log
-            try? "📤 [TransportManager] Posting PairingCompleted notification\n".appendToFile(path: "/tmp/hypo_debug.log")
-            try? "   deviceId: \(challenge.androidDeviceId)\n".appendToFile(path: "/tmp/hypo_debug.log")
-            try? "   deviceName: \(challenge.androidDeviceName)\n".appendToFile(path: "/tmp/hypo_debug.log")
-            
             NotificationCenter.default.post(
                 name: NSNotification.Name("PairingCompleted"),
                 object: nil,
                 userInfo: [
-                    "deviceId": challenge.androidDeviceId,
-                    "deviceName": challenge.androidDeviceName
+                    "deviceId": challenge.initiatorDeviceId,
+                    "deviceName": challenge.initiatorDeviceName
                 ]
             )
             
             // Also notify that device is now online (connection is established)
-            let onlineMsg = "✅ [TransportManager] Marking device as online after pairing: \(challenge.androidDeviceId)\n"
-            print(onlineMsg)
-            try? onlineMsg.appendToFile(path: "/tmp/hypo_debug.log")
             NotificationCenter.default.post(
                 name: NSNotification.Name("DeviceConnectionStatusChanged"),
                 object: nil,
                 userInfo: [
-                    "deviceId": challenge.androidDeviceId,
+                    "deviceId": challenge.initiatorDeviceId,
                     "isOnline": true
                 ]
             )
-            print("✅ [TransportManager] PairingCompleted notification posted")
-            try? "✅ [TransportManager] PairingCompleted notification posted\n".appendToFile(path: "/tmp/hypo_debug.log")
         } catch {
             #if canImport(os)
-            let logger = Logger(subsystem: "com.hypo.clipboard", category: "pairing")
+            let logger = HypoLogger(category: "pairing")
             logger.error("❌ Pairing failed with error: \(error.localizedDescription)")
             logger.error("❌ Error type: \(String(describing: type(of: error)))")
             logger.error("❌ Error details: \(error)")
             #endif
             // Log error but don't crash - just return
-            print("❌ Pairing failed: \(error)")
+            logger.error("❌ [TransportManager] Pairing failed: \(error.localizedDescription), type: \(String(describing: type(of: error)))")
             return
         }
     }
     
     nonisolated public func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {
         // Forward clipboard data to the transport for processing
-        let callMsg = "📥 [TransportManager] server(_:didReceiveClipboardData:from:) CALLED: \(connection.uuidString.prefix(8)), \(data.count) bytes\n"
-        print(callMsg)
-        try? callMsg.appendToFile(path: "/tmp/hypo_debug.log")
-        fflush(stdout)  // Force flush stdout
-        #if canImport(os)
-        let syncLogger = Logger(subsystem: "com.hypo.clipboard", category: "sync")
-        syncLogger.info("📥 CLIPBOARD RECEIVED: from connection \(connection.uuidString.prefix(8)), \(data.count) bytes")
-        #endif
-        print("📥 [TransportManager] CLIPBOARD RECEIVED: from \(connection.uuidString.prefix(8)), \(data.count) bytes")
-        try? "📥 [TransportManager] CLIPBOARD RECEIVED: from \(connection.uuidString.prefix(8)), \(data.count) bytes\n".appendToFile(path: "/tmp/hypo_debug.log")
-        
-        // Extract deviceId from envelope to update connection metadata (but NOT online status)
-        // Online status is determined by periodic checks only, not sync signals
-        print("🔍 [TransportManager] About to create Task for processing clipboard data")
-        try? "🔍 [TransportManager] About to create Task for processing clipboard data\n".appendToFile(path: "/tmp/hypo_debug.log")
         Task { @MainActor in
-            print("🔍 [TransportManager] Task started, incomingHandler: \(self.incomingHandler != nil ? "exists" : "nil")")
-            try? "🔍 [TransportManager] Task started, incomingHandler: \(self.incomingHandler != nil ? "exists" : "nil")\n".appendToFile(path: "/tmp/hypo_debug.log")
             // Try to extract deviceId from the frame-encoded data
             let frameCodec = TransportFrameCodec()
             do {
                 let envelope = try frameCodec.decode(data)
                 let deviceId = envelope.payload.deviceId
-                print("✅ [TransportManager] Extracted deviceId from envelope: \(deviceId)")
-                try? "✅ [TransportManager] Extracted deviceId from envelope: \(deviceId)\n".appendToFile(path: "/tmp/hypo_debug.log")
                 
                 // Update connection metadata if not already set (for ConnectionStatusProber to use)
                 if server.connectionMetadata(for: connection)?.deviceId == nil {
                     server.updateConnectionMetadata(connectionId: connection, deviceId: deviceId)
-                    print("✅ [TransportManager] Updated connection metadata with deviceId: \(deviceId)")
-                    try? "✅ [TransportManager] Updated connection metadata with deviceId: \(deviceId)\n".appendToFile(path: "/tmp/hypo_debug.log")
                 }
                 // Note: We do NOT update online status here - that's handled by ConnectionStatusProber periodic checks
             } catch {
-                print("⚠️ [TransportManager] Failed to decode envelope for metadata update: \(error)")
-                try? "⚠️ [TransportManager] Failed to decode envelope for metadata update: \(error)\n".appendToFile(path: "/tmp/hypo_debug.log")
+                logger.debug("⚠️ Failed to decode envelope for metadata update: \(error)")
                 // Try to get deviceId from connection metadata as fallback
                 if let metadata = server.connectionMetadata(for: connection),
                    let deviceId = metadata.deviceId {
-                    print("✅ [TransportManager] Using deviceId from connection metadata: \(deviceId)")
-                    try? "✅ [TransportManager] Using deviceId from connection metadata: \(deviceId)\n".appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("✅ [TransportManager] Using deviceId from connection metadata: \(deviceId)")
                 }
             }
             
             // Process incoming clipboard data through IncomingClipboardHandler
-            print("🔍 [TransportManager] About to call incomingHandler?.handle(data)")
-            try? "🔍 [TransportManager] About to call incomingHandler?.handle(data)\n".appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("🔍 [TransportManager] About to call incomingHandler?.handle(data)")
             if let handler = self.incomingHandler {
-                print("✅ [TransportManager] incomingHandler exists, calling handle()")
-                try? "✅ [TransportManager] incomingHandler exists, calling handle()\n".appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("✅ [TransportManager] incomingHandler exists, calling handle()")
                 await handler.handle(data, transportOrigin: .lan)
-                print("✅ [TransportManager] incomingHandler.handle() completed")
-                try? "✅ [TransportManager] incomingHandler.handle() completed\n".appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("✅ [TransportManager] incomingHandler.handle() completed")
             } else {
-                print("❌ [TransportManager] incomingHandler is nil!")
-                try? "❌ [TransportManager] incomingHandler is nil!\n".appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("❌ [TransportManager] incomingHandler is nil!")
             }
         }
     }
     
     nonisolated public func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID) {
         #if canImport(os)
-        let connLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
+        let connLogger = HypoLogger(category: "transport")
         connLogger.info("WebSocket connection established: \(id.uuidString)")
         #endif
         // Update device online status when connection is established
@@ -1288,9 +1200,8 @@ extension TransportManager: LanWebSocketServerDelegate {
             // Try to find device ID from connection metadata
             if let metadata = server.connectionMetadata(for: id),
                let deviceId = metadata.deviceId {
-                let establishedMsg = "✅ [TransportManager] Connection established for device: \(deviceId)\n"
-                print(establishedMsg)
-                try? establishedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                let metadataMsg = "✅ [TransportManager] Connection established for device: \(deviceId)"
+                logger.info(metadataMsg)
                 NotificationCenter.default.post(
                     name: NSNotification.Name("DeviceConnectionStatusChanged"),
                     object: nil,
@@ -1300,16 +1211,14 @@ extension TransportManager: LanWebSocketServerDelegate {
                     ]
                 )
             } else {
-                let noIdMsg = "⚠️ [TransportManager] Connection established but no deviceId in metadata yet (will update when handshake completes)\n"
-                print(noIdMsg)
-                try? noIdMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("⚠️ [TransportManager] Connection established but no deviceId in metadata yet (will update when handshake completes)")
             }
         }
     }
     
     nonisolated public func server(_ server: LanWebSocketServer, didCloseConnection id: UUID) {
         #if canImport(os)
-        let closeLogger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
+        let closeLogger = HypoLogger(category: "transport")
         closeLogger.info("WebSocket connection closed: \(id.uuidString)")
         #endif
         // Update device online status when connection is closed

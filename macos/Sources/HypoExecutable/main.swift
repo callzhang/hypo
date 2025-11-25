@@ -11,10 +11,10 @@ import AppKit
 struct HypoCommandApp {
     static func main() {
         #if os(macOS)
-        print("Hypo macOS app - use Xcode workspace to run the SwiftUI app")
-        print("Library built successfully with crypto and sync components")
+        logger.info("Hypo macOS app - use Xcode workspace to run the SwiftUI app")
+        logger.info("Library built successfully with crypto and sync components")
         #else
-        print("Hypo executable is only supported on macOS.")
+        logger.info("Hypo executable is only supported on macOS.")
         #endif
     }
 }

@@ -48,3 +48,4 @@ log stream --predicate 'process == "TestHotkey"' --level debug
    - Check if `RegisterEventHotKey` returns an error code
 
 
+

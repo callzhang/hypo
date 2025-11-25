@@ -38,7 +38,7 @@ public actor MemoryProfiler {
     private var snapshots: [MemorySnapshot] = []
     private let maxSnapshots: Int
     private var monitoringTask: Task<Void, Never>?
-    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "memory-profiler")
+    private let logger = HypoLogger(category: "memory-profiler")
     
     private weak var historyStore: HistoryStore?
     private weak var connectionPool: WebSocketConnectionPool?
@@ -219,19 +219,19 @@ public actor MemoryProfiler {
         let growthWarningMBPerHour: Double = 10 // 10 MB/hour
         
         if snapshot.residentMemoryMB > residentWarningMB {
-            logger.warning("High memory usage detected: \(snapshot.residentMemoryMB, privacy: .public) MB resident")
+            logger.warning("High memory usage detected: \(snapshot.residentMemoryMB) MB resident")
         }
         
         let trend = getMemoryTrend()
         if trend.growthRate > growthWarningMBPerHour {
-            logger.warning("High memory growth rate detected: \(trend.growthRate, privacy: .public) MB/hour")
+            logger.warning("High memory growth rate detected: \(trend.growthRate) MB/hour")
         }
         
         // Check memory efficiency
         let historyEfficiency = snapshot.historyCount > 0 ? 
             snapshot.estimatedHistoryMemoryMB / Double(snapshot.historyCount) : 0
         if historyEfficiency > 0.1 { // 100KB per item
-            logger.warning("Inefficient memory usage in history: \(historyEfficiency, privacy: .public) MB per item")
+            logger.warning("Inefficient memory usage in history: \(historyEfficiency) MB per item")
         }
     }
     

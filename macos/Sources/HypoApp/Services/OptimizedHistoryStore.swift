@@ -10,7 +10,7 @@ public actor OptimizedHistoryStore {
     private var lastCleanup: Date = Date()
     private let cleanupInterval: TimeInterval = 300 // 5 minutes
     
-    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "history")
+    private let logger = HypoLogger(category: "history")
     
     public init(maxEntries: Int = 200) {
         self.maxEntries = max(1, maxEntries)

@@ -42,6 +42,11 @@ public final class DefaultTransportProvider: TransportProvider {
     public func getCloudTransport() -> CloudRelayTransport {
         return cloudTransport
     }
+    
+    /// Set the closure for getting discovered peers (used by LanSyncTransport for client-side connections)
+    public func setGetDiscoveredPeers(_ closure: @escaping () -> [DiscoveredPeer]) {
+        lanTransport.setGetDiscoveredPeers(closure)
+    }
 }
 
 private struct NoopSyncTransport: SyncTransport {

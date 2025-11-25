@@ -136,7 +136,7 @@ fun HistoryScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(items) { item ->
+                items(items, key = { it.id }) { item ->
                     ClipboardCard(item = item, currentDeviceId = currentDeviceId)
                 }
             }
@@ -194,15 +194,18 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
     }
     
     // Pre-cache content to avoid accessing it during click
+    // Use item.id as key to ensure we get the correct content even if item reference changes
     val contentToCopy = remember(item.id) { item.content }
+    val itemId = remember(item.id) { item.id }  // Capture item ID to verify we're copying the right item
     
     fun copyToClipboard() {
         if (isCopying) return  // Prevent multiple rapid clicks
         
         val manager = clipboardManager ?: return
+        // Use the remembered content, which is keyed by item.id
         val content = contentToCopy
         if (content.isBlank()) {
-            android.util.Log.w("HistoryScreen", "⚠️ Content is blank, cannot copy")
+            android.util.Log.w("HistoryScreen", "⚠️ Content is blank for item ${itemId}, cannot copy")
             return
         }
         
@@ -213,7 +216,7 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
             try {
                 val clip = ClipData.newPlainText("Hypo Clipboard", content)
                 manager.setPrimaryClip(clip)
-                android.util.Log.d("HistoryScreen", "✅ Copied to clipboard: ${item.preview.take(30)}")
+                android.util.Log.d("HistoryScreen", "✅ Copied to clipboard (itemId=$itemId): ${content.take(30)}")
             } catch (e: SecurityException) {
                 android.util.Log.e("HistoryScreen", "❌ SecurityException when copying to clipboard: ${e.message}", e)
             } catch (e: IllegalStateException) {

@@ -132,6 +132,8 @@ class SettingsViewModel @Inject constructor(
                     val status = if (isServerIdle) {
                         DeviceConnectionStatus.Disconnected
                     } else when {
+                        // Device is discovered on LAN AND has cloud transport AND server is connected → Connected via LAN and server
+                        isDiscovered && transport == ActiveTransport.CLOUD && isServerConnected -> DeviceConnectionStatus.ConnectedLan
                         // Device is discovered on LAN → Connected via LAN
                         isDiscovered -> DeviceConnectionStatus.ConnectedLan
                         // Device has CLOUD transport AND server is connected → Connected via Cloud

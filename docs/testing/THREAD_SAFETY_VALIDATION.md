@@ -86,7 +86,7 @@ done
 
 **Full end-to-end test**:
 ```bash
-./scripts/test-clipboard-sync-emulator-auto.sh
+./tests/test-clipboard-sync-emulator-auto.sh
 ```
 
 **What it validates**:

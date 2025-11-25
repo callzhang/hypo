@@ -197,6 +197,17 @@
 
 ## 🐛 Known Issues
 
+### Android LAN Sync - Binary Frames Not Received
+**Status:** 🟢 **Resolved** — Binary Frames Delivered  
+**Priority:** High (was High, now resolved)  
+**Details:** See `docs/bugs/android_lan_sync_status.md`
+
+**Summary:**
+- ✅ **Resolved:** Replaced custom WebSocket parser with `org.java-websocket:Java-WebSocket` library
+- ✅ Binary frames now surface reliably via `onMessage(ByteBuffer)`
+- ✅ Verified end-to-end: Simulator → Android LAN server receives and processes binary frames
+- **Solution:** Library handles handshake, masking, fragmentation, ping/pong, and opcode routing
+
 *No issues yet - project in initialization phase*
 
 ---

@@ -560,6 +560,14 @@ shared_secret = ECDH(client_private_key, server_public_key)
 encryption_key = HKDF-SHA256(shared_secret, salt="hypo-clipboard-v1", length=32)
 ```
 
+**Key Rotation During Pairing** (Implemented November 2025):
+- Keys are always rotated during pairing requests, even when re-pairing with existing devices
+- Both initiator and responder generate new ephemeral Curve25519 key pairs for each pairing attempt
+- The responder includes its ephemeral public key in the ACK message
+- The initiator re-derives the shared key using ephemeral keys on both sides: `derive(initiator_ephemeral_private, responder_ephemeral_public)`
+- This ensures forward secrecy and prevents key reuse attacks
+- No key reuse across pairing sessions
+
 **Encryption Process**:
 ```
 nonce = random_bytes(12)

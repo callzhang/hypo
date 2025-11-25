@@ -261,7 +261,7 @@ cat ~/Library/Logs/DiagnosticReports/HypoMenuBar-*.ips | \
 ### Test Clipboard Sync (Emulator)
 
 ```bash
-./scripts/test-clipboard-sync-emulator-auto.sh
+./tests/test-clipboard-sync-emulator-auto.sh
 ```
 
 This script:
@@ -290,6 +290,8 @@ This script:
 4. **Test incrementally** - Pair first, then test sync separately
 5. **Check device IDs** - Ensure consistent format across platforms
 6. **Verify permissions** - Clipboard access requires explicit permission on Android 10+
+
+> **📋 For detailed log checking commands:** See [`docs/testing/log_checking_guide.md`](log_checking_guide.md) for comprehensive guide on checking Android, macOS, and backend logs, including patterns for message reception, decryption failures, and test script detection logic.
 
 ## Key Files for Debugging
 

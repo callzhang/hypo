@@ -99,31 +99,33 @@ Users frequently move between Xiaomi/HyperOS devices and macOS machines but lack
 
 ### 6.1 Local Pairing via QR (LAN-First)
 
-- **Entry Point**: macOS menu bar → *Pair New Device*.
-- **Prerequisites**: macOS client connected to LAN, Android device on same subnet, Bonjour enabled.
+- **Entry Point**: Any device → *Pair New Device*.
+- **Prerequisites**: Both devices connected to LAN, on same subnet, Bonjour/mDNS enabled.
+- **Device-Agnostic**: Any device can pair with any other device (Android↔Android, macOS↔macOS, Android↔macOS, etc.).
 - **QR Payload Schema**:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `ver` | string | Semantic version of the pairing payload (`"1"` for v1). |
-| `mac_device_id` | UUID v4 | Stable device identifier generated/stored in macOS Keychain. |
-| `mac_pub_key` | base64 (32 bytes) | Curve25519 public key for ephemeral ECDH. |
-| `service` | string | Bonjour service name advertised by macOS (e.g., `_hypo._tcp.local`). |
+| `peer_device_id` | UUID v4 | Stable device identifier of the device generating the QR code. |
+| `peer_pub_key` | base64 (32 bytes) | Curve25519 public key for ephemeral ECDH. |
+| `peer_signing_pub_key` | base64 (32 bytes) | Ed25519 public key for signature verification. |
+| `service` | string | Bonjour service name advertised (e.g., `_hypo._tcp.local`). |
 | `port` | number | TCP port for the provisional LAN WebSocket endpoint. |
 | `relay_hint` | URL | Optional HTTPS fallback relay endpoint if LAN negotiation fails. |
 | `issued_at` | ISO8601 | Creation timestamp (UTC). |
 | `expires_at` | ISO8601 | Expiry timestamp (issued_at + 5 min). |
-| `signature` | base64 (64 bytes) | Ed25519 signature over concatenated fields using macOS long-term pairing key. |
+| `signature` | base64 (64 bytes) | Ed25519 signature over concatenated fields using long-term pairing key. |
 
 - **Flow**:
-  1. macOS generates new ephemeral Curve25519 key pair and QR payload, signs it with its long-term pairing key, and renders QR using high-contrast theme.
-  2. Android scans QR, validates schema version, timestamp window (±5 min), and Ed25519 signature using macOS long-term public key from previous pairing (or bootstrap list bundled with app).
-  3. Android resolves the Bonjour service using `service` + `port`; if discovery fails within 3 s, prompt to retry or fall back to remote pairing.
-  4. Android generates its own ephemeral Curve25519 key pair and derives shared secret via X25519(mac_pub_key, android_priv_key) → HKDF-SHA256 (info: `"hypo/pairing"`, salt: 32 bytes of `0x00`).
-  5. Android sends encrypted `PAIRING_CHALLENGE` over LAN WebSocket with payload `{ nonce, ciphertext, tag }` using AES-256-GCM and associated data `mac_device_id`.
-  6. macOS decrypts challenge, verifies monotonic nonce (store last 32 challenge IDs), and responds with `PAIRING_ACK` containing device profile (device name, platform) encrypted with same shared key.
-  7. Both devices persist derived shared key (macOS Keychain, Android EncryptedSharedPreferences) and store counterpart device metadata.
-  8. macOS updates UI to display success toast; Android shows confirmation screen with option to start syncing.
+  1. Initiator device generates new ephemeral Curve25519 key pair and QR payload, signs it with its long-term pairing key, and renders QR using high-contrast theme.
+  2. Responder device scans QR, validates schema version, timestamp window (±5 min), and Ed25519 signature using initiator's long-term public key from previous pairing (or bootstrap list bundled with app).
+  3. Responder resolves the Bonjour service using `service` + `port`; if discovery fails within 3 s, prompt to retry or fall back to remote pairing.
+  4. Responder generates its own ephemeral Curve25519 key pair and derives shared secret via X25519(peer_pub_key, responder_priv_key) → HKDF-SHA256 (info: `"hypo/pairing"`, salt: 32 bytes of `0x00`).
+  5. Responder sends encrypted `PAIRING_CHALLENGE` over LAN WebSocket with payload `{ initiator_device_id, initiator_device_name, initiator_pub_key, nonce, ciphertext, tag }` using AES-256-GCM and associated data `initiator_device_id`.
+  6. Initiator decrypts challenge, verifies monotonic nonce (store last 32 challenge IDs), detects responder's platform from device ID or metadata, and responds with `PAIRING_ACK` containing device profile (device name, platform) encrypted with same shared key.
+  7. Both devices persist derived shared key (platform-specific secure storage) and store counterpart device metadata with detected platform information.
+  8. Both devices update UI to display success; pairing is complete and devices can begin syncing.
 - **Error Handling**:
   - If signature validation fails → display security warning, block pairing, log telemetry event `pairing_qr_signature_invalid`.
   - If handshake times out → allow user to retry scanning without generating a new QR until expiry.
@@ -131,21 +133,22 @@ Users frequently move between Xiaomi/HyperOS devices and macOS machines but lack
 
 ### 6.2 Remote Pairing via Relay (Code Entry)
 
-- **Entry Point**: macOS pairing sheet → *Pair over Internet* toggle; Android → *Enter Code* dialog.
+- **Entry Point**: Any device → *Pair over Internet* toggle; Other device → *Enter Code* dialog.
 - **Prerequisites**: Backend relay reachable, both clients online.
+- **Device-Agnostic**: Any device can create a pairing code (initiator), and any other device can claim it (responder).
 - **Pairing Code Schema**:
   - 6-digit numeric code (`000000`–`999999`), random, non-sequential.
-  - TTL: 60 s, stored in Redis with device metadata (`mac_device_id`, `mac_pub_key`, `issued_at`).
+  - TTL: 60 s, stored in Redis with device metadata (`initiator_device_id`, `initiator_public_key`, `issued_at`).
 - **Flow**:
-  1. macOS requests new pairing code from relay: `POST /pairing/code` with auth token, obtains `{ code, expires_at }` and publishes ephemeral public key + device info tied to that code.
-  2. User enters code on Android; app calls `POST /pairing/claim` with `{ code, android_device_id, android_pub_key }`.
-  3. Relay validates TTL and rate limits (max 5 attempts per minute per IP/device). On success, it returns macOS public key and device metadata, then notifies macOS via WebSocket control frame `PAIRING_CLAIMED`.
-  4. Android and macOS perform the same challenge/response exchange as LAN flow, routed via relay using encrypted control messages (`PAIRING_CHALLENGE`, `PAIRING_ACK`).
+  1. Initiator device requests new pairing code from relay: `POST /pairing/code` with `{ initiator_device_id, initiator_device_name, initiator_public_key }`, obtains `{ code, expires_at }`.
+  2. User enters code on responder device; app calls `POST /pairing/claim` with `{ code, responder_device_id, responder_device_name, responder_public_key }`.
+  3. Relay validates TTL and rate limits (max 5 attempts per minute per IP/device). On success, it returns initiator's public key and device metadata.
+  4. Responder and initiator perform the same challenge/response exchange as LAN flow, routed via relay using encrypted control messages (`PAIRING_CHALLENGE`, `PAIRING_ACK`). Challenge messages use `initiator_device_id`/`initiator_pub_key` fields; ACK messages use `responder_device_id`/`responder_device_name` fields.
   5. Relay deletes pairing code upon successful acknowledgement or TTL expiry (whichever first) and emits audit log `pairing_code_consumed`.
 - **Error Handling**:
-  - Invalid/expired code → Android shows inline error and allows regeneration request. Relay increments abuse counter; after 10 failures code is revoked.
-  - If macOS is offline when claim occurs → relay queues notification for 30 s; if unacknowledged, code returns to available state until TTL expiry.
-  - Duplicate device IDs detected by relay respond with `DEVICE_NOT_PAIRED` error, instructing Android to clear cached keys and restart pairing.
+  - Invalid/expired code → Responder shows inline error and allows regeneration request. Relay increments abuse counter; after 10 failures code is revoked.
+  - If initiator is offline when claim occurs → relay queues notification for 30 s; if unacknowledged, code returns to available state until TTL expiry.
+  - Duplicate device IDs detected by relay respond with `DEVICE_NOT_PAIRED` error, instructing responder to clear cached keys and restart pairing.
 - **Security Requirements**:
   - All relay endpoints require TLS + HMAC header (`X-Hypo-Signature`) using app secret stored securely on each device.
   - Telemetry event `pairing_remote_success` sent upon completion, including anonymized latency metrics.

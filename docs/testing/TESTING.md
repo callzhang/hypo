@@ -9,7 +9,7 @@
 Run the comprehensive test suite:
 
 ```bash
-./scripts/test-sync.sh
+./tests/test-sync.sh
 ```
 
 This script will:
@@ -41,6 +41,8 @@ All logs are stored in `/tmp/hypo_test_logs/`:
 ---
 
 ## Testing Checklist
+
+> **📋 For log checking and debugging:** See [`docs/testing/log_checking_guide.md`](log_checking_guide.md) for comprehensive guide on checking Android, macOS, and backend logs.
 
 ### Pre-Test Verification
 
@@ -367,10 +369,10 @@ adb logcat -s "LanDiscovery:*"
 
 ```bash
 # Test all backend server endpoints and functions
-./scripts/test-server-all.sh
+./tests/test-server-all.sh
 
 # Test with local server (if running locally)
-USE_LOCAL=true ./scripts/test-server-all.sh
+USE_LOCAL=true ./tests/test-server-all.sh
 ```
 
 The server test script validates:
@@ -399,7 +401,7 @@ The test script can be integrated into CI/CD pipelines:
 # Example GitHub Actions
 - name: Run Hypo Sync Tests
   run: |
-    ./scripts/test-sync.sh
+    ./tests/test-sync.sh
   env:
     FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 ```
@@ -413,7 +415,7 @@ When reporting sync issues, include:
 1. **Logs**: Attach `/tmp/hypo_test_logs/*.log`
 2. **Device Info**: macOS version, Android version, device model
 3. **Network**: Wi-Fi vs cellular, same network or not
-4. **Test Results**: Output from `./scripts/test-sync.sh`
+4. **Test Results**: Output from `./tests/test-sync.sh`
 5. **Steps to Reproduce**: Exact sequence that triggers the issue
 
 ---

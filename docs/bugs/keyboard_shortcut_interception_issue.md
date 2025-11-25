@@ -10,16 +10,18 @@
 
 ## Fix Implemented (2025-11-23)
 1) Removed the manual delegate overrides in `HypoMenuBarApp` and now rely solely on `@NSApplicationDelegateAdaptor(HypoAppDelegate.self)` to retain and wire the delegate.  
-2) Kept the Carbon `RegisterEventHotKey` setup inside `HypoAppDelegate.applicationDidFinishLaunching` (Shift+Cmd+V / keyCode 9).  
+2) Kept the Carbon `RegisterEventHotKey` setup inside `HypoAppDelegate.applicationDidFinishLaunching` (**Option+V** / keyCode 9).  
 3) Added `HistoryPopupPresenter` that shows/centers a floating SwiftUI window on hotkey (works even if MenuBarExtra view has never been opened).  
-4) Clarified inline comments so hotkey ownership is unambiguous; CGEventTap path stays retired and the NSEvent fallback remains available but is not invoked.
+4) Removed legacy `ShowHistory*` notifications from the hotkey path to avoid double window updates that caused the visible bounce.  
+5) Centering now computes the final frame on the target screen before window creation (using `frameRect`/`contentRect`) and spawns the window at that location to avoid first-show offset and cross-screen jumps.  
+6) Clarified inline comments so hotkey ownership is unambiguous; CGEventTap path stays retired and the NSEvent fallback remains available but is not invoked.
 
 ## Verification Plan
 - Launch Hypo (macOS build).  
 - Check `/tmp/hypo_debug.log` for:
   - `applicationDidFinishLaunching called` (delegate now retained)
-  - `Carbon hotkey registered: Shift+Cmd+V`
-- Press **Shift+Cmd+V**: expect popup window to appear centered and frontmost (History view). Notifications `ShowHistoryPopup` + `ShowHistorySection` still fire for in-app listeners.  
+  - `Carbon hotkey registered: Option+V`
+- Press **Option+V**: expect popup window to appear centered and frontmost (History view). Notifications `ShowHistoryPopup` + `ShowHistorySection` still fire for in-app listeners.  
 - Confirm no Accessibility prompt (Carbon path does not require it).
 
 ## Notes

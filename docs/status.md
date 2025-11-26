@@ -1,9 +1,9 @@
 # Hypo Project Status
 
-**Last Updated**: October 12, 2025
-**Current Sprint**: Sprint 8 - Polish & Deployment (In Progress)  
-**Project Phase**: Polish & Deployment - All Platforms Building Successfully
-**Overall Progress**: 92%
+**Last Updated**: November 26, 2025
+**Current Sprint**: Sprint 8 - Polish & Deployment (Near Complete)  
+**Project Phase**: Production Beta - Ready for Testing
+**Overall Progress**: 95%
 
 ---
 
@@ -58,11 +58,13 @@
 ### Next Steps 📋
 - [x] Complete Sprint 8 critical bug fixes (Android compilation) ✅
 - [x] Fix macOS Swift compilation errors ✅ *(Oct 12, 2025)*
-- [x] Deploy backend server to Fly.io staging ✅ *(Oct 12, 2025)*
-- [ ] Install and test debug APK on physical Android device
-- [ ] Implement error handling improvements
-- [ ] Prepare beta testing recruitment
-- [ ] Finalize release candidate builds
+- [x] Deploy backend server to Fly.io production ✅ *(Oct 12, 2025)*
+- [x] Fix backend routing issues ✅ *(Nov 24, 2025)*
+- [x] Fix Android LAN WebSocket server ✅ *(Nov 24, 2025)*
+- [x] Update all documentation ✅ *(Nov 26, 2025)*
+- [ ] Rebuild and test Android APK on physical device with latest fixes
+- [ ] Beta testing recruitment
+- [ ] Production release preparation
 
 ### Blocked 🚫
 - None (all critical compilation issues resolved)
@@ -197,18 +199,32 @@
 
 ## 🐛 Known Issues
 
-### Android LAN Sync - Binary Frames Not Received
-**Status:** 🟢 **Resolved** — Binary Frames Delivered  
-**Priority:** High (was High, now resolved)  
-**Details:** See `docs/bugs/android_lan_sync_status.md`
+### All Critical Issues Resolved ✅
 
-**Summary:**
-- ✅ **Resolved:** Replaced custom WebSocket parser with `org.java-websocket:Java-WebSocket` library
-- ✅ Binary frames now surface reliably via `onMessage(ByteBuffer)`
-- ✅ Verified end-to-end: Simulator → Android LAN server receives and processes binary frames
-- **Solution:** Library handles handshake, masking, fragmentation, ping/pong, and opcode routing
+**Recently Resolved (November 2025):**
 
-*No issues yet - project in initialization phase*
+1. **Android LAN Sync - Binary Frames** ✅ **Resolved**
+   - Replaced custom WebSocket parser with `org.java-websocket:Java-WebSocket` library
+   - Binary frames now surface reliably via `onMessage(ByteBuffer)`
+   - Details: See `docs/bugs/android_lan_sync_status.md`
+
+2. **Backend Routing to Wrong Device** ✅ **Resolved**
+   - Fixed case-insensitive device ID matching that caused incorrect message routing
+   - Backend now uses exact UUID matching only
+   - Messages correctly routed to target devices only
+   - Details: See `docs/bugs/android_cloud_sync_status.md`
+
+3. **Android Build Issues** ✅ **Resolved** *(Oct 12, 2025)*
+   - Fixed Room KSP compilation issues
+   - Added missing Paging dependencies
+   - Completed Hilt DI graph
+
+4. **macOS Build Issues** ✅ **Resolved** *(Oct 12, 2025)*
+   - Fixed duplicate ClipboardEntry extensions
+   - Fixed property initialization order
+   - App now builds and runs successfully
+
+**Current Status**: No blocking issues. System is production-ready for beta testing.
 
 ---
 
@@ -256,35 +272,35 @@
 - **macOS**: Introduced `CloudRelayTransport` and configuration defaults to wrap LAN transport logic while emitting cloud-labelled telemetry.
 - **Configuration**: Synced staging relay fingerprint/constants across platforms for consistent TLS pinning and analytics headers.
 
+### November 26, 2025
+- **Documentation Update** ✅: Comprehensive documentation refresh
+  - Updated prd.md to reflect current implementation (device-agnostic pairing, all implemented features)
+  - Updated technical.md with production architecture and deployment details
+  - Updated status.md with latest progress and resolved issues
+  - Consolidated redundant documentation files
+  - Marked all resolved bugs as archived
+  - All documentation now accurately reflects production state
+
+### November 24-25, 2025
+- **Backend Routing Fix** ✅: Fixed incorrect message routing
+  - Removed case-insensitive device ID matching fallback
+  - Messages now correctly routed to target devices only (exact UUID matching)
+  - Enhanced logging with detailed routing information
+  - Verified end-to-end: messages targeted to macOS only go to macOS, not Android
+  - Details: See `docs/bugs/android_cloud_sync_status.md`
+
+- **Android LAN WebSocket Server Fix** ✅: Fixed binary frame reception
+  - Replaced custom frame parser with `org.java-websocket:Java-WebSocket` library
+  - Binary frames now reliably delivered via `onMessage(ByteBuffer)`
+  - Handles handshake, masking, fragmentation, ping/pong automatically
+  - Verified end-to-end: LAN sync now working correctly
+  - Details: See `docs/bugs/android_lan_sync_status.md`
+
 ### October 12, 2025
 - **Android Build Resolution** ✅: Fixed all compilation issues and successfully built debug APK
-  - Added missing androidx.paging:paging-compose and androidx.paging:paging-runtime dependencies for PagingSource
-  - Fixed Room DAO pruning query to satisfy strict verification (keeps pinned/history entries)
-  - Added DI bindings for kotlinx.serialization.json.Json and java.time.Clock to complete Hilt graph
-  - Corrected timing helpers and Compose opt-in annotations across BatteryOptimizer, PairingScreen, HomeScreen, SettingsScreen
-  - Simplified PairingRelayClient URL normalization to avoid HttpUrl builder failures
-  - **Milestone**: `./android/gradlew assembleDebug` now completes successfully
 - **Development Environment Setup** ✅: Established reproducible Android build environment
-  - Installed and configured OpenJDK 17 via Homebrew
-  - Provisioned Android SDK via automated script (scripts/setup-android-sdk.sh)
-  - Configured Gradle with local GRADLE_USER_HOME for dependency caching
-  - Documented environment variables for shell profile integration
-- **Artifacts**: Debug APK ready at `android/app/build/outputs/apk/debug/app-debug.apk`
-- **Backend Deployment** ✅: Successfully deployed backend server to Fly.io production
-  - Installed and configured Fly.io CLI (flyctl)
-  - Updated Dockerfile to use Rust 1.83 (required for current dependencies)
-  - Configured embedded Redis in container for session management
-  - Deployed to production environment: https://hypo.fly.dev/
-  - Health checks passing on 2 machines in iad region
-  - WebSocket endpoint ready at wss://hypo.fly.dev/ws
-  - **Status**: Live and operational with 0ms downtime deployment
+- **Backend Deployment** ✅: Successfully deployed backend server to Fly.io production (https://hypo.fly.dev)
 - **Battery Optimization Enhancement** ✅: Implemented intelligent screen-state monitoring for Android
-  - Created ScreenStateReceiver to monitor ACTION_SCREEN_OFF/ON events
-  - Integrated with ClipboardSyncService for automatic connection management
-  - Auto-idles WebSocket connections when screen turns off
-  - Graceful reconnection when screen turns on (< 2s latency)
-  - Reduces battery drain by 60-80% during screen-off periods
-  - Documented in README.md, android/README.md, and docs/technical.md
 ---
 
 ## 🎯 Next Review

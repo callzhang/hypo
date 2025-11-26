@@ -1,8 +1,8 @@
 # Hypo Installation Guide
 
 **Quick setup guide for macOS and Android**  
-**Version**: 0.1.0 Beta  
-**Last Updated**: October 11, 2025
+**Version**: 0.2.3 Beta  
+**Last Updated**: November 26, 2025
 
 ---
 

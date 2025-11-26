@@ -1,9 +1,11 @@
-# Android Cloud Sync Issue - Status Report
+# Android Cloud Sync Issue - Status Report (ARCHIVED)
 
 **Date:** November 24, 2025  
-**Last Updated:** November 25, 2025  
-**Status:** 🟢 **Resolved — Backend Routing Fixed**  
-**Priority:** High → Resolved
+**Last Updated:** November 26, 2025  
+**Status:** 🟢 **RESOLVED & ARCHIVED — Backend Routing Fixed**  
+**Priority:** ~~High~~ → **Resolved**
+
+> **NOTE**: This issue has been fully resolved and verified. This document is archived for historical reference.
 
 > **Note:** For LAN sync issues, see `docs/bugs/android_lan_sync_status.md`
 

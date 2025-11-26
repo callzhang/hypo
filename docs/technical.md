@@ -560,7 +560,7 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 
 #### 4.3.4 Cloud Relay Enhancements
 
-- **Staging Deployment**: Relay packaged via Docker and deployed to Fly.io. `backend/fly.toml` defines auto-scaling (min=1, max=3) and binds Redis through the `redis` add-on. Secrets (`RELAY_HMAC_KEY`, `CERT_FINGERPRINT`, `STAGING_API_TOKEN`) managed through Fly secrets and rotated monthly. The staging relay is available at `wss://hypo-relay-staging.fly.dev/ws` (credentials tracked in 1Password shared vault) for macOS and Android smoke tests.
+- **Production Deployment**: Relay deployed to Fly.io production. `backend/fly.toml` defines auto-scaling (min=1, max=3) and embedded Redis in container. Secrets (`RELAY_HMAC_KEY`, `CERT_FINGERPRINT`) managed through Fly secrets and rotated monthly. The production relay is available at `https://hypo.fly.dev` with WebSocket endpoint `wss://hypo.fly.dev/ws`.
 - **Pairing Support**: Adds `/pairing/code` and `/pairing/claim` endpoints secured with HMAC header `X-Hypo-Signature`. Pairing codes stored in Redis with 60 s TTL and replay protection counters. Protocol is device-agnostic: any device can act as initiator (code creator) or responder (code claimer).
 - **Client Fallback Orchestration**: Android and macOS `TransportManager` instances race LAN dial attempts against a 3 s timeout before instantiating the relay transport. Fallback reason codes (`lan_timeout`, `lan_rejected`, `lan_not_supported`) are emitted through the shared `TransportAnalytics` stream for telemetry dashboards.
 - **Certificate Pinning**: `backend/scripts/cert_fingerprint.sh` extracts SHA-256 fingerprints from the Fly-issued certificate chain. Clients load the pinned hash and record a `transport_pinning_failure` analytics event when TLS verification fails (environment + host metadata captured).
@@ -711,7 +711,8 @@ docker run -p 8080:8080 hypo-relay
 
 ---
 
-**Document Version**: 0.1.0  
-**Last Updated**: October 1, 2025  
+**Document Version**: 0.2.3  
+**Last Updated**: November 26, 2025  
+**Status**: Production Beta  
 **Authors**: Principal Engineering Team
 

@@ -474,7 +474,7 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ## 📝 Changelog
 
-**Version 0.1.0 Beta** (Current)
+**Version 0.2.3 Beta** (Current)
 - Initial beta release
 - Basic clipboard sync functionality
 - QR code and remote pairing
@@ -491,6 +491,6 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ---
 
-**Last Updated**: October 11, 2025  
-**Version**: 0.1.0 Beta  
+**Last Updated**: November 26, 2025  
+**Version**: 0.2.3 Beta  
 **For Technical Support**: support@hypo.app

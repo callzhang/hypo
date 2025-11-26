@@ -2,9 +2,9 @@
 
 > Real-time, secure clipboard synchronization between any devices (Android, macOS, iOS, etc.)
 
-[![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20Android%208%2B-blue)]()
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Android%208%2B-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Status](https://img.shields.io/badge/status-Alpha%20Development-yellow)]()
+[![Status](https://img.shields.io/badge/status-Production%20Beta-green)]()
 
 ---
 

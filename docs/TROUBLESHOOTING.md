@@ -596,6 +596,6 @@ adb shell am start -n com.hypo.clipboard/.MainActivity
 ---
 
 **Troubleshooting Guide Version**: 1.0  
-**Compatible with Hypo**: 0.1.0 Beta  
-**Last Updated**: October 11, 2025  
+**Compatible with Hypo**: 0.2.3 Beta  
+**Last Updated**: November 26, 2025  
 **For Additional Help**: support@hypo.app

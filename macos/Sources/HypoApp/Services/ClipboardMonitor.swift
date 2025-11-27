@@ -208,9 +208,9 @@ public final class ClipboardMonitor {
             }
         }
         
-        // No fallback - if we can't get original format from pasteboard types, fail
-        // This surfaces issues instead of silently converting to TIFF
-        logger.error("❌ [ClipboardMonitor] No supported image format found in pasteboard types: \(types.map { $0.rawValue }.joined(separator: ", "))")
+        // No image types found - this is normal when clipboard contains text/files/URLs
+        // Return nil silently so other capture methods (text, file, URL) can be tried
+        logger.debug("⏭️ [ClipboardMonitor] No image types found in pasteboard types: \(types.map { $0.rawValue }.joined(separator: ", "))")
         return nil
     }
 

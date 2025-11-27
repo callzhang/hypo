@@ -94,13 +94,14 @@ def create_text_payload(text: str) -> dict:
     from collections import OrderedDict
     data_base64 = base64.b64encode(text.encode('utf-8')).decode('utf-8')
     # CRITICAL: Match Swift's JSONEncoder key order exactly!
-    # Swift produces: content_type, data, metadata, data_base64
+    # macOS ClipboardPayload.encode() produces: content_type, data, data_base64, metadata
+    # (See SyncEngine.swift:179-186 for exact order)
     # This order matters for encryption - different order = different plaintext bytes = BAD_DECRYPT
     return OrderedDict([
         ("content_type", "text"),
         ("data", data_base64),  # macOS includes this field (Data encoded as base64 string in JSON)
-        ("metadata", {}),  # metadata comes BEFORE data_base64 in Swift's JSONEncoder output!
-        ("data_base64", data_base64),  # Also include data_base64 for Android compatibility
+        ("data_base64", data_base64),  # data_base64 comes BEFORE metadata in macOS's encode()!
+        ("metadata", {}),  # metadata comes AFTER data_base64 in macOS's encode()!
     ])
 
 def create_image_payload(image_data: bytes, image_format: str = "png") -> dict:
@@ -119,15 +120,16 @@ def create_image_payload(image_data: bytes, image_format: str = "png") -> dict:
     from collections import OrderedDict
     data_base64 = base64.b64encode(image_data).decode('utf-8')
     # CRITICAL: Match Swift's JSONEncoder key order exactly!
-    # Swift produces: content_type, data, metadata, data_base64
+    # macOS ClipboardPayload.encode() produces: content_type, data, data_base64, metadata
+    # (See SyncEngine.swift:179-186 for exact order)
     return OrderedDict([
         ("content_type", "image"),
         ("data", data_base64),  # macOS includes this field (Data encoded as base64 string in JSON)
+        ("data_base64", data_base64),  # data_base64 comes BEFORE metadata in macOS's encode()!
         ("metadata", OrderedDict([
             ("format", image_format),
             ("size", str(len(image_data)))
-        ])),  # metadata comes BEFORE data_base64 in Swift's JSONEncoder output!
-        ("data_base64", data_base64),  # Also include data_base64 for Android compatibility
+        ])),  # metadata comes AFTER data_base64 in macOS's encode()!
     ])
 
 def create_link_payload(url: str) -> dict:
@@ -146,12 +148,13 @@ def create_link_payload(url: str) -> dict:
     url_bytes = url.encode('utf-8')
     data_base64 = base64.b64encode(url_bytes).decode('utf-8')
     # CRITICAL: Match Swift's JSONEncoder key order exactly!
-    # Swift produces: content_type, data, metadata, data_base64
+    # macOS ClipboardPayload.encode() produces: content_type, data, data_base64, metadata
+    # (See SyncEngine.swift:179-186 for exact order)
     return OrderedDict([
         ("content_type", "link"),
         ("data", data_base64),  # macOS includes this field (Data encoded as base64 string in JSON)
-        ("metadata", {"url": url}),  # metadata comes BEFORE data_base64 in Swift's JSONEncoder output!
-        ("data_base64", data_base64),  # Also include data_base64 for Android compatibility
+        ("data_base64", data_base64),  # data_base64 comes BEFORE metadata in macOS's encode()!
+        ("metadata", {"url": url}),  # metadata comes AFTER data_base64 in macOS's encode()!
     ])
 
 def create_sync_envelope(
@@ -314,7 +317,8 @@ def send_via_cloud_relay(
     key: Optional[bytes] = None,
     relay_url: str = "wss://hypo.fly.dev/ws",
     session_device_id: Optional[str] = None,
-    force_register: bool = False
+    force_register: bool = False,
+    quiet: bool = False  # Suppress output for speed
 ) -> bool:
     """Send clipboard message via cloud relay.
     
@@ -339,7 +343,8 @@ def send_via_cloud_relay(
         return False
     
     try:
-        print(f"🔌 Connecting to cloud relay: {relay_url}...")
+        if not quiet:
+            print(f"🔌 Connecting to cloud relay: {relay_url}...")
         
         # Use session_device_id for WebSocket headers (to avoid session conflicts),
         # but sender_device_id for the envelope payload (for encryption key lookup)
@@ -357,12 +362,15 @@ def send_via_cloud_relay(
         # This allows session takeover if the device is already connected
         if force_register:
             headers.append("X-Hypo-Force-Register: true")
-            print(f"   ⚠️  Force register enabled - will replace existing session if device is connected")
+            if not quiet:
+                print(f"   ⚠️  Force register enabled - will replace existing session if device is connected")
         
-        ws = create_connection(relay_url, timeout=10, header=headers)
-        print(f"✅ Connected to cloud relay")
+        # Reduced timeout for speed (5s instead of 10s)
+        ws = create_connection(relay_url, timeout=5, header=headers)
+        if not quiet:
+            print(f"✅ Connected to cloud relay")
         
-        ws.settimeout(10)
+        ws.settimeout(5)  # Reduced timeout
         
         # Create sync envelope
         envelope = create_sync_envelope(
@@ -373,20 +381,24 @@ def send_via_cloud_relay(
             encrypted=encrypted,
             key=key
         )
-        print(f"📦 Created sync envelope: id={envelope['id'][:8]}...")
-        print(f"   Target: {target_device_id or '(broadcast)'}")
+        if not quiet:
+            print(f"📦 Created sync envelope: id={envelope['id'][:8]}...")
+            print(f"   Target: {target_device_id or '(broadcast)'}")
         
         # Encode as binary frame
         frame = encode_frame(envelope)
-        print(f"📤 Sending binary frame: {len(frame)} bytes")
+        if not quiet:
+            print(f"📤 Sending binary frame: {len(frame)} bytes")
         
         # Send as BINARY message
         ws.send(frame, opcode=websocket.ABNF.OPCODE_BINARY)
-        print(f"✅ Sent clipboard sync message via relay")
+        if not quiet:
+            print(f"✅ Sent clipboard sync message via relay")
         
-        # Close connection
+        # Close connection immediately (no need to wait)
         ws.close()
-        print(f"🔌 Connection closed")
+        if not quiet:
+            print(f"🔌 Connection closed")
         
         return True
         
@@ -409,7 +421,8 @@ def send_via_lan(
     host: str = "localhost",
     port: int = 7010,
     wait_for_reply: bool = False,
-    envelope_sender_device_id: Optional[str] = None  # Device ID for envelope payload (for key lookup)
+    envelope_sender_device_id: Optional[str] = None,  # Device ID for envelope payload (for key lookup)
+    quiet: bool = False  # Suppress output for speed
 ) -> bool:
     """Send clipboard message via LAN WebSocket.
     
@@ -450,11 +463,13 @@ def send_via_lan(
             "X-Device-Platform: android"
         ]
         
-        ws = create_connection(url, timeout=10, header=headers)
-        print(f"✅ Connected to WebSocket server")
-        print(f"   Headers: X-Device-Id={sender_device_id}, X-Device-Platform=android")
+        # Reduced timeout for speed (3s instead of 10s)
+        ws = create_connection(url, timeout=3, header=headers)
+        if not quiet:
+            print(f"✅ Connected to WebSocket server")
+            print(f"   Headers: X-Device-Id={sender_device_id}, X-Device-Platform=android")
         
-        ws.settimeout(10)
+        ws.settimeout(3)  # Reduced timeout
         
         # Determine which device ID to use in the envelope payload
         # The device_id in the envelope must match a device ID that has a key stored
@@ -472,15 +487,17 @@ def send_via_lan(
             encrypted=encrypted,
             key=key
         )
-        print(f"📤 Created sync envelope: id={envelope['id'][:8]}...")
-        if encrypted:
-            print(f"   🔒 Encrypted (envelope device_id: {final_envelope_sender_id})")
-        else:
-            print(f"   📝 Plaintext mode")
+        if not quiet:
+            print(f"📤 Created sync envelope: id={envelope['id'][:8]}...")
+            if encrypted:
+                print(f"   🔒 Encrypted (envelope device_id: {final_envelope_sender_id})")
+            else:
+                print(f"   📝 Plaintext mode")
         
         # Encode frame
         frame = encode_frame(envelope)
-        print(f"📤 Frame payload: {len(frame)} bytes")
+        if not quiet:
+            print(f"📤 Frame payload: {len(frame)} bytes")
         
         # Send as WebSocket binary frame
         # CRITICAL: The websocket-client library may buffer frames.
@@ -490,14 +507,13 @@ def send_via_lan(
         import socket
         
         try:
-            print(f"📤 Sending {len(frame)} bytes as binary frame...")
+            if not quiet:
+                print(f"📤 Sending {len(frame)} bytes as binary frame...")
             
             # Explicitly send as binary frame with OPCODE_BINARY
             # The websocket-client library needs explicit opcode to ensure binary frames
             import websocket
-            print(f"   Sending with explicit OPCODE_BINARY...")
             ws.send(frame, opcode=websocket.ABNF.OPCODE_BINARY)
-            print(f"✅ send() call returned (binary opcode)")
             
             # CRITICAL FIX: Force the underlying socket to flush
             # websocket-client doesn't expose flush(), but we can access the underlying socket
@@ -509,15 +525,11 @@ def send_via_lan(
                         sock.flush()
                     # Force TCP_NODELAY to disable Nagle's algorithm (send immediately)
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    print(f"✅ Set TCP_NODELAY to force immediate send")
-                except Exception as e:
-                    print(f"⚠️  Could not access underlying socket: {e}")
+                except Exception:
+                    pass  # Ignore errors for speed
             
-            # Wait to ensure frame is actually sent over the wire
-            time.sleep(0.5)
-            print(f"⏱️  Waited 500ms after send")
-            
-            print(f"✅ Binary frame should be on wire now: {len(frame)} bytes")
+            if not quiet:
+                print(f"✅ Binary frame sent: {len(frame)} bytes")
             
         except Exception as e:
             print(f"❌ Error sending frame: {e}")
@@ -530,26 +542,25 @@ def send_via_lan(
         # Also, if we close too quickly, the close frame might be sent before the binary frame
         
         if wait_for_reply:
-            print(f"\n📥 Waiting for server reply (10s timeout)...")
+            if not quiet:
+                print(f"\n📥 Waiting for server reply (3s timeout)...")
             try:
-                ws.settimeout(10)
+                ws.settimeout(3)  # Reduced timeout
                 reply = ws.recv()
-                if isinstance(reply, bytes):
-                    print(f"📥 Received binary reply: {len(reply)} bytes")
-                else:
-                    print(f"📥 Received text reply: {reply}")
-            except Exception as e:
-                print(f"⚠️ No reply received: {type(e).__name__}")
-        else:
-            # Wait longer to ensure server receives and processes the frame
-            # before we send the close frame
-            print(f"⏱️  Waiting 3 seconds before closing to ensure frame is received...")
-            time.sleep(3)
+                if not quiet:
+                    if isinstance(reply, bytes):
+                        print(f"📥 Received binary reply: {len(reply)} bytes")
+                    else:
+                        print(f"📥 Received text reply: {reply}")
+            except Exception:
+                if not quiet:
+                    print(f"⚠️ No reply received")
+        # No need to wait - close immediately (TCP will handle delivery)
         
         # Now close the connection (this sends a CLOSE frame)
-        print(f"🔌 Closing connection (sending CLOSE frame)...")
         ws.close()
-        print(f"✅ Connection closed")
+        if not quiet:
+            print(f"✅ Connection closed")
         
         return True
         

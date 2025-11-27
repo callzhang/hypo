@@ -1,463 +1,320 @@
-# Hypo Sync Testing Guide
+# Hypo Sync Testing & Debugging Guide
 
-**Last Updated**: December 19, 2025
+**Last Updated:** December 25, 2025  
+**Audience:** Tech Leads, Developers
 
 ## Quick Start
 
-### Automated Testing
-
-Run the comprehensive test suite:
+### Automated Test Matrix
 
 ```bash
-./tests/test-sync.sh
+./tests/test-sync-matrix.sh
 ```
 
-This script will:
-1. ✅ **Build** macOS and Android apps (if code changed)
-2. ✅ **Deploy** backend to Fly.io (if code changed)
-3. ✅ **Start** macOS app with logging
-4. ✅ **Monitor** Android logs via ADB
-5. ✅ **Test** macOS → Android sync
-6. ✅ **Test** Android → macOS sync
-7. ✅ **Verify** LAN discovery, encryption, WebSocket, history
+Tests all 8 combinations: Plaintext/Encrypted × Cloud/LAN × macOS/Android
 
 ### Prerequisites
 
 - macOS with Xcode and Swift
 - Android device connected via USB with USB debugging enabled
-- OpenJDK 17 installed
-- Android SDK configured (via `./scripts/setup-android-sdk.sh`)
-- `flyctl` installed (optional, for backend deployment)
-
-### Logs Location
-
-All logs are stored in `/tmp/hypo_test_logs/`:
-- `macos.log` - macOS app runtime logs
-- `android.log` - Android app logs (filtered)
-- `macos_build.log` - macOS build output
-- `android_build.log` - Android build output
-- `backend_deploy.log` - Backend deployment output
+- OpenJDK 17, Android SDK configured
+- `flyctl` installed (for backend deployment)
 
 ---
 
-## Testing Checklist
+## Log Checking
 
-> **📋 For log checking and debugging:** See [`docs/testing/log_checking_guide.md`](log_checking_guide.md) for comprehensive guide on checking Android, macOS, and backend logs.
+### macOS Unified Logging
 
-### Pre-Test Verification
-
-- [x] macOS WebSocket server listening on port 7010
-- [x] Android service running (ClipboardSyncService)
-- [x] Both apps built with latest changes
-- [x] No compilation errors
-- [x] Log monitoring set up
-
-### Test 1: LAN Auto-Discovery Pairing
-
-**Steps:**
-1. Open Android app
-2. Navigate to Pairing screen → LAN tab
-3. Wait for macOS device to appear in list
-4. Tap the macOS device
-
-**Expected Results:**
-- [ ] Android shows "Pairing..." state
-- [ ] Android logs show: `🔵 pairWithDevice called`
-- [ ] Android logs show: `Sending pairing challenge to macOS as raw JSON`
-- [ ] macOS logs show: `📱 Received pairing challenge from: [device name]`
-- [ ] macOS logs show: `🔑 Loading LAN pairing key`
-- [ ] macOS logs show: `✅ Generated ACK with challengeId`
-- [ ] macOS logs show: `📤 Sending ACK to Android device`
-- [ ] Android logs show: `Received pairing ACK from macOS`
-- [ ] Android logs show: `✅ Pairing handshake completed! Key saved`
-- [ ] Android shows "Pairing Success" message
-- [ ] Android logs show: `✅ Key exists in store: [size] bytes`
-- [ ] Android logs show: `✅ Target devices now: [device IDs]`
-
-**Verification:**
-- [ ] Check Android Settings → Paired Devices (should show macOS device)
-- [ ] Check macOS app (should show Android device in paired devices)
-- [ ] Verify encryption key was saved (Android logs should confirm)
-
-**Monitoring:**
 ```bash
-# Use unified pairing monitor
-./scripts/monitor-pairing.sh debug
+# Real-time streaming (recommended)
+log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug
+
+# View recent logs
+log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m --level debug --style compact
+
+# Find message by content
+log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m --level debug | grep -F "content: Case 1:"
+
+# Process-based fallback
+log show --predicate 'process == "HypoMenuBar"' --last 5m --style compact
 ```
 
-### Test 2: Android → macOS Clipboard Sync
+### Android Logs
 
-**Steps:**
-1. Ensure devices are paired (from Test 1)
-2. Copy text on Android (e.g., "Test from Android - [timestamp]")
-3. Wait 2-3 seconds
-4. Check macOS clipboard history
+```bash
+# View recent logs
+adb -s <device_id> logcat -d -t 300
 
-**Expected Results:**
-- [ ] Android logs show: `📋 NEW clipboard event!`
-- [ ] Android logs show: `📨 Received clipboard event`
-- [ ] Android logs show: `💾 Upserting item to repository...`
-- [ ] Android logs show: `📤 Broadcasting to [N] paired devices`
-- [ ] Android logs show: `📤 Syncing to device: [device ID]`
-- [ ] Android logs show: `✅ transport.send() completed successfully`
-- [ ] macOS logs show: `📥 CLIPBOARD RECEIVED: from connection [ID], [N] bytes`
-- [ ] macOS logs show: `✅ Decoded clipboard event: type=text`
-- [ ] macOS clipboard history shows the text
-- [ ] macOS clipboard content matches Android text
+# Filter by process
+adb -s <device_id> logcat --pid=$(adb -s <device_id> shell pidof -s com.hypo.clipboard.debug)
 
-**Verification:**
-- [ ] Text appears in macOS history within 2 seconds
-- [ ] Device name shows as Android device name (not "macOS")
-- [ ] No duplicate entries in history
+# Find message by content
+adb -s <device_id> logcat -d | grep -F "content: Case 1:"
 
-### Test 3: macOS → Android Clipboard Sync
+# Query database (most reliable)
+adb -s <device_id> shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 10;'"
+```
 
-**Steps:**
-1. Ensure devices are paired
-2. Copy text on macOS (e.g., "Test from macOS - [timestamp]")
-3. Wait 2-3 seconds
-4. Check Android clipboard history
+### Backend Logs
 
-**Expected Results:**
-- [ ] macOS logs show: `✅ Synced clipboard to device: [device name]`
-- [ ] Android logs show: `📥 Received clipboard from deviceId=[ID], deviceName=[name]`
-- [ ] Android logs show: `✅ Decoded remote clipboard. Forwarding to SyncCoordinator`
-- [ ] Android logs show: `⏭️ Skipping broadcast (received from remote)`
-- [ ] Android clipboard history shows the text
-- [ ] Android clipboard content matches macOS text
+```bash
+# View recent logs
+flyctl logs --app hypo --limit 100
 
-**Verification:**
-- [ ] Text appears in Android history within 2 seconds
-- [ ] Device name shows as macOS device name (not "This device")
-- [ ] No duplicate entries in history
-- [ ] No sync loop (item doesn't bounce back to macOS)
+# Check routing
+flyctl logs --app hypo --limit 100 | grep -E "\[ROUTING\]|\[SEND_BINARY\]"
 
-### Test 4: Bidirectional Sync (Stress Test)
+# Check connected devices
+curl -s https://hypo.fly.dev/health | jq '.connected_devices'
+```
 
-**Steps:**
-1. Rapidly copy text on Android, then macOS, then Android again (3-4 times)
-2. Monitor both histories
+---
 
-**Expected Results:**
-- [ ] All items appear in both histories
-- [ ] Correct device names for each item
-- [ ] No duplicates
-- [ ] No sync loops
-- [ ] Items appear in correct order (most recent first)
+## Test Script Detection Logic
 
-### Test 5: Connection Recovery
+The `test-sync-matrix.sh` script detects messages by:
 
-**Steps:**
-1. Pair devices successfully
-2. Close macOS app
-3. Try to copy on Android
-4. Reopen macOS app
-5. Try to copy on Android again
+1. **Database Query** (Most Reliable)
+   - Android: SQLite database check
+   - macOS: UserDefaults check
 
-**Expected Results:**
-- [ ] Android detects connection loss gracefully
-- [ ] Android attempts reconnection when macOS app reopens
-- [ ] Sync resumes after reconnection
-- [ ] No crashes on either side
+2. **Log Content Search**
+   - Searches for `content: <message>` in logs
+   - macOS: `log show --predicate 'subsystem == "com.hypo.clipboard"'`
+   - Android: `adb logcat -d | grep -F "content:"`
+
+3. **Handler Success Logs**
+   - macOS: `Received clipboard` or `Inserted entry`
+   - Android: `Decoded clipboard event`
+
+4. **Reception Indicators**
+   - Cloud: `onMessage` calls
+   - LAN: `Binary frame received`
 
 ---
 
 ## Manual Testing Procedures
 
-### Build & Install
-
-#### macOS
-```bash
-cd macos
-swift build -c release
-
-# Update the app bundle
-cp .build/release/HypoMenuBar HypoApp.app/Contents/MacOS/HypoMenuBar
-
-# Launch the app
-open HypoApp.app
-```
-
-#### Android
-```bash
-./scripts/build-android.sh
-# Or manually:
-cd android
-export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-export ANDROID_SDK_ROOT="$(pwd)/../.android-sdk"
-./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-#### Backend (Optional)
-```bash
-cd backend
-flyctl deploy
-# Or run locally:
-docker compose up redis -d
-cargo run
-```
-
 ### Device Pairing
 
-#### LAN Auto-Discovery Pairing (Recommended)
-1. Ensure both devices are on the same Wi-Fi network
-2. On macOS: Click menu bar icon → Settings → "Pair new device"
-3. Wait for Android device to appear in discovery list
-4. Tap the Android device to pair
-5. ✅ Check: Pairing completes automatically
+**LAN Auto-Discovery** (Recommended):
+1. Ensure both devices on same Wi-Fi
+2. Android: Pair → LAN tab → Tap macOS device
+3. Verify pairing completes
 
-#### QR Code Pairing
-1. On macOS: Click menu bar icon → Settings → "Pair new device" → QR tab
-2. On Android: Open app → Pair → Scan QR Code
-3. Scan the QR code displayed on macOS
-4. ✅ Check: Pairing completes with "Pairing successful" message
+**QR Code Pairing**:
+1. macOS: Settings → Pair new device → QR tab
+2. Android: Pair → Scan QR Code
 
-#### Remote Code Pairing
-1. On macOS: Click menu bar icon → Settings → "Pair new device" → Remote Code tab
-2. Note the 6-digit code
-3. On Android: Open app → Pair → Enter Code
-4. Enter the code from macOS
-5. ✅ Check: Pairing completes
+### Clipboard Sync Testing
 
-### Sync Testing
-
-#### Test: macOS → Android
-1. Copy text on macOS (Cmd+C)
-2. ✅ Check: Android shows notification with clipboard preview
-3. ✅ Check: Android clipboard contains the same text
-4. ✅ Check: Android history shows the item
-
-**Logs to monitor:**
+**Android → macOS**:
 ```bash
-# macOS
-tail -f /tmp/hypo_test_logs/macos.log | grep -i "clipboard\|sync"
+# Copy text on Android
+adb shell input text "Test from Android"
 
-# Android
-adb logcat -s "ClipboardSyncService:*" "SyncCoordinator:*" "SyncEngine:*"
+# Monitor logs
+adb logcat | grep -E "Clipboard|Sync|transport"
+log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep -E "Received clipboard|content:"
 ```
 
-#### Test: Android → macOS
-1. Copy text on Android
-2. ✅ Check: macOS receives the clipboard (verify with Cmd+V)
-3. ✅ Check: macOS history shows the item with "from Android" label
-
-#### Test: Link Sync
-1. Copy a URL on either device
-2. ✅ Check: Link syncs correctly
-3. ✅ Check: Link is clickable on receiving device
-
-#### Test: Image Sync
-1. Copy an image on either device
-2. ✅ Check: Image data syncs
-3. ⚠️ Note: Images > 1MB may be skipped
-
-### LAN Discovery
-
-#### Test: Device Discovery
-1. Ensure both devices are on same Wi-Fi
-2. ✅ Check macOS logs for: `"Discovered Android device"`
-3. ✅ Check Android logs for: `"Discovered macOS device"`
-
-**Manual verification:**
+**macOS → Android**:
 ```bash
-# Check Bonjour services on macOS
-dns-sd -B _hypo._tcp local.
+# Copy text on macOS
+echo "Test from macOS" | pbcopy
 
-# Check Android NSD
-adb logcat -s "LanDiscovery:*"
+# Monitor Android logs
+adb logcat | grep -E "Clipboard|Sync|Received"
 ```
 
-### Transport Tests
-
-#### Test: LAN-First Transport
-1. Pair devices on same Wi-Fi
-2. Copy text
-3. ✅ Check logs show: `"Connected via LAN"` or `"transport=lan"`
-
-#### Test: Cloud Fallback
-1. Disconnect devices from Wi-Fi (use cellular on Android)
-2. Copy text
-3. ✅ Check logs show: `"Connected via cloud"` or `"transport=cloud"`
-4. ✅ Check backend logs: `fly logs -a hypo`
-
-### Battery Optimization (Android)
-
-#### Test: Screen-Off Idle
-1. Copy text to verify sync is working
-2. Turn off Android screen
-3. ✅ Check Android logs show: `"Screen OFF - idling WebSocket"`
-4. Wait 30 seconds
-5. Turn on Android screen
-6. ✅ Check logs show: `"Screen ON - resuming WebSocket"`
-7. Copy text again to verify sync resumes
-
-### History & Persistence
-
-#### Test: History Storage
-1. Copy 5 different items
-2. ✅ Check: macOS menu shows all 5 items in history
-3. ✅ Check: Android history tab shows all 5 items
-4. Restart both apps
-5. ✅ Check: History persists across restarts
-
-#### Test: History Search
-1. On macOS: Enter search query in history
-2. ✅ Check: Results filter correctly
-3. On Android: Use search in history tab
-4. ✅ Check: Results filter correctly
-
-### Error Scenarios
-
-#### Test: Network Interruption
-1. Start sync with text
-2. Disconnect Wi-Fi mid-sync
-3. ✅ Check: App handles gracefully (no crash)
-4. Reconnect Wi-Fi
-5. ✅ Check: Sync resumes automatically
-
-#### Test: Unpaired Device
-1. Clear paired devices on one side
-2. Try to copy text
-3. ✅ Check: No sync occurs
-4. ⚠️ Check: User is notified (future enhancement)
-
-#### Test: Invalid QR Code
-1. Generate QR code on macOS
-2. Wait > 5 minutes (expiry time)
-3. Try to scan on Android
-4. ✅ Check: Shows "QR code expired" error
-
-### Performance Tests
-
-#### Test: Sync Latency
-1. Copy text on macOS
-2. Time until Android receives it
-3. ✅ Target: < 500ms on LAN
-4. ✅ Target: < 2s on cloud
-
-#### Test: Large Payload
-1. Copy 100KB of text
-2. ✅ Check: Syncs successfully
-3. Copy 1MB of text
-4. ✅ Check: Syncs successfully (compression helps)
-
-#### Test: Rapid Copies
-1. Copy 10 items rapidly (within 10 seconds)
-2. ✅ Check: All items sync
-3. ✅ Check: Order is preserved
-4. ✅ Check: No duplicate entries
-
-### Security Tests
-
-#### Test: Encryption
-1. Monitor network traffic with Wireshark
-2. Copy sensitive text
-3. ✅ Check: Payload is encrypted (not readable in packet capture)
-4. ✅ Check: Logs show "AES-256-GCM" encryption
-
-#### Test: Key Isolation
-1. Pair Device A with Device B
-2. Try to decrypt messages from Device A on Device C (unpaired)
-3. ✅ Check: Decryption fails (no shared key)
+**Verification**:
+- Message content is logged: `content: <message>`
+- Check UI: macOS history (Cmd+Shift+V), Android history screen
+- Query logs: `grep -F "content: <message>"`
 
 ---
 
-## Server Testing
+## Common Issues & Solutions
 
-### Test All Server Endpoints
+### Messages Not Detected by Test Script
+
+**Symptoms**: Test script reports FAILED but messages appear in UI
+
+**Debugging**:
+```bash
+# Check database directly (most reliable)
+adb -s <device_id> shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items WHERE preview LIKE \"%Case X:%\" LIMIT 1;'"
+
+# Check logs by content
+log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -F "content: Case X:"
+adb logcat -d | grep -F "content: Case X:"
+```
+
+**Solution**: Test script may need time window adjustment or log query refinement
+
+### Decryption Failures (BAD_DECRYPT)
+
+**Causes**:
+- Key rotation (devices re-paired)
+- Wrong key in test script
+- Key not found on receiver
+
+**Debugging**:
+```bash
+# Check key exists
+security find-generic-password -w -s 'com.hypo.clipboard.keys' -a <device_id>
+
+# Check decryption errors
+log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "Decryption failed|BAD_DECRYPT"
+adb logcat -d | grep -E "BAD_DECRYPT|MissingKey"
+```
+
+**Solution**:
+1. Re-pair devices to get new key
+2. Update test script key from keychain (prioritizes keychain over .env)
+3. Verify key format matches (64 hex chars)
+
+### Connection Issues
+
+**Check connection status**:
+```bash
+# Backend health
+curl -s https://hypo.fly.dev/health | jq '.connected_devices'
+
+# Android WebSocket
+adb logcat -d | grep -E "WebSocket|connected|disconnected"
+
+# macOS WebSocket
+log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "WebSocket|connected"
+```
+
+### Device Not Appearing After Pairing
+
+**Debugging**:
+```bash
+# Check pairing completion
+log show --predicate 'subsystem == "com.hypo.clipboard"' --last 10m | grep "PairingCompleted"
+adb logcat | grep "Key saved for device"
+
+# Check device ID format
+adb logcat | grep "Key saved for device"
+```
+
+**Common Causes**:
+- Device ID format mismatch (UUID vs "android-UUID")
+- Notification not being posted/received
+- HistoryStore not processing notification
+
+### Sync Not Working
+
+**Debugging**:
+```bash
+# Check clipboard events detected
+adb logcat | grep -E "ClipboardListener|onPrimaryClipChanged"
+
+# Check sync targets
+adb logcat | grep "Target devices now"
+
+# Check transport.send() called
+adb logcat | grep "transport.send()"
+
+# Check WebSocket connection
+adb logcat | grep -E "WebSocket|Connection"
+```
+
+**Common Causes**:
+- Clipboard permission not granted
+- Sync targets not including device ID
+- Encryption key missing
+- WebSocket connection not established
+
+---
+
+## Crash Report Analysis
+
+### Finding Crash Reports
 
 ```bash
-# Test all backend server endpoints and functions
-./tests/test-server-all.sh
+# Find recent crash reports
+find ~/Library/Logs/DiagnosticReports -name "*HypoMenuBar*" -type f -mtime -1
 
-# Test with local server (if running locally)
-USE_LOCAL=true ./tests/test-server-all.sh
+# Extract crash location
+cat ~/Library/Logs/DiagnosticReports/HypoMenuBar-*.ips | \
+  grep -A 20 '"faultingThread"' | \
+  grep -E '"sourceFile"|"sourceLine"'
 ```
 
-The server test script validates:
-- ✅ Health endpoint
-- ✅ Metrics endpoint (Prometheus format)
-- ✅ Pairing code creation and claim
-- ✅ WebSocket endpoint validation
-- ✅ Error handling (404 responses)
-- ✅ CORS headers
+### Common Crash Patterns
 
-**Server Test Results**: All 7 endpoint tests passing ✅ (Dec 19, 2025)
+**Array Index Out of Bounds**:
+- Symptom: `EXC_BREAKPOINT` at `Data.subscript.getter`
+- Fix: Add guard statements before array access
 
----
+**Force Unwrap Nil**:
+- Symptom: `EXC_BREAKPOINT` with `fatalError` in stack
+- Fix: Use optional binding or provide default values
 
-## Debugging Tips
-
-See [`docs/testing/DEBUGGING.md`](DEBUGGING.md) for comprehensive debugging guide.
+**Threading Issues**:
+- Symptom: Crashes in async/await code
+- Fix: Ensure `@MainActor` for UI operations, use proper synchronization
 
 ---
 
-## CI/CD Integration
+## Key Files
 
-The test script can be integrated into CI/CD pipelines:
-
-```yaml
-# Example GitHub Actions
-- name: Run Hypo Sync Tests
-  run: |
-    ./tests/test-sync.sh
-  env:
-    FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-```
+- **macOS crash reports**: `~/Library/Logs/DiagnosticReports/HypoMenuBar-*.ips`
+- **macOS unified logs**: `log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug`
+- **Android logs**: `adb logcat`
+- **Pairing flow**: `macos/Sources/HypoApp/Services/TransportManager.swift`
+- **Sync flow**: `macos/Sources/HypoApp/Services/HistoryStore.swift`
+- **Incoming handler**: `macos/Sources/HypoApp/Services/IncomingClipboardHandler.swift`
+- **WebSocket server**: `macos/Sources/HypoApp/Services/LanWebSocketServer.swift`
+- **Android handler**: `android/app/src/main/java/com/hypo/clipboard/sync/IncomingClipboardHandler.kt`
 
 ---
 
-## Reporting Issues
+## Quick Reference
 
-When reporting sync issues, include:
+### One-liners
 
-1. **Logs**: Attach `/tmp/hypo_test_logs/*.log`
-2. **Device Info**: macOS version, Android version, device model
-3. **Network**: Wi-Fi vs cellular, same network or not
-4. **Test Results**: Output from `./tests/test-sync.sh`
-5. **Steps to Reproduce**: Exact sequence that triggers the issue
-
----
-
-## Quick Smoke Test
-
-Minimal verification that sync is working:
-
+**Android**:
 ```bash
-# 1. Start apps
-open macos/HypoApp.app
-# Android app should already be running
-
-# 2. Test basic sync
-echo "Test $(date)" | pbcopy
-sleep 2
-adb shell "am broadcast -a clipper.get" || adb shell "cmd clipboard get-clipboard"
-
-# 3. Check logs
-tail /tmp/hypo_test_logs/macos.log | grep -i sync
-adb logcat -d -s "SyncCoordinator:*" | tail -n 5
+adb -s <device_id> logcat -d -t 500 | grep -F "content:" && \
+adb -s <device_id> shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 5;'"
 ```
 
-✅ If you see "Synced clipboard" in logs, basic sync is working!
+**macOS**:
+```bash
+log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -F "content:" && \
+defaults read com.hypo.clipboard history_entries | grep -F "Case"
+```
+
+**Backend**:
+```bash
+flyctl logs --app hypo --limit 100 | grep -E "\[ROUTING\]" && \
+curl -s https://hypo.fly.dev/health | jq '.connected_devices'
+```
 
 ---
 
-## Known Issues to Watch For
+## Testing Checklist
 
-1. **Signature Verification Error**: Should be resolved with LAN auto-discovery marker
-2. **Key Not Found**: Should be resolved with proper key storage during pairing
-3. **Sync Loops**: Should be prevented by `skipBroadcast` flag
-4. **Device Name Attribution**: Should be correct with `sourceDeviceName` preservation
+- [ ] Devices paired (LAN or QR)
+- [ ] Both apps running with latest build
+- [ ] Log monitoring set up
+- [ ] Test matrix run: `./tests/test-sync-matrix.sh`
+- [ ] Android tests: Cases 2, 4, 6, 8 passing
+- [ ] macOS tests: Cases 1, 3, 5, 7 verified
+- [ ] Message content logged on both platforms
+- [ ] Database/UserDefaults verification working
+- [ ] No decryption failures
+- [ ] Connection status correct
 
-## Success Criteria
+---
 
-All tests pass if:
-- ✅ Pairing completes successfully with key exchange
-- ✅ Bidirectional sync works in both directions
-- ✅ Device names are correctly attributed
-- ✅ No sync loops or duplicates
-- ✅ Connection recovery works
-- ✅ No crashes or errors in logs
+## Related Documentation
 
-
+- `docs/bugs/android_cloud_sync_status.md` - Android cloud sync issues
+- `docs/bugs/android_lan_sync_status.md` - Android LAN sync issues
+- `docs/bugs/encryption_testing_issue.md` - Encryption testing issues

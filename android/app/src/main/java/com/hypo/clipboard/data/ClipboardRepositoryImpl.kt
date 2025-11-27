@@ -30,8 +30,13 @@ class ClipboardRepositoryImpl @Inject constructor(
 
     override suspend fun upsert(item: ClipboardItem) {
         Log.d("ClipboardRepository", "💾 Upserting item: id=${item.id.take(20)}..., type=${item.type}, preview=${item.preview.take(30)}")
-        dao.upsert(item.toEntity())
-        Log.d("ClipboardRepository", "✅ Item upserted to database")
+        
+        // Always update created_at to current time to move item to top when inserted/updated
+        val now = Instant.now()
+        val entityWithCurrentTime = item.toEntity().copy(createdAt = now)
+        dao.upsert(entityWithCurrentTime)
+        
+        Log.d("ClipboardRepository", "✅ Item upserted to database (moved to top)")
     }
 
     override suspend fun delete(id: String) {

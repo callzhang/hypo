@@ -53,8 +53,8 @@ public struct PairingPayload: Codable, Equatable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(version, forKey: .version)
-        // Encode device ID as pure UUID (no prefix) - platform is handled separately
-        let peerDeviceIdString = peerDeviceId.uuidString.lowercased()
+        // Encode device ID as pure UUID (no prefix) and preserve original casing
+        let peerDeviceIdString = peerDeviceId.uuidString
         try container.encode(peerDeviceIdString, forKey: .peerDeviceId)
         try container.encode(peerPublicKey.base64EncodedString(), forKey: .peerPublicKey)
         try container.encode(peerSigningPublicKey.base64EncodedString(), forKey: .peerSigningPublicKey)
@@ -197,6 +197,7 @@ public struct PairingChallengeMessage: Codable, Equatable {
     // Custom encoder
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        // Android generates challenge_id in lowercase; use lowercase for compatibility
         try container.encode(challengeId.uuidString.lowercased(), forKey: .challengeId)
         try container.encode(initiatorDeviceId, forKey: .initiatorDeviceId)
         try container.encode(initiatorDeviceName, forKey: .initiatorDeviceName)
@@ -237,9 +238,9 @@ public struct PairingAckMessage: Codable, Equatable {
     // Custom encoder to convert Data to Base64 strings
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        // Use lowercase UUID string to match UUID.randomUUID().toString() format
+        // Android stores challenge_id lowercase; keep lowercase to avoid mismatch comparisons
         try container.encode(challengeId.uuidString.lowercased(), forKey: .challengeId)
-        // Encode device ID as pure UUID (no prefix) to match migration to UUID+platform approach
+        // Encode device ID as pure UUID (no prefix) and lowercase to match AAD used in encryption
         let responderDeviceIdString = responderDeviceId.uuidString.lowercased()
         try container.encode(responderDeviceIdString, forKey: .responderDeviceId)
         try container.encode(responderDeviceName, forKey: .responderDeviceName)
@@ -306,12 +307,10 @@ public struct PairingChallengePayload: Codable, Equatable {
 public struct PairingAckPayload: Codable, Equatable {
     public let responseHash: Data
     public let issuedAt: Date
-    public let responderPublicKey: Data? // Ephemeral public key for key rotation (optional for backward compatibility)
     
     enum CodingKeys: String, CodingKey {
         case responseHash = "response_hash"
         case issuedAt = "issued_at"
-        case responderPublicKey = "responder_pub_key"
     }
     
     // Custom encoder to match Android's expected format (snake_case strings)
@@ -321,10 +320,6 @@ public struct PairingAckPayload: Codable, Equatable {
         try container.encode(responseHash.base64EncodedString(), forKey: .responseHash)
         let formatter = ISO8601DateFormatter()
         try container.encode(formatter.string(from: issuedAt), forKey: .issuedAt)
-        // Include responder public key if present (for key rotation)
-        if let responderPublicKey = responderPublicKey {
-            try container.encode(responderPublicKey.base64EncodedString(), forKey: .responderPublicKey)
-        }
     }
     
     // Custom decoder to handle Base64 string and ISO8601 date
@@ -342,19 +337,10 @@ public struct PairingAckPayload: Codable, Equatable {
             throw DecodingError.dataCorruptedError(forKey: .issuedAt, in: container, debugDescription: "Invalid ISO8601 date string for issued_at")
         }
         self.issuedAt = date
-        
-        // Decode responder public key if present (optional for backward compatibility)
-        if let responderPublicKeyString = try? container.decode(String.self, forKey: .responderPublicKey),
-           let responderPublicKeyData = Data(base64Encoded: responderPublicKeyString) {
-            self.responderPublicKey = responderPublicKeyData
-        } else {
-            self.responderPublicKey = nil
-        }
     }
     
-    public init(responseHash: Data, issuedAt: Date, responderPublicKey: Data? = nil) {
+    public init(responseHash: Data, issuedAt: Date) {
         self.responseHash = responseHash
         self.issuedAt = issuedAt
-        self.responderPublicKey = responderPublicKey
     }
 }

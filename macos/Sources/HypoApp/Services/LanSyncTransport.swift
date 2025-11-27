@@ -62,94 +62,86 @@ public final class LanSyncTransport: SyncTransport {
         logger.info("Sending clipboard envelope (type: \(envelope.type.rawValue), size: \(data.count) bytes)")
         #endif
         
-        // If envelope has a target device ID, try to send to that specific device
+        // If envelope has a target device ID, try direct routes first
         if let targetDeviceId = envelope.payload.target, !targetDeviceId.isEmpty {
-            // First, try to send via server (if target is connected to our server)
+            let normalizedTarget = targetDeviceId.lowercased()
+            // 1) Reuse any existing inbound connection for that device
             let activeConnections = server.activeConnections()
-            var targetConnectionFound = false
-            
             for connectionId in activeConnections {
                 if let metadata = server.connectionMetadata(for: connectionId),
-                   let deviceId = metadata.deviceId,
-                   deviceId == targetDeviceId {
-                    // Found connection for target device - send to it
+                   let deviceId = metadata.deviceId?.lowercased(),
+                   deviceId == normalizedTarget {
                     #if canImport(os)
                     logger.info("Sending to target device \(targetDeviceId) via server connection \(connectionId.uuidString.prefix(8))")
                     #endif
                     try server.send(data, to: connectionId)
-                    targetConnectionFound = true
                     return
                 }
             }
-            
-            // Target device not connected to our server - try to connect as client to their server
-            if let getPeers = getDiscoveredPeers {
-                let discoveredPeers = getPeers()
-                if let peer = discoveredPeers.first(where: { peer in
-                    peer.endpoint.metadata["device_id"] == targetDeviceId
-                }) {
-                    // Found peer - connect as client and send
-                    #if canImport(os)
-                    logger.info("Target device \(targetDeviceId) not connected to our server, connecting as client to \(peer.endpoint.host):\(peer.endpoint.port)")
-                    #endif
-                    
-                    // Create or reuse client transport for this device
-                    let clientTransport: LanWebSocketTransport
-                    if let existing = clientTransports[targetDeviceId] {
-                        clientTransport = existing
-                    } else {
-                        let urlString = "ws://\(peer.endpoint.host):\(peer.endpoint.port)"
-                        guard let url = URL(string: urlString) else {
-                            throw NSError(domain: "LanSyncTransport", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(urlString)"])
-                        }
-                        
-                        let deviceIdentity = DeviceIdentity()
-                        let config = LanWebSocketConfiguration(
-                            url: url,
-                            pinnedFingerprint: peer.endpoint.fingerprint,
-                            headers: [
-                                "X-Device-Id": deviceIdentity.deviceId.uuidString,
-                                "X-Device-Platform": "macos"
-                            ],
-                            idleTimeout: 30,
-                            environment: "lan",
-                            roundTripTimeout: 60
-                        )
-                        
-                        clientTransport = LanWebSocketTransport(
-                            configuration: config,
-                            frameCodec: TransportFrameCodec(),
-                            metricsRecorder: NullTransportMetricsRecorder(),
-                            analytics: NoopTransportAnalytics()
-                        )
-                        clientTransports[targetDeviceId] = clientTransport
-                    }
-                    
-                    // Ensure connection is established before sending
-                    do {
-                        try await clientTransport.connect()
-                        #if canImport(os)
-                        logger.info("Connected as client to \(targetDeviceId) at ws://\(peer.endpoint.host):\(peer.endpoint.port)")
-                        #endif
-                        
-                        // Send via client transport
-                        try await clientTransport.send(envelope)
-                        #if canImport(os)
-                        logger.info("Sent to target device \(targetDeviceId) via client connection")
-                        #endif
-                        return
-                    } catch {
-                        #if canImport(os)
-                        logger.info("Failed to connect/send via client to \(targetDeviceId): \(error.localizedDescription), falling back to sendToAll")
-                        #endif
-                        // Fall through to sendToAll
-                    }
+
+            // 2) Best-effort outbound dial to the latest-seen peer for this device
+            let peers = (getDiscoveredPeers?() ?? []).sorted { $0.lastSeen > $1.lastSeen }
+            // Match device IDs case-insensitively to bridge UUID casing differences between platforms.
+            if let peer = peers.first(where: { ($0.endpoint.metadata["device_id"] ?? "").lowercased() == normalizedTarget }) {
+                #if canImport(os)
+                logger.info("Dialing latest-seen peer for \(targetDeviceId): \(peer.endpoint.host):\(peer.endpoint.port)")
+                #endif
+
+                let clientTransport: LanWebSocketTransport
+                if let existing = clientTransports[targetDeviceId] {
+                    clientTransport = existing
                 } else {
-                    #if canImport(os)
-                    logger.info("Target device \(targetDeviceId) not discovered on LAN, cannot send via LAN")
-                    #endif
-                    // Fall through to sendToAll (will be a no-op if no connections)
+                    let urlString = "ws://\(peer.endpoint.host):\(peer.endpoint.port)"
+                    guard let url = URL(string: urlString) else {
+                        throw NSError(domain: "LanSyncTransport", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(urlString)"])
+                    }
+
+                    let deviceIdentity = DeviceIdentity()
+                    // Treat placeholder fingerprint as absent to avoid pinning failures on peers that don't advertise a real cert fingerprint.
+                    let pinnedFingerprint: String? = {
+                        if let fp = peer.endpoint.fingerprint, fp.lowercased() != "uninitialized" { return fp }
+                        return nil
+                    }()
+                    let config = LanWebSocketConfiguration(
+                        url: url,
+                        pinnedFingerprint: pinnedFingerprint,
+                        headers: [
+                            "X-Device-Id": deviceIdentity.deviceId.uuidString,
+                            "X-Device-Platform": "macos"
+                        ],
+                        idleTimeout: 30,
+                        environment: "lan",
+                        roundTripTimeout: 60
+                    )
+
+                    clientTransport = LanWebSocketTransport(
+                        configuration: config,
+                        frameCodec: TransportFrameCodec(),
+                        metricsRecorder: NullTransportMetricsRecorder(),
+                        analytics: NoopTransportAnalytics()
+                    )
+                    clientTransports[targetDeviceId] = clientTransport
                 }
+
+                do {
+                    try await clientTransport.connect()
+                    #if canImport(os)
+                    logger.info("Connected as client to \(targetDeviceId) at ws://\(peer.endpoint.host):\(peer.endpoint.port)")
+                    #endif
+                    try await clientTransport.send(envelope)
+                    #if canImport(os)
+                    logger.info("Sent to target device \(targetDeviceId) via client connection")
+                    #endif
+                    return
+                } catch {
+                    #if canImport(os)
+                    logger.info("Failed to connect/send via client to \(targetDeviceId): \(error.localizedDescription), will attempt broadcast")
+                    #endif
+                }
+            } else {
+                #if canImport(os)
+                logger.info("No discovered peer advertising device_id=\(targetDeviceId); skipping LAN dial")
+                #endif
             }
         }
         
@@ -188,4 +180,3 @@ public final class LanSyncTransport: SyncTransport {
         messageHandlers.removeValue(forKey: id)
     }
 }
-

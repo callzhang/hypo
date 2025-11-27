@@ -11,7 +11,7 @@ final class HistoryPopupPresenter {
 
     private var window: NSPanel?
     private var previousActiveApp: NSRunningApplication?
-    private var isPinned: Bool = true
+    private var isPinned: Bool = false  // Start unpinned - window can be dismissed by clicking outside
     private var globalClickMonitor: Any?
 
     func show(with viewModel: ClipboardHistoryViewModel) {

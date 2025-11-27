@@ -97,7 +97,7 @@ log_info ""
 
 # Monitor Android logs
 (
-    "$ANDROID_SDK_ROOT/platform-tools/adb" logcat | grep -E "LanPairingViewModel|LanWebSocketClient|pairing|Pairing|WebSocket|Connection|challenge|ACK|sendRawJson|onOpen|onFailure|onMessage" | while IFS= read -r line; do
+    "$ANDROID_SDK_ROOT/platform-tools/adb" logcat | grep -v "MIUIInput" | grep -E "LanPairingViewModel|LanWebSocketClient|pairing|Pairing|WebSocket|Connection|challenge|ACK|sendRawJson|onOpen|onFailure|onMessage" | while IFS= read -r line; do
         echo -e "${BLUE}[ANDROID]${NC} $line"
     done
 ) &

@@ -56,6 +56,14 @@ All test scripts are now in the `tests/` directory:
 
 ### Development/Debugging Tools
 These scripts are for specific debugging scenarios and can be kept for ad-hoc use:
+- **`android-logcat.sh`** - Android logcat wrapper that automatically filters MIUIInput and system noise
+  ```bash
+  # Filter by PID (excludes MIUIInput automatically)
+  ./scripts/android-logcat.sh 797e3471 --pid=$(adb -s 797e3471 shell pidof -s com.hypo.clipboard.debug) | grep "pattern"
+  
+  # Simple usage (shows app logs only, no MIUIInput)
+  ./scripts/android-logcat.sh [device_id]
+  ```
 - **`screenshot-android.sh`** - Capture Android device cast window screenshots
 - **`analyze-screenshot.sh`** - Analyze screenshots with OCR (requires tesseract)
 - **`capture-crash.sh`** - Monitor and capture crash logs when manually copying text

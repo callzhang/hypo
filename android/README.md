@@ -652,11 +652,17 @@ $ANDROID_SDK_ROOT/platform-tools/adb devices
 ### Monitoring Logs
 
 ```bash
-# View all logs
-$ANDROID_SDK_ROOT/platform-tools/adb logcat
+# Use helper script (automatically filters MIUIInput and other system noise)
+./scripts/android-logcat.sh [device_id]
+
+# View all logs (with MIUIInput filtered)
+$ANDROID_SDK_ROOT/platform-tools/adb logcat | grep -v "MIUIInput"
 
 # Filter for Hypo app only
-$ANDROID_SDK_ROOT/platform-tools/adb logcat -v time "*:E" | grep -E "clipboard|Hypo"
+$ANDROID_SDK_ROOT/platform-tools/adb logcat -v time "*:E" | grep -v "MIUIInput" | grep -E "clipboard|Hypo"
+
+# Filter by PID (excludes MIUIInput automatically)
+./scripts/android-logcat.sh <device_id> --pid=$(adb -s <device_id> shell pidof -s com.hypo.clipboard.debug)
 
 # Clear logs before testing
 $ANDROID_SDK_ROOT/platform-tools/adb logcat -c

@@ -764,7 +764,24 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
         logger.info("📥 [LanWebSocketTransport] handleIncoming: \(data.count) bytes")
         
         do {
+            // Debug: Log the raw data structure
+            if data.count >= 4 {
+                let lengthBytes = data.prefix(4)
+                let lengthValue = lengthBytes.withUnsafeBytes { buffer -> UInt32 in
+                    buffer.load(as: UInt32.self)
+                }
+                let length = Int(UInt32(bigEndian: lengthValue))
+                logger.info("🔍 [LanWebSocketTransport] Frame header: length=\(length) bytes, total data=\(data.count) bytes")
+                if data.count >= 4 + length {
+                    let jsonData = data.subdata(in: 4..<(4 + length))
+                    if let jsonString = String(data: jsonData, encoding: .utf8) {
+                        logger.info("🔍 [LanWebSocketTransport] JSON payload (first 200 chars): \(jsonString.prefix(200))")
+                    }
+                }
+            }
+            
             let envelope = try frameCodec.decode(data)
+            logger.info("✅ [LanWebSocketTransport] Successfully decoded envelope: id=\(envelope.id), type=\(envelope.type.rawValue)")
             Task { [metricsRecorder] in
                 let now = Date()
                 if let startedAt = await pendingRoundTrips.remove(id: envelope.id) {
@@ -784,6 +801,41 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                 }
             } else {
                 logger.warning("⚠️ [LanWebSocketTransport] No onIncomingMessage handler set")
+            }
+        } catch let decodingError as DecodingError {
+            logger.error("❌ [LanWebSocketTransport] Failed to decode incoming data: \(decodingError)")
+            // Log detailed decoding error information
+            switch decodingError {
+            case .keyNotFound(let key, let context):
+                logger.error("   Missing key: \(key.stringValue) at path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            case .valueNotFound(let type, let context):
+                logger.error("   Missing value of type \(String(describing: type)) at path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            case .typeMismatch(let type, let context):
+                logger.error("   Type mismatch: expected \(String(describing: type)) at path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            case .dataCorrupted(let context):
+                logger.error("   Data corrupted: \(context.debugDescription) at path: \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            @unknown default:
+                logger.error("   Unknown decoding error: \(decodingError)")
+            }
+            // Log raw data for debugging
+            if data.count >= 4 {
+                let lengthBytes = data.prefix(4)
+                let lengthValue = lengthBytes.withUnsafeBytes { buffer -> UInt32 in
+                    buffer.load(as: UInt32.self)
+                }
+                let length = Int(UInt32(bigEndian: lengthValue))
+                logger.error("   Frame header: length=\(length) bytes, total data=\(data.count) bytes")
+                if data.count >= 4 + length {
+                    let jsonData = data.subdata(in: 4..<(4 + length))
+                    if let jsonString = String(data: jsonData, encoding: .utf8) {
+                        logger.error("   JSON payload: \(jsonString)")
+                    } else {
+                        logger.error("   JSON payload (hex): \(jsonData.map { String(format: "%02x", $0) }.joined())")
+                    }
+                }
+            }
+            Task {
+                await pendingRoundTrips.pruneExpired(referenceDate: Date())
             }
         } catch {
             logger.error("❌ [LanWebSocketTransport] Failed to decode incoming data: \(error)")

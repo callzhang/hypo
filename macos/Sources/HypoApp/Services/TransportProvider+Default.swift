@@ -32,7 +32,7 @@ public final class DefaultTransportProvider: TransportProvider {
         cloudTransport.setOnIncomingMessage(handler)
     }
 
-    public func preferredTransport(for preference: TransportPreference) -> SyncTransport {
+    public func preferredTransport() -> SyncTransport {
         // Always use dual transport (sends to both LAN and cloud simultaneously)
         // This ensures maximum reliability regardless of preference
         return dualTransport
@@ -47,16 +47,4 @@ public final class DefaultTransportProvider: TransportProvider {
     public func setGetDiscoveredPeers(_ closure: @escaping () -> [DiscoveredPeer]) {
         lanTransport.setGetDiscoveredPeers(closure)
     }
-}
-
-private struct NoopSyncTransport: SyncTransport {
-    let preference: TransportPreference
-
-    func connect() async throws {}
-
-    func send(_ envelope: SyncEnvelope) async throws {
-        // No-op: Placeholder transport used until real LAN/cloud transports are wired in.
-    }
-
-    func disconnect() async {}
 }

@@ -14,7 +14,6 @@ import os
 public final class TransportManager {
     private let logger = HypoLogger(category: "TransportManager")
     private let provider: TransportProvider
-    private let preferenceStorage: PreferenceStorage
     private let browser: BonjourBrowser
     private let publisher: BonjourPublishing
     private let discoveryCache: LanDiscoveryCache
@@ -57,7 +56,6 @@ public final class TransportManager {
 
     public init(
         provider: TransportProvider,
-        preferenceStorage: PreferenceStorage = UserDefaultsPreferenceStorage(),
         browser: BonjourBrowser = BonjourBrowser(),
         publisher: BonjourPublishing = BonjourPublisher(),
         discoveryCache: LanDiscoveryCache = UserDefaultsLanDiscoveryCache(),
@@ -70,7 +68,6 @@ public final class TransportManager {
         historyStore: HistoryStore? = nil
     ) {
         self.provider = provider
-        self.preferenceStorage = preferenceStorage
         self.browser = browser
         self.publisher = publisher
         self.discoveryCache = discoveryCache
@@ -183,12 +180,7 @@ public final class TransportManager {
     }
 
     public func loadTransport() -> SyncTransport {
-        let preference = currentPreference()
-        return provider.preferredTransport(for: preference)
-    }
-
-    public func update(preference: TransportPreference) {
-        preferenceStorage.savePreference(preference)
+        return provider.preferredTransport()
     }
 
     public func setHistoryViewModel(_ viewModel: ClipboardHistoryViewModel) {
@@ -227,15 +219,11 @@ public final class TransportManager {
         #endif
     }
     
-    public func currentPreference() -> TransportPreference {
-        preferenceStorage.loadPreference() ?? .lanFirst
-    }
-    
-    /// Update the connection state (used by ConnectionStatusProber)
-    @MainActor
-    public func updateConnectionState(_ newState: ConnectionState) {
-        if connectionState != newState {
-            let msg = "🔄 [TransportManager] Updating connectionState: \(connectionState) → \(newState)\n"
+/// Update the connection state (used by ConnectionStatusProber)
+@MainActor
+public func updateConnectionState(_ newState: ConnectionState) {
+    if connectionState != newState {
+        let msg = "🔄 [TransportManager] Updating connectionState: \(connectionState) → \(newState)\n"
             logger.info(msg)
             connectionState = newState
         }
@@ -924,37 +912,9 @@ private enum ConnectionMonitorOutcome {
     case cancelled
 }
 
-public enum TransportPreference: String, Codable {
-    case lanFirst
-    case cloudOnly
-}
-
 @MainActor
 public protocol TransportProvider {
-    func preferredTransport(for preference: TransportPreference) -> SyncTransport
-}
-
-public protocol PreferenceStorage {
-    func loadPreference() -> TransportPreference?
-    func savePreference(_ preference: TransportPreference)
-}
-
-public struct UserDefaultsPreferenceStorage: PreferenceStorage {
-    private let key = "transport_preference"
-    private let defaults: UserDefaults
-
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    public func loadPreference() -> TransportPreference? {
-        guard let raw = defaults.string(forKey: key) else { return nil }
-        return TransportPreference(rawValue: raw)
-    }
-
-    public func savePreference(_ preference: TransportPreference) {
-        defaults.set(preference.rawValue, forKey: key)
-    }
+    func preferredTransport() -> SyncTransport
 }
 
 public protocol LanDiscoveryCache {

@@ -1,9 +1,5 @@
 import Foundation
-#if canImport(CryptoKit)
 import CryptoKit
-#else
-import Crypto
-#endif
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -310,15 +306,9 @@ public final class PairingSession: @unchecked Sendable {
         responderDeviceName: String
     ) async throws -> PairingAckMessage {
         let hash = SHA256.hash(data: challenge.challenge)
-        // Generate a NEW ephemeral key for key rotation
-        // The initial sharedKey was derived using persistent keys (for challenge decryption)
-        // but we include a new ephemeral public key in ACK so Android can re-derive using ephemeral keys
-        let ephemeralKeyForAck = Curve25519.KeyAgreement.PrivateKey()
-        let responderPublicKey = ephemeralKeyForAck.publicKey.rawRepresentation
         let payload = PairingAckPayload(
             responseHash: Data(hash),
-            issuedAt: clock(),
-            responderPublicKey: responderPublicKey
+            issuedAt: clock()
         )
         let data = try jsonEncoder.encode(payload)
         // Use pure UUID string (no prefix) for AAD

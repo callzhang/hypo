@@ -1,10 +1,6 @@
 import Foundation
 import Network
-#if canImport(CryptoKit)
 import CryptoKit
-#else
-import Crypto
-#endif
 #if canImport(os)
 import os
 #endif
@@ -356,6 +352,13 @@ public final class LanWebSocketServer {
             sendHTTPError(status: "400 Bad Request", connectionId: connectionId, context: context)
             return true
         }
+
+        // Capture device metadata from headers as early as possible so routing and status work
+        if let deviceIdHeader = headers["x-device-id"], !deviceIdHeader.isEmpty {
+            updateConnectionMetadata(connectionId: connectionId, deviceId: deviceIdHeader)
+            logger.info("🔍  Captured deviceId from headers: \(deviceIdHeader)")
+        }
+
         logger.info("✅  processHandshakeBuffer: All headers valid, sending handshake response")
         let response = handshakeResponse(for: key)
         context.connection.send(content: response, completion: .contentProcessed { [weak self] error in

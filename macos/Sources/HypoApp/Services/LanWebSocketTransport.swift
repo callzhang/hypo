@@ -1,5 +1,5 @@
 import Foundation
-import Crypto
+import CryptoKit
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif

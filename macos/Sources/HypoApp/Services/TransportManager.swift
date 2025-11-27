@@ -83,18 +83,17 @@ public final class TransportManager {
         // Restore persisted peers from cache
         let cachedPeers = discoveryCache.loadPeers()
         self.lanPeers = cachedPeers
+        logger.info("🔄 [TransportManager] Restored \(cachedPeers.count) peers from cache")
         self.webSocketServer = webSocketServer
-        
-        // Initialize incomingHandler first to avoid "used before initialized" error
+
+
         // Set up incoming clipboard handler if history store is provided
         if let historyStore = historyStore {
+            let transport = LanSyncTransport(server: webSocketServer)
             let keyProvider = KeychainDeviceKeyProvider()
             let deviceIdentity = DeviceIdentity()
             // Set local device ID in WebSocket server for target filtering
             webSocketServer.setLocalDeviceId(deviceIdentity.deviceId.uuidString)
-            
-            // Create transport without closure (will be set later)
-            let transport = LanSyncTransport(server: webSocketServer)
             let syncEngine = SyncEngine(
                 transport: transport,
                 keyProvider: keyProvider,
@@ -106,12 +105,21 @@ public final class TransportManager {
                 syncEngine: syncEngine,
                 historyStore: historyStore
             )
-            // Set discovered peers closure after self is fully initialized
+            // Allow LanSyncTransport to resolve peers from our discovery cache
             transport.setGetDiscoveredPeers { [weak self] in
-                self?.lanDiscoveredPeers() ?? []
+                guard let self else { return [] }
+                return self.lanDiscoveredPeers()
             }
         } else {
             self.incomingHandler = nil
+        }
+
+        // Allow outbound LAN client dials (in DefaultTransportProvider) to reuse discovery/cache results
+        if let defaultProvider = provider as? DefaultTransportProvider {
+            defaultProvider.setGetDiscoveredPeers { [weak self] in
+                guard let self else { return [] }
+                return self.lanDiscoveredPeers()
+            }
         }
         
         // Set up WebSocket server delegate
@@ -159,13 +167,15 @@ public final class TransportManager {
                 NSLog("⚠️ [TransportManager] Self deallocated in initTask")
                 return
             }
-            let logPath = "/tmp/hypo_debug.log"
             await self.activateLanServices()
             
             // CRITICAL: Add immediate logging to verify execution continues
+            self.logger.info("➡️ [TransportManager] Execution continues after activateLanServices()")
+            
             // Note: Auto-connect is now handled by ConnectionStatusProber
             // which is initialized via setHistoryViewModel()
             // This avoids duplicate connection attempts
+            self.logger.info("ℹ️ [TransportManager] Skipping auto-connect (handled by ConnectionStatusProber)")
         }
         #else
         Task { await activateLanServices() }
@@ -184,6 +194,7 @@ public final class TransportManager {
     public func setHistoryViewModel(_ viewModel: ClipboardHistoryViewModel) {
         // Prevent duplicate initialization
         guard self.historyViewModel == nil || connectionStatusProber == nil else {
+            logger.info("🔧 [TransportManager] setHistoryViewModel already called, skipping")
             return
         }
         
@@ -195,16 +206,10 @@ public final class TransportManager {
             await self?.historyViewModel?.add(entry)
         }
         
-        // Set discovered peers closure for DefaultTransportProvider's LanSyncTransport
-        if let defaultProvider = provider as? DefaultTransportProvider {
-            defaultProvider.setGetDiscoveredPeers { [weak self] in
-                self?.lanDiscoveredPeers() ?? []
-            }
-        }
-        
         // Initialize connection status prober now that we have the ViewModel
         #if canImport(AppKit)
         if connectionStatusProber == nil {
+            logger.info("🔧 [TransportManager] Initializing ConnectionStatusProber")
             
             connectionStatusProber = ConnectionStatusProber(
                 historyViewModel: viewModel,
@@ -215,7 +220,9 @@ public final class TransportManager {
             // Start event-driven checking (no periodic polling)
             connectionStatusProber?.start()
             
+            logger.info("🔧 [TransportManager] ConnectionStatusProber started (event-driven)")
         } else {
+            logger.info("🔧 [TransportManager] ConnectionStatusProber already initialized")
         }
         #endif
     }
@@ -241,7 +248,6 @@ public final class TransportManager {
         
         autoConnectTask = Task { @MainActor in
             logger.info("🚀 [TransportManager] Auto-connect Task started")
-            let logPath = "/tmp/hypo_debug.log"
             do {
                 // Auto-connect to cloud relay after a delay to show server availability
                 logger.info("⏳ [TransportManager] Waiting 3 seconds before cloud connection attempt")
@@ -262,20 +268,16 @@ public final class TransportManager {
                         do {
                             try await cloudTransport.connect()
                             connectionState = .connectedCloud
-                            let successMsg = "✅ [TransportManager] Successfully connected to cloud relay\n"
                             logger.info("✅ [TransportManager] Successfully connected to cloud relay")
                         } catch {
                             connectionState = .idle
-                            let errorMsg = "❌ [TransportManager] Cloud connection failed: \(error.localizedDescription)\n"
                             logger.info("❌ [TransportManager] Cloud connection failed: \(error.localizedDescription)")
                         }
                     } else {
                         connectionState = .connectedCloud
-                        let alreadyMsg = "☁️ [TransportManager] Cloud relay already connected\n"
                         logger.info("☁️ [TransportManager] Cloud relay already connected")
                     }
                 } else {
-                    let noProviderMsg = "⚠️ [TransportManager] Provider is not DefaultTransportProvider: \(type(of: provider))\n"
                     logger.info("⚠️ [TransportManager] Provider is not DefaultTransportProvider: \(type(of: provider))")
                 }
             } catch {
@@ -299,6 +301,7 @@ public final class TransportManager {
 
     public func lanDiscoveredPeers() -> [DiscoveredPeer] {
         let peers = lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
+        logger.info("🔍 [TransportManager] lanDiscoveredPeers() returning \(peers.count) peers: \(peers.map { "\($0.serviceName):\($0.endpoint.metadata["device_id"] ?? "none")" }.joined(separator: ", "))")
         return peers
     }
 
@@ -407,7 +410,6 @@ public final class TransportManager {
     }
 
     private func activateLanServices() async {
-        let msg = "🔵 [TransportManager] activateLanServices called, port=\(lanConfiguration.port), isServerRunning=\(isServerRunning)\n"
         if !isAdvertising, lanConfiguration.port > 0 {
             publisher.start(with: lanConfiguration)
             isAdvertising = true
@@ -435,7 +437,6 @@ public final class TransportManager {
             }
         }
         await browser.start()
-        let browserMsg = "🔍 [TransportManager] Bonjour browser started, waiting for peers...\n"
         startPruneTaskIfNeeded()
     }
 
@@ -762,11 +763,11 @@ public final class TransportManager {
             lastSeen[peer.serviceName] = peer.lastSeen
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
-            let afterMsg = "🔍 [TransportManager] After adding peer, lanPeers.count=\(lanPeers.count), serviceName=\(peer.serviceName)\n"
+            logger.info("🔍 [TransportManager] After adding peer, lanPeers.count=\(lanPeers.count), serviceName=\(peer.serviceName)")
             // Trigger connection status probe when peer is discovered
             connectionStatusProber?.probeNow()
         case .removed(let serviceName):
-            let eventMsg = "🔍 [TransportManager] Peer removed: \(serviceName)\n"
+            logger.info("🔍 [TransportManager] Peer removed: \(serviceName)")
             lanPeers.removeValue(forKey: serviceName)
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
@@ -810,24 +811,38 @@ public final class TransportManager {
             publicKeyBase64 = nil
         }
         
+        // Derive a stable fingerprint from the LAN key agreement public key so peers can pin us.
+        let fingerprint: String
+        if let publicKeyBase64 = publicKeyBase64, let pubData = Data(base64Encoded: publicKeyBase64) {
+            fingerprint = sha256Hex(pubData)
+        } else {
+            fingerprint = "uninitialized"
+        }
         return BonjourPublisher.Configuration(
             serviceName: hostName,
             port: 7010,
             version: bundleVersion,
-            fingerprint: "uninitialized",
+            fingerprint: fingerprint,
             protocols: ["ws+tls"],
             deviceId: deviceId,
             publicKey: publicKeyBase64,
             signingPublicKey: signingPublicKeyBase64
         )
     }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        return digest.compactMap { String(format: "%02x", $0) }.joined()
+    }
     private static func loadOrCreateLanPairingKey() throws -> Curve25519.KeyAgreement.PrivateKey {
         let logger = HypoLogger(category: "TransportManager")
         let keychain = KeychainKeyStore()
         if let stored = try keychain.load(for: lanPairingKeyIdentifier) {
             let data = stored.withUnsafeBytes { Data($0) }
+            logger.info("🔑 [TransportManager] Loading existing LAN pairing key from keychain (size: \(data.count) bytes)")
             do {
                 let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data)
+                logger.info("🔑 [TransportManager] Successfully loaded existing key, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
                 return key
             } catch {
                 logger.error("❌ [TransportManager] Failed to reconstruct key from keychain data: \(error)")
@@ -837,8 +852,10 @@ public final class TransportManager {
             }
         }
 
+        logger.info("🔑 [TransportManager] Creating new LAN pairing key")
         let key = Curve25519.KeyAgreement.PrivateKey()
         try keychain.save(key: SymmetricKey(data: key.rawRepresentation), for: lanPairingKeyIdentifier)
+        logger.info("🔑 [TransportManager] Saved new key to keychain, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
         return key
     }
 }
@@ -1044,17 +1061,8 @@ private final class ApplicationLifecycleObserver {
 
 extension TransportManager: LanWebSocketServerDelegate {
     nonisolated public func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {
-        logger.info("🔵 [TransportManager] didReceivePairingChallenge called from connection: \(connection.uuidString.prefix(8))")
-        #if canImport(os)
-        let pairingLogger = HypoLogger(category: "pairing")
-        pairingLogger.info("📱 Received pairing challenge from: \(challenge.initiatorDeviceName)")
-        #endif
-        
-        // Auto-accept pairing for LAN auto-discovery
         Task { @MainActor in
-            logger.info("🔵 [TransportManager] Inside Task, about to call handlePairingChallenge")
             await self.handlePairingChallenge(challenge, connectionId: connection)
-            logger.info("✅ [TransportManager] handlePairingChallenge completed")
         }
     }
     
@@ -1082,24 +1090,14 @@ extension TransportManager: LanWebSocketServerDelegate {
             #if canImport(os)
             logger.info("📝 Starting pairing session...")
             #endif
-            // Always use ephemeral key for pairing to ensure key rotation
-            // This ensures a new shared key is derived each time, even for re-pairing
-            // Note: Android uses the persistent public key from Bonjour, but since Android
-            // generates a new ephemeral private key each time, the shared key will still be
-            // different each pairing. macOS uses ephemeral key here for consistency and
-            // to ensure forward secrecy even if Android's key generation changes.
-            logger.info("🔑 [TransportManager] Setting up pairing session for key rotation...")
-            // Use persistent key for initial shared key derivation (to decrypt challenge)
-            // PairingSession will generate a separate ephemeral key for ACK
+            logger.info("🔑 [TransportManager] Loading LAN pairing key for challenge handling...")
             let persistentKey = try Self.loadOrCreateLanPairingKey()
-            logger.info("🔑 [TransportManager] Using persistent key for initial challenge decryption")
+            logger.info("🔑 [TransportManager] Loaded key, public key: \(persistentKey.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
             logger.info("🔵 [TransportManager] Creating PairingSession...")
             let pairingSession = PairingSession(identity: deviceIdentity.deviceId)
             logger.info("🔵 [TransportManager] Calling pairingSession.start()...")
-            // Pass persistent key for initial shared key derivation (to decrypt challenge)
-            // PairingSession will generate a separate ephemeral key for ACK
             try pairingSession.start(with: configuration, keyAgreementKey: persistentKey)
-            logger.info("🔑 [TransportManager] Pairing session started with persistent key (ephemeral key will be generated for ACK)")
+            logger.info("🔑 [TransportManager] Pairing session started with persistent key")
             
             #if canImport(os)
             logger.info("🔐 Handling challenge to generate ACK...")
@@ -1116,14 +1114,36 @@ extension TransportManager: LanWebSocketServerDelegate {
                 return
             }
             
-            // Send ACK back to Android
+            logger.info("✅ [TransportManager] Guard passed, ACK is non-nil")
+            #if canImport(os)
+            logger.info("✅ Generated ACK with challengeId: \(ack.challengeId.uuidString)")
+            #endif
+            logger.info("✅ [TransportManager] Generated ACK with challengeId: \(ack.challengeId.uuidString)")
+            
+            #if canImport(os)
+            logger.info("📤 Sending ACK to Android device...")
+            #endif
+            logger.info("📤 [TransportManager] About to send ACK to connection: \(connectionId.uuidString.prefix(8))")
+            // Send ACK back to Android - let errors propagate
+            logger.info("📤 [TransportManager] Calling webSocketServer.sendPairingAck()...")
             try webSocketServer.sendPairingAck(ack, to: connectionId)
+            logger.info("✅ [TransportManager] sendPairingAck() completed successfully")
+            
+            #if canImport(os)
             logger.info("✅ Pairing completed with \(challenge.initiatorDeviceName)")
+            #endif
             
             // Update connection metadata with device ID
             webSocketServer.updateConnectionMetadata(connectionId: connectionId, deviceId: challenge.initiatorDeviceId)
+            logger.info("✅ [TransportManager] Updated connection metadata: connectionId=\(connectionId.uuidString.prefix(8)), deviceId=\(challenge.initiatorDeviceId)")
             
             // Notify about successful pairing (for UI/history updates)
+            logger.info("📤 [TransportManager] Posting PairingCompleted notification")
+            logger.info("   deviceId: \(challenge.initiatorDeviceId)")
+            logger.info("   deviceName: \(challenge.initiatorDeviceName)")
+            
+            // Write to debug log
+            
             NotificationCenter.default.post(
                 name: NSNotification.Name("PairingCompleted"),
                 object: nil,
@@ -1134,6 +1154,7 @@ extension TransportManager: LanWebSocketServerDelegate {
             )
             
             // Also notify that device is now online (connection is established)
+            logger.info("✅ [TransportManager] Marking device as online after pairing: \(challenge.initiatorDeviceId)")
             NotificationCenter.default.post(
                 name: NSNotification.Name("DeviceConnectionStatusChanged"),
                 object: nil,
@@ -1142,6 +1163,7 @@ extension TransportManager: LanWebSocketServerDelegate {
                     "isOnline": true
                 ]
             )
+            logger.info("✅ [TransportManager] PairingCompleted notification posted")
         } catch {
             #if canImport(os)
             let logger = HypoLogger(category: "pairing")
@@ -1157,6 +1179,8 @@ extension TransportManager: LanWebSocketServerDelegate {
     
     nonisolated public func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {
         // Forward clipboard data to the transport for processing
+        fflush(stdout)  // Force flush stdout
+        
         Task { @MainActor in
             // Try to extract deviceId from the frame-encoded data
             let frameCodec = TransportFrameCodec()
@@ -1170,7 +1194,7 @@ extension TransportManager: LanWebSocketServerDelegate {
                 }
                 // Note: We do NOT update online status here - that's handled by ConnectionStatusProber periodic checks
             } catch {
-                logger.debug("⚠️ Failed to decode envelope for metadata update: \(error)")
+                logger.info("⚠️ [TransportManager] Failed to decode envelope for metadata update: \(error)")
                 // Try to get deviceId from connection metadata as fallback
                 if let metadata = server.connectionMetadata(for: connection),
                    let deviceId = metadata.deviceId {

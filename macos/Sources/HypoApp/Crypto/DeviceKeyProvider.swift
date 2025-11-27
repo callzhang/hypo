@@ -1,9 +1,5 @@
 import Foundation
-#if canImport(CryptoKit)
 import CryptoKit
-#else
-import Crypto
-#endif
 
 public protocol DeviceKeyProviding: Sendable {
     func key(for deviceId: String) async throws -> SymmetricKey

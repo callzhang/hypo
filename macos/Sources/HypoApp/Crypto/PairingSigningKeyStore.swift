@@ -1,9 +1,5 @@
 import Foundation
-#if canImport(CryptoKit)
 import CryptoKit
-#else
-import Crypto
-#endif
 #if canImport(Security)
 import Security
 

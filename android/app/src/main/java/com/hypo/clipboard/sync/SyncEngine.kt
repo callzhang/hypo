@@ -13,6 +13,8 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
 import java.util.Base64
+import java.util.UUID
+import java.time.Instant
 
 private val base64Encoder = Base64.getEncoder().withoutPadding()
 private val base64Decoder = Base64.getDecoder()
@@ -122,6 +124,9 @@ class SyncEngine @Inject constructor(
         }
         
         val envelope = SyncEnvelope(
+            id = UUID.randomUUID().toString(),
+            timestamp = Instant.now().toString(),
+            version = "1.0",
             type = MessageType.CLIPBOARD,
             payload = Payload(
                 contentType = item.type,

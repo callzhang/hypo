@@ -39,6 +39,17 @@ class SecureKeyStore @Inject constructor(
         // Try exact match first (as-is, no preprocessing)
         var encoded = prefs.getString(deviceId, null)
         
+        // Case-insensitive fallback: try lowercase UUID form if different
+        if (encoded == null) {
+            val lower = deviceId.lowercase()
+            if (lower != deviceId) {
+                encoded = prefs.getString(lower, null)
+                if (encoded != null) {
+                    android.util.Log.d("SecureKeyStore", "🔄 Found key using lowercase deviceId fallback: $deviceId -> $lower")
+                }
+            }
+        }
+        
         // If not found and deviceId has prefix, try without prefix
         if (encoded == null && (deviceId.startsWith("macos-") || deviceId.startsWith("android-"))) {
             val migratedId = migrateDeviceId(deviceId)

@@ -57,10 +57,23 @@ class SyncCoordinator @Inject constructor(
                 autoTargets.value = deviceIds
                 recomputeTargets()
                 
-                // When peers are discovered, start maintaining a connection to receive messages
-                if (peers.isNotEmpty()) {
-                    android.util.Log.d(TAG, "🔌 Peers discovered (${peers.size}), starting receiving connection...")
+                // When paired peers are discovered, start maintaining a connection to receive messages
+                val allowed = pairedDeviceIdsCache.value
+                lanWebSocketClient.setAllowedDeviceIdsProvider { pairedDeviceIdsCache.value }
+                val pairedPeers = peers.filter { p ->
+                    val id = p.attributes["device_id"] ?: p.serviceName
+                    allowed.any { it.equals(id, ignoreCase = true) }
+                }
+                if (pairedPeers.isNotEmpty()) {
+                    android.util.Log.d(TAG, "🔌 Paired peers discovered (${pairedPeers.size}), starting receiving connection...")
                     lanWebSocketClient.startReceiving()
+                } else if (allowed.isNotEmpty()) {
+                    // We have paired devices (even if not currently discovered), maintain connection
+                    // This ensures we can receive messages when peers come back online
+                    android.util.Log.d(TAG, "ℹ️ No paired peers currently discovered, but ${allowed.size} paired device(s) exist - maintaining LAN receive loop")
+                    lanWebSocketClient.startReceiving()
+                } else {
+                    android.util.Log.d(TAG, "ℹ️ No paired devices and no paired peers discovered; not starting LAN receive loop")
                 }
             }
         }
@@ -171,31 +184,34 @@ class SyncCoordinator @Inject constructor(
                 // Check if matches something in history (excluding the latest entry)
                 val matchingEntry = repository.findMatchingEntryInHistory(eventItem)
                 
+                val item: ClipboardItem
                 if (matchingEntry != null) {
                     // Found matching entry in history - move it to the top by updating timestamp
                     val newTimestamp = Instant.now()
                     repository.updateTimestamp(matchingEntry.id, newTimestamp)
                     android.util.Log.i(TAG, "🔄 New message matches history item, moved to top: ${matchingEntry.preview.take(50)}")
-                    continue
+                    // Use the existing item for broadcasting
+                    item = matchingEntry
+                } else {
+                    // Not a duplicate - add to history
+                    item = ClipboardItem(
+                        id = event.id,
+                        type = event.type,
+                        content = event.content,
+                        preview = event.preview,
+                        metadata = event.metadata.ifEmpty { emptyMap() },
+                        deviceId = deviceId,
+                        deviceName = deviceName,
+                        createdAt = event.createdAt,
+                        isPinned = false,
+                        isEncrypted = event.isEncrypted,
+                        transportOrigin = event.transportOrigin
+                    )
+                    repository.upsert(item)
                 }
-                
-                // Not a duplicate - add to history
-                val item = ClipboardItem(
-                    id = event.id,
-                    type = event.type,
-                    content = event.content,
-                    preview = event.preview,
-                    metadata = event.metadata.ifEmpty { emptyMap() },
-                    deviceId = deviceId,
-                    deviceName = deviceName,
-                    createdAt = event.createdAt,
-                    isPinned = false,
-                    isEncrypted = event.isEncrypted,
-                    transportOrigin = event.transportOrigin
-                )
-                repository.upsert(item)
 
                 // Only broadcast if not a received item (prevent loops)
+                // IMPORTANT: Broadcast even if item matched history - user may have re-copied it
                 if (!event.skipBroadcast) {
                     // Wait up to 10 seconds for targets to be available (handles race condition with peer discovery)
                     var pairedDevices = _targets.value

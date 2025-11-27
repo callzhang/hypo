@@ -22,6 +22,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.hypo.clipboard.MainActivity
 import com.hypo.clipboard.R
 import com.hypo.clipboard.data.ClipboardRepository
+import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.service.ClipboardAccessibilityService
 import com.hypo.clipboard.sync.ClipboardListener
 import com.hypo.clipboard.sync.ClipboardParser
@@ -169,6 +170,8 @@ class ClipboardSyncService : Service() {
         relayWebSocketClient.startReceiving()  // For cloud relay (creates separate connection)
         ensureClipboardPermissionAndStartListener()
         observeLatestItem()
+        // Ensure database latest entry matches current clipboard on startup
+        ensureDatabaseMatchesCurrentClipboard()
         registerScreenStateReceiver()
         registerNetworkChangeCallback()
         connectionStatusProber.start()
@@ -341,6 +344,86 @@ class ClipboardSyncService : Service() {
             repository.observeHistory(limit = 1).collectLatest { items ->
                 latestPreview = items.firstOrNull()?.preview
                 updateNotification()
+            }
+        }
+    }
+
+    /**
+     * Ensures the database's latest entry matches the current clipboard on startup.
+     * If they don't match, updates the database to reflect the current clipboard.
+     * This prevents old items from being considered as "latest" when the app restarts.
+     */
+    private fun ensureDatabaseMatchesCurrentClipboard() {
+        scope.launch(Dispatchers.Default) {
+            try {
+                val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val parser = ClipboardParser(
+                    contentResolver = contentResolver,
+                    onFileTooLarge = { filename, size ->
+                        showFileTooLargeWarning(filename, size)
+                    }
+                )
+                
+                val clip = clipboardManager.primaryClip ?: return@launch
+                val currentEvent = parser.parse(clip) ?: return@launch
+                
+                val latestEntry = repository.getLatestEntry()
+                
+                // If database has a latest entry, check if it matches current clipboard
+                if (latestEntry != null) {
+                    val currentItem = ClipboardItem(
+                        id = currentEvent.id,
+                        type = currentEvent.type,
+                        content = currentEvent.content,
+                        preview = currentEvent.preview,
+                        metadata = currentEvent.metadata.ifEmpty { emptyMap() },
+                        deviceId = deviceIdentity.deviceId,
+                        deviceName = deviceIdentity.deviceName,
+                        createdAt = currentEvent.createdAt,
+                        isPinned = false,
+                        isEncrypted = false,
+                        transportOrigin = null
+                    )
+                    
+                    // If current clipboard doesn't match database latest, update database
+                    if (!currentItem.matchesContent(latestEntry)) {
+                        Log.i(TAG, "🔄 Current clipboard doesn't match database latest entry - updating database")
+                        // Update the timestamp of the matching entry if it exists in history, or create new entry
+                        val matchingEntry = repository.findMatchingEntryInHistory(currentItem)
+                        if (matchingEntry != null) {
+                            // Found in history - move it to top
+                            repository.updateTimestamp(matchingEntry.id, currentEvent.createdAt)
+                            Log.i(TAG, "✅ Moved matching history item to top")
+                        } else {
+                            // Not in history - add as new entry (but don't send it - it's the current clipboard)
+                            repository.upsert(currentItem)
+                            Log.i(TAG, "✅ Added current clipboard to database as latest entry")
+                        }
+                    } else {
+                        Log.d(TAG, "✅ Database latest entry matches current clipboard")
+                    }
+                } else {
+                    // No latest entry in database - add current clipboard (but don't send it)
+                    val currentItem = ClipboardItem(
+                        id = currentEvent.id,
+                        type = currentEvent.type,
+                        content = currentEvent.content,
+                        preview = currentEvent.preview,
+                        metadata = currentEvent.metadata.ifEmpty { emptyMap() },
+                        deviceId = deviceIdentity.deviceId,
+                        deviceName = deviceIdentity.deviceName,
+                        createdAt = currentEvent.createdAt,
+                        isPinned = false,
+                        isEncrypted = false,
+                        transportOrigin = null
+                    )
+                    repository.upsert(currentItem)
+                    Log.i(TAG, "✅ Added current clipboard to empty database")
+                }
+            } catch (e: SecurityException) {
+                Log.d(TAG, "🔒 Cannot access clipboard to sync with database: ${e.message}")
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Error ensuring database matches current clipboard: ${e.message}", e)
             }
         }
     }

@@ -34,11 +34,17 @@ class ClipboardListener(
             Log.i(TAG, "📋 ClipboardListener STARTING - registering listener")
             clipboardManager.addPrimaryClipChangedListener(this)
             
-            // Try to process initial clip, but don't fail if access is blocked
+            // Initialize lastSignature from current clipboard to prevent re-sending old content on restart
+            // This ensures we only sync actual clipboard changes, not whatever happens to be in clipboard on startup
+            // IMPORTANT: We do NOT process the initial clipboard here - we only initialize lastSignature
+            // to mark it as "already seen" so it won't be processed if the clipboard hasn't actually changed
             try {
                 clipboardManager.primaryClip?.let { clip ->
-                    Log.i(TAG, "📋 Processing initial clip on start")
-                    process(clip)
+                    val event = parser.parse(clip)
+                    if (event != null) {
+                        lastSignature = event.signature()
+                        Log.i(TAG, "📋 Initialized lastSignature from current clipboard (will not process on startup - only actual changes will trigger sync)")
+                    }
                 }
             } catch (e: SecurityException) {
                 Log.d(TAG, "🔒 Initial clip access blocked: ${e.message}")

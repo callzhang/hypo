@@ -269,26 +269,26 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             queue: .main
         ) { [weak self] notification in
             guard let self = self else { return }
-            self.logger.info("🔔 [HistoryStore] PairingCompleted notification received!")
             let userInfo = notification.userInfo ?? [:]
-            self.logger.info("   Full userInfo: \(userInfo)")
-            
-            // Write to debug log
-            guard let deviceIdString = userInfo["deviceId"] as? String,
-                  let deviceName = userInfo["deviceName"] as? String else {
-                self.logger.info("⚠️ [HistoryStore] PairingCompleted notification missing required fields")
-                self.logger.info("   userInfo keys: \(userInfo.keys)")
-                self.logger.info("   deviceId type: \(type(of: userInfo["deviceId"]))")
-                self.logger.info("   deviceName type: \(type(of: userInfo["deviceName"]))")
-#if canImport(os)
-                self.logger.warning("⚠️ PairingCompleted notification missing required fields")
-#endif
-                return
-            }
-            
-            self.logger.info("📱 [HistoryStore] Processing device: \(deviceName), ID: \(deviceIdString)")
             
             Task { @MainActor in
+                self.logger.info("🔔 [HistoryStore] PairingCompleted notification received!")
+                self.logger.info("   Full userInfo: \(userInfo)")
+                
+                // Write to debug log
+                guard let deviceIdString = userInfo["deviceId"] as? String,
+                      let deviceName = userInfo["deviceName"] as? String else {
+                    self.logger.info("⚠️ [HistoryStore] PairingCompleted notification missing required fields")
+                    self.logger.info("   userInfo keys: \(userInfo.keys)")
+                    self.logger.info("   deviceId type: \(type(of: userInfo["deviceId"]))")
+                    self.logger.info("   deviceName type: \(type(of: userInfo["deviceName"]))")
+#if canImport(os)
+                    self.logger.warning("⚠️ PairingCompleted notification missing required fields")
+#endif
+                    return
+                }
+                
+                self.logger.info("📱 [HistoryStore] Processing device: \(deviceName), ID: \(deviceIdString)")
                 await self.handlePairingCompleted(deviceId: deviceIdString, deviceName: deviceName)
             }
         }
@@ -334,16 +334,17 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             queue: .main
         ) { [weak self] notification in
             guard let self = self else { return }
-            self.logger.info("🔔 [HistoryStore] DeviceConnectionStatusChanged notification received")
-            self.logger.info("🔔 [HistoryStore] userInfo: \(notification.userInfo ?? [:])")
-            guard let userInfo = notification.userInfo,
-                  let deviceId = userInfo["deviceId"] as? String,
-                  let isOnline = userInfo["isOnline"] as? Bool else {
-                self.logger.info("⚠️ [HistoryStore] Invalid notification userInfo: \(notification.userInfo ?? [:])")
-                return
-            }
-            self.logger.info("🔔 [HistoryStore] Calling updateDeviceOnlineStatus: deviceId=\(deviceId), isOnline=\(isOnline)")
+            let userInfo = notification.userInfo ?? [:]
+            
             Task { @MainActor in
+                self.logger.info("🔔 [HistoryStore] DeviceConnectionStatusChanged notification received")
+                self.logger.info("🔔 [HistoryStore] userInfo: \(userInfo)")
+                guard let deviceId = userInfo["deviceId"] as? String,
+                      let isOnline = userInfo["isOnline"] as? Bool else {
+                    self.logger.info("⚠️ [HistoryStore] Invalid notification userInfo: \(userInfo)")
+                    return
+                }
+                self.logger.info("🔔 [HistoryStore] Calling updateDeviceOnlineStatus: deviceId=\(deviceId), isOnline=\(isOnline)")
                 await self.updateDeviceOnlineStatus(deviceId: deviceId, isOnline: isOnline)
             }
         }
@@ -367,17 +368,49 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     private func handlePairingCompleted(deviceId: String, deviceName: String) async {
         logger.info("📝 [HistoryStore] handlePairingCompleted called: \(deviceName) (\(deviceId))")
         
+        // Check if device is currently discovered on LAN to get discovery info
+        var discoveredPeer: DiscoveredPeer? = nil
+        if let transportManager = transportManager {
+            let discoveredPeers = transportManager.lanDiscoveredPeers()
+            discoveredPeer = discoveredPeers.first(where: { peer in
+                if let peerDeviceId = peer.endpoint.metadata["device_id"] {
+                    return peerDeviceId.lowercased() == deviceId.lowercased()
+                }
+                return false
+            })
+        }
+        
         // Remove any duplicates first (by ID or by name+platform)
         pairedDevices.removeAll { $0.id == deviceId || ($0.name == deviceName && $0.platform == "Android") }
         
-        // Add the device
-        let device = PairedDevice(
-            id: deviceId,
-            name: deviceName,
-            platform: "Android",
-            lastSeen: Date(),
-            isOnline: true
-        )
+        // Add the device with discovery info if available
+        let device: PairedDevice
+        if let peer = discoveredPeer {
+            // Device is discovered on LAN - include discovery info
+            device = PairedDevice(
+                id: deviceId,
+                name: deviceName,
+                platform: "Android",
+                lastSeen: Date(),
+                isOnline: true,
+                serviceName: peer.serviceName,
+                bonjourHost: peer.endpoint.host,
+                bonjourPort: peer.endpoint.port,
+                fingerprint: peer.endpoint.fingerprint
+            )
+            logger.info("✅ [HistoryStore] Device paired and discovered on LAN: \(peer.endpoint.host):\(peer.endpoint.port)")
+        } else {
+            // Device not discovered yet - will be updated by ConnectionStatusProber when discovered
+            device = PairedDevice(
+                id: deviceId,
+                name: deviceName,
+                platform: "Android",
+                lastSeen: Date(),
+                isOnline: true
+            )
+            logger.info("✅ [HistoryStore] Device paired but not yet discovered on LAN (will update when discovered)")
+        }
+        
         pairedDevices.append(device)
         
         // Deduplicate and sort
@@ -387,6 +420,13 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 #if canImport(os)
         logger.info("✅ Paired device saved: \(deviceName)")
 #endif
+        
+        // Trigger connection status probe to update device with discovery info if not already set
+        // This ensures the device gets updated with LAN connection details if discovered
+        if discoveredPeer == nil, let transportManager = transportManager {
+            // Device not discovered yet - trigger probe to check again
+            await transportManager.probeConnectionStatus()
+        }
     }
     
     private static func deduplicateDevices(_ devices: [PairedDevice]) -> [PairedDevice] {
@@ -727,14 +767,24 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func registerPairedDevice(_ device: PairedDevice) {
-        if let index = pairedDevices.firstIndex(where: { $0.id == device.id }) {
-            pairedDevices[index] = device
-        } else if let existingIndex = pairedDevices.firstIndex(where: { $0.name == device.name && $0.platform == device.platform }) {
-            pairedDevices[existingIndex] = device
+        // Create a new array to ensure SwiftUI detects the change
+        var updatedDevices = pairedDevices
+        
+        if let index = updatedDevices.firstIndex(where: { $0.id == device.id }) {
+            updatedDevices[index] = device
+            logger.info("🔄 [HistoryStore] Updated existing device: \(device.name) (id: \(device.id), bonjourHost: \(device.bonjourHost ?? "nil"), bonjourPort: \(device.bonjourPort?.description ?? "nil"))")
+        } else if let existingIndex = updatedDevices.firstIndex(where: { $0.name == device.name && $0.platform == device.platform }) {
+            updatedDevices[existingIndex] = device
+            logger.info("🔄 [HistoryStore] Updated device by name: \(device.name) (id: \(device.id), bonjourHost: \(device.bonjourHost ?? "nil"), bonjourPort: \(device.bonjourPort?.description ?? "nil"))")
         } else {
-            pairedDevices.append(device)
+            updatedDevices.append(device)
+            logger.info("🔄 [HistoryStore] Added new device: \(device.name) (id: \(device.id), bonjourHost: \(device.bonjourHost ?? "nil"), bonjourPort: \(device.bonjourPort?.description ?? "nil"))")
         }
-        pairedDevices.sort { $0.lastSeen > $1.lastSeen }
+        
+        updatedDevices.sort { $0.lastSeen > $1.lastSeen }
+        
+        // Replace the entire array to trigger SwiftUI update
+        pairedDevices = updatedDevices
         persistPairedDevices()
     }
     
@@ -901,9 +951,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 
 
     public func makeRemotePairingViewModel() -> RemotePairingViewModel {
-        RemotePairingViewModel(identity: deviceIdentity) { [weak self] device in
+        RemotePairingViewModel(identity: deviceIdentity, onDevicePaired: { [weak self] device in
             self?.registerPairedDevice(device)
-        }
+        })
     }
 
     public func pairingParameters() -> (service: String, port: Int, relayHint: URL?) {
@@ -1023,10 +1073,12 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 extension ClipboardHistoryViewModel: ClipboardMonitorDelegate {
     nonisolated public func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture entry: ClipboardEntry) {
         let logger = HypoLogger(category: "ClipboardHistoryViewModel")
-        let localId = deviceIdentity.deviceId.uuidString
-        let isLocal = entry.originDeviceId == localId
-        logger.info("📋 [ClipboardHistoryViewModel] clipboardMonitor didCapture: \(entry.previewText.prefix(50)), originDeviceId: \(entry.originDeviceId), localDeviceId: \(localId), isLocal: \(isLocal), transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
-        Task { await self.add(entry) }
+        Task { @MainActor in
+            let localId = deviceIdentity.deviceId.uuidString
+            let isLocal = entry.originDeviceId == localId
+            logger.info("📋 [ClipboardHistoryViewModel] clipboardMonitor didCapture: \(entry.previewText.prefix(50)), originDeviceId: \(entry.originDeviceId), localDeviceId: \(localId), isLocal: \(isLocal), transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
+            await self.add(entry)
+        }
     }
 }
 #endif

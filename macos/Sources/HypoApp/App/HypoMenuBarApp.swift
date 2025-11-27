@@ -8,11 +8,13 @@ import ApplicationServices
 #endif
 
 // AppDelegate to ensure hotkey setup runs at app launch (not waiting for UI)
+@MainActor
 class HypoAppDelegate: NSObject, NSApplicationDelegate {
     private let logger = HypoLogger(category: "HypoAppDelegate")
     private var hotKeyRef: EventHotKeyRef?
     private var altNumberHotKeys: [Int: EventHotKeyRef] = [:]
     private static var eventHandlerInstalled = false
+    private var clipboardMonitor: ClipboardMonitor?
     
     override init() {
         super.init()
@@ -25,6 +27,9 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         // Setup Hotkey using Carbon API (more reliable than CGEventTap)
         // Note: Carbon RegisterEventHotKey does NOT require Accessibility permissions
         setupCarbonHotkey()
+        
+        // Start clipboard monitoring immediately so local copies are captured even before UI appears
+        startClipboardMonitorIfNeeded()
     }
     
     func setupCarbonHotkey() {
@@ -221,6 +226,40 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    /// Start clipboard monitoring as early as possible so local copies are captured even before the UI appears.
+    @MainActor
+    private func startClipboardMonitorIfNeeded() {
+        // Reuse shared monitor if one already exists
+        if let existing = AppContext.shared.clipboardMonitor {
+            clipboardMonitor = existing
+            logger.info("📋 [HypoAppDelegate] ClipboardMonitor already running, reusing shared instance")
+            return
+        }
+        
+        guard let viewModel = AppContext.shared.historyViewModel else {
+            logger.warning("⚠️ [HypoAppDelegate] Cannot start ClipboardMonitor: historyViewModel not set yet")
+            return
+        }
+        
+        guard let uuid = UUID(uuidString: viewModel.localDeviceId) else {
+            logger.error("❌ [HypoAppDelegate] Failed to parse localDeviceId: \(viewModel.localDeviceId)")
+            return
+        }
+        
+        let identity = DeviceIdentity()
+        let monitor = ClipboardMonitor(
+            deviceId: uuid,
+            platform: identity.platform,
+            deviceName: identity.deviceName
+        )
+        monitor.delegate = viewModel
+        monitor.start()
+        
+        AppContext.shared.clipboardMonitor = monitor
+        clipboardMonitor = monitor
+        logger.info("📋 [HypoAppDelegate] ClipboardMonitor started at launch (delegate set: \(monitor.delegate != nil))")
+    }
+    
     private func pasteToCursor() {
         // Simulate Cmd+V to paste at cursor position
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -266,7 +305,7 @@ private func pasteToCursorAtCurrentPosition() {
         keyDownEvent.flags = .maskCommand
         
         // Post to HID event tap (this sends to the frontmost app)
-        _ = keyDownEvent.post(tap: .cghidEventTap)
+        keyDownEvent.post(tap: .cghidEventTap)
         logger.info("📋 KeyDown posted")
         
         // Small delay between key down and key up
@@ -276,7 +315,7 @@ private func pasteToCursorAtCurrentPosition() {
                 return
             }
             keyUpEvent.flags = .maskCommand
-            _ = keyUpEvent.post(tap: .cghidEventTap)
+            keyUpEvent.post(tap: .cghidEventTap)
             logger.info("✅ KeyUp posted")
         }
     }
@@ -390,8 +429,14 @@ public struct HypoMenuBarApp: App {
         // Set up right-click menu after MenuBarExtra creates the status item
         // Right-click handling disabled (status item uses default behavior)
     }
-
+    
     private func setupMonitor() {
+        // Reuse monitor if AppDelegate already started it
+        if let existing = AppContext.shared.clipboardMonitor {
+            monitor = existing
+            logger.info("📋 [HypoMenuBarApp] Reusing shared ClipboardMonitor (delegate set: \(existing.delegate != nil))")
+            return
+        }
         guard monitor == nil else { return }
         // Use the same device identity as the viewModel to ensure device IDs match
         let deviceId = viewModel.localDeviceId
@@ -407,6 +452,7 @@ public struct HypoMenuBarApp: App {
         )
         monitor.delegate = viewModel
         monitor.start()
+        AppContext.shared.clipboardMonitor = monitor
         logger.info("📋 [HypoMenuBarApp] ClipboardMonitor started, deviceId: \(deviceId), delegate set: \(monitor.delegate != nil)")
         self.monitor = monitor
     }
@@ -775,7 +821,7 @@ struct MenuBarContentView: View {
             keyDownEvent.flags = .maskCommand
             
             // Post to HID event tap (this sends to the frontmost app)
-            _ = keyDownEvent.post(tap: .cghidEventTap)
+            keyDownEvent.post(tap: .cghidEventTap)
             self.logger.info("📋 KeyDown posted")
             
             // Small delay between key down and key up
@@ -785,7 +831,7 @@ struct MenuBarContentView: View {
                     return
                 }
                 keyUpEvent.flags = .maskCommand
-                _ = keyUpEvent.post(tap: .cghidEventTap)
+                keyUpEvent.post(tap: .cghidEventTap)
                 self.logger.info("✅ KeyUp posted")
             }
         }
@@ -1719,6 +1765,24 @@ private struct SettingsSectionView: View {
         let hasLan = device.bonjourHost != nil && device.bonjourPort != nil && device.bonjourHost != "unknown"
         let isServerConnected = viewModel.connectionState == .connectedCloud
         
+        // Check if device is currently discovered (even if bonjourHost/bonjourPort not set yet)
+        var isCurrentlyDiscovered = false
+        var discoveredPeerHost: String? = nil
+        var discoveredPeerPort: Int? = nil
+        if let transportManager = viewModel.transportManager {
+            let discoveredPeers = transportManager.lanDiscoveredPeers()
+            if let peer = discoveredPeers.first(where: { peer in
+                if let peerDeviceId = peer.endpoint.metadata["device_id"] {
+                    return peerDeviceId.lowercased() == device.id.lowercased()
+                }
+                return false
+            }) {
+                isCurrentlyDiscovered = true
+                discoveredPeerHost = peer.endpoint.host
+                discoveredPeerPort = peer.endpoint.port
+            }
+        }
+        
         // Get device transport to determine if it's using cloud (for cloud-only case)
         var deviceTransport: TransportChannel? = nil
         if let transportManager = viewModel.transportManager {
@@ -1728,24 +1792,42 @@ private struct SettingsSectionView: View {
         }
         let isCloudTransport = deviceTransport == .cloud && isServerConnected
         
-        // Match Android's logic: if device is discovered on LAN AND server is connected, show "and server"
-        // This works even if the device doesn't have a cloud transport record yet
-        if hasLan && isServerConnected {
-            // Connected via both LAN and server (mirror Android's behavior)
-            if let host = device.bonjourHost, let port = device.bonjourPort {
-                return "Connected via \(host):\(port) and server"
+        // If device has LAN info (from stored data or current discovery), always show it
+        let effectiveHost = device.bonjourHost ?? discoveredPeerHost
+        let effectivePort = device.bonjourPort ?? discoveredPeerPort
+        let hasEffectiveLan = effectiveHost != nil && effectivePort != nil && effectiveHost != "unknown"
+        
+        if hasEffectiveLan {
+            // We have LAN info - show IP:PORT
+            if let host = effectiveHost, let port = effectivePort {
+                if isServerConnected {
+                    // Connected via both LAN and server
+                    return "Connected via \(host):\(port) and server"
+                } else {
+                    // Connected via LAN only
+                    return "Connected via \(host):\(port)"
+                }
             }
-        } else if hasLan {
-            // Connected via LAN only
-            if let host = device.bonjourHost, let port = device.bonjourPort {
-                return "Connected via \(host):\(port)"
-            }
+        }
+        
+        // No LAN info - check cloud connection
+        if isServerConnected {
+            // Server is connected and device is online but no LAN info
+            // This means device is reachable via cloud (even if we don't have a transport record yet)
+            return "Connected via server"
         } else if isCloudTransport {
             // Connected via cloud only (device has cloud transport record)
             return "Connected via server"
         }
         
-        // Fallback: just show "Connected" if online but no specific connection info
+        // Fallback: device is online but we don't know how it's connected
+        // This should rarely happen - only if:
+        // 1. Device is online (has active connection or is discovered)
+        // 2. No LAN info (bonjourHost/bonjourPort not set and not currently discovered)
+        // 3. Server is not connected
+        // 4. No cloud transport record
+        // This could happen if there's a timing issue where the device status is updated before connection details
+        logger.debug("⚠️ [HypoMenuBarApp] Device \(device.name) is online but connection method unknown (hasLan=\(hasLan), isDiscovered=\(isCurrentlyDiscovered), isServerConnected=\(isServerConnected), deviceTransport=\(deviceTransport?.rawValue ?? "nil"))")
         return "Connected"
     }
 }

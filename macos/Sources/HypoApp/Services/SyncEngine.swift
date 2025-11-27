@@ -46,6 +46,44 @@ public struct SyncEnvelope: Codable {
         self.type = type
         self.payload = payload
     }
+    
+    // Custom decoder to handle Android's String UUID format
+    // Note: TransportFrameCodec uses .convertFromSnakeCase, so snake_case keys are automatically converted to camelCase
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Decode id as String first (Android sends UUID as string), then convert to UUID
+        let idString = try container.decode(String.self, forKey: .id)
+        guard let uuid = UUID(uuidString: idString) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .id,
+                in: container,
+                debugDescription: "Invalid UUID format: \(idString)"
+            )
+        }
+        self.id = uuid
+        
+        // Decode timestamp (Android sends ISO8601 string)
+        self.timestamp = try container.decode(Date.self, forKey: .timestamp)
+        
+        // Decode version
+        self.version = try container.decode(String.self, forKey: .version)
+        
+        // Decode type
+        self.type = try container.decode(MessageType.self, forKey: .type)
+        
+        // Decode payload
+        self.payload = try container.decode(Payload.self, forKey: .payload)
+    }
+    
+    // CodingKeys for custom decoder - use camelCase since decoder has .convertFromSnakeCase
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case timestamp
+        case version
+        case type
+        case payload
+    }
 
     public enum MessageType: String, Codable {
         case clipboard

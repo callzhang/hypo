@@ -171,7 +171,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     @Published public private(set) var items: [ClipboardEntry] = []
     @Published public private(set) var latestItem: ClipboardEntry?
     @Published public var historyLimit: Int = 200
-    @Published public var transportPreference: TransportPreference
     @Published public var allowsCloudFallback: Bool
     @Published public var appearancePreference: AppearancePreference
     @Published public var autoDeleteAfterHours: Int
@@ -230,7 +229,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         self.transportManager = transportManager
         self.defaults = defaults
         self.deviceIdentity = deviceIdentity
-        self.transportPreference = transportManager?.currentPreference() ?? .lanFirst
         self.allowsCloudFallback = defaults.object(forKey: DefaultsKey.allowsCloudFallback) as? Bool ?? true
         self.autoDeleteAfterHours = defaults.object(forKey: DefaultsKey.autoDeleteHours) as? Int ?? 0
         self.plainTextModeEnabled = defaults.object(forKey: DefaultsKey.plainTextMode) as? Bool ?? false
@@ -578,7 +576,11 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
     
     private func syncToPairedDevices(_ entry: ClipboardEntry) async {
-        guard transportManager != nil else { return }
+        logger.info("🔄 [HistoryStore] syncToPairedDevices called for entry: \(entry.previewText.prefix(50))")
+        guard transportManager != nil else {
+            logger.info("⏭️ [HistoryStore] Skipping sync - transportManager is nil")
+            return
+        }
         
         // ⚠️ CRITICAL: Only forward entries that originated from the local device
         // Skip forwarding if entry came from a remote device (has transportOrigin set)
@@ -592,6 +594,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             logger.info("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry originated from different device: \(entry.originDeviceId) (local: \(localDeviceId))")
             return
         }
+        
+        logger.info("✅ [HistoryStore] Entry is local, proceeding with sync. Paired devices: \(pairedDevices.count)")
         
         // Convert clipboard entry to payload
         let payload: ClipboardPayload
@@ -615,7 +619,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         
         // Queue messages for all paired devices (best-effort practice - sync regardless of status)
         // If no devices are paired, queue will be empty and nothing will happen
+        logger.info("📤 [HistoryStore] Queuing messages for \(pairedDevices.count) paired device(s)")
         for device in pairedDevices {
+            logger.info("📤 [HistoryStore] Queuing message for device: \(device.name) (id: \(device.id))")
             let queuedMessage = QueuedSyncMessage(
                 entry: entry,
                 payload: payload,
@@ -746,11 +752,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 self.latestItem = updated.first
             }
         }
-    }
-
-    public func updateTransportPreference(_ preference: TransportPreference) {
-        transportManager?.update(preference: preference)
-        transportPreference = preference
     }
 
     // Note: allowsCloudFallback is deprecated - we always dual-send now

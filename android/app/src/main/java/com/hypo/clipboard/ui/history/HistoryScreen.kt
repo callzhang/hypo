@@ -18,7 +18,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Search
@@ -132,7 +135,17 @@ fun HistoryScreen(
         if (items.isEmpty()) {
             EmptyHistory()
         } else {
+            val listState = rememberLazyListState()
+            
+            // Scroll to top when items change (new item added or item moved to top)
+            LaunchedEffect(items.size, items.firstOrNull()?.id) {
+                if (items.isNotEmpty()) {
+                    listState.animateScrollToItem(0)
+                }
+            }
+            
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {

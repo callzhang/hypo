@@ -1007,14 +1007,44 @@ private struct HistorySectionView: View {
 
     @ViewBuilder
     private var itemList: some View {
+        ScrollViewReader { proxy in
+            scrollContent(proxy: proxy)
+                .onChange(of: filteredItems.count) { newCount in
+                    scrollToTopIfNeeded(proxy: proxy, hasItems: newCount > 0)
+                }
+                .onChange(of: filteredItems.first?.id) { _ in
+                    scrollToTopIfNeeded(proxy: proxy, hasItems: !filteredItems.isEmpty)
+                }
+        }
+    }
+    
+    @ViewBuilder
+    private func scrollContent(proxy: ScrollViewProxy) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
+            LazyVStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(filteredItems.enumerated()), id: \.element.id) { index, item in
                     // Only show shortcut for items 2-10 (index 1-9)
                     // Item 1 (index 0) doesn't need shortcut as it's already in clipboard
                     let shortcutIndex = index > 0 && index <= 9 ? index : nil
                     rowView(item: item, shortcutIndex: shortcutIndex)
+                        .id(index == 0 ? AnyHashable("top") : AnyHashable(item.id))
                 }
+            }
+        }
+    }
+    
+    private func scrollToTopIfNeeded(proxy: ScrollViewProxy, hasItems: Bool) {
+        if hasItems {
+            withAnimation {
+                proxy.scrollTo(AnyHashable("top"), anchor: UnitPoint.top)
+            }
+        }
+    }
+    
+    private func scrollToTop(proxy: ScrollViewProxy, hasItems: Bool) {
+        if hasItems {
+            withAnimation {
+                proxy.scrollTo("top", anchor: UnitPoint.top)
             }
         }
     }
@@ -1031,7 +1061,7 @@ private struct HistorySectionView: View {
                 highlightedItemId = item.id
             }
         )
-        .padding(8)
+        .padding(4)
     }
 }
 
@@ -1311,10 +1341,10 @@ private struct ClipboardRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .center) {
                 // Left column: Icon and keyboard shortcut index (only for items 2-10)
-                VStack(alignment: .center, spacing: 4) {
+                VStack(alignment: .center, spacing: 2) {
                     Image(systemName: entry.content.iconName)
                         .foregroundStyle(.primary)
                         .accessibilityHidden(true)
@@ -1333,7 +1363,7 @@ private struct ClipboardRow: View {
                 .frame(width: 32)
                 
                 // Middle column: Content description
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
                         Text(entry.content.title)
                             .font(.headline)
@@ -1375,7 +1405,7 @@ private struct ClipboardRow: View {
                 Spacer()
                 
                 // Right column: Time, pinned status, and preview/finder icon
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 2) {
                     Text(entry.timestamp, style: .time)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -1435,7 +1465,7 @@ private struct ClipboardRow: View {
                 }
             }
         }
-        .padding(8)
+        .padding(4)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill((isHovered || isHighlighted) ? Color.accentColor.opacity(0.2) : Color(nsColor: .controlBackgroundColor))

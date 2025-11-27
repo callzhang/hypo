@@ -43,6 +43,7 @@ class SyncCoordinator @Inject constructor(
             try {
                 val deviceIds = deviceKeyStore.getAllDeviceIds().toSet()
                 pairedDeviceIdsCache.value = deviceIds
+                recomputeTargets()
                 Log.d(TAG, "📋 Initial paired device IDs loaded: ${deviceIds.size} devices")
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ Failed to load initial paired device IDs: ${e.message}")

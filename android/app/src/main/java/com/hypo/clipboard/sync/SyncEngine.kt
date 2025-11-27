@@ -103,10 +103,21 @@ class SyncEngine @Inject constructor(
             val nonce = encrypted.nonce.toBase64()
             val tag = encrypted.tag.toBase64()
         
+            android.util.Log.d("SyncEngine", "🔍 ENCODING DEBUG:")
+            android.util.Log.d("SyncEngine", "   Original content: ${item.content.take(50)}")
+            android.util.Log.d("SyncEngine", "   Ciphertext length: ${encrypted.ciphertext.size} bytes")
+            android.util.Log.d("SyncEngine", "   Ciphertext base64 (full): $ctxt")
+            android.util.Log.d("SyncEngine", "   Nonce base64: $nonce")
+            android.util.Log.d("SyncEngine", "   Tag base64: $tag")
+            android.util.Log.d("SyncEngine", "   Base64 encoder: withoutPadding=${base64Encoder.withoutPadding()}")
+            android.util.Log.d("SyncEngine", "   Ciphertext base64 length: ${ctxt.length} chars")
+            android.util.Log.d("SyncEngine", "   Ciphertext base64 ends with: ${ctxt.takeLast(10)}")
             
             Triple(ctxt, nonce, tag)
         } else {
             // Plain text mode: use plaintext directly as "ciphertext", with empty nonce/tag
+            android.util.Log.d("SyncEngine", "⚠️ PLAIN TEXT MODE: Sending unencrypted payload")
+            android.util.Log.d("SyncEngine", "   Plaintext content: ${item.content.take(50)}")
             Triple(base64Encoder.encodeToString(plaintext), "", "")
         }
         
@@ -174,15 +185,6 @@ class SyncEngine @Inject constructor(
             val nonce = envelope.payload.encryption.nonce.fromBase64()
             val tag = envelope.payload.encryption.tag.fromBase64()
             val aad = envelope.payload.deviceId.encodeToByteArray()
-            
-            // Debug logging for encryption parameters
-            android.util.Log.d("SyncEngine", "🔐 [DECRYPT] deviceId: ${envelope.payload.deviceId}")
-            android.util.Log.d("SyncEngine", "🔐 [DECRYPT] AAD: ${envelope.payload.deviceId} (${aad.size} bytes)")
-            android.util.Log.d("SyncEngine", "🔐 [DECRYPT] AAD hex: ${aad.joinToString("") { "%02x".format(it) }}")
-            android.util.Log.d("SyncEngine", "🔐 [DECRYPT] Key size: ${key.size} bytes")
-            android.util.Log.d("SyncEngine", "🔐 [DECRYPT] Ciphertext size: ${ciphertext.size} bytes")
-            android.util.Log.d("SyncEngine", "🔐 [DECRYPT] Nonce size: ${nonce.size} bytes")
-            android.util.Log.d("SyncEngine", "🔐 [DECRYPT] Tag size: ${tag.size} bytes")
 
             val decrypted = cryptoService.decrypt(
                 encrypted = com.hypo.clipboard.crypto.EncryptedData(

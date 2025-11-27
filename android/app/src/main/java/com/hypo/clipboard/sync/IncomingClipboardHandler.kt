@@ -57,7 +57,15 @@ class IncomingClipboardHandler @Inject constructor(
                     transportOrigin = transportOrigin
                 )
                 
-                Log.i(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=$senderDeviceName")
+                // Extract message content for logging
+                val contentPreview = when (event.type) {
+                    com.hypo.clipboard.domain.model.ClipboardType.TEXT -> event.content.take(100)
+                    com.hypo.clipboard.domain.model.ClipboardType.LINK -> event.content.take(100)
+                    com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> "image(${event.content.length} bytes)"
+                    com.hypo.clipboard.domain.model.ClipboardType.FILE -> "file(${event.content.length} bytes)"
+                    else -> "<unknown>"
+                }
+                Log.i(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=$senderDeviceName, content: $contentPreview")
                 
                 // Forward to coordinator (will use source device info instead of local)
                 syncCoordinator.onClipboardEvent(event)

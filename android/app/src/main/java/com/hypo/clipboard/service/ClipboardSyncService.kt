@@ -32,6 +32,10 @@ import com.hypo.clipboard.transport.lan.LanRegistrationConfig
 import com.google.crypto.tink.subtle.X25519
 import com.google.crypto.tink.subtle.Ed25519Sign
 import dagger.hilt.android.AndroidEntryPoint
+import android.util.Base64
+import java.security.MessageDigest
+import java.time.Duration
+import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
@@ -145,11 +149,6 @@ class ClipboardSyncService : Service() {
             }
         }
         
-        // Set up warning callback for decryption failures
-        incomingClipboardHandler.onDecryptionWarning = { deviceId, deviceName, reason ->
-            showDecryptionWarning(deviceId, deviceName, reason)
-        }
-        
         lanWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
             incomingClipboardHandler.handle(envelope, origin)
         }
@@ -213,7 +212,19 @@ class ClipboardSyncService : Service() {
                 stopSelf()
             }
         }
+
+        // Ensure LAN advertising is running (START_STICKY restarts may drop NSD registration)
+        ensureLanAdvertising()
         return START_STICKY
+    }
+
+    private fun ensureLanAdvertising() {
+        // Only start if not already advertising
+        if (!transportManager.isAdvertising.value) {
+            val lanConfig = buildLanRegistrationConfig()
+            Log.d(TAG, "🔁 ensureLanAdvertising: restarting transportManager with serviceName=${lanConfig.serviceName}")
+            transportManager.start(lanConfig)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -653,16 +664,31 @@ class ClipboardSyncService : Service() {
         // Load or generate persistent pairing keys for LAN auto-discovery
         val (publicKeyBase64, signingPublicKeyBase64) = loadOrCreatePairingKeys()
 
+        // Derive fingerprint from the LAN agreement public key (stable across restarts)
+        val fingerprint = publicKeyBase64
+            ?.let { Base64.decode(it, Base64.DEFAULT) }
+            ?.let { sha256Hex(it) }
+            ?: TransportManager.DEFAULT_FINGERPRINT
+
         return LanRegistrationConfig(
             serviceName = deviceIdentity.deviceId,
             port = TransportManager.DEFAULT_PORT,
-            fingerprint = TransportManager.DEFAULT_FINGERPRINT,
+            fingerprint = fingerprint,
             version = version,
             protocols = TransportManager.DEFAULT_PROTOCOLS,
             deviceId = deviceIdentity.deviceId,
             publicKey = publicKeyBase64,
             signingPublicKey = signingPublicKeyBase64
         )
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        val sb = StringBuilder(digest.size * 2)
+        for (b in digest) {
+            sb.append(String.format("%02x", b))
+        }
+        return sb.toString()
     }
     
     private fun loadOrCreatePairingKeys(): Pair<String?, String?> {
@@ -743,38 +769,6 @@ class ClipboardSyncService : Service() {
         
         notificationManager.notify(WARNING_NOTIFICATION_ID, notification)
         Log.w(TAG, "⚠️ File too large: $filename (${size / (1024 * 1024)}MB)")
-    }
-
-    private fun showDecryptionWarning(deviceId: String, deviceName: String, reason: String) {
-        val message = "Cannot decrypt message from $deviceName: $reason"
-        val fullMessage = "Device: $deviceName\nID: ${deviceId.take(36)}\nReason: $reason\n\nPlease ensure the device is paired and the encryption key is available."
-        
-        val contentIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val contentPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            contentIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        // Use unique notification ID based on device ID to avoid overwriting warnings from different devices
-        val notificationId = WARNING_NOTIFICATION_ID + deviceId.hashCode().mod(1000)
-        
-        val notification = NotificationCompat.Builder(this, WARNING_CHANNEL_ID)
-            .setContentTitle("⚠️ Decryption Failed")
-            .setContentText(message)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(contentPendingIntent)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ERROR)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(fullMessage))
-            .build()
-        
-        notificationManager.notify(notificationId, notification)
-        Log.w(TAG, "⚠️ Decryption warning: $message")
     }
 
     companion object {

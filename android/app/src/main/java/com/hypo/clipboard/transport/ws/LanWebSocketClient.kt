@@ -57,7 +57,19 @@ class OkHttpWebSocketConnector @Inject constructor(
     init {
         val baseClient = okHttpClient ?: OkHttpClient()
         val normalizedUrl = normalizeWebSocketUrl(config.url)
-        val url = normalizedUrl.toHttpUrl()
+        // Validate URL before parsing
+        if (normalizedUrl.isBlank()) {
+            throw IllegalArgumentException("WebSocket URL cannot be blank")
+        }
+        // Log the URL being parsed for debugging
+        android.util.Log.d("OkHttpWebSocketConnector", "🔗 Parsing WebSocket URL: $normalizedUrl (original: ${config.url})")
+        val url = try {
+            normalizedUrl.toHttpUrl()
+        } catch (e: IllegalArgumentException) {
+            android.util.Log.e("OkHttpWebSocketConnector", "❌ Failed to parse URL: $normalizedUrl", e)
+            throw IllegalArgumentException("Invalid WebSocket URL: $normalizedUrl (original: ${config.url})", e)
+        }
+        android.util.Log.d("OkHttpWebSocketConnector", "✅ Parsed URL - scheme: ${url.scheme}, host: ${url.host}, port: ${url.port}")
         val builder = baseClient.newBuilder()
         // Only apply certificate pinning for secure connections (wss:// -> https://)
         // Skip pinning for non-secure connections (ws:// -> http://)
@@ -101,7 +113,18 @@ class OkHttpWebSocketConnector @Inject constructor(
             return when {
                 trimmed.startsWith("wss://", ignoreCase = true) -> "https://" + trimmed.substring(6)
                 trimmed.startsWith("ws://", ignoreCase = true) -> "http://" + trimmed.substring(5)
-                else -> trimmed
+                trimmed.startsWith("https://", ignoreCase = true) -> trimmed // Already normalized
+                trimmed.startsWith("http://", ignoreCase = true) -> trimmed // Already normalized
+                trimmed.startsWith("/") -> {
+                    // If URL starts with /, it's likely a path - this is an error
+                    android.util.Log.e("OkHttpWebSocketConnector", "❌ Invalid URL format: starts with '/' - $trimmed")
+                    throw IllegalArgumentException("Invalid WebSocket URL: URL cannot start with '/' - $trimmed")
+                }
+                else -> {
+                    // If no scheme, assume it's a host:port and add http:// (for ws:// connections)
+                    android.util.Log.w("OkHttpWebSocketConnector", "⚠️ URL missing scheme, assuming http:// (ws://): $trimmed")
+                    "http://$trimmed"
+                }
             }
         }
     }
@@ -224,9 +247,10 @@ class LanWebSocketClient @Inject constructor(
             }
             
             if (peerUrl != null && peerUrl != currentUrl) {
-                // Create new connector with peer's URL
-                // For LAN connections (ws://), skip certificate pinning (no TLS)
-                // Only use certificate pinning for secure connections (wss://)
+                // Peer IP changed - update URL and trigger reconnection
+                android.util.Log.d("LanWebSocketClient", "🔄 Peer IP changed in send(): $peerUrl (was: $currentUrl) - reconnecting")
+                // Update both currentUrl and lastKnownUrl to the same value
+                lastKnownUrl = peerUrl
                 val isSecure = peerUrl.startsWith("wss://", ignoreCase = true)
                 val peerConfig = TlsWebSocketConfig(
                     url = peerUrl,
@@ -239,7 +263,7 @@ class LanWebSocketClient @Inject constructor(
                 val newConnector = OkHttpWebSocketConnector(peerConfig)
                 
                 mutex.withLock {
-                    webSocket?.close(1000, "Switching to peer IP")
+                    webSocket?.close(1000, "Peer IP changed")
                     webSocket = null
                     isOpen.set(false)
                     connectionJob?.cancel()
@@ -247,8 +271,11 @@ class LanWebSocketClient @Inject constructor(
                     currentConnector = newConnector
                     currentUrl = peerUrl
                 }
+            } else if (peerUrl != null && peerUrl == currentUrl) {
+                // Peer URL matches current - ensure lastKnownUrl is also updated
+                lastKnownUrl = peerUrl
             } else if (peerUrl == null) {
-                android.util.Log.w("LanWebSocketClient", "⚠️ Target device $targetDeviceId not found in discovered peers, using default config URL")
+                android.util.Log.w("LanWebSocketClient", "⚠️ Target device $targetDeviceId not found in discovered peers, using current URL: $currentUrl")
             }
         }
         
@@ -435,88 +462,22 @@ class LanWebSocketClient @Inject constructor(
         }
     }
 
+    /**
+     * Establish a long-lived WebSocket connection for receiving messages.
+     * Only reconnects when:
+     * 1. Peer IP changes (detected via discovery events)
+     * 2. Connection disconnects (onClosed/onFailure)
+     * 
+     * Does NOT continuously retry - relies on discovery events to trigger reconnection.
+     */
     private suspend fun runConnectionLoop() {
         var retryCount = 0
         val maxRetryDelay = 128_000L // 128 seconds max delay (after exponential backoff)
         val baseRetryDelay = 1_000L // 1 second base delay
         
         while (!sendQueue.isClosedForReceive) {
-            // Before each connection attempt, check if we should update URL based on discovered peers
-            if (transportManager != null) {
-                val isCloudConnection = config.url.contains("fly.dev", ignoreCase = true) || config.url.startsWith("wss://", ignoreCase = true)
-                if (!isCloudConnection) {
-                    val peers = transportManager.currentPeers()
-                    val allowedIds = allowedDeviceIdsProvider?.invoke() ?: emptySet()
-                    val filteredPeers = if (allowedIds.isNotEmpty()) {
-                        peers.filter { peer ->
-                            val id = peer.attributes["device_id"] ?: peer.serviceName
-                            allowedIds.any { it.equals(id, ignoreCase = true) }
-                        }
-                    } else peers
-                    
-                    val peerList = if (filteredPeers.isNotEmpty()) filteredPeers else peers
-                    
-                    if (peerList.isNotEmpty()) {
-                        val peer = peerList.first()
-                        val peerUrl = when {
-                            peer.host != "unknown" && peer.host != "127.0.0.1" -> {
-                                "ws://${peer.host}:${peer.port}"
-                            }
-                            peer.host == "127.0.0.1" -> {
-                                val emulatorHost = "10.0.2.2"
-                                "ws://$emulatorHost:${peer.port}"
-                            }
-                            else -> null
-                        }
-                        
-                        if (peerUrl != null && peerUrl != currentUrl) {
-                            android.util.Log.d("LanWebSocketClient", "🔄 Updating URL to discovered peer: $peerUrl (was: $currentUrl)")
-                            // Cache the successful peer URL for future use when discovery fails
-                            lastKnownUrl = peerUrl
-                            val peerConfig = TlsWebSocketConfig(
-                                url = peerUrl,
-                                fingerprintSha256 = null,
-                                headers = config.headers,
-                                environment = "lan",
-                                idleTimeoutMillis = config.idleTimeoutMillis,
-                                roundTripTimeoutMillis = config.roundTripTimeoutMillis
-                            )
-                            val newConnector = OkHttpWebSocketConnector(peerConfig)
-                            
-                            mutex.withLock {
-                                webSocket?.close(1000, "Switching to discovered peer")
-                                webSocket = null
-                                isOpen.set(false)
-                                currentConnector = newConnector
-                                currentUrl = peerUrl
-                            }
-                        }
-                    } else {
-                        // No peers discovered - use last known URL if available and we have paired devices
-                        val allowedIds = allowedDeviceIdsProvider?.invoke() ?: emptySet()
-                        if (allowedIds.isNotEmpty() && lastKnownUrl != null && lastKnownUrl != currentUrl && lastKnownUrl != config.url) {
-                            android.util.Log.d("LanWebSocketClient", "🔄 No peers discovered, but ${allowedIds.size} paired device(s) exist - using last known URL: $lastKnownUrl")
-                            val peerConfig = TlsWebSocketConfig(
-                                url = lastKnownUrl!!,
-                                fingerprintSha256 = null,
-                                headers = config.headers,
-                                environment = "lan",
-                                idleTimeoutMillis = config.idleTimeoutMillis,
-                                roundTripTimeoutMillis = config.roundTripTimeoutMillis
-                            )
-                            val newConnector = OkHttpWebSocketConnector(peerConfig)
-                            
-                            mutex.withLock {
-                                webSocket?.close(1000, "Switching to last known peer URL")
-                                webSocket = null
-                                isOpen.set(false)
-                                currentConnector = newConnector
-                                currentUrl = lastKnownUrl!!
-                            }
-                        }
-                    }
-                }
-            }
+            // Check if we should update URL based on discovered peers (IP may have changed)
+            updateUrlFromDiscovery()
             
             android.util.Log.d("LanWebSocketClient", "🚀 connection attempt #${retryCount + 1} url=$currentUrl")
             
@@ -529,8 +490,8 @@ class LanWebSocketClient @Inject constructor(
             }
             val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    android.util.Log.i("LanWebSocketClient", "✅ WebSocket connection opened: $currentUrl")
-                    android.util.Log.i("LanWebSocketClient", "   Device ID registered with backend: ${config.headers["X-Device-Id"]}")
+                    android.util.Log.d("LanWebSocketClient", "✅ WebSocket connection opened: $currentUrl")
+                    android.util.Log.d("LanWebSocketClient", "   Device ID registered with backend: ${config.headers["X-Device-Id"]}")
                     android.util.Log.d("LanWebSocketClient", "   Response headers: ${response.headers}")
                     android.util.Log.d("LanWebSocketClient", "   Config URL: ${config.url}")
                     android.util.Log.d("LanWebSocketClient", "   WebSocket instance: ${webSocket.hashCode()}")
@@ -601,7 +562,7 @@ class LanWebSocketClient @Inject constructor(
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     android.util.Log.e("LanWebSocketClient", "🔥🔥🔥 onMessage() CALLED! ${bytes.size} bytes from $currentUrl")
                     touch()
-                    android.util.Log.i("LanWebSocketClient", "📥 Received binary message: ${bytes.size} bytes from URL: $currentUrl")
+                    android.util.Log.d("LanWebSocketClient", "📥 Received binary message: ${bytes.size} bytes from URL: $currentUrl")
                     
                     // Decode the binary frame first (handles 4-byte length prefix)
                     // Then check if it's a pairing message or clipboard message
@@ -705,6 +666,12 @@ class LanWebSocketClient @Inject constructor(
                     }
                     shutdownSocket(webSocket)
                     handshakeStarted = null
+                    // Trigger reconnection on failure - connection loop will handle it
+                    scope.launch {
+                        // Small delay to let cleanup complete
+                        delay(100)
+                        ensureConnection()
+                    }
                     // Re-throw to propagate error
                     if (t is SSLPeerUnverifiedException) {
                         val host = config.url.toHttpUrlOrNull()?.host
@@ -897,7 +864,7 @@ class LanWebSocketClient @Inject constructor(
 
     private fun handleIncoming(bytes: ByteString) {
         val now = clock.instant()
-        android.util.Log.i("LanWebSocketClient", "🔍 handleIncoming: ${bytes.size} bytes, handler=${onIncomingClipboard != null}, transportOrigin=$transportOrigin")
+        android.util.Log.d("LanWebSocketClient", "🔍 handleIncoming: ${bytes.size} bytes, handler=${onIncomingClipboard != null}, transportOrigin=$transportOrigin")
         
         val messageString = bytes.utf8()
         

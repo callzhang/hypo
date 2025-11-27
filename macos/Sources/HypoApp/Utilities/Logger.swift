@@ -54,9 +54,9 @@ public struct HypoLogger {
     
     private func log(_ message: String, level: String) {
         // For os.Logger: just use the message as-is (system adds timestamp, level, process, subsystem:category)
-        // For print(): format with timestamp and category for terminal viewing
+        // For print(): format with timestamp and category for terminal viewing (without process name/PID)
         let timestamp = formatTimestamp()
-        let printFormatted = "[\(timestamp)] \(level) \(ProcessInfo.processInfo.processName): [\(subsystem):\(category)] \(message)"
+        let printFormatted = "[\(timestamp)] \(level) [\(subsystem):\(category)] \(message)"
         
         #if canImport(os)
         // Use os.Logger so logs appear in log stream - system will add metadata

@@ -38,6 +38,12 @@ public final class ConnectionStatusProber {
                 if oldStatus != newStatus {
                     self?.logger.info("🌐", "Network connectivity changed: \(oldStatus) -> \(newStatus) (path status: \(path.status))")
                     self?.hasNetworkConnectivity = newStatus
+                    // Reconnect cloud WebSocket to use new IP address
+                    if newStatus, let transportProvider = self?.transportProvider as? DefaultTransportProvider {
+                        let cloudTransport = transportProvider.getCloudTransport()
+                        self?.logger.info("🔄", "Reconnecting cloud WebSocket due to network change")
+                        await cloudTransport.reconnect()
+                    }
                     // Trigger immediate probe on network change to update server and peer status
                     self?.logger.info("🔍", "Triggering immediate probe due to network change")
                     await self?.probeConnections()

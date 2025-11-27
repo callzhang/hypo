@@ -85,7 +85,7 @@ class RelayWebSocketClient @Inject constructor(
      * Used when network changes to ensure connection uses new IP address.
      */
     suspend fun reconnect() {
-        android.util.Log.i("RelayWebSocketClient", "🔄 Reconnecting cloud WebSocket due to network change")
+        android.util.Log.d("RelayWebSocketClient", "🔄 Reconnecting cloud WebSocket due to network change")
         delegate.close()
         // Small delay to let connection close
         kotlinx.coroutines.delay(500)

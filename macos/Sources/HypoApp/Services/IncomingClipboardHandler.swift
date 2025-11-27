@@ -69,7 +69,8 @@ public final class IncomingClipboardHandler {
             
             // Add to history FIRST (marked as from remote device) with device info from envelope
             // This ensures the entry is created with the correct origin before ClipboardMonitor detects the change
-            await addToHistory(payload, deviceId: deviceId, devicePlatform: platform, deviceName: deviceName, isEncrypted: isEncrypted, transportOrigin: transportOrigin)
+            // Use envelope timestamp (when message was created on Android) instead of current time
+            await addToHistory(payload, deviceId: deviceId, devicePlatform: platform, deviceName: deviceName, isEncrypted: isEncrypted, transportOrigin: transportOrigin, timestamp: envelope.timestamp)
             
             // Apply to system clipboard AFTER adding to history
             // Post notification to update ClipboardMonitor's changeCount to prevent duplicate detection
@@ -182,7 +183,7 @@ public final class IncomingClipboardHandler {
         }
     }
     
-    private func addToHistory(_ payload: ClipboardPayload, deviceId: String, devicePlatform: DevicePlatform?, deviceName: String?, isEncrypted: Bool, transportOrigin: TransportOrigin) async {
+    private func addToHistory(_ payload: ClipboardPayload, deviceId: String, devicePlatform: DevicePlatform?, deviceName: String?, isEncrypted: Bool, transportOrigin: TransportOrigin, timestamp: Date) async {
         let finalDeviceId = deviceId  // UUID string (pure UUID)
         let finalPlatform = devicePlatform
         let finalDeviceName = deviceName ?? "Remote Device"
@@ -226,7 +227,7 @@ public final class IncomingClipboardHandler {
         
         let entry = ClipboardEntry(
             id: UUID(),
-            timestamp: Date(),
+            timestamp: timestamp,  // Use envelope timestamp (when message was created on Android) instead of current time
             originDeviceId: finalDeviceId,
             originPlatform: finalPlatform,
             originDeviceName: finalDeviceName,

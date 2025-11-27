@@ -49,3 +49,5 @@ log stream --predicate 'process == "TestHotkey"' --level debug
 
 
 
+
+

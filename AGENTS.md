@@ -8,7 +8,7 @@
 - `tests/transport/*.json`: transport and crypto fixtures consumed by macOS and Android regression suites.
 
 ## Build, Test, and Development Commands
-- macOS: `cd macos && swift build` for development; `swift test` or `swift test --filter TransportMetricsAggregatorTests` for focused runs.
+- macOS: `./scripts/build-macos.sh [clean]` for development; `swift test` or `swift test --filter TransportMetricsAggregatorTests` for focused runs.
 - Android: `./scripts/build-android.sh [clean]` assembles `app-debug.apk`; `cd android && ./gradlew testDebugUnitTest` runs JVM unit tests.
 - Backend: `cd backend && cargo run` brings up the relay; `cargo test` covers unit + integration (requires Redis from `docker compose up redis`).
 - Cross-platform: `./scripts/run-transport-regression.sh` executes the shared transport metrics suite and expects `JAVA_HOME` and `ANDROID_SDK_ROOT`.

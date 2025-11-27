@@ -226,7 +226,10 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 **IP Address Updates**:
 - **LAN Discovery**: Bonjour/NSD automatically update IP addresses in service records when services restart
 - **WebSocket Connections**: Clients discover updated IP addresses through mDNS/NSD discovery
-- **Cloud Relay**: WebSocket connections automatically reconnect on network changes; backend gets IP from connection itself
+- **Cloud Relay**: WebSocket connections automatically reconnect on network changes:
+  - **Android**: `RelayWebSocketClient.reconnect()` closes existing connection and establishes new one with updated IP
+  - **macOS**: `CloudRelayTransport.reconnect()` disconnects and reconnects to use new IP address
+  - Backend automatically gets new IP from the WebSocket connection when client reconnects
 
 **Re-Pairing Scenarios**:
 - **Network Change**: Devices automatically recover without re-pairing; encryption keys persist across network changes
@@ -243,7 +246,17 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 - Network change handlers are non-blocking and run asynchronously
 - Service restarts preserve existing encryption keys and paired device metadata
 - No user intervention required for network changes or IP updates
-- Cloud relay connections handle reconnection automatically via existing retry logic
+- **Cloud Relay Reconnection**:
+  - **Android**: `ClipboardSyncService` network callbacks call `RelayWebSocketClient.reconnect()` which:
+    1. Closes existing WebSocket connection (if any)
+    2. Waits 500ms for connection to close cleanly
+    3. Calls `startReceiving()` to establish new connection with updated IP
+  - **macOS**: `ConnectionStatusProber` network path monitor calls `CloudRelayTransport.reconnect()` which:
+    1. Disconnects existing WebSocket connection
+    2. Waits 500ms for connection to close cleanly
+    3. Reconnects to establish new connection with updated IP
+  - Backend automatically receives new IP address from WebSocket connection when client reconnects
+  - Session registration in Redis is updated with new connection ID
 
 ### 3.3 Message Encryption
 

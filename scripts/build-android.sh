@@ -84,6 +84,27 @@ echo "   ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
 echo "   GRADLE_USER_HOME: $GRADLE_USER_HOME"
 echo ""
 
+# Ensure app icons exist
+echo -e "${YELLOW}Checking app icons...${NC}"
+ICON_SCRIPT="$PROJECT_ROOT/scripts/generate-icons.py"
+ANDROID_RES="$PROJECT_ROOT/android/app/src/main/res"
+ICON_CHECK="$ANDROID_RES/mipmap-xxxhdpi/ic_launcher.png"
+
+if [ ! -f "$ICON_CHECK" ]; then
+    if [ -f "$ICON_SCRIPT" ]; then
+        echo "   Icons not found. Generating..."
+        python3 "$ICON_SCRIPT" || echo -e "${YELLOW}⚠️  Icon generation failed, continuing without icons${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Icon generation script not found. App will build without icons.${NC}"
+    fi
+elif [ -f "$ICON_SCRIPT" ] && [ "$ICON_SCRIPT" -nt "$ICON_CHECK" ]; then
+    echo "   Icon generation script is newer than icons, regenerating..."
+    python3 "$ICON_SCRIPT" 2>/dev/null || echo -e "${YELLOW}⚠️  Icon regeneration failed, using existing icons${NC}"
+else
+    echo "   Icons are up to date"
+fi
+echo ""
+
 # Build
 # Load .env file if it exists
 if [ -f "$PROJECT_ROOT/.env" ]; then

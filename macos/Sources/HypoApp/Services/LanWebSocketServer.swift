@@ -4,6 +4,9 @@ import CryptoKit
 #if canImport(os)
 import os
 #endif
+#if canImport(ifaddrs)
+import ifaddrs
+#endif
 
 public enum WebSocketMessageType {
     case pairing
@@ -80,7 +83,7 @@ public final class LanWebSocketServer {
     }
     
     public func updateConnectionMetadata(connectionId: UUID, deviceId: String) {
-        if var existing = connectionMetadata[connectionId] {
+        if let existing = connectionMetadata[connectionId] {
             connectionMetadata[connectionId] = ConnectionMetadata(deviceId: deviceId, connectedAt: existing.connectedAt)
         } else {
             connectionMetadata[connectionId] = ConnectionMetadata(deviceId: deviceId, connectedAt: Date())
@@ -116,8 +119,12 @@ public final class LanWebSocketServer {
         parameters.allowLocalEndpointReuse = true
         parameters.acceptLocalOnly = false  // Allow connections from LAN
         
+        // NWListener with just a port automatically binds to all interfaces (0.0.0.0)
+        // This allows connections from any network interface (LAN, WiFi, etc.)
+        // No explicit IPv4/IPv6 configuration needed - Network.framework handles this
         do {
             listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: UInt16(port)))
+            logger.info("📡 [LanWebSocketServer] Listener created on port \(port) - will accept connections from all interfaces (0.0.0.0:\(port))")
         } catch {
             logger.error("❌", "Failed to create listener: \(error.localizedDescription)")
             throw error
@@ -282,7 +289,14 @@ public final class LanWebSocketServer {
                     self.logger.info("🔗 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) state: ready")
                     self.beginHandshake(for: id)
                 case .failed(let error):
-                    self.logger.error("❌ [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) failed: \(error.localizedDescription)")
+                    // Connection resets (error 54) are normal when clients disconnect abruptly
+                    // Log as info/warning instead of error to reduce noise
+                    let errorCode = (error as NSError).code
+                    if errorCode == 54 { // Connection reset by peer
+                        self.logger.info("🔌 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) reset by peer (client disconnected)")
+                    } else {
+                        self.logger.warning("⚠️ [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) failed: \(error.localizedDescription)")
+                    }
                     self.closeConnection(id)
                 case .cancelled:
                     self.logger.info("🔌 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) cancelled by system")
@@ -336,8 +350,9 @@ public final class LanWebSocketServer {
                         return
                     }
                 }
-                // Only close if isComplete is true AND we have no data AND buffer is empty
-                // But be more tolerant - if we're already upgraded, don't close during handshake
+                // Handle EOF (isComplete = true) during handshake
+                // isComplete = true means this receive operation finished, not necessarily that connection is closed
+                // Only close if we're sure the connection is actually closed (no more data possible)
                 if isComplete {
                     let bufferSnapshot = context.snapshotBuffer()
                     if bufferSnapshot.isEmpty {
@@ -346,9 +361,23 @@ public final class LanWebSocketServer {
                             self.logger.info("✅  Handshake already complete, EOF is normal")
                             return
                         }
-                        self.logger.info("⚠️  Handshake receive completed without data and empty buffer - closing connection")
-                        self.closeConnection(connectionId)
-                        return
+                        // During handshake, isComplete with empty buffer might mean:
+                        // 1. Connection is actually closed (client disconnected)
+                        // 2. This receive operation finished but more data might come
+                        // Be more tolerant - check connection state before closing
+                        let connectionState = context.connection.state
+                        self.logger.info("⚠️  Handshake receive completed without data and empty buffer (connection state: \(connectionState))")
+                        // Check connection state - if it's still ready, continue receiving
+                        if connectionState == .ready {
+                            self.logger.info("⏳  Connection still ready, continuing to receive handshake data")
+                            self.receiveHandshakeChunk(for: connectionId, context: context)
+                            return
+                        } else {
+                            // Connection is not ready (failed, cancelled, etc.) - close it
+                            self.logger.info("⚠️  Connection not ready (state: \(connectionState)), closing")
+                            self.closeConnection(connectionId)
+                            return
+                        }
                     } else {
                         // Buffer has data but we didn't receive new data - try processing buffer one more time
                         self.logger.info("⚠️  Handshake receive completed but buffer has \(bufferSnapshot.count) bytes - processing buffer")
@@ -365,12 +394,14 @@ public final class LanWebSocketServer {
                                 self.receiveFrameChunk(for: connectionId, context: context)
                                 return
                             }
-                            self.logger.info("❌  Handshake incomplete in buffer, closing connection")
-                            self.closeConnection(connectionId)
+                            // Handshake incomplete but we have data - continue receiving
+                            self.logger.info("⏳  Handshake incomplete in buffer, continuing to receive")
+                            self.receiveHandshakeChunk(for: connectionId, context: context)
                             return
                         }
                     }
                 }
+                // No data and not complete - continue receiving
                 self.receiveHandshakeChunk(for: connectionId, context: context)
             }
         }
@@ -433,6 +464,10 @@ public final class LanWebSocketServer {
         }
         
         // Use .contentProcessed to ensure the response is fully sent before starting frame reception
+        // Mark as upgraded BEFORE sending so connection is ready to receive frames immediately
+        context.upgraded = true
+        logger.info("✅ [LanWebSocketServer] Marking connection as upgraded before sending 101 response")
+        
         context.connection.send(content: response, completion: .contentProcessed { [weak self] error in
             Task { @MainActor in
                 guard let self else { return }
@@ -444,19 +479,24 @@ public final class LanWebSocketServer {
                     #if canImport(os)
                     self.logger.error("Handshake send error: \(error.localizedDescription)")
                     #endif
-                    self.logger.info("❌  Handshake send error: \(error.localizedDescription)")
+                    self.logger.error("❌ [LanWebSocketServer] Handshake send error: \(error.localizedDescription)")
                     self.closeConnection(connectionId)
                     return
                 }
-                context.upgraded = true
                 #if canImport(os)
                 self.logger.info("✅ CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded for \(connectionId.uuidString.prefix(8))")
                 #endif
-                self.logger.info("✅  CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded, starting frame reception")
+                self.logger.info("✅ [LanWebSocketServer] HTTP 101 response sent successfully, connection upgraded")
                 self.logger.info("🔗 [LanWebSocketServer] Connection state after handshake: \(context.connection.state)")
+                
+                // Notify delegate that connection is accepted
                 self.delegate?.server(self, didAcceptConnection: connectionId)
+                
+                // Process any frames that might already be in the buffer
                 self.processFrameBuffer(for: connectionId, context: context)
-                self.logger.info("📡  CLIPBOARD SETUP: Starting receiveFrameChunk for connection \(connectionId.uuidString.prefix(8))")
+                
+                // Start receiving WebSocket frames
+                self.logger.info("📡 [LanWebSocketServer] Starting receiveFrameChunk for connection \(connectionId.uuidString.prefix(8))")
                 self.receiveFrameChunk(for: connectionId, context: context)
             }
         })
@@ -628,20 +668,16 @@ public final class LanWebSocketServer {
             logger.info("📦 FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes, masked=\(isMasked), connection=\(connectionId.uuidString.prefix(8))")
             #endif
             
-            // Call handleFrame with error handling
-            do {
-                logger.info("🔵  About to call handleFrame")
-                handleFrame(opcode: opcode, isFinal: isFinal, payload: payload, connectionId: connectionId, context: context)
-                logger.info("🔵  Returned from handleFrame")
-                
-                // If this was a close frame, mark as pending close but continue processing remaining data
-                if opcode == 0x8 {
-                    logger.info("🔌 [LanWebSocketServer] Close frame received, marking connection for close after data is depleted")
-                    context.pendingClose = true
-                    // Don't return - continue processing any remaining frames in the buffer
-                }
-            } catch {
-                logger.error("❌ [LanWebSocketServer] Error in handleFrame: \(error)")
+            // Call handleFrame (doesn't throw, so no error handling needed)
+            logger.info("🔵  About to call handleFrame")
+            handleFrame(opcode: opcode, isFinal: isFinal, payload: payload, connectionId: connectionId, context: context)
+            logger.info("🔵  Returned from handleFrame")
+            
+            // If this was a close frame, mark as pending close but continue processing remaining data
+            if opcode == 0x8 {
+                logger.info("🔌 [LanWebSocketServer] Close frame received, marking connection for close after data is depleted")
+                context.pendingClose = true
+                // Don't return - continue processing any remaining frames in the buffer
             }
             
             // After processing frame, check if we should close (pending close and buffer is empty)
@@ -1045,28 +1081,77 @@ public final class LanWebSocketServer {
     
     private func handleListenerState(_ state: NWListener.State) {
         switch state {
+        case .setup:
+            logger.info("🟡 [LanWebSocketServer] Listener setting up")
         case .ready:
             #if canImport(os)
-            logger.info("WebSocket server ready")
+            logger.info("✅ WebSocket server ready and listening on all interfaces")
             #endif
-            logger.info("✅  Server is ready and listening")
+            logger.info("✅ [LanWebSocketServer] Server is ready and listening on all interfaces (0.0.0.0)")
+            
+            // Log network interfaces for debugging
+            logNetworkInterfaces()
         case .failed(let error):
             #if canImport(os)
-            logger.error("WebSocket server failed: \(error.localizedDescription)")
+            logger.error("❌ WebSocket server failed: \(error.localizedDescription)")
             #endif
-            logger.info("❌  Server failed: \(error.localizedDescription)")
+            logger.error("❌ [LanWebSocketServer] Server failed: \(error.localizedDescription)")
         case .cancelled:
             #if canImport(os)
-            logger.info("WebSocket server cancelled")
+            logger.info("🛑 WebSocket server cancelled")
             #endif
-            logger.info("🔌  Server cancelled")
+            logger.info("🛑 [LanWebSocketServer] Server cancelled")
         case .waiting(let error):
-            logger.info("⏳  Server waiting: \(error.localizedDescription)")
-        default:
+            logger.warning("⏳ [LanWebSocketServer] Server waiting: \(error.localizedDescription)")
+        @unknown default:
             #if canImport(os)
-            logger.debug("WebSocket server state: \(String(describing: state))")
+            logger.debug("🟡 WebSocket server state: \(String(describing: state))")
             #endif
-            logger.info("🟡  Server state: \(String(describing: state))")
+            logger.info("🟡 [LanWebSocketServer] Server state: \(String(describing: state))")
+        }
+    }
+    
+    private func logNetworkInterfaces() {
+        // Log available network interfaces for debugging connection issues
+        var interfaces: [String] = []
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0 else {
+            logger.warning("⚠️ [LanWebSocketServer] Failed to get network interfaces")
+            return
+        }
+        defer { freeifaddrs(ifaddr) }
+        
+        var ptr = ifaddr
+        while ptr != nil {
+            defer { ptr = ptr?.pointee.ifa_next }
+            
+            guard let interface = ptr?.pointee else { continue }
+            let flags = Int32(interface.ifa_flags)
+            
+            // Check if interface is up and not loopback
+            if (flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING) && (flags & IFF_LOOPBACK) == 0 {
+                if let addr = interface.ifa_addr {
+                    let addrFamily = addr.pointee.sa_family
+                    if addrFamily == AF_INET {
+                        let sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+                        if let addrString = inet_ntoa(sin.sin_addr) {
+                            let ip = String(cString: addrString)
+                            let name = String(cString: interface.ifa_name)
+                            interfaces.append("\(name): \(ip)")
+                        }
+                    }
+                }
+            }
+            ptr = ptr?.pointee.ifa_next
+        }
+        
+        if !interfaces.isEmpty {
+            logger.info("📡 [LanWebSocketServer] Available network interfaces:")
+            for interface in interfaces {
+                logger.info("   - \(interface)")
+            }
+        } else {
+            logger.warning("⚠️ [LanWebSocketServer] No network interfaces found (may indicate network issue)")
         }
     }
     

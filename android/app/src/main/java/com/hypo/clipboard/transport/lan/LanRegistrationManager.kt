@@ -83,7 +83,7 @@ class LanRegistrationManager(
         if (connectivityReceiver != null) return
         connectivityReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                android.util.Log.i("LanRegistrationManager", "🌐 Network state changed - re-registering service to update IP address")
+                android.util.Log.d("LanRegistrationManager", "🌐 Network state changed - re-registering service to update IP address")
                 currentConfig?.let { config ->
                     // Unregister first to ensure clean restart with new IP
                     registrationListener?.let { listener ->
@@ -127,7 +127,7 @@ class LanRegistrationManager(
         android.util.Log.d("LanRegistrationManager", "📝 Service info created: name=${info.serviceName}, type=${info.serviceType}, port=${info.port}")
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
-                android.util.Log.i("LanRegistrationManager", "✅ Service registered successfully: ${serviceInfo.serviceName}")
+                android.util.Log.d("LanRegistrationManager", "✅ Service registered successfully: ${serviceInfo.serviceName}")
                 attempts = 0
             }
 

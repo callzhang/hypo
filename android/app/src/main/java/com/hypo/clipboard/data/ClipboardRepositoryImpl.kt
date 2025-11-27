@@ -31,12 +31,23 @@ class ClipboardRepositoryImpl @Inject constructor(
     override suspend fun upsert(item: ClipboardItem) {
         Log.d("ClipboardRepository", "💾 Upserting item: id=${item.id.take(20)}..., type=${item.type}, preview=${item.preview.take(30)}")
         
-        // Always update created_at to current time to move item to top when inserted/updated
-        val now = Instant.now()
-        val entityWithCurrentTime = item.toEntity().copy(createdAt = now)
-        dao.upsert(entityWithCurrentTime)
+        // Only update created_at to current time for local items (transportOrigin == null)
+        // Preserve original timestamp for received items (transportOrigin != null) to maintain chronological order
+        val entity = if (item.transportOrigin == null) {
+            // Local item - move to top by updating timestamp
+            val now = Instant.now()
+            item.toEntity().copy(createdAt = now)
+        } else {
+            // Received item - preserve original timestamp
+            item.toEntity()
+        }
+        dao.upsert(entity)
         
-        Log.d("ClipboardRepository", "✅ Item upserted to database (moved to top)")
+        if (item.transportOrigin == null) {
+            Log.d("ClipboardRepository", "✅ Local item upserted to database (moved to top)")
+        } else {
+            Log.d("ClipboardRepository", "✅ Received item upserted to database (preserved timestamp: ${item.createdAt})")
+        }
     }
 
     override suspend fun delete(id: String) {

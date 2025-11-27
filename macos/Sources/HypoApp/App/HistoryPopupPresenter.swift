@@ -15,7 +15,7 @@ final class HistoryPopupPresenter {
     private var globalClickMonitor: Any?
 
     func show(with viewModel: ClipboardHistoryViewModel) {
-        logger.info("📢 [HistoryPopupPresenter] show() called")
+        logger.debug("📢 [HistoryPopupPresenter] show() called")
         previousActiveApp = NSWorkspace.shared.frontmostApplication
         DispatchQueue.main.async {
             Task { @MainActor in
@@ -68,7 +68,7 @@ final class HistoryPopupPresenter {
                 return
             }
             
-            self.logger.info("🔄 hideAndRestoreFocus called")
+            self.logger.debug("🔄 hideAndRestoreFocus called")
             
             // Restore focus immediately (before hiding) to ensure it's ready for paste
             self.restorePreviousFocus()
@@ -78,12 +78,12 @@ final class HistoryPopupPresenter {
             window.alphaValue = 1.0  // Reset for next show
             self.removeClickMonitor()
             
-            self.logger.info("🔄 Window hidden, waiting for focus restore...")
+            self.logger.debug("🔄 Window hidden, waiting for focus restore...")
             
             // Wait longer for focus to fully restore, then call completion
             // macOS needs time to actually switch focus between applications
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self.logger.info("✅ Focus restore delay complete, calling completion")
+                self.logger.debug("✅ Focus restore delay complete, calling completion")
                 completion()
             }
         }
@@ -93,7 +93,7 @@ final class HistoryPopupPresenter {
         // Restore focus to the application that was active before we showed the popup
         if let previousApp = previousActiveApp, previousApp != NSRunningApplication.current {
             previousApp.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
-            self.logger.info("🔄 [HistoryPopupPresenter] Restored focus to: \(previousApp.localizedName ?? "unknown") (PID: \(previousApp.processIdentifier))")
+            self.logger.debug("🔄 [HistoryPopupPresenter] Restored focus to: \(previousApp.localizedName ?? "unknown") (PID: \(previousApp.processIdentifier))")
         } else {
             // Fallback: try to find the frontmost application that's not us
             let runningApps = NSWorkspace.shared.runningApplications.filter { app in
@@ -101,7 +101,7 @@ final class HistoryPopupPresenter {
             }
             if let frontmost = runningApps.first {
                 frontmost.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
-                self.logger.info("🔄 [HistoryPopupPresenter] Fallback: Restored focus to: \(frontmost.localizedName ?? "unknown") (PID: \(frontmost.processIdentifier))")
+                self.logger.debug("🔄 [HistoryPopupPresenter] Fallback: Restored focus to: \(frontmost.localizedName ?? "unknown") (PID: \(frontmost.processIdentifier))")
             } else {
                 self.logger.warning("⚠️ [HistoryPopupPresenter] No previous app found, cannot restore focus")
             }
@@ -124,7 +124,7 @@ final class HistoryPopupPresenter {
     private func present(with viewModel: ClipboardHistoryViewModel) {
         // Reuse existing window if possible
         if let window = self.window {
-            self.logger.info("🪟 [HistoryPopupPresenter] Reusing existing window")
+            self.logger.debug("🪟 [HistoryPopupPresenter] Reusing existing window")
             let target = self.targetScreen()
             let expected = self.centeredFrame(for: window.frame.size, on: target)
             let needsMove = window.screen != target || window.frame.origin != expected.origin
@@ -136,7 +136,7 @@ final class HistoryPopupPresenter {
 
             let frameStr = NSStringFromRect(window.frame)
             let expectedStr = NSStringFromRect(expected)
-            self.logger.info("📍 Reuse frame: \(frameStr) expected: \(expectedStr) screen: \(target.localizedName) moved=\(needsMove)")
+            self.logger.debug("📍 Reuse frame: \(frameStr) expected: \(expectedStr) screen: \(target.localizedName) moved=\(needsMove)")
             self.appendDebug("[HistoryPopupPresenter] reuse frame=\(frameStr) expected=\(expectedStr) screen=\(target.localizedName) moved=\(needsMove)\n")
             
             window.alphaValue = 1.0
@@ -148,7 +148,7 @@ final class HistoryPopupPresenter {
             return
         }
 
-        self.logger.info("🆕 [HistoryPopupPresenter] Creating new window")
+        self.logger.debug("🆕 [HistoryPopupPresenter] Creating new window")
 
         let contentSize = NSSize(width: 360, height: 480)
         let content = MenuBarContentView(viewModel: viewModel, historyOnly: true, applySwiftUIBackground: true)
@@ -199,7 +199,7 @@ final class HistoryPopupPresenter {
         let visibleStr = NSStringFromRect(visiblePost)
         let sizeStr = NSStringFromSize(finalSize)
         let frameStr = NSStringFromRect(finalFrame)
-        self.logger.info("📍 New window target screen: \(postLayoutScreen.localizedName), visible=\(visibleStr), finalSize=\(sizeStr), setFrame=\(frameStr)")
+        self.logger.debug("📍 New window target screen: \(postLayoutScreen.localizedName), visible=\(visibleStr), finalSize=\(sizeStr), setFrame=\(frameStr)")
         self.appendDebug("[HistoryPopupPresenter] new window screen=\(postLayoutScreen.localizedName) visible=\(visibleStr) size=\(sizeStr) frame=\(frameStr)\n")
         // Make window accept keyboard events
         panel.acceptsMouseMovedEvents = true
@@ -207,7 +207,7 @@ final class HistoryPopupPresenter {
 
         self.window = panel
 
-        self.logger.info("🪟 [HistoryPopupPresenter] Displaying window at center")
+        self.logger.debug("🪟 [HistoryPopupPresenter] Displaying window at center")
 
         panel.alphaValue = 1.0
         NSApp.activate(ignoringOtherApps: true)
@@ -216,7 +216,7 @@ final class HistoryPopupPresenter {
         panel.orderFrontRegardless()
         updateClickMonitor()
 
-        self.logger.info("✅ [HistoryPopupPresenter] Window displayed")
+        self.logger.debug("✅ [HistoryPopupPresenter] Window displayed")
     }
 
     private func applyWindowPresentation(for panel: NSPanel) {

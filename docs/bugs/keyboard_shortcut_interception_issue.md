@@ -25,7 +25,7 @@
 - Confirm no Accessibility prompt (Carbon path does not require it).
 
 ## Notes
-- `macos/TestHotkey/` remains the working reference app.  
+- `macos/TestHotkey/` remains the working reference app.  √√
 - `setupGlobalShortcut()` (NSEvent fallback) is currently unused; enable from `HypoMenuBarApp` if we ever need a debug-only path that depends on Accessibility permissions.
 
 ## Additional Fix (2025-11-23)

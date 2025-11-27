@@ -86,4 +86,13 @@ public final class CloudRelayTransport: SyncTransport {
     public func setOnIncomingMessage(_ handler: @escaping (Data, TransportOrigin) async -> Void) {
         delegate.setOnIncomingMessage(handler)
     }
+    
+    /// Force reconnection by disconnecting and reconnecting.
+    /// Used when network changes to ensure connection uses new IP address.
+    public func reconnect() async {
+        await delegate.disconnect()
+        // Small delay to let connection close
+        try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+        try? await delegate.connect()
+    }
 }

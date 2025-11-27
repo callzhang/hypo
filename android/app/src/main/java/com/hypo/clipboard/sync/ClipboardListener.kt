@@ -31,7 +31,7 @@ class ClipboardListener(
     fun start() {
         if (isListening) return
         try {
-            Log.i(TAG, "📋 ClipboardListener STARTING - registering listener")
+            Log.d(TAG, "📋 ClipboardListener STARTING - registering listener")
             clipboardManager.addPrimaryClipChangedListener(this)
             
             // Initialize lastSignature from current clipboard to prevent re-sending old content on restart
@@ -43,7 +43,7 @@ class ClipboardListener(
                     val event = parser.parse(clip)
                     if (event != null) {
                         lastSignature = event.signature()
-                        Log.i(TAG, "📋 Initialized lastSignature from current clipboard (will not process on startup - only actual changes will trigger sync)")
+                        Log.d(TAG, "📋 Initialized lastSignature from current clipboard (will not process on startup - only actual changes will trigger sync)")
                     }
                 }
             } catch (e: SecurityException) {
@@ -59,7 +59,7 @@ class ClipboardListener(
             }
             
             isListening = true
-            Log.i(TAG, "✅ ClipboardListener is now ACTIVE (listener + ${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "polling" else "no polling"})")
+            Log.d(TAG, "✅ ClipboardListener is now ACTIVE (listener + ${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "polling" else "no polling"})")
         } catch (e: SecurityException) {
             Log.e(TAG, "❌ SecurityException in start(): ${e.message}", e)
             // Don't set isListening = true if we can't register the listener
@@ -88,7 +88,7 @@ class ClipboardListener(
     private fun startPolling() {
         pollingJob?.cancel()
         pollingJob = scope.launch(dispatcher) {
-            Log.i(TAG, "🔄 Starting clipboard polling (Android 10+ workaround)")
+            Log.d(TAG, "🔄 Starting clipboard polling (Android 10+ workaround)")
             var consecutiveBlockedCount = 0
             while (isActive) {
                 delay(2_000) // Poll every 2 seconds
@@ -103,7 +103,7 @@ class ClipboardListener(
                                 // Only process if it's different from what we last polled
                                 // (onPrimaryClipChanged might have already processed it)
                                 if (signature != lastPolledSignature && signature != lastSignature) {
-                                    Log.i(TAG, "🔍 Polling detected new clipboard content (manual paste detected)")
+                                    Log.d(TAG, "🔍 Polling detected new clipboard content (manual paste detected)")
                                     lastPolledSignature = signature
                                     consecutiveBlockedCount = 0 // Reset counter on success
                                     process(clip)
@@ -146,11 +146,11 @@ class ClipboardListener(
         // Launch processing in a coroutine immediately to avoid blocking the main thread
         scope.launch(Dispatchers.Default) {
             try {
-                Log.i(TAG, "🔔 onPrimaryClipChanged TRIGGERED!")
+                Log.d(TAG, "🔔 onPrimaryClipChanged TRIGGERED!")
                 try {
                     val clip = clipboardManager.primaryClip
                     if (clip != null) {
-                        Log.i(TAG, "📋 Clipboard has content, processing...")
+                        Log.d(TAG, "📋 Clipboard has content, processing...")
                         process(clip)
                     } else {
                         Log.w(TAG, "⚠️  Clipboard clip is null!")

@@ -69,10 +69,30 @@ if [ ! -d "$APP_BUNDLE" ]; then
     <string>0.2.3</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
 </dict>
 </plist>
 EOF
         log_success "Created Info.plist"
+    fi
+fi
+
+# Ensure app icon exists
+ICON_ICNS="$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+ICONSET_DIR="$APP_BUNDLE/Contents/Resources/AppIcon.iconset"
+if [ ! -f "$ICON_ICNS" ] && [ ! -d "$ICONSET_DIR" ]; then
+    log_warn "App icon not found. Generating icons..."
+    if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ]; then
+        python3 "$PROJECT_ROOT/scripts/generate-icons.py" || log_warn "Icon generation failed, continuing without icon"
+    else
+        log_warn "Icon generation script not found. App will run without icon."
     fi
 fi
 
@@ -181,6 +201,14 @@ if [ -f "$APP_BINARY" ]; then
 else
     log_error "Failed to copy binary to app bundle"
     exit 1
+fi
+
+# Ensure icon is up to date (check if icon generation script is newer than icon)
+if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ] && [ -f "$ICON_ICNS" ]; then
+    if [ "$PROJECT_ROOT/scripts/generate-icons.py" -nt "$ICON_ICNS" ]; then
+        log_info "Icon generation script is newer than icon, regenerating..."
+        python3 "$PROJECT_ROOT/scripts/generate-icons.py" 2>/dev/null || log_warn "Icon regeneration failed, using existing icon"
+    fi
 fi
 
 # Touch the app bundle to update its modification time

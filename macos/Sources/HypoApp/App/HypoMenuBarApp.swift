@@ -22,7 +22,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        logger.info("🚀 [HypoAppDelegate] applicationDidFinishLaunching called")
+        logger.debug("🚀 [HypoAppDelegate] applicationDidFinishLaunching called")
         
         // Setup Hotkey using Carbon API (more reliable than CGEventTap)
         // Note: Carbon RegisterEventHotKey does NOT require Accessibility permissions
@@ -33,11 +33,11 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func setupCarbonHotkey() {
-        logger.info("🔧 setupCarbonHotkey() called")
+        logger.debug("🔧 setupCarbonHotkey() called")
         
         // Install event handler once (static check)
         if !Self.eventHandlerInstalled {
-            logger.info("🔧 [HypoAppDelegate] Installing Carbon event handler...")
+            logger.debug("🔧 [HypoAppDelegate] Installing Carbon event handler...")
             
             var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyPressed))
             
@@ -142,7 +142,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             
         if installStatus == noErr {
             Self.eventHandlerInstalled = true
-            logger.info("✅ [HypoAppDelegate] Event handler installed successfully")
+            logger.debug("✅ [HypoAppDelegate] Event handler installed successfully")
         } else {
             logger.error("❌ [HypoAppDelegate] Failed to install Carbon event handler: \(installStatus)")
             return
@@ -151,7 +151,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         
         // Check if hotkey is already registered
         if self.hotKeyRef != nil {
-            logger.info("ℹ️ [HypoAppDelegate] Hotkey already registered, skipping")
+            logger.debug("ℹ️ [HypoAppDelegate] Hotkey already registered, skipping")
             return
         }
         
@@ -164,7 +164,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         let keyCode = UInt32(9) // 'V' key
         let modifiers = UInt32(optionKey) // Alt/Option
         
-        logger.info("🔧 [HypoAppDelegate] Registering hotkey: keyCode=\(keyCode), modifiers=\(modifiers), signature=\(hotKeyID.signature), id=\(hotKeyID.id)")
+        logger.debug("🔧 [HypoAppDelegate] Registering hotkey: keyCode=\(keyCode), modifiers=\(modifiers), signature=\(hotKeyID.signature), id=\(hotKeyID.id)")
         
         let status = RegisterEventHotKey(
             keyCode,
@@ -177,14 +177,14 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         
         if status == noErr, let hotKey = hotKeyRef {
             self.hotKeyRef = hotKey
-            logger.info("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+V (status: \(status), ref: \(hotKey))")
+            logger.debug("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+V (status: \(status), ref: \(hotKey))")
         } else if self.hotKeyRef == nil {
             // Only log error if hotkey wasn't already registered
             logger.warning("⚠️ [HypoAppDelegate] Hotkey registration returned status=\(status) (may already be registered). Ref: \(hotKeyRef != nil ? "exists" : "nil")")
             
             // If registration failed but we don't have a ref, try to unregister any existing hotkey first
             if status == -9878 { // eventHotKeyExistsErr
-                logger.info("🔄 [HypoAppDelegate] Hotkey already exists, attempting to unregister and re-register...")
+                logger.debug("🔄 [HypoAppDelegate] Hotkey already exists, attempting to unregister and re-register...")
                 // Note: We can't unregister without the ref, so we'll just log this
             }
         }
@@ -219,7 +219,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             
             if status == noErr, let hotKey = hotKeyRef {
                 altNumberHotKeys[num] = hotKey
-                logger.info("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+\(num) (status: \(status))")
+                logger.debug("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+\(num) (status: \(status))")
             } else {
                 logger.warning("⚠️ [HypoAppDelegate] Failed to register Alt+\(num): status=\(status)")
             }
@@ -232,7 +232,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         // Reuse shared monitor if one already exists
         if let existing = AppContext.shared.clipboardMonitor {
             clipboardMonitor = existing
-            logger.info("📋 [HypoAppDelegate] ClipboardMonitor already running, reusing shared instance")
+            logger.debug("📋 [HypoAppDelegate] ClipboardMonitor already running, reusing shared instance")
             return
         }
         
@@ -257,7 +257,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         
         AppContext.shared.clipboardMonitor = monitor
         clipboardMonitor = monitor
-        logger.info("📋 [HypoAppDelegate] ClipboardMonitor started at launch (delegate set: \(monitor.delegate != nil))")
+        logger.debug("📋 [HypoAppDelegate] ClipboardMonitor started at launch (delegate set: \(monitor.delegate != nil))")
     }
     
     private func pasteToCursor() {
@@ -294,7 +294,7 @@ private func pasteToCursorAtCurrentPosition() {
     
     // Additional delay to ensure focus is fully restored and clipboard is ready
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-        logger.info("📋 Attempting to paste...")
+        logger.debug("📋 Attempting to paste...")
         
         // Use global event tap - more reliable than postToPid
         // Create key down event for 'V' with Cmd modifier
@@ -306,7 +306,7 @@ private func pasteToCursorAtCurrentPosition() {
         
         // Post to HID event tap (this sends to the frontmost app)
         keyDownEvent.post(tap: .cghidEventTap)
-        logger.info("📋 KeyDown posted")
+        logger.debug("📋 KeyDown posted")
         
         // Small delay between key down and key up
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
@@ -316,7 +316,7 @@ private func pasteToCursorAtCurrentPosition() {
             }
             keyUpEvent.flags = .maskCommand
             keyUpEvent.post(tap: .cghidEventTap)
-            logger.info("✅ KeyUp posted")
+            logger.debug("✅ KeyUp posted")
         }
     }
 }
@@ -434,7 +434,7 @@ public struct HypoMenuBarApp: App {
         // Reuse monitor if AppDelegate already started it
         if let existing = AppContext.shared.clipboardMonitor {
             monitor = existing
-            logger.info("📋 [HypoMenuBarApp] Reusing shared ClipboardMonitor (delegate set: \(existing.delegate != nil))")
+            logger.debug("📋 [HypoMenuBarApp] Reusing shared ClipboardMonitor (delegate set: \(existing.delegate != nil))")
             return
         }
         guard monitor == nil else { return }
@@ -453,7 +453,7 @@ public struct HypoMenuBarApp: App {
         monitor.delegate = viewModel
         monitor.start()
         AppContext.shared.clipboardMonitor = monitor
-        logger.info("📋 [HypoMenuBarApp] ClipboardMonitor started, deviceId: \(deviceId), delegate set: \(monitor.delegate != nil)")
+        logger.debug("📋 [HypoMenuBarApp] ClipboardMonitor started, deviceId: \(deviceId), delegate set: \(monitor.delegate != nil)")
         self.monitor = monitor
     }
     
@@ -463,11 +463,11 @@ public struct HypoMenuBarApp: App {
         
         // Avoid duplicate setup
         if globalShortcutMonitor != nil {
-            logger.info("ℹ️ [HypoMenuBarApp] Global shortcut already set up, skipping")
+            logger.debug("ℹ️ [HypoMenuBarApp] Global shortcut already set up, skipping")
             return
         }
         
-        logger.info("🔧 [HypoMenuBarApp] setupGlobalShortcut() called - Using Shift+Cmd+V")
+        logger.debug("🔧 [HypoMenuBarApp] setupGlobalShortcut() called - Using Shift+Cmd+V")
         
         // Clean up existing monitors
         if let monitor = globalShortcutMonitor {
@@ -494,7 +494,7 @@ public struct HypoMenuBarApp: App {
         // Use NSEvent monitors with Shift+Cmd+V (V for View/History)
         // This avoids conflicts with system shortcuts like Shift+Cmd+C (Color Picker)
         
-        logger.info("🔧 [HypoMenuBarApp] Setting up NSEvent shortcut for Shift+Cmd+V")
+        logger.debug("🔧 [HypoMenuBarApp] Setting up NSEvent shortcut for Shift+Cmd+V")
         
         // Local monitor (works when app is active)
         let localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
@@ -508,7 +508,7 @@ public struct HypoMenuBarApp: App {
             }
             
             if hasCmd && hasShift && key == "v" {
-                logger.info("🎯 [NSEvent] Intercepted Shift+Cmd+V - showing popup")
+                logger.debug("🎯 [NSEvent] Intercepted Shift+Cmd+V - showing popup")
                 
                 // Activate app first, then show popup
                 NSApp.activate(ignoringOtherApps: true)
@@ -527,7 +527,7 @@ public struct HypoMenuBarApp: App {
             if event.modifierFlags.contains(.command) &&
                event.modifierFlags.contains(.shift) &&
                key == "v" {
-                logger.info("🎯 [NSEvent Global] Intercepted Shift+Cmd+V - showing popup")
+                logger.debug("🎯 [NSEvent Global] Intercepted Shift+Cmd+V - showing popup")
                 
                 DispatchQueue.main.async {
                     NSApp.activate(ignoringOtherApps: true)
@@ -538,11 +538,11 @@ public struct HypoMenuBarApp: App {
             }
         }
         
-        logger.info("✅ [HypoMenuBarApp] NSEvent shortcut registered: Shift+Cmd+V")
+        logger.debug("✅ [HypoMenuBarApp] NSEvent shortcut registered: Shift+Cmd+V")
     }
     
     private func showHistoryPopup() {
-        logger.info("📢 [HypoMenuBarApp] showHistoryPopup() called - posting notifications")
+        logger.debug("📢 [HypoMenuBarApp] showHistoryPopup() called - posting notifications")
         
         // Post notification to show history popup
         // The MenuBarContentView will handle centering and showing the window
@@ -557,7 +557,7 @@ public struct HypoMenuBarApp: App {
             object: nil
         )
         
-        logger.info("✅ [HypoMenuBarApp] Notifications posted: ShowHistoryPopup, ShowHistorySection")
+        logger.debug("✅ [HypoMenuBarApp] Notifications posted: ShowHistoryPopup, ShowHistorySection")
     }
 }
 
@@ -705,7 +705,7 @@ struct MenuBarContentView: View {
                 ]
                 
                 if let num = numberKeyCodes[keyCode] {
-                    self.logger.info("🎯 [MenuBarContentView] Alt+\(num) pressed")
+                    self.logger.debug("🎯 [MenuBarContentView] Alt+\(num) pressed")
                     
                     // Get filtered items (same logic as HistorySectionView)
                     let filteredItems: [ClipboardEntry] = {
@@ -767,7 +767,7 @@ struct MenuBarContentView: View {
                 
                 if let num = numberKeyCodes[keyCode] {
                     DispatchQueue.main.async {
-                        self.logger.info("🎯 [MenuBarContentView] Alt+\(num) pressed (global monitor)")
+                        self.logger.debug("🎯 [MenuBarContentView] Alt+\(num) pressed (global monitor)")
                         
                         let filteredItems: [ClipboardEntry] = {
                             if self.search.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -811,7 +811,7 @@ struct MenuBarContentView: View {
     private func pasteToCursor() {
         // Use a delay to ensure clipboard is updated and focus is restored
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            self.logger.info("📋 Attempting to paste...")
+            self.logger.debug("📋 Attempting to paste...")
             
             // Use global event tap - more reliable than postToPid
             guard let keyDownEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true) else {
@@ -848,7 +848,7 @@ struct MenuBarContentView: View {
             historyPopupObserver = nil
         }
         
-        logger.info("🔧 [MenuBarContentView] Setting up notification observers")
+        logger.debug("🔧 [MenuBarContentView] Setting up notification observers")
         
         // Set up observer for history section switch
         historySectionObserver = NotificationCenter.default.addObserver(
@@ -856,7 +856,7 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { [self] _ in
-            logger.info("📨 [MenuBarContentView] Received ShowHistorySection notification")
+            logger.debug("📨 [MenuBarContentView] Received ShowHistorySection notification")
             // Switch to history section when shortcut is pressed
             selectedSection = .history
         }
@@ -868,7 +868,7 @@ struct MenuBarContentView: View {
             queue: .main
         ) { [self] _ in
             guard !isHandlingPopup else { return }
-            logger.info("📨 [MenuBarContentView] Received ShowHistoryPopup notification")
+            logger.debug("📨 [MenuBarContentView] Received ShowHistoryPopup notification")
             
             isHandlingPopup = true
             // Reset flag after handling
@@ -883,7 +883,7 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { [self] _ in
-            logger.info("📨 [MenuBarContentView] Received ShowSettingsSection notification")
+            logger.debug("📨 [MenuBarContentView] Received ShowSettingsSection notification")
             // Switch to settings section
             selectedSection = .settings
         }
@@ -1095,6 +1095,11 @@ private struct ClipboardCard: View {
         }
     }
     
+    private func openLinkInBrowser(entry: ClipboardEntry) {
+        guard case .link(let url) = entry.content else { return }
+        NSWorkspace.shared.open(url)
+    }
+    
     private var originName: String {
         entry.originDisplayName(localDeviceId: localDeviceId)
     }
@@ -1211,7 +1216,9 @@ private struct ClipboardCard: View {
                                 switch entry.content {
                                 case .file:
                                     openFileInFinder(entry: entry)
-                                case .image, .text, .link:
+                                case .link:
+                                    openLinkInBrowser(entry: entry)
+                                case .image, .text:
                                     showFullContent = true
                                 }
                             }) {
@@ -1219,7 +1226,9 @@ private struct ClipboardCard: View {
                                     switch entry.content {
                                     case .file:
                                         return "folder"  // Folder icon for "Open in Finder"
-                                    case .image, .text, .link:
+                                    case .link:
+                                        return "safari"  // Safari icon for "Visit in Browser"
+                                    case .image, .text:
                                         return "eye"  // Eye icon for "View Detail/Preview"
                                     }
                                 }())
@@ -1231,7 +1240,9 @@ private struct ClipboardCard: View {
                                 switch entry.content {
                                 case .file:
                                     return "Open in Finder"
-                                case .image, .text, .link:
+                                case .link:
+                                    return "Visit in Browser"
+                                case .image, .text:
                                     return "View Detail"
                                 }
                             }())
@@ -1285,6 +1296,11 @@ private struct ClipboardRow: View {
         } catch {
             logger.info("Failed to create temp file for Finder: \(error)")
         }
+    }
+    
+    private func openLinkInBrowser(entry: ClipboardEntry) {
+        guard case .link(let url) = entry.content else { return }
+        NSWorkspace.shared.open(url)
     }
     
     private var originName: String {
@@ -1409,13 +1425,17 @@ private struct ClipboardRow: View {
                     Text(entry.timestamp, style: .time)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
-                    Button(action: { viewModel.togglePin(entry) }) {
+                    Button(action: { 
+                        // Ensure pin toggle works for all items, including the first one
+                        viewModel.togglePin(entry) 
+                    }) {
                         Label(entry.isPinned ? "Unpin" : "Pin", systemImage: entry.isPinned ? "pin.fill" : "pin")
                             .labelStyle(.iconOnly)
                             .foregroundStyle(entry.isPinned ? .orange : .secondary)
                             .font(.caption)
                     }
                     .buttonStyle(.plain)
+                    .help(entry.isPinned ? "Unpin this item" : "Pin this item")
                     // Preview/finder icon moved here
                     let shouldShowButton: Bool = {
                         switch entry.content {
@@ -1433,7 +1453,9 @@ private struct ClipboardRow: View {
                             switch entry.content {
                             case .file:
                                 openFileInFinder(entry: entry)
-                            case .image, .text, .link:
+                            case .link:
+                                openLinkInBrowser(entry: entry)
+                            case .image, .text:
                                 showFullContent = true
                             }
                         }) {
@@ -1441,7 +1463,9 @@ private struct ClipboardRow: View {
                                 switch entry.content {
                                 case .file:
                                     return "folder"  // Folder icon for "Open in Finder"
-                                case .image, .text, .link:
+                                case .link:
+                                    return "safari"  // Safari icon for "Visit in Browser"
+                                case .image, .text:
                                     return "eye"  // Eye icon for "View Detail/Preview"
                                 }
                             }())
@@ -1453,7 +1477,9 @@ private struct ClipboardRow: View {
                             switch entry.content {
                             case .file:
                                 return "Open in Finder"
-                            case .image, .text, .link:
+                            case .link:
+                                return "Visit in Browser"
+                            case .image, .text:
                                 return "View Detail"
                             }
                         }())

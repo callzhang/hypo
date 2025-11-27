@@ -28,7 +28,7 @@ Tests all 8 combinations: Plaintext/Encrypted × Cloud/LAN × macOS/Android
 
 ```bash
 # Real-time streaming (recommended)
-log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug
+log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug --style compact
 
 # View recent logs
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m --level debug --style compact

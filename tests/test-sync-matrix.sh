@@ -1,6 +1,8 @@
 #!/bin/bash
 # Comprehensive Sync Matrix Test Script
-# Tests all 8 combinations: Plaintext/Encrypted × Cloud/LAN × macOS/Android
+# Tests all 16 combinations: 
+#   - Text: Plaintext/Encrypted × Cloud/LAN × macOS/Android (8 cases)
+#   - Image: Plaintext/Encrypted × Cloud/LAN × macOS/Android (8 cases)
 #
 # This is an INTEGRATION test that uses REAL device keys from .env or keychain.
 # For unit tests with deterministic test vectors, see:
@@ -210,8 +212,13 @@ check_android_reception() {
         handler_success=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "IncomingClipboardHandler.*✅.*Decoded clipboard event" || echo "0")
         handler_failure=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "IncomingClipboardHandler.*❌.*Failed" || echo "0")
         
-        # Check for specific message text in logs (if plaintext)
-        message_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -c "$message_text" || echo "0")
+        # Check for specific message text in logs (if plaintext) or image indicators
+        if [ "$content_type" = "image" ]; then
+            # For images, look for image-related log entries
+            message_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "content_type.*image|type.*image|image.*received|🖼️" || echo "0")
+        else
+            message_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -c "$message_text" || echo "0")
+        fi
         
         # Fallback: Check database via SQLite query
         db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%${message_text}%\" OR content LIKE \"%${message_text}%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
@@ -289,6 +296,73 @@ check_macos_reception() {
     fi
 }
 
+# Create a visible test image (100x100 red square with text)
+create_test_image() {
+    local image_file="/tmp/test_image_$$.png"
+    local case_num="$1"  # Optional case number for text in image
+    
+    # Try to create a visible image using ImageMagick (best option)
+    if command -v convert &> /dev/null; then
+        # Create 100x100 red square with white text showing case number
+        if [ -n "$case_num" ]; then
+            convert -size 100x100 xc:red -pointsize 20 -fill white -gravity center -annotate +0+0 "Case $case_num" "$image_file" 2>/dev/null || {
+                # Fallback: just red square
+                convert -size 100x100 xc:red "$image_file" 2>/dev/null || {
+                    # Last fallback: use Python
+                    create_simple_png_image "$image_file" 100 100
+                }
+            }
+        else
+            convert -size 100x100 xc:red "$image_file" 2>/dev/null || {
+                create_simple_png_image "$image_file" 100 100
+            }
+        fi
+    else
+        # Fallback: create a larger PNG using Python (100x100 red square)
+        create_simple_png_image "$image_file" 100 100
+    fi
+    
+    echo "$image_file"
+}
+
+# Create a simple PNG image using Python (no external dependencies)
+create_simple_png_image() {
+    local image_file="$1"
+    local width="${2:-100}"
+    local height="${3:-100}"
+    
+    python3 -c "
+import struct
+import zlib
+
+# Create a $width x $height red PNG
+png_data = b'\x89PNG\r\n\x1a\n'  # PNG signature
+
+# IHDR chunk
+ihdr = struct.pack('>IIBBBBB', $width, $height, 8, 6, 0, 0, 0)  # width, height, bit_depth=8, color_type=6 (RGBA)
+ihdr_crc = zlib.crc32(b'IHDR' + ihdr) & 0xffffffff
+png_data += struct.pack('>I', 13) + b'IHDR' + ihdr + struct.pack('>I', ihdr_crc)
+
+# IDAT chunk: Create $width x $height red pixels (RGBA: red=255, green=0, blue=0, alpha=255)
+# PNG scanline format: filter byte (0 = none) + pixel data
+pixel_row = b'\x00' + (b'\xff\x00\x00\xff' * $width)  # Filter byte + RGBA pixels
+all_rows = pixel_row * $height
+idat = zlib.compress(all_rows)
+idat_crc = zlib.crc32(b'IDAT' + idat) & 0xffffffff
+png_data += struct.pack('>I', len(idat)) + b'IDAT' + idat + struct.pack('>I', idat_crc)
+
+# IEND chunk
+iend_crc = zlib.crc32(b'IEND') & 0xffffffff
+png_data += struct.pack('>I', 0) + b'IEND' + struct.pack('>I', iend_crc)
+
+with open('$image_file', 'wb') as f:
+    f.write(png_data)
+" 2>/dev/null || {
+        # Last resort: create empty file (will fail but script continues)
+        touch "$image_file"
+    }
+}
+
 # Run a single test case
 run_test_case() {
     local case_num=$1
@@ -297,6 +371,7 @@ run_test_case() {
     local target_platform=$4
     local description="$5"
     local mode="${6:-send_and_check}"  # "send_only" or "send_and_check"
+    local content_type="${7:-text}"  # "text" or "image"
     
     if [ "$mode" != "send_only" ]; then
         TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -316,6 +391,26 @@ run_test_case() {
     local message_text="Case $case_num: $description $(date +%H:%M:%S)"
     local result="UNKNOWN"
     local error_msg=""
+    local image_file=""
+    
+    # Create test image if needed
+    if [ "$content_type" = "image" ]; then
+        image_file=$(create_test_image "$case_num")
+        if [ ! -f "$image_file" ] || [ ! -s "$image_file" ]; then
+            log_error "Failed to create test image"
+            result="FAILED"
+            error_msg="Image creation failed"
+            return
+        fi
+        local image_size=$(stat -f%z "$image_file" 2>/dev/null || stat -c%s "$image_file" 2>/dev/null || echo "unknown")
+        echo "   🖼️  Created test image: $image_file ($image_size bytes, 100x100 red square)"
+        if command -v sips &> /dev/null; then
+            local dims=$(sips -g pixelWidth -g pixelHeight "$image_file" 2>/dev/null | grep -E "pixelWidth|pixelHeight" | awk '{print $2}' | tr '\n' 'x' | sed 's/x$//' || echo "")
+            if [ -n "$dims" ]; then
+                echo "   📐 Image dimensions: ${dims}"
+            fi
+        fi
+    fi
     
     # Determine target device ID
     local target_device_id=""
@@ -378,41 +473,91 @@ run_test_case() {
     if [ "$transport" = "cloud" ]; then
         # Cloud relay test
         echo "   Transport: Cloud Relay (wss://hypo.fly.dev/ws)"
-        local cmd="python3 $SIM_SCRIPTS_DIR/simulate-android-relay.py"
-        cmd="$cmd --text \"$message_text\""
         # Use test UUID for WebSocket session (to avoid backend conflicts)
         # Real device ID will be used in envelope payload for key lookup
         local test_session_id="test-$(date +%s)-${case_num}"
-        cmd="$cmd --device-id \"$test_session_id\""
-        cmd="$cmd --device-name \"[SIM] Test Device\""
         
-        # Always use --target-device-id (required)
-        cmd="$cmd --target-device-id \"$target_device_id\""
-        echo "   Target: $target_platform device ($target_device_id)"
-        
-        # Use fake UUID for WebSocket session to avoid conflicts with real device
-        # But use sender's device ID in envelope payload for key lookup on receiver
-        local test_session_id="test-$(date +%s)-${case_num}"
-        cmd="$cmd --session-device-id \"$test_session_id\""
-        echo "   📝 Using fake UUID for WebSocket session: $test_session_id (to avoid conflicts)"
-        
-        if [ "$encryption" = "encrypted" ] && [ -n "$encryption_key" ] && [ -n "$encryption_device_id" ]; then
-            # Use sender's device ID and key - device_id in envelope must match stored key on receiver
-            cmd="$cmd --encrypted --key \"$encryption_key\""
-            # Use sender's device ID for encryption key lookup (receiver will decrypt using this)
-            cmd="$cmd --encryption-device-id \"$encryption_device_id\""
-            echo "   🔑 Using sender device ID in envelope: $encryption_device_id (for key lookup on receiver)"
-            echo "   Encryption: AES-256-GCM (using sender's device ID and key)"
-        else
-            # For plaintext, still use sender's device ID in envelope (for consistency)
-            if [ "$target_platform" = "android" ]; then
-                cmd="$cmd --encryption-device-id \"$MACOS_DEVICE_ID\""
-                echo "   🔑 Using sender device ID in envelope: $MACOS_DEVICE_ID"
+        local cmd=""
+        if [ "$content_type" = "image" ] && [ -n "$image_file" ]; then
+            # For images, create a temporary Python script
+            local temp_script="/tmp/send_image_${case_num}_$$.py"
+            cat > "$temp_script" << PYTHON_SCRIPT
+import sys
+import os
+sys.path.insert(0, '$SIM_SCRIPTS_DIR')
+from clipboard_sender import create_image_payload, send_via_cloud_relay
+
+# Read image file
+with open('$image_file', 'rb') as f:
+    image_data = f.read()
+
+# Create payload
+payload = create_image_payload(image_data, 'png')
+
+# Get encryption config
+encryption_key_hex = '$encryption_key' if '$encryption_key' else None
+encryption_device_id = '$encryption_device_id' if '$encryption_device_id' else None
+
+# Convert hex key to bytes if provided
+key_bytes = None
+if encryption_key_hex and len(encryption_key_hex) == 64:
+    try:
+        key_bytes = bytes.fromhex(encryption_key_hex)
+    except:
+        key_bytes = None
+
+# Send via relay
+# Note: send_via_cloud_relay doesn't have encryption_device_id parameter
+# The envelope will use sender_device_id for key lookup, so we need to use
+# the real device ID as sender_device_id for encryption to work
+actual_sender_id = encryption_device_id if encryption_device_id else '$test_session_id'
+send_via_cloud_relay(
+    payload=payload,
+    sender_device_id=actual_sender_id,
+    sender_device_name='[SIM] Test Device',
+    target_device_id='$target_device_id',
+    relay_url='wss://hypo.fly.dev/ws',
+    encrypted=bool(key_bytes),
+    key=key_bytes,
+    session_device_id='$test_session_id',
+    quiet=False
+)
+PYTHON_SCRIPT
+            cmd="python3 $temp_script"
+            echo "   📝 Created temporary Python script: $temp_script"
+            echo "   Target: $target_platform device ($target_device_id)"
+            echo "   📝 Using fake UUID for WebSocket session: $test_session_id (to avoid conflicts)"
+            if [ "$encryption" = "encrypted" ] && [ -n "$encryption_key" ]; then
+                echo "   🔑 Using sender device ID in envelope: $encryption_device_id (for key lookup on receiver)"
+                echo "   Encryption: AES-256-GCM (using sender's device ID and key)"
             else
-                cmd="$cmd --encryption-device-id \"$ANDROID_DEVICE_ID\""
-                echo "   🔑 Using sender device ID in envelope: $ANDROID_DEVICE_ID"
+                echo "   Encryption: None (plaintext)"
             fi
-            echo "   Encryption: None (plaintext)"
+        else
+            cmd="python3 $SIM_SCRIPTS_DIR/simulate-android-relay.py"
+            cmd="$cmd --text \"$message_text\""
+            cmd="$cmd --device-id \"$test_session_id\""
+            cmd="$cmd --device-name \"[SIM] Test Device\""
+            cmd="$cmd --target-device-id \"$target_device_id\""
+            echo "   Target: $target_platform device ($target_device_id)"
+            cmd="$cmd --session-device-id \"$test_session_id\""
+            echo "   📝 Using fake UUID for WebSocket session: $test_session_id (to avoid conflicts)"
+            
+            if [ "$encryption" = "encrypted" ] && [ -n "$encryption_key" ] && [ -n "$encryption_device_id" ]; then
+                cmd="$cmd --encrypted --key \"$encryption_key\""
+                cmd="$cmd --encryption-device-id \"$encryption_device_id\""
+                echo "   🔑 Using sender device ID in envelope: $encryption_device_id (for key lookup on receiver)"
+                echo "   Encryption: AES-256-GCM (using sender's device ID and key)"
+            else
+                if [ "$target_platform" = "android" ]; then
+                    cmd="$cmd --encryption-device-id \"$MACOS_DEVICE_ID\""
+                    echo "   🔑 Using sender device ID in envelope: $MACOS_DEVICE_ID"
+                else
+                    cmd="$cmd --encryption-device-id \"$ANDROID_DEVICE_ID\""
+                    echo "   🔑 Using sender device ID in envelope: $ANDROID_DEVICE_ID"
+                fi
+                echo "   Encryption: None (plaintext)"
+            fi
         fi
         
         echo "   Command: $cmd"
@@ -421,11 +566,15 @@ run_test_case() {
         if eval "$cmd" > /tmp/test_case_${case_num}.log 2>&1; then
             log_success "  Message sent via cloud relay"
             echo "   ✅ Send successful - check /tmp/test_case_${case_num}.log for details"
+            # Clean up temp script if it exists
+            [ -f "/tmp/send_image_${case_num}_$$.py" ] && rm -f "/tmp/send_image_${case_num}_$$.py" || true
         else
             log_error "  Failed to send message"
             error_msg="Send failed"
             result="FAILED"
             echo "   ❌ Send failed - check /tmp/test_case_${case_num}.log for errors"
+            # Clean up temp script if it exists
+            [ -f "/tmp/send_image_${case_num}_$$.py" ] && rm -f "/tmp/send_image_${case_num}_$$.py" || true
         fi
     else
         # LAN test
@@ -462,39 +611,95 @@ run_test_case() {
             fi
         fi
         
-        local cmd="python3 $SIM_SCRIPTS_DIR/simulate-android-copy.py"
-        cmd="$cmd --text \"$message_text\""
         # Use fake UUID for WebSocket session to avoid conflicts
         # But use real device ID in envelope payload for key lookup
         local test_session_id="test-$(date +%s)-${case_num}"
-        cmd="$cmd --session-device-id \"$test_session_id\""
-        echo "   📝 Using fake UUID for WebSocket session: $test_session_id (to avoid conflicts)"
-        cmd="$cmd --device-name \"[SIM] Test Device\""
-        # Use appropriate host based on target platform
-        cmd="$cmd --host $lan_host"
-        cmd="$cmd --port $lan_port"
         
-        # Always use --target-device-id (required)
-        cmd="$cmd --target-device-id \"$target_device_id\""
-        echo "   Target: $target_platform device ($target_device_id) at $lan_host:$lan_port"
-        
-        if [ "$encryption" = "encrypted" ] && [ -n "$encryption_key" ] && [ -n "$encryption_device_id" ]; then
-            # Use sender's device ID and key - device_id in envelope must match stored key on receiver
-            cmd="$cmd --encrypted --key \"$encryption_key\""
-            # Use sender's device ID for encryption key lookup (receiver will decrypt using this)
-            cmd="$cmd --encryption-device-id \"$encryption_device_id\""
-            echo "   🔑 Using sender device ID in envelope: $encryption_device_id (for key lookup on receiver)"
-            echo "   Encryption: AES-256-GCM (using sender's device ID and key)"
-        else
-            # For plaintext, still use sender's device ID in envelope (for consistency)
-            if [ "$target_platform" = "android" ]; then
-                cmd="$cmd --encryption-device-id \"$MACOS_DEVICE_ID\""
-                echo "   🔑 Using sender device ID in envelope: $MACOS_DEVICE_ID"
+        local cmd=""
+        if [ "$content_type" = "image" ] && [ -n "$image_file" ]; then
+            # For images, create a temporary Python script
+            local temp_script="/tmp/send_image_lan_${case_num}_$$.py"
+            cat > "$temp_script" << PYTHON_SCRIPT
+import sys
+import os
+sys.path.insert(0, '$SIM_SCRIPTS_DIR')
+from clipboard_sender import create_image_payload, send_via_lan
+
+# Read image file
+with open('$image_file', 'rb') as f:
+    image_data = f.read()
+
+# Create payload
+payload = create_image_payload(image_data, 'png')
+
+# Get encryption config
+encryption_key_hex = '$encryption_key' if '$encryption_key' else None
+encryption_device_id = '$encryption_device_id' if '$encryption_device_id' else None
+
+# Convert hex key to bytes if provided
+key_bytes = None
+if encryption_key_hex and len(encryption_key_hex) == 64:
+    try:
+        key_bytes = bytes.fromhex(encryption_key_hex)
+    except:
+        key_bytes = None
+
+# Send via LAN
+send_via_lan(
+    payload=payload,
+    sender_device_id='$test_session_id',
+    sender_device_name='[SIM] Test Device',
+    target_device_id='$target_device_id',
+    host='$lan_host',
+    port=$lan_port,
+    encrypted=bool(key_bytes),
+    key=key_bytes,
+    envelope_sender_device_id=encryption_device_id,
+    quiet=False
+)
+PYTHON_SCRIPT
+            cmd="python3 $temp_script"
+            echo "   📝 Created temporary Python script: $temp_script"
+            echo "   Target: $target_platform device ($target_device_id) at $lan_host:$lan_port"
+            echo "   📝 Using fake UUID for WebSocket session: $test_session_id (to avoid conflicts)"
+            if [ "$encryption" = "encrypted" ] && [ -n "$encryption_key" ]; then
+                echo "   🔑 Using sender device ID in envelope: $encryption_device_id (for key lookup on receiver)"
+                echo "   Encryption: AES-256-GCM (using sender's device ID and key)"
             else
-                cmd="$cmd --encryption-device-id \"$ANDROID_DEVICE_ID\""
-                echo "   🔑 Using sender device ID in envelope: $ANDROID_DEVICE_ID"
+                echo "   Encryption: None (plaintext)"
             fi
-            echo "   Encryption: None (plaintext)"
+        else
+            cmd="python3 $SIM_SCRIPTS_DIR/simulate-android-copy.py"
+            cmd="$cmd --text \"$message_text\""
+            cmd="$cmd --session-device-id \"$test_session_id\""
+            echo "   📝 Using fake UUID for WebSocket session: $test_session_id (to avoid conflicts)"
+            cmd="$cmd --device-name \"[SIM] Test Device\""
+            # Use appropriate host based on target platform
+            cmd="$cmd --host $lan_host"
+            cmd="$cmd --port $lan_port"
+            
+            # Always use --target-device-id (required)
+            cmd="$cmd --target-device-id \"$target_device_id\""
+            echo "   Target: $target_platform device ($target_device_id) at $lan_host:$lan_port"
+            
+            if [ "$encryption" = "encrypted" ] && [ -n "$encryption_key" ] && [ -n "$encryption_device_id" ]; then
+                # Use sender's device ID and key - device_id in envelope must match stored key on receiver
+                cmd="$cmd --encrypted --key \"$encryption_key\""
+                # Use sender's device ID for encryption key lookup (receiver will decrypt using this)
+                cmd="$cmd --encryption-device-id \"$encryption_device_id\""
+                echo "   🔑 Using sender device ID in envelope: $encryption_device_id (for key lookup on receiver)"
+                echo "   Encryption: AES-256-GCM (using sender's device ID and key)"
+            else
+                # For plaintext, still use sender's device ID in envelope (for consistency)
+                if [ "$target_platform" = "android" ]; then
+                    cmd="$cmd --encryption-device-id \"$MACOS_DEVICE_ID\""
+                    echo "   🔑 Using sender device ID in envelope: $MACOS_DEVICE_ID"
+                else
+                    cmd="$cmd --encryption-device-id \"$ANDROID_DEVICE_ID\""
+                    echo "   🔑 Using sender device ID in envelope: $ANDROID_DEVICE_ID"
+                fi
+                echo "   Encryption: None (plaintext)"
+            fi
         fi
         
         echo "   Command: $cmd"
@@ -503,11 +708,15 @@ run_test_case() {
         if eval "$cmd" > /tmp/test_case_${case_num}.log 2>&1; then
             log_success "  Message sent via LAN"
             echo "   ✅ Send successful - check /tmp/test_case_${case_num}.log for details"
+            # Clean up temp script if it exists
+            [ -f "/tmp/send_image_lan_${case_num}_$$.py" ] && rm -f "/tmp/send_image_lan_${case_num}_$$.py" || true
         else
             log_error "  Failed to send message"
             error_msg="Send failed"
             result="FAILED"
             echo "   ❌ Send failed - check /tmp/test_case_${case_num}.log for errors"
+            # Clean up temp script if it exists
+            [ -f "/tmp/send_image_lan_${case_num}_$$.py" ] && rm -f "/tmp/send_image_lan_${case_num}_$$.py" || true
         fi
     fi
     echo "   ──────────────────────────────────────────────────────────────────────────"
@@ -615,6 +824,7 @@ check_test_case_reception() {
     local transport=$3
     local target_platform=$4
     local description="$5"
+    local content_type="${6:-text}"  # "text" or "image"
     
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
     
@@ -642,20 +852,36 @@ check_test_case_reception() {
         local case_pattern="Case $case_num:"
         
         # Improved detection: Check multiple sources with better patterns
-        # 1. Check database FIRST (most reliable) - look for case number in preview
-        local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+        # 1. Check database FIRST (most reliable) - look for case number in preview or image type
+        if [ "$content_type" = "image" ]; then
+            # For images, check for image type in database
+            local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE type=\"image\" OR preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+        else
+            local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+        fi
         if [ "${db_found:-0}" = "0" ] 2>/dev/null; then
             # Fallback to release package name
             db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         fi
         
         # 2. Check logcat for case pattern in preview/content (database entries show this)
-        local case_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "Case $case_num:|preview=Case $case_num:" 2>/dev/null || echo "0")
+        # For images, also check for image-related indicators
+        if [ "$content_type" = "image" ]; then
+            local case_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "Case $case_num:|preview=Case $case_num:|content_type.*image|type.*image" 2>/dev/null || echo "0")
+        else
+            local case_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "Case $case_num:|preview=Case $case_num:" 2>/dev/null || echo "0")
+        fi
         
         # 3. Check for handler success - look for "Decoded clipboard event" or "Upserting item" with case number
-        local handler_success=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "✅.*Decoded clipboard event|IncomingClipboardHandler.*✅.*Decoded|Upserting item.*Case $case_num:" 2>/dev/null || echo "0")
+        # For images, also check for image content type
+        if [ "$content_type" = "image" ]; then
+            local handler_success=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "✅.*Decoded clipboard event|IncomingClipboardHandler.*✅.*Decoded|Upserting item.*Case $case_num:|content_type.*image|type.*image" 2>/dev/null || echo "0")
+        else
+            local handler_success=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "✅.*Decoded clipboard event|IncomingClipboardHandler.*✅.*Decoded|Upserting item.*Case $case_num:" 2>/dev/null || echo "0")
+        fi
         
         # 4. Check for handler failure (decryption errors)
+        # For images, failure might be indicated differently
         local handler_failure=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "❌.*Failed.*Case $case_num:|IncomingClipboardHandler.*❌.*Failed|BAD_DECRYPT" 2>/dev/null || echo "0")
         
         # 5. Check for message reception indicators (onMessage, binary frames, etc.)
@@ -888,18 +1114,20 @@ print_usage() {
 Usage: $0 [OPTIONS]
 
 Options:
-    -c, --case NUM          Run specific test case (1-8)
+    -c, --case NUM          Run specific test case (1-16)
     -v, --verify            Run detailed log verification after test
-    -a, --all               Run all 8 test cases (default)
+    -a, --all               Run all 16 test cases (default)
     -h, --help              Show this help message
 
 Examples:
-    $0                      # Run all 8 test cases
-    $0 -c 8                 # Run only case 8 (Encrypted LAN Android)
+    $0                      # Run all 16 test cases (8 text + 8 image)
+    $0 -c 8                 # Run only case 8 (Encrypted Text LAN Android)
+    $0 -c 16                # Run only case 16 (Encrypted Image LAN Android)
     $0 -c 8 -v              # Run case 8 with detailed log verification
     $0 -v                   # Run all cases with detailed verification
 
 Test Cases:
+    Text Messages (1-8):
     1. Plaintext + Cloud + macOS
     2. Plaintext + Cloud + Android
     3. Plaintext + LAN + macOS
@@ -908,6 +1136,16 @@ Test Cases:
     6. Encrypted + Cloud + Android
     7. Encrypted + LAN + macOS
     8. Encrypted + LAN + Android
+    
+    Image Messages (9-16):
+    9. Plaintext + Cloud + macOS
+    10. Plaintext + Cloud + Android
+    11. Plaintext + LAN + macOS
+    12. Plaintext + LAN + Android
+    13. Encrypted + Cloud + macOS
+    14. Encrypted + Cloud + Android
+    15. Encrypted + LAN + macOS
+    16. Encrypted + LAN + Android
 
 EOF
 }
@@ -950,9 +1188,11 @@ main() {
     echo "=================================="
     echo ""
     echo "Test Matrix:"
+    echo "  - Content: Text / Image"
     echo "  - Encryption: Plaintext / Encrypted"
     echo "  - Transport: LAN / Cloud"
     echo "  - Target: macOS / Android"
+    echo "  - Total: 16 test cases (8 text + 8 image)"
     echo ""
     echo "Device IDs:"
     echo "  Android: $ANDROID_DEVICE_ID"
@@ -993,25 +1233,44 @@ main() {
         # Phase 1: Send all messages first
         log_section "📤 Phase 1: Sending All Messages"
         echo ""
-        echo "Sending all 8 test messages in sequence..."
+        echo "Sending all 16 test messages (8 text + 8 image) in sequence..."
         echo ""
         
-        # Send all messages (send_only mode)
-        run_test_case 1 "plaintext" "cloud" "macos" "Plaintext Cloud macOS" "send_only"
+        # Send all text messages (send_only mode)
+        log_info "Sending text messages (cases 1-8)..."
+        run_test_case 1 "plaintext" "cloud" "macos" "Plaintext Cloud macOS" "send_only" "text"
         sleep 0.5
-        run_test_case 2 "plaintext" "cloud" "android" "Plaintext Cloud Android" "send_only"
+        run_test_case 2 "plaintext" "cloud" "android" "Plaintext Cloud Android" "send_only" "text"
         sleep 0.5
-        run_test_case 3 "plaintext" "lan" "macos" "Plaintext LAN macOS" "send_only"
+        run_test_case 3 "plaintext" "lan" "macos" "Plaintext LAN macOS" "send_only" "text"
         sleep 0.5
-        run_test_case 4 "plaintext" "lan" "android" "Plaintext LAN Android" "send_only"
+        run_test_case 4 "plaintext" "lan" "android" "Plaintext LAN Android" "send_only" "text"
         sleep 0.5
-        run_test_case 5 "encrypted" "cloud" "macos" "Encrypted Cloud macOS" "send_only"
+        run_test_case 5 "encrypted" "cloud" "macos" "Encrypted Cloud macOS" "send_only" "text"
         sleep 0.5
-        run_test_case 6 "encrypted" "cloud" "android" "Encrypted Cloud Android" "send_only"
+        run_test_case 6 "encrypted" "cloud" "android" "Encrypted Cloud Android" "send_only" "text"
         sleep 0.5
-        run_test_case 7 "encrypted" "lan" "macos" "Encrypted LAN macOS" "send_only"
+        run_test_case 7 "encrypted" "lan" "macos" "Encrypted LAN macOS" "send_only" "text"
         sleep 0.5
-        run_test_case 8 "encrypted" "lan" "android" "Encrypted LAN Android" "send_only"
+        run_test_case 8 "encrypted" "lan" "android" "Encrypted LAN Android" "send_only" "text"
+        
+        echo ""
+        log_info "Sending image messages (cases 9-16)..."
+        run_test_case 9 "plaintext" "cloud" "macos" "Plaintext Image Cloud macOS" "send_only" "image"
+        sleep 0.5
+        run_test_case 10 "plaintext" "cloud" "android" "Plaintext Image Cloud Android" "send_only" "image"
+        sleep 0.5
+        run_test_case 11 "plaintext" "lan" "macos" "Plaintext Image LAN macOS" "send_only" "image"
+        sleep 0.5
+        run_test_case 12 "plaintext" "lan" "android" "Plaintext Image LAN Android" "send_only" "image"
+        sleep 0.5
+        run_test_case 13 "encrypted" "cloud" "macos" "Encrypted Image Cloud macOS" "send_only" "image"
+        sleep 0.5
+        run_test_case 14 "encrypted" "cloud" "android" "Encrypted Image Cloud Android" "send_only" "image"
+        sleep 0.5
+        run_test_case 15 "encrypted" "lan" "macos" "Encrypted Image LAN macOS" "send_only" "image"
+        sleep 0.5
+        run_test_case 16 "encrypted" "lan" "android" "Encrypted Image LAN Android" "send_only" "image"
         
         echo ""
         log_info "All messages sent. Waiting 10 seconds for delivery and processing..."
@@ -1022,35 +1281,57 @@ main() {
         log_section "📥 Phase 2: Checking Reception for All Messages"
         echo ""
         
-        # Check each test case reception
-        check_test_case_reception 1 "plaintext" "cloud" "macos" "Plaintext Cloud macOS"
-        check_test_case_reception 2 "plaintext" "cloud" "android" "Plaintext Cloud Android"
-        check_test_case_reception 3 "plaintext" "lan" "macos" "Plaintext LAN macOS"
-        check_test_case_reception 4 "plaintext" "lan" "android" "Plaintext LAN Android"
-        check_test_case_reception 5 "encrypted" "cloud" "macos" "Encrypted Cloud macOS"
-        check_test_case_reception 6 "encrypted" "cloud" "android" "Encrypted Cloud Android"
-        check_test_case_reception 7 "encrypted" "lan" "macos" "Encrypted LAN macOS"
-        check_test_case_reception 8 "encrypted" "lan" "android" "Encrypted LAN Android"
+        log_info "Checking text message reception (cases 1-8)..."
+        # Check each text test case reception
+        check_test_case_reception 1 "plaintext" "cloud" "macos" "Plaintext Cloud macOS" "text"
+        check_test_case_reception 2 "plaintext" "cloud" "android" "Plaintext Cloud Android" "text"
+        check_test_case_reception 3 "plaintext" "lan" "macos" "Plaintext LAN macOS" "text"
+        check_test_case_reception 4 "plaintext" "lan" "android" "Plaintext LAN Android" "text"
+        check_test_case_reception 5 "encrypted" "cloud" "macos" "Encrypted Cloud macOS" "text"
+        check_test_case_reception 6 "encrypted" "cloud" "android" "Encrypted Cloud Android" "text"
+        check_test_case_reception 7 "encrypted" "lan" "macos" "Encrypted LAN macOS" "text"
+        check_test_case_reception 8 "encrypted" "lan" "android" "Encrypted LAN Android" "text"
+        
+        echo ""
+        log_info "Checking image message reception (cases 9-16)..."
+        # Check each image test case reception
+        check_test_case_reception 9 "plaintext" "cloud" "macos" "Plaintext Image Cloud macOS" "image"
+        check_test_case_reception 10 "plaintext" "cloud" "android" "Plaintext Image Cloud Android" "image"
+        check_test_case_reception 11 "plaintext" "lan" "macos" "Plaintext Image LAN macOS" "image"
+        check_test_case_reception 12 "plaintext" "lan" "android" "Plaintext Image LAN Android" "image"
+        check_test_case_reception 13 "encrypted" "cloud" "macos" "Encrypted Image Cloud macOS" "image"
+        check_test_case_reception 14 "encrypted" "cloud" "android" "Encrypted Image Cloud Android" "image"
+        check_test_case_reception 15 "encrypted" "lan" "macos" "Encrypted Image LAN macOS" "image"
+        check_test_case_reception 16 "encrypted" "lan" "android" "Encrypted Image LAN Android" "image"
         
         # Detailed verification if requested
         if [ "$verify_mode" = true ]; then
             echo ""
             log_section "🔍 Detailed Log Verification"
             echo ""
-            for case_num in {1..8}; do
+            for case_num in {1..16}; do
                 local encryption=""
                 local transport=""
                 local target=""
                 local description=""
+                local content_type="text"
                 case $case_num in
-                    1) encryption="plaintext"; transport="cloud"; target="macos"; description="Plaintext Cloud macOS" ;;
-                    2) encryption="plaintext"; transport="cloud"; target="android"; description="Plaintext Cloud Android" ;;
-                    3) encryption="plaintext"; transport="lan"; target="macos"; description="Plaintext LAN macOS" ;;
-                    4) encryption="plaintext"; transport="lan"; target="android"; description="Plaintext LAN Android" ;;
-                    5) encryption="encrypted"; transport="cloud"; target="macos"; description="Encrypted Cloud macOS" ;;
-                    6) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted Cloud Android" ;;
-                    7) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted LAN macOS" ;;
-                    8) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted LAN Android" ;;
+                    1) encryption="plaintext"; transport="cloud"; target="macos"; description="Plaintext Cloud macOS"; content_type="text" ;;
+                    2) encryption="plaintext"; transport="cloud"; target="android"; description="Plaintext Cloud Android"; content_type="text" ;;
+                    3) encryption="plaintext"; transport="lan"; target="macos"; description="Plaintext LAN macOS"; content_type="text" ;;
+                    4) encryption="plaintext"; transport="lan"; target="android"; description="Plaintext LAN Android"; content_type="text" ;;
+                    5) encryption="encrypted"; transport="cloud"; target="macos"; description="Encrypted Cloud macOS"; content_type="text" ;;
+                    6) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted Cloud Android"; content_type="text" ;;
+                    7) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted LAN macOS"; content_type="text" ;;
+                    8) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted LAN Android"; content_type="text" ;;
+                    9) encryption="plaintext"; transport="cloud"; target="macos"; description="Plaintext Image Cloud macOS"; content_type="image" ;;
+                    10) encryption="plaintext"; transport="cloud"; target="android"; description="Plaintext Image Cloud Android"; content_type="image" ;;
+                    11) encryption="plaintext"; transport="lan"; target="macos"; description="Plaintext Image LAN macOS"; content_type="image" ;;
+                    12) encryption="plaintext"; transport="lan"; target="android"; description="Plaintext Image LAN Android"; content_type="image" ;;
+                    13) encryption="encrypted"; transport="cloud"; target="macos"; description="Encrypted Image Cloud macOS"; content_type="image" ;;
+                    14) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted Image Cloud Android"; content_type="image" ;;
+                    15) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted Image LAN macOS"; content_type="image" ;;
+                    16) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted Image LAN Android"; content_type="image" ;;
                 esac
                 local test_id="Case $case_num:"
                 verify_test_case_logs "$case_num" "$encryption" "$transport" "$target" "$test_id"
@@ -1058,8 +1339,8 @@ main() {
         fi
     else
         # Run single test case
-        if [ -z "$test_case" ] || ! [[ "$test_case" =~ ^[1-8]$ ]]; then
-            log_error "Invalid test case: $test_case (must be 1-8)"
+        if [ -z "$test_case" ] || ! [[ "$test_case" =~ ^[1-9]$|^1[0-6]$ ]]; then
+            log_error "Invalid test case: $test_case (must be 1-16)"
             print_usage
             exit 1
         fi
@@ -1069,22 +1350,31 @@ main() {
         local target=""
         local description=""
         
+        local content_type="text"
         case $test_case in
-            1) encryption="plaintext"; transport="cloud"; target="macos"; description="Plaintext Cloud macOS" ;;
-            2) encryption="plaintext"; transport="cloud"; target="android"; description="Plaintext Cloud Android" ;;
-            3) encryption="plaintext"; transport="lan"; target="macos"; description="Plaintext LAN macOS" ;;
-            4) encryption="plaintext"; transport="lan"; target="android"; description="Plaintext LAN Android" ;;
-            5) encryption="encrypted"; transport="cloud"; target="macos"; description="Encrypted Cloud macOS" ;;
-            6) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted Cloud Android" ;;
-            7) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted LAN macOS" ;;
-            8) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted LAN Android" ;;
+            1) encryption="plaintext"; transport="cloud"; target="macos"; description="Plaintext Cloud macOS"; content_type="text" ;;
+            2) encryption="plaintext"; transport="cloud"; target="android"; description="Plaintext Cloud Android"; content_type="text" ;;
+            3) encryption="plaintext"; transport="lan"; target="macos"; description="Plaintext LAN macOS"; content_type="text" ;;
+            4) encryption="plaintext"; transport="lan"; target="android"; description="Plaintext LAN Android"; content_type="text" ;;
+            5) encryption="encrypted"; transport="cloud"; target="macos"; description="Encrypted Cloud macOS"; content_type="text" ;;
+            6) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted Cloud Android"; content_type="text" ;;
+            7) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted LAN macOS"; content_type="text" ;;
+            8) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted LAN Android"; content_type="text" ;;
+            9) encryption="plaintext"; transport="cloud"; target="macos"; description="Plaintext Image Cloud macOS"; content_type="image" ;;
+            10) encryption="plaintext"; transport="cloud"; target="android"; description="Plaintext Image Cloud Android"; content_type="image" ;;
+            11) encryption="plaintext"; transport="lan"; target="macos"; description="Plaintext Image LAN macOS"; content_type="image" ;;
+            12) encryption="plaintext"; transport="lan"; target="android"; description="Plaintext Image LAN Android"; content_type="image" ;;
+            13) encryption="encrypted"; transport="cloud"; target="macos"; description="Encrypted Image Cloud macOS"; content_type="image" ;;
+            14) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted Image Cloud Android"; content_type="image" ;;
+            15) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted Image LAN macOS"; content_type="image" ;;
+            16) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted Image LAN Android"; content_type="image" ;;
         esac
         
         log_section "🧪 Running Test Case $test_case: $description"
         echo ""
         
         # Send message
-        run_test_case "$test_case" "$encryption" "$transport" "$target" "$description" "send_only"
+        run_test_case "$test_case" "$encryption" "$transport" "$target" "$description" "send_only" "$content_type"
         
         echo ""
         log_info "Message sent. Waiting 5 seconds for delivery and processing..."
@@ -1092,7 +1382,7 @@ main() {
         echo ""
         
         # Check reception
-        check_test_case_reception "$test_case" "$encryption" "$transport" "$target" "$description"
+        check_test_case_reception "$test_case" "$encryption" "$transport" "$target" "$description" "$content_type"
         
         # Detailed verification if requested
         if [ "$verify_mode" = true ]; then
@@ -1129,14 +1419,22 @@ main() {
         
         local desc=""
         case $case_num in
-            1) desc="Plaintext + Cloud + macOS" ;;
-            2) desc="Plaintext + Cloud + Android" ;;
-            3) desc="Plaintext + LAN + macOS" ;;
-            4) desc="Plaintext + LAN + Android" ;;
-            5) desc="Encrypted + Cloud + macOS" ;;
-            6) desc="Encrypted + Cloud + Android" ;;
-            7) desc="Encrypted + LAN + macOS" ;;
-            8) desc="Encrypted + LAN + Android" ;;
+            1) desc="Plaintext Text + Cloud + macOS" ;;
+            2) desc="Plaintext Text + Cloud + Android" ;;
+            3) desc="Plaintext Text + LAN + macOS" ;;
+            4) desc="Plaintext Text + LAN + Android" ;;
+            5) desc="Encrypted Text + Cloud + macOS" ;;
+            6) desc="Encrypted Text + Cloud + Android" ;;
+            7) desc="Encrypted Text + LAN + macOS" ;;
+            8) desc="Encrypted Text + LAN + Android" ;;
+            9) desc="Plaintext Image + Cloud + macOS" ;;
+            10) desc="Plaintext Image + Cloud + Android" ;;
+            11) desc="Plaintext Image + LAN + macOS" ;;
+            12) desc="Plaintext Image + LAN + Android" ;;
+            13) desc="Encrypted Image + Cloud + macOS" ;;
+            14) desc="Encrypted Image + Cloud + Android" ;;
+            15) desc="Encrypted Image + LAN + macOS" ;;
+            16) desc="Encrypted Image + LAN + Android" ;;
         esac
         
         local status_color=""
@@ -1161,6 +1459,8 @@ main() {
     
     # Cleanup
     rm -f "$RESULTS_FILE"
+    # Clean up any remaining temp image files and scripts
+    rm -f /tmp/test_image_*.png /tmp/send_image_*.py 2>/dev/null || true
     
     # Exit with appropriate code
     if [ "$FAILED_TESTS" -eq 0 ]; then

@@ -320,7 +320,7 @@ class TransportManager(
      */
     fun restartForNetworkChange() {
         val config = currentConfig ?: return
-        android.util.Log.i("TransportManager", "🌐 Network changed - restarting LAN services to update IP address")
+        android.util.Log.d("TransportManager", "🌐 Network changed - restarting LAN services to update IP address")
         
         // Stop current services
         if (_isAdvertising.value) {

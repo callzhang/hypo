@@ -3,6 +3,8 @@ package com.hypo.clipboard.ui.history
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Image
@@ -339,16 +342,40 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
                     modifier = Modifier.weight(1f)
                 )
                 if (isTruncated) {
-                    IconButton(
-                        onClick = { showDetailDialog = true },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Visibility,
-                            contentDescription = "View Detail",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    if (item.type == ClipboardType.LINK) {
+                        // For links, show browser icon and open URL in browser
+                        IconButton(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(item.content))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    // If opening browser fails, fall back to detail dialog
+                                    showDetailDialog = true
+                                }
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.OpenInBrowser,
+                                contentDescription = "Visit in Browser",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    } else {
+                        // For other types, show visibility icon and open detail dialog
+                        IconButton(
+                            onClick = { showDetailDialog = true },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Visibility,
+                                contentDescription = "View Detail",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }

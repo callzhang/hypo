@@ -387,17 +387,17 @@ class ClipboardSyncService : Service() {
                     
                     // If current clipboard doesn't match database latest, update database
                     if (!currentItem.matchesContent(latestEntry)) {
-                        Log.i(TAG, "🔄 Current clipboard doesn't match database latest entry - updating database")
+                        Log.d(TAG, "🔄 Current clipboard doesn't match database latest entry - updating database")
                         // Update the timestamp of the matching entry if it exists in history, or create new entry
                         val matchingEntry = repository.findMatchingEntryInHistory(currentItem)
                         if (matchingEntry != null) {
-                            // Found in history - move it to top
-                            repository.updateTimestamp(matchingEntry.id, currentEvent.createdAt)
-                            Log.i(TAG, "✅ Moved matching history item to top")
+                            // Found in history - move it to top with current time
+                            repository.updateTimestamp(matchingEntry.id, Instant.now())
+                            Log.d(TAG, "✅ Moved matching history item to top")
                         } else {
                             // Not in history - add as new entry (but don't send it - it's the current clipboard)
                             repository.upsert(currentItem)
-                            Log.i(TAG, "✅ Added current clipboard to database as latest entry")
+                            Log.d(TAG, "✅ Added current clipboard to database as latest entry")
                         }
                     } else {
                         Log.d(TAG, "✅ Database latest entry matches current clipboard")
@@ -418,7 +418,7 @@ class ClipboardSyncService : Service() {
                         transportOrigin = null
                     )
                     repository.upsert(currentItem)
-                    Log.i(TAG, "✅ Added current clipboard to empty database")
+                    Log.d(TAG, "✅ Added current clipboard to empty database")
                 }
             } catch (e: SecurityException) {
                 Log.d(TAG, "🔒 Cannot access clipboard to sync with database: ${e.message}")
@@ -518,7 +518,7 @@ class ClipboardSyncService : Service() {
                 transportManager.restartForNetworkChange()
                 // Reconnect cloud WebSocket to use new IP address
                 scope.launch {
-                    cloudWebSocketClient.reconnect()
+                    relayWebSocketClient.reconnect()
                 }
                 connectionStatusProber.probeNow()
             }
@@ -539,7 +539,7 @@ class ClipboardSyncService : Service() {
                 transportManager.restartForNetworkChange()
                 // Reconnect cloud WebSocket to use new IP address
                 scope.launch {
-                    cloudWebSocketClient.reconnect()
+                    relayWebSocketClient.reconnect()
                 }
                 connectionStatusProber.probeNow()
             }
@@ -600,7 +600,7 @@ class ClipboardSyncService : Service() {
         if (isForeground != isAppInForeground) {
             isAppInForeground = isForeground
             val status = if (isForeground) "FOREGROUND" else "BACKGROUND"
-            Log.i(TAG, "📱 App state: $status")
+            Log.d(TAG, "📱 App state: $status")
             if (!isForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAccessibilityServiceEnabled) {
                 Log.w(TAG, "⚠️ Clipboard access BLOCKED in background. Enable accessibility service for background access.")
             }
@@ -703,10 +703,10 @@ class ClipboardSyncService : Service() {
             }
         }
         
-        Log.i(TAG, "📱 Opening clipboard permission settings...")
+        Log.d(TAG, "📱 Opening clipboard permission settings...")
         runCatching { 
             startActivity(intent)
-            Log.i(TAG, "✅ Settings activity started")
+            Log.d(TAG, "✅ Settings activity started")
         }.onFailure { e ->
             Log.e(TAG, "❌ Failed to open settings: ${e.message}", e)
         }

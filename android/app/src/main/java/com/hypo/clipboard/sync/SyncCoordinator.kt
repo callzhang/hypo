@@ -177,7 +177,7 @@ class SyncCoordinator @Inject constructor(
                 } ?: false
                 
                 if (matchesCurrentClipboard) {
-                    android.util.Log.i(TAG, "⏭️ New message matches current clipboard, discarding: ${event.preview.take(50)}")
+                    android.util.Log.d(TAG, "⏭️ New message matches current clipboard, discarding: ${event.preview.take(50)}")
                     continue
                 }
                 
@@ -189,7 +189,7 @@ class SyncCoordinator @Inject constructor(
                     // Found matching entry in history - move it to the top by updating timestamp
                     val newTimestamp = Instant.now()
                     repository.updateTimestamp(matchingEntry.id, newTimestamp)
-                    android.util.Log.i(TAG, "🔄 New message matches history item, moved to top: ${matchingEntry.preview.take(50)}")
+                    android.util.Log.d(TAG, "🔄 New message matches history item, moved to top: ${matchingEntry.preview.take(50)}")
                     // Use the existing item for broadcasting
                     item = matchingEntry
                 } else {
@@ -224,17 +224,17 @@ class SyncCoordinator @Inject constructor(
                         if (pairedDevices.isEmpty()) {
                             Log.w(TAG, "⏭️  No paired devices available after waiting (targets: ${_targets.value})")
                         } else {
-                            Log.i(TAG, "✅ Targets became available after ${System.currentTimeMillis() - startTime}ms: ${pairedDevices.size} devices")
+                            Log.d(TAG, "✅ Targets became available after ${System.currentTimeMillis() - startTime}ms: ${pairedDevices.size} devices")
                         }
                     }
                     
                     if (pairedDevices.isNotEmpty()) {
-                        Log.i(TAG, "📤 Broadcasting to ${pairedDevices.size} paired devices: $pairedDevices")
+                        Log.d(TAG, "📤 Broadcasting to ${pairedDevices.size} paired devices: $pairedDevices")
                         pairedDevices.forEach { target ->
-                            Log.i(TAG, "📤 Syncing to device: $target")
+                            Log.d(TAG, "📤 Syncing to device: $target")
                             try {
                                 val envelope = syncEngine.sendClipboard(item, target)
-                                Log.i(TAG, "✅ Successfully sent clipboard to $target, envelope type: ${envelope.type}")
+                                Log.d(TAG, "✅ Successfully sent clipboard to $target, envelope type: ${envelope.type}")
                             } catch (error: TransportPayloadTooLargeException) {
                                 Log.w(TAG, "⚠️ Payload too large for $target, skipping sync: ${error.message}")
                                 // Don't crash - just skip this sync
@@ -243,7 +243,7 @@ class SyncCoordinator @Inject constructor(
                             }
                         }
                     } else {
-                        Log.i(TAG, "⏭️  No paired devices to broadcast to (targets: ${_targets.value})")
+                        Log.d(TAG, "⏭️  No paired devices to broadcast to (targets: ${_targets.value})")
                     }
                 }
             }
@@ -281,7 +281,7 @@ class SyncCoordinator @Inject constructor(
                 recomputeTargets() // Still recompute with current cache
             }
         }
-        Log.i(TAG, "➕ Added manual sync target: $deviceId")
+        Log.d(TAG, "➕ Added manual sync target: $deviceId")
     }
 
     fun removeTargetDevice(deviceId: String) {
@@ -297,7 +297,7 @@ class SyncCoordinator @Inject constructor(
                 recomputeTargets() // Still recompute with current cache
             }
         }
-        Log.i(TAG, "➖ Removed manual sync target: $deviceId")
+        Log.d(TAG, "➖ Removed manual sync target: $deviceId")
     }
 
     companion object {

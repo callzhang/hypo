@@ -33,7 +33,7 @@ class IncomingClipboardHandler @Inject constructor(
                 val senderDeviceId = envelope.payload.deviceId
                 val senderDeviceName = envelope.payload.deviceName
                 
-                Log.i(TAG, "📥 Received clipboard from deviceId=${senderDeviceId.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}")
+                Log.d(TAG, "📥 Received clipboard from deviceId=${senderDeviceId.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}")
                 
                 // Check if message was encrypted (non-empty nonce and tag)
                 val isEncrypted = envelope.payload.encryption.nonce.isNotEmpty() && envelope.payload.encryption.tag.isNotEmpty()
@@ -65,7 +65,7 @@ class IncomingClipboardHandler @Inject constructor(
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> "file(${event.content.length} bytes)"
                     else -> "<unknown>"
                 }
-                Log.i(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=$senderDeviceName, content: $contentPreview")
+                Log.d(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=$senderDeviceName, content: $contentPreview")
                 
                 // Forward to coordinator (will use source device info instead of local)
                 syncCoordinator.onClipboardEvent(event)

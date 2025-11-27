@@ -776,6 +776,31 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                     let jsonData = data.subdata(in: 4..<(4 + length))
                     if let jsonString = String(data: jsonData, encoding: .utf8) {
                         logger.info("🔍 [LanWebSocketTransport] JSON payload (first 200 chars): \(jsonString.prefix(200))")
+                        
+                        // Check if this is a control message (from cloud relay) before trying to decode as SyncEnvelope
+                        // Control messages have structure: {"msg_type":"control","payload":{...}}
+                        // They don't have an "id" field, so decoding as SyncEnvelope will fail
+                        if jsonString.contains("\"msg_type\"") && jsonString.contains("\"control\"") {
+                            logger.info("📋 [LanWebSocketTransport] Received control message from cloud relay - handling separately")
+                            // Try to parse as control message
+                            if let jsonDict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                               let msgType = jsonDict["msg_type"] as? String,
+                               msgType == "control",
+                               let payload = jsonDict["payload"] as? [String: Any],
+                               let action = payload["action"] as? String {
+                                logger.info("📋 [LanWebSocketTransport] Control message action: \(action)")
+                                if action == "routing_failure" {
+                                    if let reason = payload["reason"] as? String {
+                                        logger.warning("⚠️ [LanWebSocketTransport] Routing failure: \(reason)")
+                                    }
+                                    if let targetDeviceId = payload["target_device_id"] as? String {
+                                        logger.warning("⚠️ [LanWebSocketTransport] Target device not connected: \(targetDeviceId)")
+                                    }
+                                }
+                            }
+                            // Control messages are informational - don't try to decode as SyncEnvelope
+                            return
+                        }
                     }
                 }
             }

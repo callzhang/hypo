@@ -121,7 +121,7 @@ public final class ClipboardMonitor {
                 isEncrypted: false,
                 transportOrigin: nil  // Explicitly nil for local copies
             )
-            logger.info("📋 [ClipboardMonitor] Captured local link: \(url.absoluteString.prefix(50))")
+            logger.debug("📋 [ClipboardMonitor] Captured local link: \(url.absoluteString.prefix(50))")
             delegate?.clipboardMonitor(self, didCapture: entry)
             return entry
         }
@@ -136,7 +136,7 @@ public final class ClipboardMonitor {
                 isEncrypted: false,
                 transportOrigin: nil  // Explicitly nil for local copies
             )
-            logger.info("📋 [ClipboardMonitor] Captured local text: \(string.prefix(50))")
+            logger.debug("📋 [ClipboardMonitor] Captured local text: \(string.prefix(50))")
             delegate?.clipboardMonitor(self, didCapture: entry)
             return entry
         }

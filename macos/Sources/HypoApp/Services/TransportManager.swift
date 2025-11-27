@@ -9,6 +9,9 @@ import AppKit
 #if canImport(os)
 import os
 #endif
+#if canImport(Network)
+import Network
+#endif
 
 @MainActor
 public final class TransportManager {
@@ -29,6 +32,8 @@ public final class TransportManager {
 
     private var discoveryTask: Task<Void, Never>?
     private var pruneTask: Task<Void, Never>?
+    private var healthCheckTask: Task<Void, Never>?
+    private var networkMonitorTask: Task<Void, Never>?
     private var isAdvertising = false
     private var isServerRunning = false
     private var lanPeers: [String: DiscoveredPeer] = [:]
@@ -426,6 +431,8 @@ public func updateConnectionState(_ newState: ConnectionState) {
         }
         await browser.start()
         startPruneTaskIfNeeded()
+        startHealthCheckTaskIfNeeded()
+        startNetworkMonitorTaskIfNeeded()
     }
 
     private func deactivateLanServices() async {
@@ -433,6 +440,8 @@ public func updateConnectionState(_ newState: ConnectionState) {
         discoveryTask = nil
         await browser.stop()
         cancelPruneTask()
+        cancelHealthCheckTask()
+        cancelNetworkMonitorTask()
         if isAdvertising {
             publisher.stop()
             isAdvertising = false
@@ -463,6 +472,115 @@ public func updateConnectionState(_ newState: ConnectionState) {
     private func cancelPruneTask() {
         pruneTask?.cancel()
         pruneTask = nil
+    }
+
+    private func startHealthCheckTaskIfNeeded() {
+        guard healthCheckTask == nil else { return }
+        healthCheckTask = Task { [weak self] in
+            guard let self else { return }
+            let interval: UInt64 = 30_000_000_000 // 30 seconds
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: interval)
+                if Task.isCancelled { break }
+                
+                // Check if advertising should be active but isn't
+                if self.lanConfiguration.port > 0 && !self.isAdvertising {
+                    self.logger.warning("⚠️ [TransportManager] Health check: Advertising should be active but isn't. Restarting...")
+                    await self.activateLanServices()
+                }
+                
+                // Check if WebSocket server should be running but isn't
+                if self.lanConfiguration.port > 0 && !self.isServerRunning {
+                    self.logger.warning("⚠️ [TransportManager] Health check: WebSocket server should be running but isn't. Restarting...")
+                    await self.activateLanServices()
+                }
+                
+                // Verify publisher is still active (check currentEndpoint)
+                if self.isAdvertising, self.publisher.currentEndpoint == nil {
+                    self.logger.warning("⚠️ [TransportManager] Health check: Publisher endpoint is nil but isAdvertising=true. Restarting...")
+                    await self.activateLanServices()
+                }
+            }
+        }
+    }
+
+    private func cancelHealthCheckTask() {
+        healthCheckTask?.cancel()
+        healthCheckTask = nil
+    }
+
+    private func startNetworkMonitorTaskIfNeeded() {
+        guard networkMonitorTask == nil else { return }
+        networkMonitorTask = Task { [weak self] in
+            guard let self else { return }
+            // Monitor network path changes using NWPathMonitor
+            #if canImport(Network)
+            let monitor = NWPathMonitor()
+            let queue = DispatchQueue(label: "com.hypo.network.monitor")
+            
+            monitor.pathUpdateHandler = { [weak self] path in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if path.status == .satisfied {
+                        self.logger.info("🌐 [TransportManager] Network path satisfied. Restarting LAN services to update IP address...")
+                        // Force restart to ensure Bonjour service updates with new IP address
+                        await self.restartLanServicesForNetworkChange()
+                    } else {
+                        self.logger.info("🌐 [TransportManager] Network path not satisfied. Status: \(path.status)")
+                    }
+                }
+            }
+            monitor.start(queue: queue)
+            
+            // Keep task alive
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            }
+            monitor.cancel()
+            #else
+            // Fallback: periodic check without Network framework
+            let interval: UInt64 = 60_000_000_000 // 60 seconds
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: interval)
+                if Task.isCancelled { break }
+                // Simple check: if we should be advertising but aren't, restart
+                if self.lanConfiguration.port > 0 && !self.isAdvertising {
+                    self.logger.info("🌐 [TransportManager] Network monitor: Restarting LAN services...")
+                    await self.activateLanServices()
+                }
+            }
+            #endif
+        }
+    }
+
+    private func cancelNetworkMonitorTask() {
+        networkMonitorTask?.cancel()
+        networkMonitorTask = nil
+    }
+
+    /// Restart LAN services when network changes to update IP address in Bonjour
+    private func restartLanServicesForNetworkChange() async {
+        let wasAdvertising = isAdvertising
+        let wasServerRunning = isServerRunning
+        
+        // Stop current services
+        if wasAdvertising {
+            publisher.stop()
+            isAdvertising = false
+        }
+        if wasServerRunning {
+            webSocketServer.stop()
+            isServerRunning = false
+        }
+        
+        // Small delay to let network stack settle
+        try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+        
+        // Restart services with new network configuration
+        if wasAdvertising || wasServerRunning {
+            logger.info("🔄 [TransportManager] Restarting LAN services after network change...")
+            await activateLanServices()
+        }
     }
 
     @discardableResult

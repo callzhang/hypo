@@ -159,7 +159,7 @@ security dump-keychain 2>/dev/null | grep -B2 -A10 "com.hypo.clipboard.keys" | g
 
 ```bash
 # Android logs showing key lookup
-./scripts/android-logcat.sh 797e3471 -d | grep -E "SecureKeyStore.*loadKey|SyncEngine.*Key size"
+adb -s 797e3471 logcat -d | grep -v "MIUIInput" | grep -E "SecureKeyStore.*loadKey|SyncEngine.*Key size"
 
 # Shows key was found (32 bytes), but decryption still failed
 ```
@@ -393,10 +393,10 @@ cd /Users/derek/Documents/Projects/hypo
 
 ```bash
 # Filter by PID for cleaner output
-./scripts/android-logcat.sh 797e3471 --pid=$(adb -s 797e3471 shell pidof -s com.hypo.clipboard.debug) -d | grep -E "(SyncEngine|IncomingClipboardHandler|BAD_DECRYPT)"
+adb -s 797e3471 logcat --pid=$(adb -s 797e3471 shell pidof -s com.hypo.clipboard.debug) -d | grep -v "MIUIInput" | grep -E "(SyncEngine|IncomingClipboardHandler|BAD_DECRYPT)"
 
-# Check for handler success/failure (helper script automatically filters MIUIInput)
-./scripts/android-logcat.sh 797e3471 -d | grep -E "IncomingClipboardHandler.*✅|IncomingClipboardHandler.*❌"
+# Check for handler success/failure (filter MIUIInput)
+adb -s 797e3471 logcat -d | grep -v "MIUIInput" | grep -E "IncomingClipboardHandler.*✅|IncomingClipboardHandler.*❌"
 ```
 
 ### Check Database

@@ -83,7 +83,15 @@ class LanRegistrationManager(
         if (connectivityReceiver != null) return
         connectivityReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                currentConfig?.let { scheduleRetry(it, immediate = true) }
+                android.util.Log.i("LanRegistrationManager", "🌐 Network state changed - re-registering service to update IP address")
+                currentConfig?.let { config ->
+                    // Unregister first to ensure clean restart with new IP
+                    registrationListener?.let { listener ->
+                        runCatching { nsdManager.unregisterService(listener) }
+                    }
+                    // Then re-register with new network configuration
+                    scheduleRetry(config, immediate = true)
+                }
             }
         }
         applicationContext.registerReceiver(

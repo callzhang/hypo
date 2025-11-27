@@ -79,4 +79,16 @@ class RelayWebSocketClient @Inject constructor(
         android.util.Log.d("RelayWebSocketClient", "🔍 probeNow(): forcing ensureConnection at ${System.currentTimeMillis()}")
         delegate.forceConnectOnce()
     }
+    
+    /**
+     * Force reconnection by closing existing connection and starting a new one.
+     * Used when network changes to ensure connection uses new IP address.
+     */
+    suspend fun reconnect() {
+        android.util.Log.i("RelayWebSocketClient", "🔄 Reconnecting cloud WebSocket due to network change")
+        delegate.close()
+        // Small delay to let connection close
+        kotlinx.coroutines.delay(500)
+        delegate.startReceiving()
+    }
 }

@@ -42,23 +42,23 @@ log show --predicate 'process == "HypoMenuBar"' --last 5m --style compact
 
 ### Android Logs
 
-**⚠️ Always use the helper script** - It automatically filters MIUIInput and other system noise:
+**⚠️ Always filter MIUIInput** - Add `| grep -v "MIUIInput"` to all `adb logcat` commands:
 
 ```bash
-# Filter by PID (excludes MIUIInput automatically)
-./scripts/android-logcat.sh <device_id> --pid=$(adb -s <device_id> shell pidof -s com.hypo.clipboard.debug) | grep "pattern"
+# Filter by PID (excludes MIUIInput)
+adb -s <device_id> logcat --pid=$(adb -s <device_id> shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep "pattern"
 
 # Simple usage (shows app logs only, no MIUIInput)
-./scripts/android-logcat.sh <device_id>
+adb -s <device_id> logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep -v "MIUIInput"
 
 # With custom grep filters
-./scripts/android-logcat.sh <device_id> | grep -E "SyncEngine|transport"
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep -E "SyncEngine|transport"
 
-# View recent logs (automatically filters MIUIInput)
-./scripts/android-logcat.sh <device_id> -d -t 300
+# View recent logs (filters MIUIInput)
+adb -s <device_id> logcat -d -t 300 | grep -v "MIUIInput"
 
-# Find message by content (automatically filters MIUIInput)
-./scripts/android-logcat.sh <device_id> -d | grep -F "content: Case 1:"
+# Find message by content (filters MIUIInput)
+adb -s <device_id> logcat -d | grep -v "MIUIInput" | grep -F "content: Case 1:"
 ```
 
 **Query database (most reliable, no filtering needed)**:
@@ -66,7 +66,7 @@ log show --predicate 'process == "HypoMenuBar"' --last 5m --style compact
 adb -s <device_id> shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 10;'"
 ```
 
-**Note**: The helper script automatically excludes MIUIInput logs. If you must use `adb logcat` directly, always add `| grep -v "MIUIInput"` to filter system noise.
+**Note**: Always add `| grep -v "MIUIInput"` to `adb logcat` commands to filter system noise from Xiaomi devices.
 
 ### Backend Logs
 
@@ -94,7 +94,7 @@ The `test-sync-matrix.sh` script detects messages by:
 2. **Log Content Search**
    - Searches for `content: <message>` in logs
    - macOS: `log show --predicate 'subsystem == "com.hypo.clipboard"'`
-   - Android: `./scripts/android-logcat.sh <device_id> -d | grep -F "content:"` (automatically filters MIUIInput)
+   - Android: `adb -s <device_id> logcat -d | grep -v "MIUIInput" | grep -F "content:"`
 
 3. **Handler Success Logs**
    - macOS: `Received clipboard` or `Inserted entry`
@@ -126,8 +126,8 @@ The `test-sync-matrix.sh` script detects messages by:
 # Copy text on Android
 adb shell input text "Test from Android"
 
-# Monitor logs (helper script automatically filters MIUIInput)
-./scripts/android-logcat.sh <device_id> | grep -E "Clipboard|Sync|transport"
+# Monitor logs (filter MIUIInput)
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep -E "Clipboard|Sync|transport"
 log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep -E "Received clipboard|content:"
 ```
 
@@ -136,8 +136,8 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep 
 # Copy text on macOS
 echo "Test from macOS" | pbcopy
 
-# Monitor Android logs (helper script automatically filters MIUIInput)
-./scripts/android-logcat.sh <device_id> | grep -E "Clipboard|Sync|Received"
+# Monitor Android logs (filter MIUIInput)
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep -E "Clipboard|Sync|Received"
 ```
 
 **Verification**:
@@ -158,9 +158,9 @@ echo "Test from macOS" | pbcopy
 # Check database directly (most reliable)
 adb -s <device_id> shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items WHERE preview LIKE \"%Case X:%\" LIMIT 1;'"
 
-# Check logs by content (helper script automatically filters MIUIInput)
+# Check logs by content (filter MIUIInput)
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -F "content: Case X:"
-./scripts/android-logcat.sh <device_id> -d | grep -F "content: Case X:"
+adb -s <device_id> logcat -d | grep -v "MIUIInput" | grep -F "content: Case X:"
 ```
 
 **Solution**: Test script may need time window adjustment or log query refinement
@@ -177,9 +177,9 @@ log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -F "co
 # Check key exists
 security find-generic-password -w -s 'com.hypo.clipboard.keys' -a <device_id>
 
-# Check decryption errors (helper script automatically filters MIUIInput)
+# Check decryption errors (filter MIUIInput)
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "Decryption failed|BAD_DECRYPT"
-./scripts/android-logcat.sh <device_id> -d | grep -E "BAD_DECRYPT|MissingKey"
+adb -s <device_id> logcat -d | grep -v "MIUIInput" | grep -E "BAD_DECRYPT|MissingKey"
 ```
 
 **Solution**:
@@ -194,8 +194,8 @@ log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "De
 # Backend health
 curl -s https://hypo.fly.dev/health | jq '.connected_devices'
 
-# Android WebSocket (helper script automatically filters MIUIInput)
-./scripts/android-logcat.sh <device_id> -d | grep -E "WebSocket|connected|disconnected"
+# Android WebSocket (filter MIUIInput)
+adb -s <device_id> logcat -d | grep -v "MIUIInput" | grep -E "WebSocket|connected|disconnected"
 
 # macOS WebSocket
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "WebSocket|connected"
@@ -205,12 +205,12 @@ log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "We
 
 **Debugging**:
 ```bash
-# Check pairing completion (helper script automatically filters MIUIInput)
+# Check pairing completion (filter MIUIInput)
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 10m | grep "PairingCompleted"
-./scripts/android-logcat.sh <device_id> | grep "Key saved for device"
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep "Key saved for device"
 
 # Check device ID format
-./scripts/android-logcat.sh <device_id> | grep "Key saved for device"
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep "Key saved for device"
 ```
 
 **Common Causes**:
@@ -220,19 +220,19 @@ log show --predicate 'subsystem == "com.hypo.clipboard"' --last 10m | grep "Pair
 
 ### Sync Not Working
 
-**Debugging** (helper script automatically filters MIUIInput):
+**Debugging** (filter MIUIInput):
 ```bash
 # Check clipboard events detected
-./scripts/android-logcat.sh <device_id> | grep -E "ClipboardListener|onPrimaryClipChanged"
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep -E "ClipboardListener|onPrimaryClipChanged"
 
 # Check sync targets
-./scripts/android-logcat.sh <device_id> | grep "Target devices now"
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep "Target devices now"
 
 # Check transport.send() called
-./scripts/android-logcat.sh <device_id> | grep "transport.send()"
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep "transport.send()"
 
 # Check WebSocket connection
-./scripts/android-logcat.sh <device_id> | grep -E "WebSocket|Connection"
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep -E "WebSocket|Connection"
 ```
 
 **Common Causes**:
@@ -290,9 +290,9 @@ cat ~/Library/Logs/DiagnosticReports/HypoMenuBar-*.ips | \
 
 ### One-liners
 
-**Android** (helper script automatically filters MIUIInput):
+**Android** (filter MIUIInput):
 ```bash
-./scripts/android-logcat.sh <device_id> -d -t 500 | grep -F "content:" && \
+adb -s <device_id> logcat -d -t 500 | grep -v "MIUIInput" | grep -F "content:" && \
 adb -s <device_id> shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 5;'"
 ```
 

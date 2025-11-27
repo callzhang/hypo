@@ -132,6 +132,7 @@ class TransportManager(
 
     private var discoveryJob: Job? = null
     private var pruneJob: Job? = null
+    private var healthCheckJob: Job? = null
     private var connectionJob: Job? = null
     private var networkSignalJob: Job? = null
     private var currentConfig: LanRegistrationConfig? = null
@@ -244,6 +245,29 @@ class TransportManager(
                 }
             }
         }
+
+        // Start health check task to verify advertising is still active
+        if (healthCheckJob == null) {
+            healthCheckJob = scope.launch {
+                while (isActive) {
+                    delay(30_000) // 30 seconds
+                    if (!isActive) break
+                    
+                    // Check if advertising should be active but isn't
+                    val config = currentConfig
+                    if (config != null && config.port > 0 && !_isAdvertising.value) {
+                        android.util.Log.w("TransportManager", "⚠️ Health check: Advertising should be active but isn't. Restarting...")
+                        start(config)
+                    }
+                    
+                    // Check if WebSocket server should be running but isn't
+                    if (config != null && config.port > 0 && webSocketServer == null) {
+                        android.util.Log.w("TransportManager", "⚠️ Health check: WebSocket server should be running but isn't. Restarting...")
+                        start(config)
+                    }
+                }
+            }
+        }
     }
 
     fun stop() {
@@ -251,6 +275,8 @@ class TransportManager(
         discoveryJob = null
         pruneJob?.cancel()
         pruneJob = null
+        healthCheckJob?.cancel()
+        healthCheckJob = null
         stopConnectionSupervisor()
         if (_isAdvertising.value) {
             registrationController.stop()
@@ -286,6 +312,26 @@ class TransportManager(
             registrationController.start(updated)
             _isAdvertising.value = true
         }
+    }
+
+    /**
+     * Restart LAN services when network changes to update IP address
+     * This ensures Bonjour/NSD service and WebSocket server rebind to new IP
+     */
+    fun restartForNetworkChange() {
+        val config = currentConfig ?: return
+        android.util.Log.i("TransportManager", "🌐 Network changed - restarting LAN services to update IP address")
+        
+        // Stop current services
+        if (_isAdvertising.value) {
+            registrationController.stop()
+            _isAdvertising.value = false
+        }
+        webSocketServer?.stop()
+        webSocketServer = null
+        
+        // Restart with same configuration (will bind to new IP)
+        start(config)
     }
 
     fun currentPeers(): List<DiscoveredPeer> = peers.value

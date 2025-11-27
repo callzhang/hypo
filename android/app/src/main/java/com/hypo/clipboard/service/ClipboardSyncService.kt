@@ -513,7 +513,13 @@ class ClipboardSyncService : Service() {
         networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: android.net.Network) {
                 super.onAvailable(network)
-                android.util.Log.d(TAG, "🌐 Network became available - triggering immediate probe")
+                android.util.Log.d(TAG, "🌐 Network became available - restarting LAN services and reconnecting cloud")
+                // Restart LAN services to update IP address in Bonjour/NSD and WebSocket server
+                transportManager.restartForNetworkChange()
+                // Reconnect cloud WebSocket to use new IP address
+                scope.launch {
+                    cloudWebSocketClient.reconnect()
+                }
                 connectionStatusProber.probeNow()
             }
 
@@ -528,7 +534,13 @@ class ClipboardSyncService : Service() {
                 networkCapabilities: android.net.NetworkCapabilities
             ) {
                 super.onCapabilitiesChanged(network, networkCapabilities)
-                android.util.Log.d(TAG, "🌐 Network capabilities changed - triggering immediate probe")
+                android.util.Log.d(TAG, "🌐 Network capabilities changed - restarting LAN services and reconnecting cloud")
+                // Restart LAN services when network capabilities change (e.g., IP address change)
+                transportManager.restartForNetworkChange()
+                // Reconnect cloud WebSocket to use new IP address
+                scope.launch {
+                    cloudWebSocketClient.reconnect()
+                }
                 connectionStatusProber.probeNow()
             }
         }

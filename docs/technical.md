@@ -203,6 +203,48 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
    - Initiator offline → relay retries notify for 30 s; if unacknowledged, entry resets for reuse until TTL.
    - Duplicate device ID claims → HTTP 409 `DEVICE_NOT_PAIRED`; instruct client to restart handshake.
 
+#### 3.2.4 Re-Pairing and Network Change Recovery ✅ Implemented
+
+**Automatic Service Recovery**: Both platforms automatically restart LAN services (Bonjour/NSD advertising and WebSocket servers) when network changes are detected, ensuring devices remain discoverable and connections use updated IP addresses.
+
+**Network Change Detection**:
+
+**macOS**:
+- Uses `NWPathMonitor` to detect network path changes
+- When network path becomes satisfied, automatically restarts:
+  - Bonjour service advertising (updates IP address in mDNS records)
+  - WebSocket server (rebinds to new IP address)
+- 500ms delay after stopping services allows network stack to settle before restart
+
+**Android**:
+- Listens for `WifiManager.NETWORK_STATE_CHANGED_ACTION` broadcasts
+- Listens for `ConnectivityManager.NetworkCallback` events (network available, capabilities changed)
+- On network change, automatically:
+  - Unregisters and re-registers NSD service (updates IP in service records)
+  - Restarts WebSocket server (rebinds to new IP address)
+
+**IP Address Updates**:
+- **LAN Discovery**: Bonjour/NSD automatically update IP addresses in service records when services restart
+- **WebSocket Connections**: Clients discover updated IP addresses through mDNS/NSD discovery
+- **Cloud Relay**: WebSocket connections automatically reconnect on network changes; backend gets IP from connection itself
+
+**Re-Pairing Scenarios**:
+- **Network Change**: Devices automatically recover without re-pairing; encryption keys persist across network changes
+- **IP Address Change**: Services restart automatically; peers discover new IP via mDNS/NSD
+- **Service Loss**: Health check tasks (30s interval) detect and restart services if they stop unexpectedly
+- **Manual Re-Pairing**: Users can manually re-pair devices if needed (generates new encryption keys)
+
+**Health Monitoring**:
+- **macOS**: Periodic health check (30s) verifies advertising and WebSocket server are active
+- **Android**: Periodic health check (30s) verifies NSD registration and WebSocket server are running
+- Both platforms automatically restart services if health checks detect failures
+
+**Implementation Details**:
+- Network change handlers are non-blocking and run asynchronously
+- Service restarts preserve existing encryption keys and paired device metadata
+- No user intervention required for network changes or IP updates
+- Cloud relay connections handle reconnection automatically via existing retry logic
+
 ### 3.3 Message Encryption
 
 **Algorithm**: AES-256-GCM
@@ -334,6 +376,7 @@ func showNotification(for item: ClipboardItem) {
 - **BonjourBrowser** (`Utilities/BonjourBrowser.swift`): Actor-backed wrapper around `NetServiceBrowser` that normalizes discovery callbacks into an `AsyncStream<LanDiscoveryEvent>`. Each `DiscoveredPeer` carries resolved host, port, TXT metadata (including `fingerprint_sha256`), and the `lastSeen` timestamp. The browser supports explicit stale pruning (`prunePeers`) and is unit-tested with driver doubles in `BonjourBrowserTests`.
 - **TransportManager Integration** (`Services/TransportManager.swift`): The manager now persists LAN sightings via `UserDefaultsLanDiscoveryCache`, auto-starts discovery/advertising on foreground using `ApplicationLifecycleObserver`, and exposes `lanDiscoveredPeers()` plus a diagnostics string for `hypo://debug/lan`. Deep links are surfaced through SwiftUI's `.onOpenURL`, logging active registrations alongside publisher state. A background prune task runs every 60 s (configurable) to drop peers not seen in the last 5 minutes and refresh the cached roster.
 - **BonjourPublisher** (`Utilities/BonjourPublisher.swift`): Publishes `_hypo._tcp` with TXT payload `{ version, fingerprint_sha256, protocols }`, tracks the currently advertised endpoint, and restarts advertising when configuration changes (e.g., port update). Diagnostics reuse this metadata so operators can validate fingerprints during support sessions.
+- **Network Change Handling** (`Services/TransportManager.swift`): Uses `NWPathMonitor` to detect network path changes. When network becomes available, automatically restarts Bonjour advertising and WebSocket server to update IP addresses. Health check task (30s interval) monitors service state and restarts if services stop unexpectedly.
 - **Testing**: `TransportManagerLanTests` validate that discovery events update persisted timestamps, diagnostics include discovered peers, and lifecycle hooks stop advertising on suspend.
 
 #### 4.1.6 LAN WebSocket Client
@@ -432,8 +475,9 @@ interface ClipboardDao {
 #### 4.2.4 NSD Discovery & Registration
 
 - **LanDiscoveryRepository** (`transport/lan/LanDiscoveryRepository.kt`): Bridges `NsdManager` callbacks into a `callbackFlow<LanDiscoveryEvent>` while acquiring a scoped multicast lock. Network-change events are injectable (default implementation listens for Wi-Fi broadcasts) so tests can drive deterministic restarts without Robolectric, and the repository guards `discoverServices` restarts with a `Mutex` to avoid overlapping NSD calls.
-- **LanRegistrationManager** (`transport/lan/LanRegistrationManager.kt`): Publishes `_hypo._tcp` with TXT payload `{ fingerprint_sha256, version, protocols }`, listens for Wi-Fi connectivity changes, and re-registers using exponential backoff (1 s, 2 s, 4 s… capped at 5 minutes). Backoff attempts reset after successful registration.
-- **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. Helpers surface last-seen timestamps and prune stale peers, with a coroutine-driven maintenance loop pruning entries unseen for 5 minutes (default) to keep telemetry/UI aligned with active LAN peers.
+- **LanRegistrationManager** (`transport/lan/LanRegistrationManager.kt`): Publishes `_hypo._tcp` with TXT payload `{ fingerprint_sha256, version, protocols }`, listens for Wi-Fi connectivity changes, and re-registers using exponential backoff (1 s, 2 s, 4 s… capped at 5 minutes). Backoff attempts reset after successful registration. On network changes, unregisters and re-registers service to update IP address in NSD records.
+- **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. Helpers surface last-seen timestamps and prune stale peers, with a coroutine-driven maintenance loop pruning entries unseen for 5 minutes (default) to keep telemetry/UI aligned with active LAN peers. Provides `restartForNetworkChange()` method to restart both NSD registration and WebSocket server when network changes.
+- **Network Change Handling** (`service/ClipboardSyncService.kt`): Registers `ConnectivityManager.NetworkCallback` to detect network availability and capability changes. On network changes, calls `TransportManager.restartForNetworkChange()` to update services with new IP addresses. Health check task (30s interval) monitors service state and restarts if services stop unexpectedly.
 - **OEM Notes**: HyperOS throttles multicast after ~15 minutes of screen-off time. The repository exposes lock lifecycle hooks so the service can prompt users to re-open the app, and the registration manager schedules immediate retries when connectivity resumes to mitigate OEM suppression.
 
 #### 4.2.5 Android WebSocket Client

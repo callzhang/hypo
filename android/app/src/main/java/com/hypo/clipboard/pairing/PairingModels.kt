@@ -52,6 +52,5 @@ data class PairingChallengePayload(
 @Serializable
 data class PairingAckPayload(
     @SerialName("response_hash") val responseHash: String,
-    @SerialName("issued_at") val issuedAt: String,
-    @SerialName("responder_pub_key") val responderPublicKey: String? = null // Ephemeral public key for key rotation (optional for backward compatibility)
+    @SerialName("issued_at") val issuedAt: String
 )

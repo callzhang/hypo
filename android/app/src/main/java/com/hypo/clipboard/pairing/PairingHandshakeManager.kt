@@ -203,27 +203,9 @@ class PairingHandshakeManager @Inject constructor(
                     "ACK timestamp out of range"
                 }
 
-                // Key rotation: If responder's ephemeral public key is present, re-derive shared key
-                val finalSharedKey = if (payload.responderPublicKey != null && payload.responderPublicKey.isNotEmpty()) {
-                    Log.d(TAG, "Key rotation: Using responder's ephemeral public key from ACK")
-                    val responderEphemeralPublicKey = Base64.decode(payload.responderPublicKey, Base64.DEFAULT)
-                    if (responderEphemeralPublicKey.size != 32) {
-                        Log.w(TAG, "Invalid responder ephemeral public key size: ${responderEphemeralPublicKey.size}, falling back to initial shared key")
-                        state.sharedKey
-                    } else {
-                        // Re-derive shared key using ephemeral keys on both sides
-                        val newSharedKey = cryptoService.deriveKey(state.androidPrivateKey, responderEphemeralPublicKey)
-                        Log.d(TAG, "Key rotation: Re-derived shared key using ephemeral keys (${newSharedKey.size} bytes)")
-                        newSharedKey
-                    }
-                } else {
-                    Log.d(TAG, "No responder ephemeral public key in ACK, using initial shared key (backward compatibility)")
-                    state.sharedKey
-                }
-
                 // Migrate device ID to pure UUID format (remove prefix if present)
                 val migratedDeviceId = migrateDeviceId(state.payload.peerDeviceId)
-                deviceKeyStore.saveKey(migratedDeviceId, finalSharedKey)
+                deviceKeyStore.saveKey(migratedDeviceId, state.sharedKey)
                 PairingCompletionResult.Success(migratedDeviceId, ack.responderDeviceName)
             }.getOrElse { throwable ->
                 PairingCompletionResult.Failure(throwable.message ?: "Pairing failed")

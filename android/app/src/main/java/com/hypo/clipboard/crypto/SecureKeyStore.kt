@@ -48,18 +48,7 @@ class SecureKeyStore @Inject constructor(
             }
         }
         
-        // If still not found, try lowercase version for backward compatibility
-        // (Old keys may have been stored as lowercase from PairingPayload)
-        // UUIDs are case-insensitive, so this is safe
-        if (encoded == null && deviceId.length == 36 && deviceId.matches(Regex("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"))) {
-            val lowercased = deviceId.lowercase()
-            if (lowercased != deviceId) {
-                encoded = prefs.getString(lowercased, null)
-                if (encoded != null) {
-                    android.util.Log.d("SecureKeyStore", "🔄 Found key using lowercase (backward compatibility): $deviceId -> $lowercased")
-                }
-            }
-        }
+        // Do not attempt lowercase fallback; store and look up exactly as provided.
         
         // If still not found, try old format (with prefix) for backward compatibility
         if (encoded == null && !deviceId.startsWith("macos-") && !deviceId.startsWith("android-")) {

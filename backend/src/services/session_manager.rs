@@ -18,9 +18,6 @@ pub enum SessionError {
 
     #[error("invalid message format")]
     InvalidMessage,
-
-    #[error("session already connected")]
-    SessionAlreadyConnected,
 }
 
 #[derive(Clone, Default)]
@@ -45,33 +42,6 @@ impl SessionManager {
         Self::default()
     }
 
-    /// Check if a device is currently registered.
-    pub async fn is_registered(&self, device_id: &str) -> bool {
-        self.inner.read().await.contains_key(device_id)
-    }
-
-    /// Get the number of active connections (devices).
-    pub async fn get_active_count(&self) -> usize {
-        self.inner.read().await.len()
-    }
-
-    /// Get the list of connected device IDs.
-    pub async fn get_connected_devices(&self) -> Vec<String> {
-        self.inner.read().await.keys().cloned().collect()
-    }
-
-    /// Get detailed information about all registered sessions (for debugging).
-    pub async fn get_session_info(&self) -> Vec<(String, u64)> {
-        self.inner
-            .read()
-            .await
-            .iter()
-            .map(|(device_id, entry)| (device_id.clone(), entry.token))
-            .collect()
-    }
-
-    /// Register a new session, replacing any existing session for the device.
-    /// This is the original behavior - use with caution.
     pub async fn register(&self, device_id: String) -> Registration {
         let (tx, rx) = mpsc::unbounded_channel();
         let token = self.next_token.fetch_add(1, Ordering::Relaxed);
@@ -95,36 +65,6 @@ impl SessionManager {
         );
         drop(sessions);
         Registration { receiver: rx, token }
-    }
-
-    /// Register a new session only if the device is not already registered.
-    /// Returns an error if the device is already connected.
-    pub async fn register_if_absent(&self, device_id: String) -> Result<Registration, SessionError> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let token = self.next_token.fetch_add(1, Ordering::Relaxed);
-        let mut sessions = self.inner.write().await;
-        
-        if sessions.contains_key(&device_id) {
-            drop(sessions);
-            return Err(SessionError::SessionAlreadyConnected);
-        }
-        
-        sessions.insert(
-            device_id.clone(),
-            SessionEntry {
-                sender: tx,
-                token,
-            },
-        );
-        let count = sessions.len();
-        tracing::info!(
-            "Registered device: {} (token={}). Total sessions: {}",
-            device_id,
-            token,
-            count
-        );
-        drop(sessions);
-        Ok(Registration { receiver: rx, token })
     }
 
     pub async fn unregister(&self, device_id: &str) {
@@ -171,42 +111,20 @@ impl SessionManager {
     pub async fn send_binary(&self, device_id: &str, frame: BinaryFrame) -> Result<(), SessionError> {
         let sessions = self.inner.read().await;
         let registered_devices: Vec<String> = sessions.keys().cloned().collect();
-        tracing::info!("[SEND_BINARY] Attempting to send to device: {} (frame size: {} bytes). Registered devices: {:?}", device_id, frame.len(), registered_devices);
-        
-        // Exact match only - device IDs are UUIDs and must match exactly
-        // No case-insensitive matching to avoid routing to wrong devices
-        // CRITICAL: Only send to ONE device - the exact match
-        if let Some(sender) = sessions.get(device_id) {
-            tracing::info!("[SEND_BINARY] ✅ Found exact match for device: {} (token={}). Sending to THIS device ONLY.", device_id, sender.token);
-            
-            // Verify we're only sending to one device
-            let match_count = registered_devices.iter().filter(|&id| id == device_id).count();
-            if match_count != 1 {
-                tracing::error!("[SEND_BINARY] ⚠️ CRITICAL: Found {} matches for device_id {} (expected 1)! This should never happen!", match_count, device_id);
-            }
-            
-            sender
-                .sender
-                .send(frame)
-                .map_err(|err| {
-                    tracing::error!("[SEND_BINARY] ❌ Failed to send to device {}: {}", device_id, err);
-                    SessionError::SendError(err.to_string())
-                })
-        } else {
-            tracing::warn!("[SEND_BINARY] ❌ Device {} not found in sessions. Available devices: {:?}", device_id, registered_devices);
-            
-            // Check for potential case-insensitive matches (for debugging)
-            let case_insensitive_matches: Vec<&String> = registered_devices
-                .iter()
-                .filter(|&registered_id| registered_id.eq_ignore_ascii_case(device_id))
-                .collect();
-            
-            if !case_insensitive_matches.is_empty() {
-                tracing::warn!("[SEND_BINARY] ⚠️ Found case-insensitive matches for {}: {:?} (but exact match required)", device_id, case_insensitive_matches);
-            }
-            
-            Err(SessionError::DeviceNotConnected)
-        }
+        tracing::info!("Attempting to send to device: {}. Registered devices: {:?}", device_id, registered_devices);
+        let sender = sessions
+            .get(device_id)
+            .ok_or_else(|| {
+                tracing::warn!("Device {} not found in sessions. Available: {:?}", device_id, registered_devices);
+                SessionError::DeviceNotConnected
+            })?;
+        sender
+            .sender
+            .send(frame)
+            .map_err(|err| {
+                tracing::error!("Failed to send to device {}: {}", device_id, err);
+                SessionError::SendError(err.to_string())
+            })
     }
 }
 
@@ -225,56 +143,6 @@ fn encode_binary_frame(json_str: &str) -> Vec<u8> {
 mod tests {
     use super::{SessionError, SessionManager};
     use tokio::time::{sleep, Duration};
-
-    #[tokio::test]
-    async fn is_registered_returns_true_for_registered_device() {
-        let manager = SessionManager::new();
-        assert!(!manager.is_registered("device-1").await);
-        
-        manager.register("device-1".to_string()).await;
-        assert!(manager.is_registered("device-1").await);
-        
-        manager.unregister("device-1").await;
-        assert!(!manager.is_registered("device-1").await);
-    }
-
-    #[tokio::test]
-    async fn register_if_absent_rejects_duplicate_registration() {
-        let manager = SessionManager::new();
-        
-        // First registration should succeed
-        let reg1 = manager.register_if_absent("device-1".to_string()).await;
-        assert!(reg1.is_ok());
-        
-        // Second registration should fail
-        let reg2 = manager.register_if_absent("device-1".to_string()).await;
-        assert!(matches!(reg2, Err(SessionError::SessionAlreadyConnected)));
-        
-        // First session should still be active
-        assert!(manager.is_registered("device-1").await);
-        
-        manager.unregister("device-1").await;
-    }
-
-    #[tokio::test]
-    async fn register_replaces_existing_session() {
-        let manager = SessionManager::new();
-        
-        let reg1 = manager.register("device-1".to_string()).await;
-        let token1 = reg1.token;
-        
-        // Register again - should replace
-        let reg2 = manager.register("device-1".to_string()).await;
-        let token2 = reg2.token;
-        
-        // Tokens should be different (new session)
-        assert_ne!(token1, token2);
-        
-        // Only one session should exist
-        assert_eq!(manager.inner.read().await.len(), 1);
-        
-        manager.unregister("device-1").await;
-    }
 
     #[tokio::test]
     async fn registers_and_broadcasts_messages() {

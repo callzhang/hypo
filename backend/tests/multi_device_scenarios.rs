@@ -28,13 +28,11 @@ async fn multi_device_direct_and_broadcast_flow() {
         .await
         .expect("target device is registered");
 
-    let frame = timeout(Duration::from_millis(50), bob_rx.recv())
+    let received = timeout(Duration::from_millis(50), bob_rx.recv())
         .await
         .expect("bob should receive direct message")
         .expect("channel open");
-    // Decode binary frame (4-byte length + JSON payload)
-    let json_str = std::str::from_utf8(&frame[4..]).unwrap();
-    assert_eq!(json_str, direct_payload);
+    assert_eq!(received, direct_payload);
 
     assert!(
         timeout(Duration::from_millis(50), alice_rx.recv())
@@ -65,19 +63,15 @@ async fn multi_device_direct_and_broadcast_flow() {
         .broadcast_except("charlie", &broadcast_payload)
         .await;
 
-    let alice_frame = timeout(Duration::from_millis(50), alice_rx.recv())
+    let alice_view = timeout(Duration::from_millis(50), alice_rx.recv())
         .await
         .expect("alice should observe broadcast")
         .expect("channel open");
-    // Decode binary frame (4-byte length + JSON payload)
-    let alice_json = std::str::from_utf8(&alice_frame[4..]).unwrap();
-    assert_eq!(alice_json, broadcast_payload);
+    assert_eq!(alice_view, broadcast_payload);
 
-    let bob_frame = timeout(Duration::from_millis(50), bob_rx.recv())
+    let bob_view = timeout(Duration::from_millis(50), bob_rx.recv())
         .await
         .expect("bob should observe broadcast")
         .expect("channel open");
-    // Decode binary frame (4-byte length + JSON payload)
-    let bob_json = std::str::from_utf8(&bob_frame[4..]).unwrap();
-    assert_eq!(bob_json, broadcast_payload);
+    assert_eq!(bob_view, broadcast_payload);
 }

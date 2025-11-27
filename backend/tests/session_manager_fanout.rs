@@ -14,13 +14,11 @@ async fn broadcasts_messages_to_all_other_clients() {
     manager.broadcast_except("sender", "payload").await;
 
     for (idx, mut rx) in receivers.into_iter().enumerate() {
-        let frame = timeout(Duration::from_millis(50), rx.recv())
+        let message = timeout(Duration::from_millis(50), rx.recv())
             .await
             .expect("receive timeout")
             .expect("channel closed");
-        // Decode binary frame (4-byte length + JSON payload)
-        let json_str = std::str::from_utf8(&frame[4..]).unwrap();
-        assert_eq!(json_str, "payload", "receiver {idx} should get broadcast");
+        assert_eq!(message, "payload", "receiver {idx} should get broadcast");
     }
 
     assert!(timeout(Duration::from_millis(50), sender.recv()).await.is_err());
@@ -34,11 +32,9 @@ async fn routes_direct_messages_to_specific_recipient() {
 
     manager.send("target", "secret").await.expect("send succeeds");
 
-    let frame = timeout(Duration::from_millis(50), target.recv())
+    let received = timeout(Duration::from_millis(50), target.recv())
         .await
         .expect("receive timeout")
         .expect("channel closed");
-    // Decode binary frame (4-byte length + JSON payload)
-    let json_str = std::str::from_utf8(&frame[4..]).unwrap();
-    assert_eq!(json_str, "secret");
+    assert_eq!(received, "secret");
 }

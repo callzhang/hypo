@@ -18,13 +18,11 @@ async fn broadcast_throughput_for_hundred_messages() {
         sessions.broadcast_except("sender", &payload).await;
 
         for rx in receivers.iter_mut() {
-            let frame = timeout(Duration::from_millis(50), rx.recv())
+            let received = timeout(Duration::from_millis(50), rx.recv())
                 .await
                 .expect("receiver should get broadcast")
                 .expect("channel open");
-            // Decode binary frame (4-byte length + JSON payload)
-            let json_str = std::str::from_utf8(&frame[4..]).unwrap();
-            assert_eq!(json_str, payload);
+            assert_eq!(received, payload);
         }
     }
 

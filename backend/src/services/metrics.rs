@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Default)]
 pub struct Metrics {
+    pub websocket_connections: Arc<AtomicU64>,
     pub messages_processed: Arc<AtomicU64>,
     pub redis_operations: Arc<AtomicU64>,
     pub error_count: Arc<AtomicU64>,
@@ -14,6 +15,14 @@ pub struct Metrics {
 impl Metrics {
     pub fn new() -> Self {
         Self::default()
+    }
+    
+    pub fn increment_websocket_connections(&self) {
+        self.websocket_connections.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn decrement_websocket_connections(&self) {
+        self.websocket_connections.fetch_sub(1, Ordering::Relaxed);
     }
     
     pub fn increment_messages(&self) {
@@ -39,6 +48,8 @@ impl Metrics {
     
     pub async fn get_stats(&self) -> HashMap<String, String> {
         let mut stats = HashMap::new();
+        stats.insert("websocket_connections".to_string(), 
+                    self.websocket_connections.load(Ordering::Relaxed).to_string());
         stats.insert("messages_processed".to_string(),
                     self.messages_processed.load(Ordering::Relaxed).to_string());
         stats.insert("redis_operations".to_string(),

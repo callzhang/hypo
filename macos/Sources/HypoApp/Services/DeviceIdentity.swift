@@ -30,8 +30,9 @@ public final class DeviceIdentity: DeviceIdentityProviding {
     public let deviceName: String
     
     /// UUID string for protocol compatibility (backward compatibility during migration)
+    /// Normalized to lowercase for cross-platform compatibility (Android uses lowercase UUIDs)
     public var deviceIdString: String {
-        deviceId.uuidString
+        deviceId.uuidString.lowercased()
     }
 
     public init(userDefaults: UserDefaults = .standard, hostname: String = Host.current().localizedName ?? "Hypo Mac") {

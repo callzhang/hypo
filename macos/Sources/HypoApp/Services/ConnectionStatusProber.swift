@@ -179,6 +179,16 @@ public final class ConnectionStatusProber {
                 if let deviceId = peer.endpoint.metadata["device_id"] {
                     discoveredDeviceIds.insert(deviceId)
                     logger.info("peer", "   ✅ Peer: \(peer.serviceName), device_id=\(deviceId)\n")
+                    
+                    // Also check if this device ID matches any paired device (case-insensitive)
+                    for device in pairedDevices {
+                        if device.id.lowercased() == deviceId.lowercased() {
+                            logger.info("match", "   ✅ Matched discovered peer to paired device: \(device.name) (\(device.id) == \(deviceId))\n")
+                            // Ensure we're using the paired device's ID (in case of case differences)
+                            discoveredDeviceIds.insert(device.id)
+                            break
+                        }
+                    }
                 } else {
                     logger.info("peer", "   ⚠️ Peer: \(peer.serviceName), no device_id attribute\n")
                     // Fallback: match by service name
@@ -257,16 +267,30 @@ public final class ConnectionStatusProber {
         logger.info("checkDevices", "🔍 [ConnectionStatusProber] Checking \(pairedDevices.count) paired devices\n")
         
         for device in pairedDevices {
-            let hasActiveConnection = onlineDeviceIds.contains(device.id)
-            let isDiscovered = discoveredDeviceIds.contains(device.id)
+            // Check for active connection (case-insensitive matching)
+            let hasActiveConnection = onlineDeviceIds.contains(device.id) || 
+                onlineDeviceIds.contains { $0.lowercased() == device.id.lowercased() }
+            
+            // Check if discovered (case-insensitive matching)
+            let isDiscovered = discoveredDeviceIds.contains(device.id) || 
+                discoveredDeviceIds.contains { $0.lowercased() == device.id.lowercased() }
             
             // Update device with discovery information if found
             if isDiscovered, let transportManager = transportManager {
                 let discoveredPeers = transportManager.lanDiscoveredPeers()
-                if let peer = discoveredPeers.first(where: { $0.endpoint.metadata["device_id"] == device.id }) {
-                    // Update device with discovery info
+                // Match by device ID (case-insensitive)
+                if let peer = discoveredPeers.first(where: { peer in
+                    if let peerDeviceId = peer.endpoint.metadata["device_id"] {
+                        return peerDeviceId.lowercased() == device.id.lowercased()
+                    }
+                    return false
+                }) {
+                    // Update device with discovery info - ensure we're on MainActor
                     let updatedDevice = device.updating(from: peer)
-                    historyViewModel.registerPairedDevice(updatedDevice)
+                    await MainActor.run {
+                        historyViewModel.registerPairedDevice(updatedDevice)
+                    }
+                    logger.info("update", "   🔄 Updated device \(device.name) with discovery info: \(peer.endpoint.host):\(peer.endpoint.port)\n")
                 }
             }
             

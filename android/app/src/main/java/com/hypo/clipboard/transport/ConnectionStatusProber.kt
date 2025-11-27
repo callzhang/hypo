@@ -200,7 +200,11 @@ class ConnectionStatusProber @Inject constructor(
                 
                 val isDiscovered = peers.any { 
                     val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
-                    peerDeviceId == deviceId || it.serviceName == deviceId
+                    // Case-insensitive matching for device IDs
+                    peerDeviceId.equals(deviceId, ignoreCase = true) || 
+                    it.serviceName.equals(deviceId, ignoreCase = true) ||
+                    peerDeviceId == deviceId || 
+                    it.serviceName == deviceId
                 }
                 
                 val transport = lastTransport[deviceId]

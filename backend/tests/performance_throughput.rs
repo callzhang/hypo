@@ -22,7 +22,8 @@ async fn broadcast_throughput_for_hundred_messages() {
                 .await
                 .expect("receiver should get broadcast")
                 .expect("channel open");
-            assert_eq!(received, payload);
+            let received_str = std::str::from_utf8(&received[4..]).expect("valid UTF-8");
+            assert_eq!(received_str, payload);
         }
     }
 

@@ -1,7 +1,7 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 0.2.3  
-Date: November 26, 2025  
+Version: 0.2.4  
+Date: November 27, 2025  
 Status: Production Beta
 
 ---
@@ -225,7 +225,11 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 
 **IP Address Updates**:
 - **LAN Discovery**: Bonjour/NSD automatically update IP addresses in service records when services restart
-- **WebSocket Connections**: Clients discover updated IP addresses through mDNS/NSD discovery
+- **WebSocket Connections**: 
+  - **Event-driven**: Clients discover updated IP addresses through mDNS/NSD discovery events (not periodic polling)
+  - **Android**: When peer is discovered via NSD, `lastKnownUrl` is updated and connection is established/updated
+  - **macOS**: When peer is discovered via Bonjour, connection is established/updated with new IP
+  - No continuous retry loops - connections only happen when peers are discovered or connection disconnects
 - **Cloud Relay**: WebSocket connections automatically reconnect on network changes:
   - **Android**: `RelayWebSocketClient.reconnect()` closes existing connection and establishes new one with updated IP
   - **macOS**: `CloudRelayTransport.reconnect()` disconnects and reconnects to use new IP address
@@ -241,6 +245,15 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 - **macOS**: Periodic health check (30s) verifies advertising and WebSocket server are active
 - **Android**: Periodic health check (30s) verifies NSD registration and WebSocket server are running
 - Both platforms automatically restart services if health checks detect failures
+
+**Discovery Architecture**:
+- **Fully event-driven**: Peer discovery uses OS-level callbacks (NSD `onServiceFound`/`onServiceLost` on Android, Bonjour callbacks on macOS)
+- **No periodic polling**: Discovery events are emitted immediately when peers appear/disappear on the network
+- **StateFlow propagation**: Discovery events update `TransportManager.peers` StateFlow, which triggers connection establishment in `SyncCoordinator`
+- **Connection triggers**: Connections are only established when:
+  1. Peer is discovered (NSD/Bonjour callback → StateFlow update → `startReceiving()`)
+  2. Connection disconnects (`onClosed`/`onFailure` → reconnection attempt if URL available)
+- **Maintenance tasks**: Periodic tasks (prune stale peers, health checks) are for maintenance only, not for discovery or connection triggering
 
 **Implementation Details**:
 - Network change handlers are non-blocking and run asynchronously
@@ -394,8 +407,11 @@ func showNotification(for item: ClipboardItem) {
 
 #### 4.1.6 LAN WebSocket Client
 
-- **Transport Pipeline**: `LanWebSocketTransport` wraps `URLSessionWebSocketTask` behind the shared `SyncTransport` protocol. The client pins the SHA-256 fingerprint advertised in the Bonjour TXT record, frames JSON envelopes with a 4-byte length prefix via `TransportFrameCodec`, and restarts its receive loop after each payload.
-- **Timeouts**: Dial attempts still cancel after 3 s; once connected the configurable idle watchdog (30 s default) tears down sockets when no LAN traffic is observed.
+- **Transport Pipeline**: `LanWebSocketTransport` wraps `URLSessionWebSocketTask` behind the shared `SyncTransport` protocol. The client pins the SHA-256 fingerprint advertised in the Bonjour TXT record, frames JSON envelopes with a 4-byte length prefix via `TransportFrameCodec`, and maintains a long-lived connection for receiving messages.
+- **Event-Driven Connection**: Connections are established when peers are discovered via Bonjour. The client maintains a long-lived connection and only reconnects when:
+  - Peer IP changes (detected via Bonjour discovery)
+  - Connection disconnects (connection lifecycle callbacks)
+- **Timeouts**: Dial attempts cancel after 3 s; once connected the configurable idle watchdog (30 s default) tears down sockets when no LAN traffic is observed.
 - **Metrics**: Every connection records handshake duration, first-message latency, idle timeout events, and disconnect reasons which feed into `TelemetryClient` and status reporting.
 
 ### 4.2 Android Client
@@ -489,14 +505,38 @@ interface ClipboardDao {
 
 - **LanDiscoveryRepository** (`transport/lan/LanDiscoveryRepository.kt`): Bridges `NsdManager` callbacks into a `callbackFlow<LanDiscoveryEvent>` while acquiring a scoped multicast lock. Network-change events are injectable (default implementation listens for Wi-Fi broadcasts) so tests can drive deterministic restarts without Robolectric, and the repository guards `discoverServices` restarts with a `Mutex` to avoid overlapping NSD calls.
 - **LanRegistrationManager** (`transport/lan/LanRegistrationManager.kt`): Publishes `_hypo._tcp` with TXT payload `{ fingerprint_sha256, version, protocols }`, listens for Wi-Fi connectivity changes, and re-registers using exponential backoff (1 s, 2 s, 4 s… capped at 5 minutes). Backoff attempts reset after successful registration. On network changes, unregisters and re-registers service to update IP address in NSD records.
-- **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. Helpers surface last-seen timestamps and prune stale peers, with a coroutine-driven maintenance loop pruning entries unseen for 5 minutes (default) to keep telemetry/UI aligned with active LAN peers. Provides `restartForNetworkChange()` method to restart both NSD registration and WebSocket server when network changes.
+- **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. **Event-driven discovery**: Collects from `discoverySource.discover().collect { event -> handleEvent(event) }` - reacts to NSD callbacks (`onServiceFound`, `onServiceLost`) immediately, no periodic polling. When peers are discovered, updates `_peers` StateFlow which triggers connection establishment in `SyncCoordinator`. Helpers surface last-seen timestamps and prune stale peers, with a coroutine-driven maintenance loop pruning entries unseen for 5 minutes (default) to keep telemetry/UI aligned with active LAN peers. Provides `restartForNetworkChange()` method to restart both NSD registration and WebSocket server when network changes.
 - **Network Change Handling** (`service/ClipboardSyncService.kt`): Registers `ConnectivityManager.NetworkCallback` to detect network availability and capability changes. On network changes, calls `TransportManager.restartForNetworkChange()` to update services with new IP addresses. Health check task (30s interval) monitors service state and restarts if services stop unexpectedly.
 - **OEM Notes**: HyperOS throttles multicast after ~15 minutes of screen-off time. The repository exposes lock lifecycle hooks so the service can prompt users to re-open the app, and the registration manager schedules immediate retries when connectivity resumes to mitigate OEM suppression.
 
 #### 4.2.5 Android WebSocket Client
 
+**Event-Driven Connection Architecture** ✅ Implemented (November 2025):
+- **Fully event-driven**: Connections are triggered by peer discovery events, not periodic polling
+- **No continuous retry loops**: Connection loop exits if no peer URL is available, waits for discovery events
+- **URL Management**: Uses only `lastKnownUrl` (removed `currentUrl`) - updated when peers are discovered via NSD
+- **Connection Lifecycle**:
+  1. NSD discovery event → `LanDiscoveryEvent.Added(peer)` emitted
+  2. `TransportManager` updates `peers` StateFlow
+  3. `SyncCoordinator` observes peers StateFlow → calls `lanWebSocketClient.startReceiving()`
+  4. `startReceiving()` updates `lastKnownUrl` with peer's IP address
+  5. Connection established and maintained as long-lived connection
+  6. Reconnection only occurs when:
+     - Peer IP changes (detected via discovery event)
+     - Connection disconnects (`onClosed`/`onFailure` callbacks)
+- **Discovery Integration**: `LanDiscoveryRepository` uses NSD callbacks (`onServiceFound`, `onServiceLost`) - fully event-driven, no periodic polling
+- **StateFlow Observation**: `SyncCoordinator` observes `transportManager.peers.collect { peers -> ... }` to react to discovery events
+
+**Implementation Details**:
 - **OkHttp Integration**: `OkHttpClient` configured with `CertificatePinner` keyed to the relay fingerprint and LAN fingerprint when available. Coroutine-based `Channel` ensures backpressure while sending messages.
-- **Fallback Orchestration**: `TransportManager` races LAN connection vs. a 3 s timeout before instantiating a relay `WebSocket`. Cloud attempts use jittered exponential backoff, persisting the last successful transport in `DataStore` for heuristics.
+- **URL Resolution**: 
+  - LAN connections: `lastKnownUrl` is updated when peer is discovered via NSD
+  - Cloud connections: Always uses `config.url` (static cloud relay URL)
+  - Fallback: `lastKnownUrl ?: config.url` (for cloud connections or initialization)
+- **Connection Loop**: 
+  - Exits immediately if no peer URL available (waits for discovery event)
+  - No exponential backoff retry - relies on discovery events to trigger reconnection
+  - Maintains long-lived connection once established
 - **Instrumentation**: `MetricsReporter` logs handshake and first payload durations (`transport_handshake_ms`, `transport_first_payload_ms`) with transport label `lan` or `cloud` for downstream analytics.
 - **Relay Client Abstraction**: `RelayWebSocketClient` reuses the LAN TLS implementation but sources its endpoint, fingerprint, and telemetry headers from Gradle-provided `BuildConfig` constants (`RELAY_WS_URL`, `RELAY_CERT_FINGERPRINT`, `RELAY_ENVIRONMENT`). Unit tests exercise pinning-failure analytics to confirm the cloud environment label is surfaced correctly.
 

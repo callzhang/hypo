@@ -123,9 +123,10 @@ object AppModule {
         deviceIdentity: DeviceIdentity
     ): TlsWebSocketConfig =
         TlsWebSocketConfig(
-            // Use ws:// (not wss://) for LAN connections - macOS server uses plain WebSocket
-            // The URL will be updated dynamically when peers are discovered via TransportManager
-            url = "ws://127.0.0.1:${TransportManager.DEFAULT_PORT}",
+            // LAN connections use peer-discovered URLs - no default URL needed
+            // The actual connection URL comes from lastKnownUrl which is set by peer discovery
+            // When a peer is discovered, a new connector is created with the peer's URL
+            url = null, // No default URL for LAN - will be set when peer is discovered
             fingerprintSha256 = null,
             headers = mapOf(
                 "X-Device-Id" to deviceIdentity.deviceId,
@@ -208,12 +209,14 @@ object AppModule {
         @Named("cloud_ws_config") config: TlsWebSocketConfig,
         @Named("cloud_ws_connector") connector: WebSocketConnector,
         frameCodec: TransportFrameCodec,
-        analytics: TransportAnalytics
+        analytics: TransportAnalytics,
+        transportManager: com.hypo.clipboard.transport.TransportManager
     ): RelayWebSocketClient = RelayWebSocketClient(
         config = config,
         connector = connector,
         frameCodec = frameCodec,
-        analytics = analytics
+        analytics = analytics,
+        transportManager = transportManager
     )
 
     @Provides

@@ -66,7 +66,7 @@ class SettingsViewModel @Inject constructor(
                 settingsRepository.settings,
                 transportManager.peers,
                 transportManager.lastSuccessfulTransport,
-                transportManager.connectionState,
+                transportManager.cloudConnectionState,  // Only show cloud server status in UI
                 connectivityCheckTrigger.onStart { emit(Unit) } // Emit immediately on start
             ) { settings, peers, lastTransport, connectionState, _ ->
                 val isAccessibilityEnabled = checkAccessibilityServiceStatus()

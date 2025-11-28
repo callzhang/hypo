@@ -19,6 +19,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
@@ -144,6 +147,28 @@ class TransportManager(
     val peers: StateFlow<List<DiscoveredPeer>> = _peers.asStateFlow()
     val isAdvertising: StateFlow<Boolean> = _isAdvertising.asStateFlow()
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    // Cloud-only connection state for UI - filters out LAN states, only shows cloud server status
+    val cloudConnectionState: StateFlow<ConnectionState> = _connectionState
+        .map { state ->
+            val mapped = when (state) {
+                ConnectionState.ConnectedCloud -> ConnectionState.ConnectedCloud
+                ConnectionState.ConnectingCloud -> ConnectionState.ConnectingCloud
+                ConnectionState.ConnectedLan, ConnectionState.ConnectingLan -> {
+                    // If LAN is connected, check if cloud is also connected
+                    // For UI purposes, we only care about cloud server status
+                    // If cloud is not explicitly connected, show as Idle
+                    ConnectionState.Idle
+                }
+                else -> state
+            }
+            android.util.Log.d("TransportManager", "🌐 cloudConnectionState mapping: $state -> $mapped")
+            mapped
+        }
+        .stateIn(
+            scope = scope,
+            started = SharingStarted.Eagerly,  // Start immediately to ensure UI gets updates
+            initialValue = ConnectionState.Idle
+        )
     val lastSuccessfulTransport: StateFlow<Map<String, ActiveTransport>> =
         _lastSuccessfulTransport.asStateFlow()
     
@@ -151,6 +176,7 @@ class TransportManager(
      * Update the connection state (used by ConnectionStatusProber)
      */
     fun updateConnectionState(newState: ConnectionState) {
+        android.util.Log.d("TransportManager", "🔄 Updating connection state: ${_connectionState.value} -> $newState")
         _connectionState.value = newState
     }
 

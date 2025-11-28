@@ -911,7 +911,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             
             logger.info("✅ [HistoryStore] Device \(device.name) status updated and persisted: isOnline=\(isOnline) (array replaced, count: \(updatedDevices.count))")
         } else {
-            logger.info("ℹ️ [HistoryStore] Device \(device.name) online status unchanged: \(isOnline)")
+            logger.debug("ℹ️ [HistoryStore] Device \(device.name) online status unchanged: \(isOnline)")
         }
     }
     

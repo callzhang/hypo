@@ -504,7 +504,8 @@ mod tests {
             .await
             .expect("receiver should get broadcast")
             .expect("channel open");
-        assert_eq!(forwarded, message);
+        let forwarded_str = std::str::from_utf8(&forwarded[4..]).expect("valid UTF-8");
+        assert_eq!(forwarded_str, message);
 
         assert!(
             sender_rx.try_recv().is_err(),
@@ -537,7 +538,8 @@ mod tests {
             .await
             .expect("receiver should get direct message")
             .expect("channel open");
-        assert_eq!(forwarded, message);
+        let forwarded_str = std::str::from_utf8(&forwarded[4..]).expect("valid UTF-8");
+        assert_eq!(forwarded_str, message);
 
         assert!(
             sender_rx.try_recv().is_err(),
@@ -665,7 +667,8 @@ mod tests {
             .await
             .expect("receiver should get broadcast")
             .expect("channel open");
-        assert_eq!(forwarded, message);
+        let forwarded_str = std::str::from_utf8(&forwarded[4..]).expect("valid UTF-8");
+        assert_eq!(forwarded_str, message);
 
         assert!(sender_rx.try_recv().is_err());
     }

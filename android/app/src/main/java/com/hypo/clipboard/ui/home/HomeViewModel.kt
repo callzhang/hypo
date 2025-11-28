@@ -32,7 +32,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 repository.observeHistory(limit = HISTORY_SAMPLE_LIMIT).map { it.firstOrNull() },
-                transportManager.connectionState
+                transportManager.cloudConnectionState  // Only show cloud server status in UI
             ) { latestItem, connectionState ->
                 HomeUiState(
                     latestItem = latestItem,

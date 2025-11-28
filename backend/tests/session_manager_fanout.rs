@@ -18,7 +18,8 @@ async fn broadcasts_messages_to_all_other_clients() {
             .await
             .expect("receive timeout")
             .expect("channel closed");
-        assert_eq!(message, "payload", "receiver {idx} should get broadcast");
+        let message_str = std::str::from_utf8(&message[4..]).expect("valid UTF-8");
+        assert_eq!(message_str, "payload", "receiver {idx} should get broadcast");
     }
 
     assert!(timeout(Duration::from_millis(50), sender.recv()).await.is_err());
@@ -36,5 +37,6 @@ async fn routes_direct_messages_to_specific_recipient() {
         .await
         .expect("receive timeout")
         .expect("channel closed");
-    assert_eq!(received, "secret");
+    let received_str = std::str::from_utf8(&received[4..]).expect("valid UTF-8");
+    assert_eq!(received_str, "secret");
 }

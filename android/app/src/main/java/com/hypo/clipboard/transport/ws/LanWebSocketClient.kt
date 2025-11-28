@@ -56,52 +56,71 @@ class OkHttpWebSocketConnector @Inject constructor(
 
     init {
         val baseClient = okHttpClient ?: OkHttpClient()
-        val normalizedUrl = normalizeWebSocketUrl(config.url)
-        // Validate URL before parsing
-        if (normalizedUrl.isBlank()) {
-            throw IllegalArgumentException("WebSocket URL cannot be blank")
-        }
-        // Log the URL being parsed for debugging
-        android.util.Log.d("OkHttpWebSocketConnector", "🔗 Parsing WebSocket URL: $normalizedUrl (original: ${config.url})")
-        val url = try {
-            normalizedUrl.toHttpUrl()
-        } catch (e: IllegalArgumentException) {
-            android.util.Log.e("OkHttpWebSocketConnector", "❌ Failed to parse URL: $normalizedUrl", e)
-            throw IllegalArgumentException("Invalid WebSocket URL: $normalizedUrl (original: ${config.url})", e)
-        }
-        android.util.Log.d("OkHttpWebSocketConnector", "✅ Parsed URL - scheme: ${url.scheme}, host: ${url.host}, port: ${url.port}")
-        val builder = baseClient.newBuilder()
-        // Only apply certificate pinning for secure connections (wss:// -> https://)
-        // Skip pinning for non-secure connections (ws:// -> http://)
-        val isSecure = config.url.startsWith("wss://", ignoreCase = true)
-        if (isSecure && config.fingerprintSha256?.takeIf { it.isNotBlank() } != null) {
-            val hex = config.fingerprintSha256!!
-            try {
-                val pin = hexToPin(hex)
-                val pinner = CertificatePinner.Builder()
-                    .add(url.host, "sha256/$pin")
-                    .build()
-                builder.certificatePinner(pinner)
-            } catch (e: IllegalArgumentException) {
-                // Invalid fingerprint format - log and skip pinning
-                android.util.Log.w("OkHttpWebSocketConnector", "Invalid fingerprint format: ${e.message}, skipping certificate pinning")
+        
+        // For LAN connections, URL may be null (will be provided when peer is discovered)
+        if (config.url == null) {
+            if (config.environment == "cloud") {
+                throw IllegalArgumentException("Cloud WebSocket URL cannot be null")
             }
+            // LAN connection without URL - create a dummy request that will never be used
+            // The connector will be replaced when peer is discovered
+            client = baseClient
+            request = Request.Builder().url("http://0.0.0.0:0").build() // Dummy request, never used
+            android.util.Log.d("OkHttpWebSocketConnector", "⚠️ LAN connector created without URL - will be replaced when peer is discovered")
+        } else {
+            val urlString = config.url
+            val normalizedUrl = normalizeWebSocketUrl(urlString)
+            // Validate URL before parsing
+            if (normalizedUrl.isBlank()) {
+                throw IllegalArgumentException("WebSocket URL cannot be blank")
+            }
+            // Log the URL being parsed for debugging
+            android.util.Log.d("OkHttpWebSocketConnector", "🔗 Parsing WebSocket URL: $normalizedUrl (original: $urlString)")
+            val url = try {
+                normalizedUrl.toHttpUrl()
+            } catch (e: IllegalArgumentException) {
+                android.util.Log.e("OkHttpWebSocketConnector", "❌ Failed to parse URL: $normalizedUrl", e)
+                throw IllegalArgumentException("Invalid WebSocket URL: $normalizedUrl (original: $urlString)", e)
+            }
+            android.util.Log.d("OkHttpWebSocketConnector", "✅ Parsed URL - scheme: ${url.scheme}, host: ${url.host}, port: ${url.port}")
+        val builder = baseClient.newBuilder()
+            // Only apply certificate pinning for secure connections (wss:// -> https://)
+            // Skip pinning for non-secure connections (ws:// -> http://)
+            val isSecure = urlString.startsWith("wss://", ignoreCase = true)
+            if (isSecure && config.fingerprintSha256?.takeIf { it.isNotBlank() } != null) {
+                val hex = config.fingerprintSha256!!
+                try {
+            val pin = hexToPin(hex)
+            val pinner = CertificatePinner.Builder()
+                .add(url.host, "sha256/$pin")
+                .build()
+            builder.certificatePinner(pinner)
+                } catch (e: IllegalArgumentException) {
+                    // Invalid fingerprint format - log and skip pinning
+                    android.util.Log.w("OkHttpWebSocketConnector", "Invalid fingerprint format: ${e.message}, skipping certificate pinning")
+                }
         }
         client = builder.build()
         val requestBuilder = Request.Builder().url(url)
         config.headers.forEach { (key, value) ->
             requestBuilder.addHeader(key, value)
         }
-        // Debug: Log headers being sent
-        if (config.headers.isNotEmpty()) {
-            android.util.Log.d("OkHttpWebSocketConnector", "📤 WebSocket headers: ${config.headers.keys.joinToString()}")
-        } else {
-            android.util.Log.w("OkHttpWebSocketConnector", "⚠️ No headers configured for WebSocket connection to $url")
-        }
+            // Debug: Log headers being sent
+            if (config.headers.isNotEmpty()) {
+                android.util.Log.d("OkHttpWebSocketConnector", "📤 WebSocket headers: ${config.headers.keys.joinToString()}")
+            } else {
+                android.util.Log.w("OkHttpWebSocketConnector", "⚠️ No headers configured for WebSocket connection to $url")
+            }
         request = requestBuilder.build()
+        }
     }
 
     override fun connect(listener: WebSocketListener): WebSocket {
+        // For LAN connections with null URL, this should never be called
+        // The connector will be replaced when peer is discovered
+        if (config.url == null && config.environment == "lan") {
+            throw IllegalStateException("WebSocket connector not initialized with URL (LAN connection requires peer discovery)")
+        }
         return client.newWebSocket(request, listener)
     }
 
@@ -157,13 +176,12 @@ class LanWebSocketClient @Inject constructor(
     private var onPairingChallenge: (suspend (String) -> String?)? = null  // Challenge as JSON string -> ACK JSON or null
     @Volatile private var connectionSignal = CompletableDeferred<Unit>()
     @Volatile private var currentConnector: WebSocketConnector = connector
-    @Volatile private var currentUrl: String = config.url
-    @Volatile private var lastKnownUrl: String? = null  // Cache last known URL for paired devices when discovery fails
+    @Volatile private var lastKnownUrl: String? = null  // Use only lastKnownUrl - updated when peer is discovered
     private var allowedDeviceIdsProvider: (() -> Set<String>)? = null
     
-    // Determine transport origin based on URL (cloud relay URLs contain "fly.dev" or are wss://)
+    // Determine transport origin based on config environment
     private val transportOrigin: com.hypo.clipboard.domain.model.TransportOrigin = 
-        if (config.url.contains("fly.dev", ignoreCase = true) || config.url.startsWith("wss://", ignoreCase = true)) {
+        if (config.environment == "cloud") {
             com.hypo.clipboard.domain.model.TransportOrigin.CLOUD
         } else {
             com.hypo.clipboard.domain.model.TransportOrigin.LAN
@@ -205,13 +223,12 @@ class LanWebSocketClient @Inject constructor(
                 if (!hasWebSocket || !isOpenState || isClosedState) {
                     return false
                 }
-                // For cloud connections, also verify we're connected to the cloud URL
-                // (not a LAN connection that was switched)
-                val isCloudConnection = config.url.contains("fly.dev", ignoreCase = true) || config.url.startsWith("wss://", ignoreCase = true)
+                // For cloud connections, verify we're using the config URL
+                val isCloudConnection = config.environment == "cloud"
                 if (isCloudConnection) {
-                    // For cloud, verify current URL matches config URL (cloud URL)
-                    val isCloudUrl = currentUrl.contains("fly.dev", ignoreCase = true) || currentUrl.startsWith("wss://", ignoreCase = true)
-                    if (!isCloudUrl) {
+                    // For cloud, lastKnownUrl should be null (we use config.url)
+                    // config.url should not be null for cloud connections
+                    if (lastKnownUrl != null || config.url == null) {
                         return false
                     }
                 }
@@ -246,10 +263,9 @@ class LanWebSocketClient @Inject constructor(
                 else -> null
             }
             
-            if (peerUrl != null && peerUrl != currentUrl) {
-                // Peer IP changed - update URL and trigger reconnection
-                android.util.Log.d("LanWebSocketClient", "🔄 Peer IP changed in send(): $peerUrl (was: $currentUrl) - reconnecting")
-                // Update both currentUrl and lastKnownUrl to the same value
+            if (peerUrl != null && peerUrl != lastKnownUrl) {
+                // Peer IP changed - update lastKnownUrl and trigger reconnection
+                android.util.Log.d("LanWebSocketClient", "🔄 Peer IP changed in send(): $peerUrl (was: $lastKnownUrl) - reconnecting")
                 lastKnownUrl = peerUrl
                 val isSecure = peerUrl.startsWith("wss://", ignoreCase = true)
                 val peerConfig = TlsWebSocketConfig(
@@ -269,20 +285,21 @@ class LanWebSocketClient @Inject constructor(
                     connectionJob?.cancel()
                     connectionJob = null
                     currentConnector = newConnector
-                    currentUrl = peerUrl
                 }
-            } else if (peerUrl != null && peerUrl == currentUrl) {
-                // Peer URL matches current - ensure lastKnownUrl is also updated
+                // Trigger reconnection with new URL
+                ensureConnection()
+            } else if (peerUrl != null) {
+                // Peer URL matches lastKnownUrl - ensure it's set
                 lastKnownUrl = peerUrl
             } else if (peerUrl == null) {
-                android.util.Log.w("LanWebSocketClient", "⚠️ Target device $targetDeviceId not found in discovered peers, using current URL: $currentUrl")
+                android.util.Log.w("LanWebSocketClient", "⚠️ Target device $targetDeviceId not found in discovered peers, using lastKnownUrl: $lastKnownUrl")
             }
         }
         
         android.util.Log.d("LanWebSocketClient", "📤 send() called: type=${envelope.type}, target=${envelope.payload.target}, id=${envelope.id}")
         ensureConnection()
         try {
-            sendQueue.send(envelope)
+        sendQueue.send(envelope)
             android.util.Log.d("LanWebSocketClient", "✅ Envelope queued: ${envelope.id}")
         } catch (e: Exception) {
             android.util.Log.e("LanWebSocketClient", "❌ send(): Failed to send envelope to queue: ${e.message}", e)
@@ -335,25 +352,39 @@ class LanWebSocketClient @Inject constructor(
      */
     private suspend fun ensureConnection() {
         mutex.withLock {
+            val isCloudConnection = config.environment == "cloud"
+            val urlToUse = if (isCloudConnection) {
+                config.url ?: throw IllegalStateException("Cloud connection config URL cannot be null")
+            } else {
+                lastKnownUrl
+            }
+            
             if (connectionJob == null || connectionJob?.isActive != true) {
+                android.util.Log.d("LanWebSocketClient", "🔌 ensureConnection() starting new connection job (isCloud=$isCloudConnection, url=${urlToUse ?: "null"})")
                 // Reset connection signal for new connection attempt
                 if (connectionSignal.isCompleted) {
                     connectionSignal = CompletableDeferred()
                 }
                 val job = scope.launch {
                     try {
+                        android.util.Log.d("LanWebSocketClient", "🔌 Connection job started, calling runConnectionLoop()")
                         runConnectionLoop()
+                    } catch (e: Exception) {
+                        android.util.Log.e("LanWebSocketClient", "❌ Error in connection loop: ${e.message}", e)
                     } finally {
                         val current = coroutineContext[Job]
                         mutex.withLock {
                             if (connectionJob === current) {
                                 connectionJob = null
+                                android.util.Log.d("LanWebSocketClient", "🔌 Connection job completed and cleared")
                             }
                         }
                     }
                 }
                 connectionJob = job
-                android.util.Log.d("LanWebSocketClient", "🔌 Started connection loop for receiving messages")
+                android.util.Log.d("LanWebSocketClient", "🔌 Starting long-lived connection for receiving messages (event-driven, no polling)")
+            } else {
+                android.util.Log.d("LanWebSocketClient", "⏸️ ensureConnection() skipped - connection job already active (isCloud=$isCloudConnection)")
             }
         }
     }
@@ -363,16 +394,24 @@ class LanWebSocketClient @Inject constructor(
      * This should be called when a peer is discovered to ensure we can receive messages.
      * If transportManager is available, it will discover peers and connect to the first discovered peer.
      */
+    /**
+     * Start maintaining a persistent connection to receive incoming messages.
+     * Event-driven: only connects when peer is discovered or connection disconnects.
+     * Updates lastKnownUrl when peer is discovered.
+     */
     fun startReceiving() {
+        val isCloudConnection = config.environment == "cloud"
         android.util.Log.d("LanWebSocketClient", "👂 Starting to receive messages...")
-        android.util.Log.d("LanWebSocketClient", "   Config URL: ${config.url}")
-        android.util.Log.d("LanWebSocketClient", "   Current URL: $currentUrl")
+        android.util.Log.d("LanWebSocketClient", "   Config URL: ${config.url ?: "null (LAN - will use peer discovery)"}")
+        android.util.Log.d("LanWebSocketClient", "   Config environment: ${config.environment}")
+        android.util.Log.d("LanWebSocketClient", "   Is cloud connection: $isCloudConnection")
+        android.util.Log.d("LanWebSocketClient", "   Last known URL: $lastKnownUrl")
         android.util.Log.d("LanWebSocketClient", "   Transport origin: $transportOrigin")
         android.util.Log.d("LanWebSocketClient", "   Has transportManager: ${transportManager != null}")
         
         scope.launch {
             // Check if this is a cloud relay connection - never switch URLs for cloud connections
-            val isCloudConnection = config.url.contains("fly.dev", ignoreCase = true) || config.url.startsWith("wss://", ignoreCase = true)
+            val isCloudConnection = config.environment == "cloud"
             
             // If we have a transport manager AND this is NOT a cloud connection, try to discover peers
             if (transportManager != null && !isCloudConnection) {
@@ -400,14 +439,12 @@ class LanWebSocketClient @Inject constructor(
                             val emulatorHost = "10.0.2.2"
                             "ws://$emulatorHost:${peer.port}"
                         }
-                        else -> {
-                            android.util.Log.w("LanWebSocketClient", "⚠️ Peer has invalid host: ${peer.host}, using default URL")
-                            currentUrl
-                        }
+                        else -> null
                     }
                     
-                    if (peerUrl != currentUrl && peerUrl.startsWith("ws://", ignoreCase = true)) {
-                        android.util.Log.d("LanWebSocketClient", "   Updating URL to discovered peer: $peerUrl")
+                    if (peerUrl != null && peerUrl != lastKnownUrl) {
+                        android.util.Log.d("LanWebSocketClient", "🔄 Peer discovered: updating lastKnownUrl to $peerUrl")
+                        lastKnownUrl = peerUrl
                         val peerConfig = TlsWebSocketConfig(
                             url = peerUrl,
                             fingerprintSha256 = null, // No pinning for ws://
@@ -419,34 +456,50 @@ class LanWebSocketClient @Inject constructor(
                         val newConnector = OkHttpWebSocketConnector(peerConfig)
                         
                         mutex.withLock {
-                            webSocket?.close(1000, "Switching to discovered peer")
+                            webSocket?.close(1000, "Peer IP changed")
                             webSocket = null
                             isOpen.set(false)
                             connectionJob?.cancel()
                             connectionJob = null
                             currentConnector = newConnector
-                            currentUrl = peerUrl
                         }
+                    } else if (peerUrl != null) {
+                        // Peer URL matches lastKnownUrl - ensure it's set
+                        lastKnownUrl = peerUrl
                     }
                 } else {
-                    android.util.Log.w("LanWebSocketClient", "⚠️ No peers discovered, using default URL: $currentUrl")
-                    // Even if no peers are discovered, still try to maintain connection
-                    // The connection loop will retry and reconnect when peers are discovered
-                    android.util.Log.d("LanWebSocketClient", "   Will maintain connection loop to reconnect when peers are discovered")
+                    android.util.Log.d("LanWebSocketClient", "ℹ️ No peers discovered, will use lastKnownUrl: $lastKnownUrl")
                 }
             } else if (isCloudConnection) {
-                // For cloud connections, ensure we're using the config URL (never switch to LAN)
-                android.util.Log.d("LanWebSocketClient", "   Cloud connection detected - using config URL: ${config.url}")
+                // For cloud connections, use config URL (lastKnownUrl should be null)
+                android.util.Log.d("LanWebSocketClient", "☁️ Cloud connection detected - using config URL: ${config.url}")
+                android.util.Log.d("LanWebSocketClient", "   Environment: ${config.environment}")
+                android.util.Log.d("LanWebSocketClient", "   Has transportManager: ${transportManager != null}")
+                lastKnownUrl = null
                 mutex.withLock {
-                    if (currentUrl != config.url) {
-                        android.util.Log.w("LanWebSocketClient", "   ⚠️ URL mismatch! Resetting to config URL: ${config.url}")
-                        currentUrl = config.url
-                        currentConnector = connector
-                    }
+                    currentConnector = connector
                 }
             }
             
-            android.util.Log.d("LanWebSocketClient", "🔌 Calling ensureConnection() for URL: $currentUrl")
+            // For LAN connections, only connect if we have a discovered peer URL
+            // For cloud connections, use config.url
+            val urlToUse = if (isCloudConnection) {
+                config.url ?: throw IllegalStateException("Cloud connection config URL cannot be null")
+            } else {
+                lastKnownUrl
+            }
+            
+            if (urlToUse == null || urlToUse.isBlank()) {
+                if (!isCloudConnection) {
+                    android.util.Log.d("LanWebSocketClient", "⏸️ No peer URL available for LAN connection, waiting for discovery event")
+                    return@launch
+                } else {
+                    android.util.Log.e("LanWebSocketClient", "❌ Cloud connection config URL is empty!")
+                    return@launch
+                }
+            }
+            
+            android.util.Log.d("LanWebSocketClient", "🔌 Calling ensureConnection() for URL: $urlToUse (isCloud=${isCloudConnection})")
             ensureConnection()
         }
     }
@@ -457,29 +510,61 @@ class LanWebSocketClient @Inject constructor(
      */
     fun forceConnectOnce() {
         scope.launch {
-            android.util.Log.d("LanWebSocketClient", "🔌 forceConnectOnce() @${System.currentTimeMillis()} url=$currentUrl")
+            val isCloudConnection = config.environment == "cloud"
+            val urlToUse = if (isCloudConnection) {
+                config.url ?: throw IllegalStateException("Cloud connection config URL cannot be null")
+            } else {
+                lastKnownUrl
+            }
+            
+            if (urlToUse == null || urlToUse.isBlank()) {
+                android.util.Log.w("LanWebSocketClient", "⚠️ forceConnectOnce() called but no URL available (isCloud=$isCloudConnection)")
+                return@launch
+            }
+            
+            android.util.Log.d("LanWebSocketClient", "🔌 forceConnectOnce() @${System.currentTimeMillis()} url=$urlToUse")
             ensureConnection()
         }
     }
 
     /**
      * Establish a long-lived WebSocket connection for receiving messages.
-     * Only reconnects when:
-     * 1. Peer IP changes (detected via discovery events)
-     * 2. Connection disconnects (onClosed/onFailure)
+     * Event-driven for LAN: only connects when peer is discovered or connection disconnects.
+     * Retry with backoff for cloud: cloud connections should retry since URL is always available.
      * 
-     * Does NOT continuously retry - relies on discovery events to trigger reconnection.
+     * Note: Despite the name "loop", this is NOT a polling loop. It maintains a single
+     * long-lived WebSocket connection and processes incoming messages. The loop only exists
+     * to keep the connection alive and handle reconnection on failure.
      */
     private suspend fun runConnectionLoop() {
+        val isCloudConnection = config.environment == "cloud"
+        
+        // For LAN connections, only connect if we have a discovered peer URL
+        // For cloud connections, use config.url
+        val urlToUse = if (isCloudConnection) {
+            config.url ?: throw IllegalStateException("Cloud connection config URL cannot be null")
+        } else {
+            lastKnownUrl
+        }
+        
+        // For LAN connections, never use the default config.url - only connect when we have a discovered peer URL
+        // The config.url is only for DI initialization and will never be used for actual connections
+        if (!isCloudConnection && (urlToUse == null || urlToUse.isBlank() || (config.url != null && urlToUse == config.url))) {
+            android.util.Log.d("LanWebSocketClient", "⏸️ No peer URL available, waiting for discovery event (urlToUse=$urlToUse, config.url=${config.url})")
+            return
+        }
+        
+        if (isCloudConnection && (urlToUse == null || urlToUse.isBlank())) {
+            android.util.Log.e("LanWebSocketClient", "❌ Cloud connection config URL is empty!")
+            return
+        }
+        
         var retryCount = 0
         val maxRetryDelay = 128_000L // 128 seconds max delay (after exponential backoff)
         val baseRetryDelay = 1_000L // 1 second base delay
         
         while (!sendQueue.isClosedForReceive) {
-            // Check if we should update URL based on discovered peers (IP may have changed)
-            updateUrlFromDiscovery()
-            
-            android.util.Log.d("LanWebSocketClient", "🚀 connection attempt #${retryCount + 1} url=$currentUrl")
+            android.util.Log.d("LanWebSocketClient", "🚀 Connecting to: $urlToUse${if (isCloudConnection) " (cloud, attempt ${retryCount + 1})" else ""}")
             
             val closedSignal = CompletableDeferred<Unit>()
             val handshakeSignal = mutex.withLock {
@@ -490,10 +575,20 @@ class LanWebSocketClient @Inject constructor(
             }
             val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    android.util.Log.d("LanWebSocketClient", "✅ WebSocket connection opened: $currentUrl")
+                    val isCloudConnection = config.environment == "cloud"
+                    val urlToUse = if (isCloudConnection) {
+                        config.url ?: "unknown"
+                    } else {
+                        lastKnownUrl ?: "unknown"
+                    }
+                    android.util.Log.d("LanWebSocketClient", "✅ WebSocket connection opened: $urlToUse")
                     android.util.Log.d("LanWebSocketClient", "   Device ID registered with backend: ${config.headers["X-Device-Id"]}")
                     android.util.Log.d("LanWebSocketClient", "   Response headers: ${response.headers}")
-                    android.util.Log.d("LanWebSocketClient", "   Config URL: ${config.url}")
+                    if (isCloudConnection) {
+                        android.util.Log.d("LanWebSocketClient", "   Cloud connection URL: ${config.url ?: "null"}")
+                    } else {
+                        android.util.Log.d("LanWebSocketClient", "   LAN connection URL: $lastKnownUrl")
+                    }
                     android.util.Log.d("LanWebSocketClient", "   WebSocket instance: ${webSocket.hashCode()}")
                     android.util.Log.d("LanWebSocketClient", "   Response code: ${response.code}")
                     android.util.Log.d("LanWebSocketClient", "   Response message: ${response.message}")
@@ -504,6 +599,16 @@ class LanWebSocketClient @Inject constructor(
                             isClosed.set(false) // Clear closed flag
                             touch()
                             startWatchdog()
+                        }
+                        
+                        // Notify TransportManager of connection state change (event-driven)
+                        // Only update connection state for cloud connections - LAN connections don't affect global status
+                        // The UI should show cloud connection status, not LAN status
+                        if (transportManager != null && isCloudConnection) {
+                            android.util.Log.d("LanWebSocketClient", "☁️ Cloud connection opened - updating connection state to ConnectedCloud")
+                            transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectedCloud)
+                        } else {
+                            android.util.Log.d("LanWebSocketClient", "⚠️ Not updating connection state: transportManager=${transportManager != null}, isCloudConnection=$isCloudConnection")
                         }
                         val started = handshakeStarted
                         if (started != null) {
@@ -560,9 +665,15 @@ class LanWebSocketClient @Inject constructor(
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    android.util.Log.e("LanWebSocketClient", "🔥🔥🔥 onMessage() CALLED! ${bytes.size} bytes from $currentUrl")
+                    val isCloudConnection = config.environment == "cloud"
+                    val urlToUse = if (isCloudConnection) {
+                        config.url ?: "unknown"
+                    } else {
+                        lastKnownUrl ?: "unknown"
+                    }
+                    android.util.Log.e("LanWebSocketClient", "🔥🔥🔥 onMessage() CALLED! ${bytes.size} bytes from $urlToUse")
                     touch()
-                    android.util.Log.d("LanWebSocketClient", "📥 Received binary message: ${bytes.size} bytes from URL: $currentUrl")
+                    android.util.Log.d("LanWebSocketClient", "📥 Received binary message: ${bytes.size} bytes from URL: $urlToUse")
                     
                     // Decode the binary frame first (handles 4-byte length prefix)
                     // Then check if it's a pairing message or clipboard message
@@ -624,24 +735,50 @@ class LanWebSocketClient @Inject constructor(
                     } catch (e: Exception) {
                         android.util.Log.e("LanWebSocketClient", "❌ Failed to decode frame in onMessage: ${e.message}", e)
                         // Fallback: try to handle as raw bytes (might be legacy format)
-                        handleIncoming(bytes)
+                    handleIncoming(bytes)
                     }
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    android.util.Log.w("LanWebSocketClient", "🔴 WebSocket closed: code=$code, reason=$reason, url=$currentUrl")
+                    val isCloudConnection = config.environment == "cloud"
+                    val urlToUse = if (isCloudConnection) {
+                        config.url ?: "unknown"
+                    } else {
+                        lastKnownUrl ?: "unknown"
+                    }
+                    android.util.Log.w("LanWebSocketClient", "🔴 WebSocket closed: code=$code, reason=$reason, url=$urlToUse")
                     isOpen.set(false) // Mark as not open
                     isClosed.set(true) // Mark as closed
                     if (!closedSignal.isCompleted) {
                         closedSignal.complete(Unit)
                     }
                     shutdownSocket(webSocket)
+                    
+                    // Notify TransportManager of connection state change (event-driven)
+                    // Only update connection state for cloud connections - LAN connections don't affect global status
+                    if (transportManager != null && isCloudConnection) {
+                        transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.Idle)
+                    }
+                    
+                    // Trigger reconnection - event-driven, only if we have a URL
+                    if (lastKnownUrl != null || isCloudConnection) {
+                        scope.launch {
+                            delay(100)
+                            ensureConnection()
+                        }
+                    }
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     // Detailed error logging
+                    val isCloudConnection = config.environment == "cloud"
+                    val urlToUse = if (isCloudConnection) {
+                        config.url ?: "unknown"
+                    } else {
+                        lastKnownUrl ?: "unknown"
+                    }
                     val errorMsg = buildString {
-                        append("❌ Connection failed to $currentUrl: ${t.message}")
+                        append("❌ Connection failed to $urlToUse: ${t.message}")
                         append(" (${t.javaClass.simpleName})")
                         if (response != null) {
                             append(" - HTTP ${response.code} ${response.message}")
@@ -666,17 +803,30 @@ class LanWebSocketClient @Inject constructor(
                     }
                     shutdownSocket(webSocket)
                     handshakeStarted = null
-                    // Trigger reconnection on failure - connection loop will handle it
-                    scope.launch {
-                        // Small delay to let cleanup complete
-                        delay(100)
-                        ensureConnection()
+                    
+                    // Notify TransportManager of connection state change (event-driven)
+                    // isCloudConnection already declared above
+                    if (transportManager != null) {
+                        // Only update to Idle if this was the cloud connection
+                        // LAN connections might still have other peers available
+                        if (isCloudConnection) {
+                            transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.Idle)
+                        }
+                    }
+                    
+                    // Trigger reconnection on failure - event-driven, only if we have a URL
+                    if (lastKnownUrl != null || isCloudConnection) {
+                        scope.launch {
+                            delay(100)
+                            ensureConnection()
+                        }
                     }
                     // Re-throw to propagate error
                     if (t is SSLPeerUnverifiedException) {
-                        val host = config.url.toHttpUrlOrNull()?.host
-                            ?: runCatching { URI(config.url).host }.getOrNull()
-                            ?: "unknown"
+                        val host = config.url?.let { url ->
+                            url.toHttpUrlOrNull()?.host
+                                ?: runCatching { URI(url).host }.getOrNull()
+                        } ?: "unknown"
                         analytics.record(
                             TransportAnalyticsEvent.PinningFailure(
                                 environment = config.environment,
@@ -691,7 +841,7 @@ class LanWebSocketClient @Inject constructor(
 
             handshakeStarted = clock.instant()
             // Debug: Log which connector is being used
-            android.util.Log.d("LanWebSocketClient", "🔌 Connecting using connector for URL: $currentUrl")
+            android.util.Log.d("LanWebSocketClient", "🔌 Connecting using connector for URL: $urlToUse")
             val socket = currentConnector.connect(listener)
             val connectTimeoutMillis = if (config.roundTripTimeoutMillis > 0) config.roundTripTimeoutMillis else 10_000L
             val connected = try {
@@ -700,38 +850,76 @@ class LanWebSocketClient @Inject constructor(
                     true
                 }
             } catch (t: Throwable) {
-                // Error already logged in onFailure, just cancel and retry with backoff
+                // Connection failed
                 socket.cancel()
                 shutdownSocket(socket)
-                retryCount++
-                // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
-                val retryDelay = if (retryCount <= 8) {
-                    baseRetryDelay * (1 shl (retryCount - 1))
+                
+                if (isCloudConnection) {
+                    // Cloud connections: retry with exponential backoff
+                    retryCount++
+                    val retryDelay = if (retryCount <= 8) {
+                        baseRetryDelay * (1 shl (retryCount - 1))
+                    } else {
+                        maxRetryDelay // Keep retrying every 128s indefinitely
+                    }
+                    android.util.Log.w("LanWebSocketClient", "⚠️ Cloud connection failed, retrying in ${retryDelay}ms (attempt $retryCount)")
+                    delay(retryDelay)
+                    continue
+                } else if (lastKnownUrl != null) {
+                    // LAN connections with discovered peer: retry with exponential backoff (shorter max delay)
+                    retryCount++
+                    val maxLanRetryDelay = 32_000L // 32 seconds max for LAN (shorter than cloud)
+                    val retryDelay = if (retryCount <= 6) {
+                        baseRetryDelay * (1 shl (retryCount - 1))
+                    } else {
+                        maxLanRetryDelay // Keep retrying every 32s for LAN
+                    }
+                    android.util.Log.w("LanWebSocketClient", "⚠️ LAN connection failed to discovered peer, retrying in ${retryDelay}ms (attempt $retryCount)")
+                    delay(retryDelay)
+                    continue
                 } else {
-                    maxRetryDelay // Keep retrying every 128s indefinitely
+                    // LAN connections without discovered peer: exit and wait for discovery event
+                    android.util.Log.w("LanWebSocketClient", "⚠️ LAN connection failed, no peer discovered, will reconnect on discovery event")
+                    return // Exit loop - will reconnect when peer is discovered
                 }
-                android.util.Log.w("LanWebSocketClient", "⚠️ Connection failed, retrying in ${retryDelay}ms (attempt $retryCount)")
-                delay(retryDelay)
-                continue
             }
             if (!connected) {
-                android.util.Log.w("LanWebSocketClient", "⚠️ Connection not established, retrying...")
                 socket.cancel()
                 shutdownSocket(socket)
-                retryCount++
-                // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
-                val retryDelay = if (retryCount <= 8) {
-                    baseRetryDelay * (1 shl (retryCount - 1))
+                
+                if (isCloudConnection) {
+                    // Cloud connections: retry with exponential backoff
+                    retryCount++
+                    val retryDelay = if (retryCount <= 8) {
+                        baseRetryDelay * (1 shl (retryCount - 1))
+                    } else {
+                        maxRetryDelay
+                    }
+                    android.util.Log.w("LanWebSocketClient", "⚠️ Cloud connection not established, retrying in ${retryDelay}ms (attempt $retryCount)")
+                    delay(retryDelay)
+                    continue
+                } else if (lastKnownUrl != null) {
+                    // LAN connections with discovered peer: retry with exponential backoff (shorter max delay)
+                    retryCount++
+                    val maxLanRetryDelay = 32_000L // 32 seconds max for LAN (shorter than cloud)
+                    val retryDelay = if (retryCount <= 6) {
+                        baseRetryDelay * (1 shl (retryCount - 1))
+                    } else {
+                        maxLanRetryDelay
+                    }
+                    android.util.Log.w("LanWebSocketClient", "⚠️ LAN connection not established to discovered peer, retrying in ${retryDelay}ms (attempt $retryCount)")
+                    delay(retryDelay)
+                    continue
                 } else {
-                    maxRetryDelay // Keep retrying every 128s indefinitely
+                    // LAN connections without discovered peer: exit and wait for discovery event
+                    android.util.Log.w("LanWebSocketClient", "⚠️ LAN connection not established, no peer discovered, will reconnect on discovery event")
+                    return // Exit loop - will reconnect when peer is discovered
                 }
-                android.util.Log.w("LanWebSocketClient", "⚠️ Connection not established, retrying in ${retryDelay}ms (attempt $retryCount)")
-                delay(retryDelay)
-                continue
             }
             
-            // Connection successful, reset retry count
+            // Connection successful - reset retry count and maintain long-lived connection
             retryCount = 0
+            android.util.Log.d("LanWebSocketClient", "✅ Long-lived connection established${if (isCloudConnection) " (cloud)" else ", will only reconnect on IP change or disconnect"}")
 
             try {
                 loop@ while (true) {
@@ -810,7 +998,7 @@ class LanWebSocketClient @Inject constructor(
         val observedJob = connectionJob
         
         // For cloud relay connections, use ping/pong keepalive instead of idle timeout
-        val isCloudRelay = config.url.contains("fly.dev", ignoreCase = true) || config.url.startsWith("wss://", ignoreCase = true)
+        val isCloudRelay = config.environment == "cloud"
         
         if (isCloudRelay) {
             android.util.Log.d("LanWebSocketClient", "⏰ Starting ping/pong keepalive for cloud relay connection")

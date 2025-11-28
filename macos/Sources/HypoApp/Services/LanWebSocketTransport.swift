@@ -791,10 +791,12 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                                 logger.info("📋 [LanWebSocketTransport] Control message action: \(action)")
                                 if action == "routing_failure" {
                                     if let reason = payload["reason"] as? String {
-                                        logger.warning("⚠️ [LanWebSocketTransport] Routing failure: \(reason)")
+                                        // Log as debug instead of warning - these are expected when devices are offline
+                                        logger.debug("ℹ️ [LanWebSocketTransport] Routing failure: \(reason)")
                                     }
                                     if let targetDeviceId = payload["target_device_id"] as? String {
-                                        logger.warning("⚠️ [LanWebSocketTransport] Target device not connected: \(targetDeviceId)")
+                                        // Log as debug instead of warning - these are expected when devices are offline
+                                        logger.debug("ℹ️ [LanWebSocketTransport] Target device not connected: \(targetDeviceId)")
                                     }
                                 }
                             }

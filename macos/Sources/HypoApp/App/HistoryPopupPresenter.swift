@@ -199,8 +199,9 @@ final class HistoryPopupPresenter {
         let visibleStr = NSStringFromRect(visiblePost)
         let sizeStr = NSStringFromSize(finalSize)
         let frameStr = NSStringFromRect(finalFrame)
-        self.logger.debug("📍 New window target screen: \(postLayoutScreen.localizedName), visible=\(visibleStr), finalSize=\(sizeStr), setFrame=\(frameStr)")
-        self.appendDebug("[HistoryPopupPresenter] new window screen=\(postLayoutScreen.localizedName) visible=\(visibleStr) size=\(sizeStr) frame=\(frameStr)\n")
+        // Window creation details removed for cleaner logs
+        // self.logger.debug("📍 New window target screen: \(postLayoutScreen.localizedName), visible=\(visibleStr), finalSize=\(sizeStr), setFrame=\(frameStr)")
+        // self.appendDebug("[HistoryPopupPresenter] new window screen=\(postLayoutScreen.localizedName) visible=\(visibleStr) size=\(sizeStr) frame=\(frameStr)\n")
         // Make window accept keyboard events
         panel.acceptsMouseMovedEvents = true
         panel.makeFirstResponder(hosting.view)

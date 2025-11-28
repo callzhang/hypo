@@ -32,7 +32,8 @@ async fn multi_device_direct_and_broadcast_flow() {
         .await
         .expect("bob should receive direct message")
         .expect("channel open");
-    assert_eq!(received, direct_payload);
+    let received_str = std::str::from_utf8(&received[4..]).expect("valid UTF-8");
+    assert_eq!(received_str, direct_payload);
 
     assert!(
         timeout(Duration::from_millis(50), alice_rx.recv())
@@ -67,11 +68,13 @@ async fn multi_device_direct_and_broadcast_flow() {
         .await
         .expect("alice should observe broadcast")
         .expect("channel open");
-    assert_eq!(alice_view, broadcast_payload);
+    let alice_view_str = std::str::from_utf8(&alice_view[4..]).expect("valid UTF-8");
+    assert_eq!(alice_view_str, broadcast_payload);
 
     let bob_view = timeout(Duration::from_millis(50), bob_rx.recv())
         .await
         .expect("bob should observe broadcast")
         .expect("channel open");
-    assert_eq!(bob_view, broadcast_payload);
+    let bob_view_str = std::str::from_utf8(&bob_view[4..]).expect("valid UTF-8");
+    assert_eq!(bob_view_str, broadcast_payload);
 }

@@ -34,6 +34,10 @@ public final class TransportManager {
     private var pruneTask: Task<Void, Never>?
     private var healthCheckTask: Task<Void, Never>?
     private var networkMonitorTask: Task<Void, Never>?
+#if canImport(Network)
+    private var hasSeenNetworkPathUpdate = false
+    private var lastNetworkPathStatus: NWPath.Status?
+#endif
     private var isAdvertising = false
     private var isServerRunning = false
     private var lanPeers: [String: DiscoveredPeer] = [:]
@@ -521,12 +525,30 @@ public func updateConnectionState(_ newState: ConnectionState) {
             monitor.pathUpdateHandler = { [weak self] path in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    // Skip restart on the very first path update; initial .satisfied
+                    // does not represent a real network change and was causing
+                    // unnecessary LAN server restarts right after launch.
+                    if !self.hasSeenNetworkPathUpdate {
+                        self.hasSeenNetworkPathUpdate = true
+                        self.lastNetworkPathStatus = path.status
+                        self.logger.info("🌐 [TransportManager] Initial network path: \(path.status) – not restarting LAN services")
+                        return
+                    }
+                    
                     if path.status == .satisfied {
-                        self.logger.info("🌐 [TransportManager] Network path satisfied. Restarting LAN services to update IP address...")
-                        // Force restart to ensure Bonjour service updates with new IP address
-                        await self.restartLanServicesForNetworkChange()
+                        // Only restart when transitioning from a non-satisfied state
+                        // to satisfied; avoid repeated restarts when the path
+                        // remains satisfied.
+                        if self.lastNetworkPathStatus != .satisfied {
+                            self.logger.info("🌐 [TransportManager] Network path became satisfied. Restarting LAN services to update IP address...")
+                            self.lastNetworkPathStatus = .satisfied
+                            await self.restartLanServicesForNetworkChange()
+                        } else {
+                            self.logger.info("🌐 [TransportManager] Network path still satisfied – skipping LAN restart")
+                        }
                     } else {
                         self.logger.info("🌐 [TransportManager] Network path not satisfied. Status: \(path.status)")
+                        self.lastNetworkPathStatus = path.status
                     }
                 }
             }

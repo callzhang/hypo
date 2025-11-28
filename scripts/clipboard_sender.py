@@ -463,8 +463,32 @@ def send_via_lan(
             "X-Device-Platform: android"
         ]
         
-        # Reduced timeout for speed (3s instead of 10s)
-        ws = create_connection(url, timeout=3, header=headers)
+        # Connect with a short retry window to avoid flakiness when the
+        # macOS LAN server is being restarted (NWPathMonitor or app relaunch).
+        # This only affects the test harness; it does not change app logic.
+        max_attempts = 3
+        ws = None
+        import socket
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Reduced timeout for speed (3s instead of 10s)
+                ws = create_connection(url, timeout=3, header=headers)
+                break
+            except WebSocketException as e:
+                # Transient connection errors (e.g., ECONNREFUSED while server restarts)
+                if attempt < max_attempts and not quiet:
+                    print(f"⚠️ WebSocket connect error (attempt {attempt}/{max_attempts}): {e} – retrying...")
+                if attempt == max_attempts:
+                    print(f"❌ WebSocket error: {e}")
+                    return False
+            except socket.error as e:
+                # Handle low-level socket connect failures the same way
+                if attempt < max_attempts and not quiet:
+                    print(f"⚠️ Socket connect error (attempt {attempt}/{max_attempts}): {e} – retrying...")
+                if attempt == max_attempts:
+                    print(f"❌ Error: {e}")
+                    return False
+        
         if not quiet:
             print(f"✅ Connected to WebSocket server")
             print(f"   Headers: X-Device-Id={sender_device_id}, X-Device-Platform=android")
@@ -572,4 +596,3 @@ def send_via_lan(
         import traceback
         traceback.print_exc()
         return False
-

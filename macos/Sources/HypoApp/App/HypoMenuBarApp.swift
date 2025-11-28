@@ -179,13 +179,13 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             self.hotKeyRef = hotKey
             logger.debug("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+V (status: \(status), ref: \(hotKey))")
         } else if self.hotKeyRef == nil {
-            // Only log error if hotkey wasn't already registered
-            logger.warning("⚠️ [HypoAppDelegate] Hotkey registration returned status=\(status) (may already be registered). Ref: \(hotKeyRef != nil ? "exists" : "nil")")
-            
-            // If registration failed but we don't have a ref, try to unregister any existing hotkey first
+            // If registration failed but we don't have a ref, check if it's just because hotkey already exists
             if status == -9878 { // eventHotKeyExistsErr
-                logger.debug("🔄 [HypoAppDelegate] Hotkey already exists, attempting to unregister and re-register...")
+                logger.debug("🔄 [HypoAppDelegate] Hotkey already exists (status=-9878), skipping registration")
                 // Note: We can't unregister without the ref, so we'll just log this
+            } else {
+                // Only log warning for actual errors (not "already exists")
+                logger.warning("⚠️ [HypoAppDelegate] Hotkey registration returned status=\(status). Ref: \(hotKeyRef != nil ? "exists" : "nil")")
             }
         }
         
@@ -221,7 +221,12 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                 altNumberHotKeys[num] = hotKey
                 logger.debug("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+\(num) (status: \(status))")
             } else {
-                logger.warning("⚠️ [HypoAppDelegate] Failed to register Alt+\(num): status=\(status)")
+                // Log as debug if hotkey already exists (expected behavior), warning for actual errors
+                if status == -9878 { // eventHotKeyExistsErr
+                    logger.debug("🔄 [HypoAppDelegate] Alt+\(num) already registered (status=-9878), skipping")
+                } else {
+                    logger.warning("⚠️ [HypoAppDelegate] Failed to register Alt+\(num): status=\(status)")
+                }
             }
         }
     }

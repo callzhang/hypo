@@ -495,7 +495,9 @@ public final class LanWebSocketServer {
                 // Process any frames that might already be in the buffer
                 self.processFrameBuffer(for: connectionId, context: context)
                 
-                // Start receiving WebSocket frames
+                // Start receiving WebSocket frames immediately after handshake
+                // .contentProcessed ensures the HTTP 101 response is fully sent before this callback runs
+                // Starting frame reception immediately ensures OkHttp can read frames as soon as it's ready
                 self.logger.info("📡 [LanWebSocketServer] Starting receiveFrameChunk for connection \(connectionId.uuidString.prefix(8))")
                 self.receiveFrameChunk(for: connectionId, context: context)
             }
@@ -547,7 +549,17 @@ public final class LanWebSocketServer {
                     // But check if we have pending data in buffer first
                     let remainingBuffer = context.snapshotBuffer()
                     if remainingBuffer.isEmpty {
-                        self.logger.info("🔌 [LanWebSocketServer] Connection \(connectionId.uuidString.prefix(8)) closed by peer (EOF - no data, isComplete=true, buffer empty)")
+                        // Check connection state - if it's still ready, this might be a false EOF
+                        // (e.g., OkHttp hasn't started reading yet after handshake)
+                        let connectionState = context.connection.state
+                        if connectionState == .ready {
+                            // Connection is still ready, this might be a false EOF right after handshake
+                            // Continue receiving - OkHttp might not have started reading frames yet
+                            self.logger.info("⏳ [LanWebSocketServer] EOF received but connection still ready (might be false EOF after handshake), continuing to receive...")
+                            self.receiveFrameChunk(for: connectionId, context: context)
+                            return
+                        }
+                        self.logger.info("🔌 [LanWebSocketServer] Connection \(connectionId.uuidString.prefix(8)) closed by peer (EOF - no data, isComplete=true, buffer empty, state=\(connectionState))")
                         #if canImport(os)
                         self.logger.info("Connection \(connectionId.uuidString) closed by peer")
                         #endif
@@ -1114,9 +1126,10 @@ public final class LanWebSocketServer {
     private func logNetworkInterfaces() {
         // Log available network interfaces for debugging connection issues
         var interfaces: [String] = []
+        var allInterfaces: [String] = [] // Track all interfaces for debugging
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifaddr) == 0 else {
-            logger.warning("⚠️ [LanWebSocketServer] Failed to get network interfaces")
+            logger.warning("⚠️ [LanWebSocketServer] Failed to get network interfaces: errno=\(errno)")
             return
         }
         defer { freeifaddrs(ifaddr) }
@@ -1127,6 +1140,14 @@ public final class LanWebSocketServer {
             
             guard let interface = ptr?.pointee else { continue }
             let flags = Int32(interface.ifa_flags)
+            let name = String(cString: interface.ifa_name)
+            
+            // Track all interfaces for debugging
+            var status = ""
+            if (flags & IFF_UP) != 0 { status += "UP " }
+            if (flags & IFF_RUNNING) != 0 { status += "RUNNING " }
+            if (flags & IFF_LOOPBACK) != 0 { status += "LOOPBACK " }
+            allInterfaces.append("\(name): flags=\(flags) (\(status.trimmingCharacters(in: .whitespaces)))")
             
             // Check if interface is up and not loopback
             if (flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING) && (flags & IFF_LOOPBACK) == 0 {
@@ -1136,13 +1157,19 @@ public final class LanWebSocketServer {
                         let sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
                         if let addrString = inet_ntoa(sin.sin_addr) {
                             let ip = String(cString: addrString)
-                            let name = String(cString: interface.ifa_name)
                             interfaces.append("\(name): \(ip)")
+                        }
+                    } else if addrFamily == AF_INET6 {
+                        // Also log IPv6 interfaces for completeness
+                        var sin6 = addr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee }
+                        var addrBuffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                        if inet_ntop(AF_INET6, &sin6.sin6_addr, &addrBuffer, socklen_t(INET6_ADDRSTRLEN)) != nil {
+                            let ip = String(cString: addrBuffer)
+                            interfaces.append("\(name): [\(ip)] (IPv6)")
                         }
                     }
                 }
             }
-            ptr = ptr?.pointee.ifa_next
         }
         
         if !interfaces.isEmpty {
@@ -1151,7 +1178,16 @@ public final class LanWebSocketServer {
                 logger.info("   - \(interface)")
             }
         } else {
-            logger.warning("⚠️ [LanWebSocketServer] No network interfaces found (may indicate network issue)")
+            // Log all interfaces for debugging when none are found
+            logger.warning("⚠️ [LanWebSocketServer] No active network interfaces found")
+            if !allInterfaces.isEmpty {
+                logger.info("📡 [LanWebSocketServer] All detected interfaces:")
+                for interface in allInterfaces {
+                    logger.info("   - \(interface)")
+                }
+            } else {
+                logger.warning("⚠️ [LanWebSocketServer] No network interfaces detected at all (network may be down)")
+            }
         }
     }
     

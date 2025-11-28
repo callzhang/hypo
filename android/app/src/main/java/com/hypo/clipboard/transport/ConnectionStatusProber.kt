@@ -19,6 +19,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Duration
 import javax.inject.Inject
+import javax.inject.Named
 import javax.inject.Singleton
 
 /**
@@ -31,7 +32,8 @@ class ConnectionStatusProber @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val deviceKeyStore: DeviceKeyStore,
     private val lanWebSocketClient: LanWebSocketClient,
-    private val cloudWebSocketClient: RelayWebSocketClient
+    private val cloudWebSocketClient: RelayWebSocketClient,
+    @Named("cloud_ws_config") private val cloudConfig: com.hypo.clipboard.transport.ws.TlsWebSocketConfig
 ) {
     private val scope = CoroutineScope(SupervisorJob())
     private var periodicJob: Job? = null
@@ -39,7 +41,9 @@ class ConnectionStatusProber @Inject constructor(
     
     companion object {
         private const val TAG = "ConnectionStatusProber"
-        private val PROBE_INTERVAL_MS = Duration.ofSeconds(10).toMillis() // 10 seconds - immediate status updates
+        // Increased interval since connection state is now updated event-driven from WebSocket callbacks
+        // This probe now only updates device online status, not connection state
+        private val PROBE_INTERVAL_MS = Duration.ofMinutes(1).toMillis() // 1 minute - less frequent since connection state is event-driven
     }
     
     /**
@@ -124,7 +128,14 @@ class ConnectionStatusProber @Inject constructor(
         
         return withContext(Dispatchers.IO) {
             try {
-                val url = URL("https://hypo.fly.dev/health")
+                // Convert WebSocket URL to HTTP health endpoint
+                val healthUrl = (cloudConfig.url ?: throw IllegalStateException("Cloud config URL cannot be null"))
+                    .replaceFirst("wss://", "https://")
+                    .replaceFirst("ws://", "http://")
+                    .removeSuffix("/ws")
+                    .let { url -> if (url.endsWith("/")) url else "$url/" }
+                    .plus("health")
+                val url = URL(healthUrl)
                 val connection = url.openConnection() as HttpURLConnection
                 connection.requestMethod = "GET"
                 connection.connectTimeout = 3000 // 3 seconds - faster check
@@ -152,30 +163,15 @@ class ConnectionStatusProber @Inject constructor(
         
         isProbing = true
         try {
-            // Check network connectivity first - update status immediately if disconnected
+            // Connection state is now updated event-driven from WebSocket callbacks (onOpen/onClosed/onFailure)
+            // This probe only updates device online status based on discovery and transport info
+            // No need to check connection state here - it's already updated by WebSocket clients
+            
+            // Check network connectivity for device status updates
             val hasNetwork = checkNetworkConnectivity()
             if (!hasNetwork) {
-                transportManager.updateConnectionState(ConnectionState.Idle)
-                // Continue to check peers - they will be marked as offline in SettingsViewModel
-                // based on connectionState being Idle
-            } else {
-                // Check actual WebSocket connection status first (most accurate)
-                val webSocketConnected = cloudWebSocketClient.isConnected()
-                
-                if (webSocketConnected) {
-                    // WebSocket is connected - we're definitely online
-                    transportManager.updateConnectionState(ConnectionState.ConnectedCloud)
-                } else {
-                    // WebSocket is not connected - don't show as connected just because server is reachable
-                    // The WebSocket must actually be connected for cloud sync to work
-                    transportManager.updateConnectionState(ConnectionState.Idle)
-                    // Try to establish connection if server is reachable
-                    val serverReachable = checkServerHealth()
-                    if (serverReachable) {
-                        // Force connection attempt
-                        cloudWebSocketClient.startReceiving()
-                    }
-                }
+                // Network is offline - connection state will be updated by network change callbacks
+                // Just continue to update device status
             }
             
             // Get current peers (discovered devices)

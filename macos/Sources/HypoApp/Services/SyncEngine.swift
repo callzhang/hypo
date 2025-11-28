@@ -342,13 +342,15 @@ public final actor SyncEngine {
         } else {
             // Normal encryption mode
             let key = try await keyProvider.key(for: targetDeviceId)
-            let aad = Data(localDeviceId.utf8)
+            // Use entry.originDeviceId as AAD (sender's device ID) so it matches what Android expects
+            // Android decrypts using envelope.payload.deviceId as AAD, so they must match
+            let aad = Data(entry.originDeviceId.utf8)
             let sealed = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
             ciphertext = sealed.ciphertext
             nonce = sealed.nonce
             tag = sealed.tag
             
-            logger.info("🔒 [SyncEngine] ENCRYPTED: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes")
+            logger.info("🔒 [SyncEngine] ENCRYPTED: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes, AAD=deviceId=\(entry.originDeviceId)")
         }
 
         let envelope = SyncEnvelope(

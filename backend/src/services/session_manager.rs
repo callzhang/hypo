@@ -126,6 +126,14 @@ impl SessionManager {
                 SessionError::SendError(err.to_string())
             })
     }
+
+    pub async fn get_active_count(&self) -> usize {
+        self.inner.read().await.len()
+    }
+
+    pub async fn get_connected_devices(&self) -> Vec<String> {
+        self.inner.read().await.keys().cloned().collect()
+    }
 }
 
 /// Encode JSON string to binary frame (4-byte big-endian length + JSON payload)

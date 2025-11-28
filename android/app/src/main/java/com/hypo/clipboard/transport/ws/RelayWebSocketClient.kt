@@ -13,11 +13,12 @@ import kotlinx.coroutines.SupervisorJob
 import javax.inject.Inject
 
 class RelayWebSocketClient @Inject constructor(
-    config: TlsWebSocketConfig,
+    private val config: TlsWebSocketConfig,
     connector: WebSocketConnector,
     frameCodec: TransportFrameCodec = TransportFrameCodec(),
     metricsRecorder: TransportMetricsRecorder = NoopTransportMetricsRecorder,
     analytics: TransportAnalytics = NoopTransportAnalytics,
+    transportManager: com.hypo.clipboard.transport.TransportManager,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     clock: Clock = Clock.systemUTC()
 ) : SyncTransport {
@@ -30,7 +31,7 @@ class RelayWebSocketClient @Inject constructor(
         clock = clock,
         metricsRecorder = metricsRecorder,
         analytics = analytics,
-        transportManager = null  // Explicitly set to null for cloud relay (no peer discovery)
+        transportManager = transportManager  // Pass TransportManager so cloud connection state can be updated
     )
 
     override suspend fun send(envelope: SyncEnvelope) {
@@ -68,6 +69,8 @@ class RelayWebSocketClient @Inject constructor(
             "RelayWebSocketClient",
             "👂 startReceiving() called @${System.currentTimeMillis()} – connecting to cloud relay"
         )
+        android.util.Log.d("RelayWebSocketClient", "   Config URL: ${config.url}")
+        android.util.Log.d("RelayWebSocketClient", "   Config environment: ${config.environment}")
         delegate.startReceiving()
     }
     

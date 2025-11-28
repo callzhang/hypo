@@ -4,7 +4,7 @@ use rand::Rng;
 use redis::{aio::ConnectionManager, Client};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tracing::{debug, warn};
+use tracing::debug;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PairingCodeError {
@@ -162,7 +162,7 @@ impl RedisClient {
     }
 
     pub async fn unregister_devices_batch(&mut self, device_ids: &[String]) -> Result<()> {
-        use redis::{AsyncCommands, Pipeline};
+        use redis::Pipeline;
 
         if device_ids.is_empty() {
             return Ok(());

@@ -23,7 +23,7 @@ class RelayWebSocketClient @Inject constructor(
     clock: Clock = Clock.systemUTC()
 ) : SyncTransport {
 
-    private val delegate = LanWebSocketClient(
+    private val delegate = WebSocketTransportClient(
         config = config,
         connector = connector,
         frameCodec = frameCodec,
@@ -86,12 +86,35 @@ class RelayWebSocketClient @Inject constructor(
     /**
      * Force reconnection by closing existing connection and starting a new one.
      * Used when network changes to ensure connection uses new IP address.
+     * Only reconnects if connection is already established (not in progress).
      */
     suspend fun reconnect() {
         android.util.Log.d("RelayWebSocketClient", "🔄 Reconnecting cloud WebSocket due to network change")
-        delegate.close()
-        // Small delay to let connection close
-        kotlinx.coroutines.delay(500)
-        delegate.startReceiving()
+        
+        // Check if connection is already established (not just in progress)
+        val isConnected = delegate.isConnected()
+        if (isConnected) {
+            android.util.Log.d("RelayWebSocketClient", "   Connection is established, closing and reconnecting")
+            // Close the connection - this will cancel the connection job and close the socket
+            // close() now checks if handshake is in progress and handles it safely
+            delegate.close()
+            // Wait for connection job to fully complete cleanup (close() uses cancelAndJoin())
+            // Additional delay to ensure socket is fully closed at OS level
+            kotlinx.coroutines.delay(1500)
+            // Start receiving will trigger ensureConnection which will start a new connection
+            delegate.startReceiving()
+        } else {
+            android.util.Log.d("RelayWebSocketClient", "   Connection not yet established or in progress")
+            // Connection is in progress or not started
+            // Don't call close() here as it might interrupt an in-progress connection attempt
+            // The close() method now checks for handshake in progress, but we still avoid calling it
+            // during connection attempts to prevent "Socket closed" errors
+            // Instead, cancel the connection job and let it clean up naturally, then reconnect
+            android.util.Log.d("RelayWebSocketClient", "   Cancelling in-progress connection and will reconnect")
+            delegate.cancelConnectionJob()
+            kotlinx.coroutines.delay(500) // Brief delay to let cancellation complete
+            // Start receiving will trigger ensureConnection which will start a new connection
+            delegate.startReceiving()
+        }
     }
 }

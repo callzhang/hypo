@@ -176,8 +176,17 @@ class TransportManager(
      * Update the connection state (used by ConnectionStatusProber)
      */
     fun updateConnectionState(newState: ConnectionState) {
-        android.util.Log.d("TransportManager", "🔄 Updating connection state: ${_connectionState.value} -> $newState")
+        val oldState = _connectionState.value
+        android.util.Log.d("TransportManager", "🔄 Updating connection state: $oldState -> $newState")
         _connectionState.value = newState
+        // Log the mapped cloudConnectionState for debugging
+        val mapped = when (newState) {
+            ConnectionState.ConnectedCloud -> ConnectionState.ConnectedCloud
+            ConnectionState.ConnectingCloud -> ConnectionState.ConnectingCloud
+            ConnectionState.ConnectedLan, ConnectionState.ConnectingLan -> ConnectionState.Idle
+            else -> newState
+        }
+        android.util.Log.d("TransportManager", "🌐 cloudConnectionState will be: $mapped (from $newState)")
     }
 
     fun start(config: LanRegistrationConfig) {
@@ -212,14 +221,32 @@ class TransportManager(
                 }
                 
                 override fun onClipboardData(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, data: ByteArray, connectionId: String) {
-                    android.util.Log.d("TransportManager", "📋 Received clipboard data from $connectionId (${data.size} bytes)")
+                    android.util.Log.d("TransportManager", "📋 Received clipboard data from connection $connectionId (${data.size} bytes)")
+                    
+                    // Skip empty frames (could be ping/pong or malformed)
+                    if (data.isEmpty()) {
+                        android.util.Log.w("TransportManager", "⚠️ Received empty frame from connection $connectionId, skipping")
+                        return
+                    }
+                    
+                    // Skip frames that are too small to contain a valid frame header (4 bytes)
+                    if (data.size < 4) {
+                        android.util.Log.w("TransportManager", "⚠️ Received truncated frame from connection $connectionId (${data.size} bytes < 4), skipping")
+                        return
+                    }
+                    
                     // Decode the binary frame and process clipboard data
                     scope.launch {
                         try {
                             // Decode the binary frame (4-byte length prefix + JSON payload)
                             val frameCodec = com.hypo.clipboard.transport.ws.TransportFrameCodec()
                             val envelope = frameCodec.decode(data)
-                            android.util.Log.d("TransportManager", "✅ Decoded envelope: type=${envelope.type}, id=${envelope.id.take(8)}...")
+                            android.util.Log.d("TransportManager", "✅ Decoded envelope: type=${envelope.type}, id=${envelope.id.take(8)}..., senderDeviceId=${envelope.payload.deviceId?.take(20)}...")
+                            
+                            // Check if this is from our own device ID (prevent echo loops)
+                            val senderDeviceId = envelope.payload.deviceId?.lowercase()
+                            // Note: We need access to DeviceIdentity to compare - this check will be done in IncomingClipboardHandler
+                            // For now, we'll pass it through and let IncomingClipboardHandler filter it
                             
                             // No target filtering - process all messages and verify with UUID/key pairs only
                             // The message handler will verify decryption using the sender's device ID and stored keys
@@ -496,10 +523,16 @@ class TransportManager(
     fun addPeer(peer: DiscoveredPeer) {
         // Cancel any pending removal job if peer is rediscovered
         val pendingRemoval = synchronized(stateLock) { pendingPeerRemovalJobs.remove(peer.serviceName) }
-        pendingRemoval?.cancel()
+        val existingPeer = synchronized(stateLock) { peersByService[peer.serviceName] }
+        val ipChanged = existingPeer != null && existingPeer.host != peer.host
+        
         if (pendingRemoval != null) {
             android.util.Log.d("TransportManager", "✅ Peer ${peer.serviceName} rediscovered (was offline, now online)")
         }
+        if (ipChanged) {
+            android.util.Log.d("TransportManager", "🔄 Peer ${peer.serviceName} IP changed: ${existingPeer?.host} -> ${peer.host}")
+        }
+        
         synchronized(stateLock) {
             peersByService[peer.serviceName] = peer
             lastSeenByService[peer.serviceName] = peer.lastSeen
@@ -531,7 +564,20 @@ class TransportManager(
     }
 
     private fun publishStateLocked() {
-        _peers.value = peersByService.values.sortedByDescending { it.lastSeen }
+        // Deduplicate peers by device_id - keep only the most recent peer for each device_id
+        val peersByDeviceId = mutableMapOf<String, DiscoveredPeer>()
+        for (peer in peersByService.values) {
+            val deviceId = peer.attributes["device_id"] ?: peer.serviceName
+            val existing = peersByDeviceId[deviceId]
+            if (existing == null || peer.lastSeen.isAfter(existing.lastSeen)) {
+                peersByDeviceId[deviceId] = peer
+            }
+        }
+        val deduplicatedPeers = peersByDeviceId.values.sortedByDescending { it.lastSeen }
+        if (deduplicatedPeers.size < peersByService.size) {
+            android.util.Log.d("TransportManager", "🔍 Deduplicated peers: ${peersByService.size} -> ${deduplicatedPeers.size} (removed ${peersByService.size - deduplicatedPeers.size} duplicates by device_id)")
+        }
+        _peers.value = deduplicatedPeers
         _lastSeen.value = HashMap(lastSeenByService)
     }
 

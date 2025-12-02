@@ -3,7 +3,7 @@ package com.hypo.clipboard.transport
 import android.util.Log
 import com.hypo.clipboard.data.settings.SettingsRepository
 import com.hypo.clipboard.sync.DeviceKeyStore
-import com.hypo.clipboard.transport.ws.LanWebSocketClient
+import com.hypo.clipboard.transport.ws.WebSocketTransportClient
 import com.hypo.clipboard.transport.ws.RelayWebSocketClient
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
@@ -31,7 +31,7 @@ class ConnectionStatusProber @Inject constructor(
     private val transportManager: TransportManager,
     private val settingsRepository: SettingsRepository,
     private val deviceKeyStore: DeviceKeyStore,
-    private val lanWebSocketClient: LanWebSocketClient,
+    private val lanWebSocketClient: WebSocketTransportClient,
     private val cloudWebSocketClient: RelayWebSocketClient,
     @Named("cloud_ws_config") private val cloudConfig: com.hypo.clipboard.transport.ws.TlsWebSocketConfig
 ) {

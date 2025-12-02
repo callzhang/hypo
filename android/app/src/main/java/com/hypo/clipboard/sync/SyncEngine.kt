@@ -50,30 +50,19 @@ class SyncEngine @Inject constructor(
             android.util.Log.w("SyncEngine", "⚠️ PLAIN TEXT MODE: Sending without encryption")
         }
         
-        // Step 3: Verify keys loaded for sync (Issue 2b checklist)
+        // Key lookup handles normalization internally - no need to normalize here
         android.util.Log.d("SyncEngine", "🔑 Loading key for device: $targetDeviceId")
         
         val key = if (!plainTextMode) {
             val loadedKey = keyStore.loadKey(targetDeviceId)
             if (loadedKey == null) {
-                android.util.Log.e("SyncEngine", "❌ No key found for $targetDeviceId")
+                android.util.Log.e("SyncEngine", "❌ No key found for device: $targetDeviceId")
                 val availableKeys = try {
                     keyStore.getAllDeviceIds()
                 } catch (e: Exception) {
                     emptyList<String>()
                 }
                 android.util.Log.e("SyncEngine", "📋 Available keys in store: $availableKeys")
-                android.util.Log.e("SyncEngine", "🔍 Trying to find matching key...")
-                // Try case-insensitive and partial matching
-                val matchingKey = availableKeys.find { 
-                    it.equals(targetDeviceId, ignoreCase = true) || 
-                    it.contains(targetDeviceId, ignoreCase = true) ||
-                    targetDeviceId.contains(it, ignoreCase = true)
-                }
-                if (matchingKey != null) {
-                    android.util.Log.w("SyncEngine", "⚠️ Found similar key: $matchingKey (requested: $targetDeviceId)")
-                    android.util.Log.w("SyncEngine", "💡 Device ID mismatch! Key saved as '$matchingKey' but sync target is '$targetDeviceId'")
-                }
                 throw SyncEngineException.MissingKey(targetDeviceId)
             } else {
                 android.util.Log.d("SyncEngine", "✅ Key loaded: ${loadedKey.size} bytes")
@@ -98,7 +87,11 @@ class SyncEngine @Inject constructor(
         val plaintext = json.encodeToString(payload).encodeToByteArray()
 
         val (ciphertextBase64, nonceBase64, tagBase64) = if (!plainTextMode && key != null) {
-            val aad = identity.deviceId.encodeToByteArray()
+            // Normalize device ID to lowercase for AAD to match decryption (macOS uses lowercase)
+            // Normalize sender device ID to lowercase for AAD to match macOS encryption
+            // macOS encrypts with entry.deviceId (already lowercase) as AAD
+            val normalizedSenderDeviceId = identity.deviceId.lowercase()
+            val aad = normalizedSenderDeviceId.encodeToByteArray()
             val encrypted = cryptoService.encrypt(plaintext, key, aad)
 
             val ctxt = encrypted.ciphertext.toBase64()
@@ -131,9 +124,9 @@ class SyncEngine @Inject constructor(
             payload = Payload(
                 contentType = item.type,
                 ciphertext = ciphertextBase64,
-                deviceId = identity.deviceId,
+                deviceId = identity.deviceId.lowercase(), // Normalize to lowercase for consistent matching
                 deviceName = identity.deviceName,
-                target = targetDeviceId,
+                target = targetDeviceId, // Target device ID (key lookup handles normalization)
                 encryption = EncryptionMetadata(
                     nonce = nonceBase64,
                     tag = tagBase64
@@ -156,10 +149,9 @@ class SyncEngine @Inject constructor(
             )
         }
 
-        android.util.Log.d("SyncEngine", "📤 Calling transport.send() for device: $targetDeviceId (payload size: ~${estimatedPayloadSize} bytes)")
         try {
             transport.send(envelope)
-            android.util.Log.d("SyncEngine", "✅ transport.send() completed successfully")
+            android.util.Log.d("SyncEngine", "✅ Sync sent to $targetDeviceId (~${estimatedPayloadSize / 1024}KB)")
         } catch (e: com.hypo.clipboard.transport.ws.TransportFrameException) {
             // Re-throw as TransportPayloadTooLargeException for better error handling
             android.util.Log.e("SyncEngine", "❌ Transport frame error: ${e.message}", e)
@@ -183,13 +175,35 @@ class SyncEngine @Inject constructor(
             val plaintext = envelope.payload.ciphertext.fromBase64()
             plaintext.decodeToString()
         } else {
-            val key = keyStore.loadKey(envelope.payload.deviceId)
-                ?: throw SyncEngineException.MissingKey(envelope.payload.deviceId)
+            val deviceId = envelope.payload.deviceId
+            android.util.Log.d("SyncEngine", "🔓 DECODING: deviceId=$deviceId")
+            
+            // Key lookup handles normalization internally - no need to normalize here
+            val key = keyStore.loadKey(deviceId)
+            if (key == null) {
+                android.util.Log.e("SyncEngine", "❌ Key not found for device: $deviceId")
+                val availableKeys = try {
+                    keyStore.getAllDeviceIds()
+                } catch (e: Exception) {
+                    emptyList<String>()
+                }
+                android.util.Log.e("SyncEngine", "📋 Available keys in store: $availableKeys")
+                throw SyncEngineException.MissingKey(deviceId)
+            }
+            
+            android.util.Log.d("SyncEngine", "✅ Key loaded: ${key.size} bytes for device: $deviceId")
 
             val ciphertext = envelope.payload.ciphertext.fromBase64()
             val nonce = envelope.payload.encryption.nonce.fromBase64()
             val tag = envelope.payload.encryption.tag.fromBase64()
-            val aad = envelope.payload.deviceId.encodeToByteArray()
+            
+            android.util.Log.d("SyncEngine", "🔓 Decryption params: ciphertext=${ciphertext.size} bytes, nonce=${nonce.size} bytes, tag=${tag.size} bytes")
+            
+            // Normalize device ID to lowercase for AAD to match macOS encryption
+            // macOS encrypts with entry.deviceId (already lowercase) as AAD
+            val normalizedDeviceId = deviceId.lowercase()
+            val aad = normalizedDeviceId.encodeToByteArray()
+            android.util.Log.d("SyncEngine", "🔓 AAD: deviceId=$normalizedDeviceId (${aad.size} bytes)")
 
             val decrypted = cryptoService.decrypt(
                 encrypted = com.hypo.clipboard.crypto.EncryptedData(

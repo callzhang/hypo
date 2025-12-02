@@ -26,7 +26,7 @@ class SyncCoordinator @Inject constructor(
     private val identity: DeviceIdentity,
     private val transportManager: com.hypo.clipboard.transport.TransportManager,
     private val deviceKeyStore: DeviceKeyStore,
-    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
+    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient
 ) {
     private var eventChannel: Channel<ClipboardEvent>? = null
     private var job: Job? = null
@@ -145,9 +145,10 @@ class SyncCoordinator @Inject constructor(
         eventChannel = channel
         job = scope.launch {
             for (event in channel) {
-                // Use source device info if available (from remote sync), otherwise use local device info
-                val deviceId = event.sourceDeviceId ?: identity.deviceId
-                val deviceName = event.sourceDeviceName ?: identity.deviceName
+                // Use device info if available (from remote sync), otherwise use local device info
+                // Normalize to lowercase for consistent matching
+                val deviceId = (event.deviceId ?: identity.deviceId).lowercase()
+                val deviceName = event.deviceName ?: identity.deviceName
                 
                 // Simplified duplicate detection (no time windows):
                 // 1. If new message matches the current clipboard (latest entry) → discard
@@ -229,21 +230,21 @@ class SyncCoordinator @Inject constructor(
                     }
                     
                     if (pairedDevices.isNotEmpty()) {
-                        Log.d(TAG, "📤 Broadcasting to ${pairedDevices.size} paired devices: $pairedDevices")
+                        val results = mutableListOf<String>()
                         pairedDevices.forEach { target ->
-                            Log.d(TAG, "📤 Syncing to device: $target")
                             try {
                                 val envelope = syncEngine.sendClipboard(item, target)
-                                Log.d(TAG, "✅ Successfully sent clipboard to $target, envelope type: ${envelope.type}")
+                                results.add("✅ $target")
                             } catch (error: TransportPayloadTooLargeException) {
-                                Log.w(TAG, "⚠️ Payload too large for $target, skipping sync: ${error.message}")
+                                results.add("⚠️ $target (too large)")
                                 // Don't crash - just skip this sync
                             } catch (error: Exception) {
-                                Log.e(TAG, "❌ Failed to sync to $target: ${error.message}", error)
+                                results.add("❌ $target (${error.message?.take(30)})")
                             }
                         }
+                        Log.d(TAG, "📤 Sync: ${pairedDevices.size} device(s) → ${results.joinToString(", ")}")
                     } else {
-                        Log.d(TAG, "⏭️  No paired devices to broadcast to (targets: ${_targets.value})")
+                        Log.d(TAG, "⏭️ Sync: No paired devices (targets: ${_targets.value})")
                     }
                 }
             }

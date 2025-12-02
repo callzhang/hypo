@@ -57,7 +57,7 @@ class ClipboardSyncService : Service() {
     @Inject lateinit var deviceIdentity: DeviceIdentity
     @Inject lateinit var repository: ClipboardRepository
     @Inject lateinit var incomingClipboardHandler: com.hypo.clipboard.sync.IncomingClipboardHandler
-    @Inject lateinit var lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
+    @Inject lateinit var lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient
     @Inject lateinit var relayWebSocketClient: com.hypo.clipboard.transport.ws.RelayWebSocketClient
     @Inject lateinit var clipboardAccessChecker: com.hypo.clipboard.sync.ClipboardAccessChecker
     @Inject lateinit var connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber
@@ -116,36 +116,26 @@ class ClipboardSyncService : Service() {
         
         // Set up pairing challenge handler for WebSocket server (incoming connections)
         transportManager.setPairingChallengeHandler { challengeJson ->
-            Log.d(TAG, "📱 Received pairing challenge, handling...")
-            Log.d(TAG, "   Challenge JSON length: ${challengeJson.length}")
-            Log.d(TAG, "   Challenge JSON preview: ${challengeJson.take(200)}")
             try {
                 // Load persistent LAN pairing private key
                 val prefs = getSharedPreferences("hypo_pairing_keys", Context.MODE_PRIVATE)
                 val privateKeyBase64 = prefs.getString("lan_agreement_private_key", null)
                 if (privateKeyBase64 == null) {
-                    Log.e(TAG, "❌ No LAN pairing private key found, cannot handle challenge")
-                    Log.e(TAG, "   Available keys in prefs: ${prefs.all.keys}")
+                    Log.e(TAG, "❌ Pairing: No LAN private key found (available keys: ${prefs.all.keys})")
                     return@setPairingChallengeHandler null
                 }
-                Log.d(TAG, "   Loaded private key (base64 length: ${privateKeyBase64.length})")
-                val privateKey = android.util.Base64.decode(privateKeyBase64, android.util.Base64.NO_WRAP)
-                Log.d(TAG, "   Decoded private key size: ${privateKey.size} bytes")
                 
-                // Handle challenge and generate ACK (this is a suspend function)
-                Log.d(TAG, "   Calling pairingHandshakeManager.handleChallenge...")
+                val privateKey = android.util.Base64.decode(privateKeyBase64, android.util.Base64.NO_WRAP)
                 val ackJson = pairingHandshakeManager.handleChallenge(challengeJson, privateKey)
+                
                 if (ackJson != null) {
-                    Log.d(TAG, "✅ Generated pairing ACK (${ackJson.length} chars), sending response")
-                    Log.d(TAG, "   ACK JSON preview: ${ackJson.take(200)}")
+                    Log.d(TAG, "✅ Pairing: Challenge handled → ACK generated (${ackJson.length} chars)")
                 } else {
-                    Log.e(TAG, "❌ Failed to generate pairing ACK")
+                    Log.e(TAG, "❌ Pairing: Failed to generate ACK from challenge")
                 }
                 ackJson
             } catch (e: Exception) {
-                Log.e(TAG, "❌ Error handling pairing challenge: ${e.message}", e)
-                Log.e(TAG, "   Exception type: ${e.javaClass.simpleName}")
-                e.printStackTrace()
+                Log.e(TAG, "❌ Pairing: Error handling challenge - ${e.javaClass.simpleName}: ${e.message}", e)
                 null
             }
         }
@@ -162,7 +152,7 @@ class ClipboardSyncService : Service() {
         }
         
         // Start receiving connections for both LAN and cloud
-        // NOTE: relayWebSocketClient creates its own LanWebSocketClient instance,
+        // NOTE: relayWebSocketClient creates its own WebSocketTransportClient instance,
         // so calling startReceiving() on both creates TWO separate connections.
         // Only call startReceiving() on relayWebSocketClient for cloud relay.
         // lanWebSocketClient.startReceiving() is for LAN connections only.
@@ -510,14 +500,54 @@ class ClipboardSyncService : Service() {
     
     private fun registerNetworkChangeCallback() {
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        
+        // Get the current active network BEFORE registering callback
+        // This prevents the initial onAvailable() calls from triggering false network changes
+        val currentNetwork = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            connectivityManager.activeNetwork
+        } else {
+            null
+        }
+        val currentNetworkId = currentNetwork?.hashCode()
+        
+        var lastNetworkChangeTime = 0L
+        var lastActiveNetworkId: Int? = currentNetworkId  // Initialize with current network
+        val networkChangeDebounceMs = 5000L // 5 seconds debounce (increased from 2s)
+        
+        android.util.Log.d(TAG, "🌐 Registering network callback - current network ID: $currentNetworkId")
+        
         networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: android.net.Network) {
                 super.onAvailable(network)
-                android.util.Log.d(TAG, "🌐 Network became available - restarting LAN services and reconnecting cloud")
+                val now = System.currentTimeMillis()
+                val networkId = network.hashCode()
+                
+                android.util.Log.d(TAG, "🌐 onAvailable() called for network ID: $networkId (current active: $currentNetworkId, lastActive: $lastActiveNetworkId)")
+                
+                // Check if this is actually a new network (different network ID)
+                if (lastActiveNetworkId == networkId) {
+                    android.util.Log.d(TAG, "🌐 Network available but same network ID ($networkId) - ignoring (initial callback)")
+                    return
+                }
+                
+                // If this is the initial callback for the current network, ignore it
+                if (currentNetworkId != null && networkId == currentNetworkId && lastActiveNetworkId == currentNetworkId) {
+                    android.util.Log.d(TAG, "🌐 Initial callback for current network ($networkId) - ignoring")
+                    return
+                }
+                
+                if (now - lastNetworkChangeTime < networkChangeDebounceMs) {
+                    android.util.Log.d(TAG, "🌐 Network change debounced (${now - lastNetworkChangeTime}ms since last)")
+                    return
+                }
+                lastNetworkChangeTime = now
+                lastActiveNetworkId = networkId
+                android.util.Log.d(TAG, "🌐 New network became available (ID: $networkId) - restarting LAN services and reconnecting cloud")
                 // Restart LAN services to update IP address in Bonjour/NSD and WebSocket server
                 transportManager.restartForNetworkChange()
-                // Reconnect cloud WebSocket to use new IP address
+                // Reconnect cloud WebSocket to use new IP address (debounced to avoid cancelling in-progress connections)
                 scope.launch {
+                    kotlinx.coroutines.delay(1000) // Wait 1 second to let any in-progress connection complete
                     relayWebSocketClient.reconnect()
                 }
                 connectionStatusProber.probeNow()
@@ -525,8 +555,14 @@ class ClipboardSyncService : Service() {
 
             override fun onLost(network: android.net.Network) {
                 super.onLost(network)
-                android.util.Log.d(TAG, "🌐 Network lost - triggering immediate probe")
-                connectionStatusProber.probeNow()
+                val networkId = network.hashCode()
+                if (lastActiveNetworkId == networkId) {
+                    lastActiveNetworkId = null
+                    android.util.Log.d(TAG, "🌐 Network lost (ID: $networkId) - triggering immediate probe")
+                    connectionStatusProber.probeNow()
+                } else {
+                    android.util.Log.d(TAG, "🌐 Network lost but not the active one (ID: $networkId) - ignoring")
+                }
             }
 
             override fun onCapabilitiesChanged(
@@ -534,14 +570,10 @@ class ClipboardSyncService : Service() {
                 networkCapabilities: android.net.NetworkCapabilities
             ) {
                 super.onCapabilitiesChanged(network, networkCapabilities)
-                android.util.Log.d(TAG, "🌐 Network capabilities changed - restarting LAN services and reconnecting cloud")
-                // Restart LAN services when network capabilities change (e.g., IP address change)
-                transportManager.restartForNetworkChange()
-                // Reconnect cloud WebSocket to use new IP address
-                scope.launch {
-                    relayWebSocketClient.reconnect()
-                }
-                connectionStatusProber.probeNow()
+                // Ignore capability changes - they fire too frequently for minor changes
+                // (signal strength, bandwidth, etc.) without actual network changes
+                // Only react to actual network availability changes (onAvailable/onLost)
+                android.util.Log.v(TAG, "🌐 Network capabilities changed (ID: ${network.hashCode()}) - ignoring (too frequent)")
             }
         }
         val request = android.net.NetworkRequest.Builder()

@@ -73,14 +73,14 @@ class SettingsViewModel @Inject constructor(
                 settingsRepository.settings,
                 transportManager.peers,  // Emits when peers are discovered/lost
                 transportManager.lastSuccessfulTransport,  // Emits when transport status changes
-                transportManager.cloudConnectionState,  // Emits when cloud connection state changes
+                transportManager.cloudConnectionState,  // Cloud-only connection state - tracks cloud state separately from LAN
                 accessibilityStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) }, // Emit immediately on start, then every 2 seconds
                 smsPermissionStatusFlow.onStart { emit(checkSmsPermissionStatus()) } // Emit immediately on start, then every 2 seconds
             ) { values ->
                 val settings = values[0] as UserSettings
                 val peers = values[1] as List<DiscoveredPeer>
                 val lastTransport = values[2] as Map<String, com.hypo.clipboard.transport.ActiveTransport>
-                val connectionState = values[3] as com.hypo.clipboard.transport.ConnectionState
+                val cloudConnectionState = values[3] as com.hypo.clipboard.transport.ConnectionState
                 val isAccessibilityEnabled = values[4] as Boolean
                 val isSmsPermissionGranted = values[5] as Boolean
                 // Load all paired devices directly from persistent storage
@@ -137,16 +137,15 @@ class SettingsViewModel @Inject constructor(
                             it.key.equals(deviceId, ignoreCase = true)
                         }?.value
                     
-                    val isServerConnected = connectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedCloud
-                    val isLanConnected = connectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedLan
+                    val isServerConnected = cloudConnectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedCloud
                     
                     // Determine status: prioritize discovery status since LAN connections are on-demand
                     val status = when {
                         // Device is discovered on LAN → Connected via LAN (regardless of global connection state)
                         // LAN connections are established on-demand, so discovery means the device is reachable
                         isDiscovered -> DeviceConnectionStatus.ConnectedLan
-                        // We have an active LAN connection AND device has LAN transport → Connected via LAN (even if not currently discovered)
-                        isLanConnected && transport == ActiveTransport.LAN -> DeviceConnectionStatus.ConnectedLan
+                        // Device has LAN transport → Connected via LAN (even if not currently discovered)
+                        transport == ActiveTransport.LAN -> DeviceConnectionStatus.ConnectedLan
                         // Device has CLOUD transport AND server is connected → Connected via Cloud
                         transport == ActiveTransport.CLOUD && isServerConnected -> DeviceConnectionStatus.ConnectedCloud
                         // Device has CLOUD transport but server is offline → Disconnected
@@ -191,7 +190,7 @@ class SettingsViewModel @Inject constructor(
                     deviceTransports = peerTransports,
                     isAccessibilityServiceEnabled = isAccessibilityEnabled,
                     isSmsPermissionGranted = isSmsPermissionGranted,
-                    connectionState = connectionState,
+                    connectionState = cloudConnectionState,
                     peerDiscoveryStatus = peerDiscoveryStatus,
                     peerDeviceNames = peerDeviceNames
                 )

@@ -50,6 +50,17 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    // Notification permission request launcher (Android 13+)
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            android.util.Log.d("MainActivity", "✅ Notification permission granted")
+        } else {
+            android.util.Log.w("MainActivity", "⚠️ Notification permission denied - persistent notification will not be shown")
+        }
+    }
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -59,6 +70,18 @@ class MainActivity : ComponentActivity() {
                 != PackageManager.PERMISSION_GRANTED) {
                 // Request permission
                 smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
+            }
+        }
+        
+        // Request notification permission if not granted (Android 13+)
+        // This is required for foreground service notifications to be shown
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) 
+                != PackageManager.PERMISSION_GRANTED) {
+                android.util.Log.d("MainActivity", "📱 Requesting notification permission...")
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                android.util.Log.d("MainActivity", "✅ Notification permission already granted")
             }
         }
         
@@ -118,6 +141,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenBatterySettings = ::openBatterySettings,
                                 onOpenAccessibilitySettings = ::openAccessibilitySettings,
                                 onRequestSmsPermission = ::requestSmsPermission,
+                                onRequestNotificationPermission = ::requestNotificationPermission,
                                 onStartPairing = { navController.navigate("pairing") }
                             )
                         }
@@ -176,6 +200,19 @@ class MainActivity : ComponentActivity() {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) 
                 != PackageManager.PERMISSION_GRANTED) {
                 smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
+            }
+        }
+    }
+    
+    private fun requestNotificationPermission() {
+        // Notification permission is only required on Android 13+ (API 33+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) 
+                != PackageManager.PERMISSION_GRANTED) {
+                android.util.Log.d("MainActivity", "📱 Requesting notification permission from settings...")
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                android.util.Log.d("MainActivity", "✅ Notification permission already granted")
             }
         }
     }

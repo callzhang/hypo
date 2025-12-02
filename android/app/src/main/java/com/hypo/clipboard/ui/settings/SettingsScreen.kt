@@ -54,6 +54,7 @@ fun SettingsRoute(
     onOpenBatterySettings: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onRequestSmsPermission: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
     onStartPairing: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -66,6 +67,7 @@ fun SettingsRoute(
         onOpenBatterySettings = onOpenBatterySettings,
         onOpenAccessibilitySettings = onOpenAccessibilitySettings,
         onRequestSmsPermission = onRequestSmsPermission,
+        onRequestNotificationPermission = onRequestNotificationPermission,
         onStartPairing = onStartPairing,
         onRemoveDevice = viewModel::removeDevice
     )
@@ -81,6 +83,7 @@ fun SettingsScreen(
     onOpenBatterySettings: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onRequestSmsPermission: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit,
     modifier: Modifier = Modifier
@@ -132,6 +135,13 @@ fun SettingsScreen(
                 SmsPermissionSection(
                     isGranted = state.isSmsPermissionGranted,
                     onRequestSmsPermission = onRequestSmsPermission
+                )
+            }
+
+            item {
+                NotificationPermissionSection(
+                    isGranted = state.isNotificationPermissionGranted,
+                    onRequestNotificationPermission = onRequestNotificationPermission
                 )
             }
 
@@ -447,6 +457,68 @@ private fun SmsPermissionSection(
             if (!isGranted) {
                 Text(
                     text = stringResource(id = R.string.settings_sms_permission_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotificationPermissionSection(
+    isGranted: Boolean,
+    onRequestNotificationPermission: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(imageVector = Icons.Filled.Message, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(id = R.string.settings_notification_permission),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                text = stringResource(id = R.string.settings_notification_permission_description),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isGranted) {
+                        stringResource(id = R.string.settings_notification_permission_status_granted)
+                    } else {
+                        stringResource(id = R.string.settings_notification_permission_status_denied)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isGranted) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+                if (!isGranted) {
+                    Button(onClick = onRequestNotificationPermission) {
+                        Text(text = stringResource(id = R.string.settings_notification_permission_request_button))
+                    }
+                }
+            }
+            if (!isGranted) {
+                Text(
+                    text = stringResource(id = R.string.settings_notification_permission_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

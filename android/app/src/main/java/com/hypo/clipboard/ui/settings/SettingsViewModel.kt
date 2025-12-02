@@ -58,6 +58,14 @@ class SettingsViewModel @Inject constructor(
             emit(checkSmsPermissionStatus())
         }
     }
+    
+    // Flow that emits notification permission status periodically (needed for UI updates)
+    private val notificationPermissionStatusFlow = flow {
+        while (true) {
+            delay(2_000L) // Check every 2 seconds
+            emit(checkNotificationPermissionStatus())
+        }
+    }
 
     init {
         observeState()
@@ -75,7 +83,8 @@ class SettingsViewModel @Inject constructor(
                 transportManager.lastSuccessfulTransport,  // Emits when transport status changes
                 transportManager.cloudConnectionState,  // Cloud-only connection state - tracks cloud state separately from LAN
                 accessibilityStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) }, // Emit immediately on start, then every 2 seconds
-                smsPermissionStatusFlow.onStart { emit(checkSmsPermissionStatus()) } // Emit immediately on start, then every 2 seconds
+                smsPermissionStatusFlow.onStart { emit(checkSmsPermissionStatus()) }, // Emit immediately on start, then every 2 seconds
+                notificationPermissionStatusFlow.onStart { emit(checkNotificationPermissionStatus()) } // Emit immediately on start, then every 2 seconds
             ) { values ->
                 val settings = values[0] as UserSettings
                 val peers = values[1] as List<DiscoveredPeer>
@@ -83,6 +92,7 @@ class SettingsViewModel @Inject constructor(
                 val cloudConnectionState = values[3] as com.hypo.clipboard.transport.ConnectionState
                 val isAccessibilityEnabled = values[4] as Boolean
                 val isSmsPermissionGranted = values[5] as Boolean
+                val isNotificationPermissionGranted = values[6] as Boolean
                 // Load all paired devices directly from persistent storage
                 val allPairedDeviceIds = runCatching { 
                     deviceKeyStore.getAllDeviceIds() 
@@ -187,9 +197,11 @@ class SettingsViewModel @Inject constructor(
                     plainTextModeEnabled = settings.plainTextModeEnabled,
                     discoveredPeers = pairedPeersForUi,
                     deviceStatuses = peerStatuses,
+                    isNotificationPermissionGranted = isNotificationPermissionGranted,
                     deviceTransports = peerTransports,
                     isAccessibilityServiceEnabled = isAccessibilityEnabled,
                     isSmsPermissionGranted = isSmsPermissionGranted,
+                    isNotificationPermissionGranted = isNotificationPermissionGranted,
                     connectionState = cloudConnectionState,
                     peerDiscoveryStatus = peerDiscoveryStatus,
                     peerDeviceNames = peerDeviceNames
@@ -285,6 +297,7 @@ data class SettingsUiState(
         val deviceTransports: Map<String, ActiveTransport?> = emptyMap(),
         val isAccessibilityServiceEnabled: Boolean = false,
         val isSmsPermissionGranted: Boolean = false,
+        val isNotificationPermissionGranted: Boolean = false,
         val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Disconnected,
         val peerDiscoveryStatus: Map<String, Boolean> = emptyMap(), // Maps serviceName to isDiscovered
         val peerDeviceNames: Map<String, String?> = emptyMap() // Maps serviceName to device name

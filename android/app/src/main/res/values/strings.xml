@@ -61,6 +61,13 @@
     <string name="settings_sms_permission_status_denied">Not Granted</string>
     <string name="settings_sms_permission_request_button">Grant Permission</string>
     <string name="settings_sms_permission_note">Note: On Android 10+, SMS access may be restricted. Manual copy still works.</string>
+    
+    <string name="settings_notification_permission">Notifications</string>
+    <string name="settings_notification_permission_description">Required for persistent notification showing latest clipboard item</string>
+    <string name="settings_notification_permission_status_granted">Granted</string>
+    <string name="settings_notification_permission_status_denied">Not Granted</string>
+    <string name="settings_notification_permission_request_button">Grant Permission</string>
+    <string name="settings_notification_permission_note">Note: Without notification permission, the persistent notification showing the latest clipboard item will not be displayed.</string>
     <string name="settings_history_limit_value">Storing up to %1$d items</string>
     <string name="settings_auto_delete_value">Auto delete after %1$d days</string>
     <string name="settings_auto_delete_never">Never delete automatically</string>

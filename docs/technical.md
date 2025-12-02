@@ -1,6 +1,6 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 0.3.4  
+Version: 0.3.5  
 Date: December 2, 2025  
 Status: Production Beta
 
@@ -230,6 +230,12 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 3. User taps discovered device to initiate pairing
 4. Automatic ECDH key exchange via WebSocket challenge-response
 5. Keys stored securely, pairing complete in < 3 seconds
+
+**Implementation Details** (December 2025):
+- **Connection Management**: Pairing creates a dedicated `WebSocketTransportClient` with `config.url` set to the peer's WebSocket URL (e.g., `ws://10.0.0.146:7010`)
+- **URL Resolution**: `runConnectionLoop()` allows `config.url` as fallback when `lastKnownUrl` is null, enabling pairing connections to establish without waiting for discovery events
+- **Timeout Handling**: `sendRawJson()` properly captures `connectionSignal` atomically to avoid race conditions where the signal might be reassigned during connection establishment
+- **Connection Signal**: Uses mutex-protected capture of `connectionSignal` to ensure pairing challenges wait on the correct signal instance
 
 #### 2. QR Code Pairing (LAN) ✅ Implemented
 **Device-Agnostic**: Any device can initiate pairing (generate QR) and any device can respond (scan QR). Roles are initiator/responder, not platform-specific.

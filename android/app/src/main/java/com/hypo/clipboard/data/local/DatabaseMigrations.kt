@@ -13,12 +13,12 @@ object DatabaseMigrations {
      * - Adds `transport_origin` column (String, nullable)
      */
     val MIGRATION_2_3 = object : Migration(2, 3) {
-        override fun migrate(database: SupportSQLiteDatabase) {
+        override fun migrate(db: SupportSQLiteDatabase) {
             // Add is_encrypted column with default value false
-            database.execSQL("ALTER TABLE clipboard_items ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE clipboard_items ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 0")
             
             // Add transport_origin column (nullable)
-            database.execSQL("ALTER TABLE clipboard_items ADD COLUMN transport_origin TEXT")
+            db.execSQL("ALTER TABLE clipboard_items ADD COLUMN transport_origin TEXT")
         }
     }
 }

@@ -501,9 +501,8 @@ class WebSocketTransportClient @Inject constructor(
                             android.util.Log.d("WebSocketTransportClient", "🔌 runConnectionLoop() exited normally")
                         } catch (e: Exception) {
                             android.util.Log.e("WebSocketTransportClient", "❌ Error in connection loop: ${e.message}", e)
-                            // Increment failure count for exponential backoff (both cloud and LAN)
-                            consecutiveFailures++
-                            android.util.Log.w("WebSocketTransportClient", "📈 Consecutive failures: $consecutiveFailures (cloud=$isCloudConnection)")
+                            // Don't increment failure count here - onFailure callback already handles it
+                            // This prevents double-counting failures
                             // Event-driven: onClosed/onFailure will trigger ensureConnection() automatically
                         } finally {
                             val current = coroutineContext[Job]
@@ -518,8 +517,8 @@ class WebSocketTransportClient @Inject constructor(
                     }
                     connectionJob = job
                     android.util.Log.d("WebSocketTransportClient", "🔌 Starting long-lived connection for receiving messages (event-driven, no polling)")
-                    // Reset reconnecting flag after successfully starting connection job
-                    isReconnecting = false
+                    // Keep isReconnecting = true until connection job completes (in finally block)
+                    // This prevents duplicate ensureConnection() calls while connection is in progress
                 } else {
                     android.util.Log.d("WebSocketTransportClient", "⏸️ ensureConnection() skipped - connection job already active (isCloud=$isCloudConnection)")
                     // Reset reconnecting flag since we're not starting a new connection
@@ -876,12 +875,6 @@ class WebSocketTransportClient @Inject constructor(
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    // Use outer scope variables to avoid shadowing
-                    val connUrl = if (isCloudConnection) {
-                        config.url ?: "unknown"
-                    } else {
-                        lastKnownUrl ?: "unknown"
-                    }
                     touch()
                     // Message received - decode and handle below
                     
@@ -1089,7 +1082,8 @@ class WebSocketTransportClient @Inject constructor(
                             "event-driven reconnection will be triggered")
                         
                         // Event-driven: immediately trigger reconnection for cloud connections
-                        if (isCloudConnection && !sendQueue.isClosedForReceive) {
+                        // Only trigger if not already reconnecting (prevents duplicate calls)
+                        if (isCloudConnection && !sendQueue.isClosedForReceive && !isReconnecting) {
                             scope.launch {
                                 // Cancel connection job to ensure runConnectionLoop() exits quickly
                                 // This allows ensureConnection() to start a new connection attempt
@@ -1100,11 +1094,13 @@ class WebSocketTransportClient @Inject constructor(
                                         connectionJob = null
                                     }
                                 }
-                                // Small delay to ensure cleanup completes
-                                delay(100)
+                                // Small delay to ensure cleanup completes and connection job's finally block runs
+                                delay(200)
                                 android.util.Log.d("WebSocketTransportClient", "🔄 Event-driven: triggering ensureConnection() after onFailure (RST)")
                                 ensureConnection()
                             }
+                        } else if (isCloudConnection && isReconnecting) {
+                            android.util.Log.d("WebSocketTransportClient", "⏸️ Skipping ensureConnection() after onFailure (RST) - already reconnecting")
                         }
                         
                         // Return early - don't execute the rest of onFailure logic
@@ -1149,7 +1145,8 @@ class WebSocketTransportClient @Inject constructor(
                     }
                     
                     // Event-driven: immediately trigger reconnection for cloud connections
-                    if (isCloudConnection && !sendQueue.isClosedForReceive) {
+                    // Only trigger if not already reconnecting (prevents duplicate calls)
+                    if (isCloudConnection && !sendQueue.isClosedForReceive && !isReconnecting) {
                         scope.launch {
                             // Cancel connection job to ensure runConnectionLoop() exits quickly
                             // This allows ensureConnection() to start a new connection attempt
@@ -1160,11 +1157,13 @@ class WebSocketTransportClient @Inject constructor(
                                     connectionJob = null
                                 }
                             }
-                            // Small delay to ensure cleanup completes
-                            delay(100)
+                            // Small delay to ensure cleanup completes and connection job's finally block runs
+                            delay(200)
                             android.util.Log.d("WebSocketTransportClient", "🔄 Event-driven: triggering ensureConnection() after onFailure")
                             ensureConnection()
                         }
+                    } else if (isCloudConnection && isReconnecting) {
+                        android.util.Log.d("WebSocketTransportClient", "⏸️ Skipping ensureConnection() after onFailure - already reconnecting")
                     }
                     
                     // Re-throw to propagate error
@@ -1462,7 +1461,7 @@ class WebSocketTransportClient @Inject constructor(
                             } else {
                                 android.util.Log.w("WebSocketTransportClient", "⚠️ Cloud ping send failed, closing socket to trigger retry")
                                 try {
-                                    socket?.close(1006, "Ping failed")
+                                    socket.close(1006, "Ping failed")
                                 } catch (e: Exception) {
                                     android.util.Log.w("WebSocketTransportClient", "⚠️ Error closing socket after ping failure: ${e.message}")
                                 }
@@ -1470,7 +1469,7 @@ class WebSocketTransportClient @Inject constructor(
                         } catch (e: Exception) {
                             android.util.Log.w("WebSocketTransportClient", "⚠️ Cloud ping exception: ${e.message}, closing socket to trigger retry")
                             try {
-                                socket?.close(1006, "Ping failed")
+                                socket.close(1006, "Ping failed")
                             } catch (closeException: Exception) {
                                 android.util.Log.w("WebSocketTransportClient", "⚠️ Error closing socket after ping exception: ${closeException.message}")
                             }

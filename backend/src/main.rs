@@ -7,6 +7,7 @@ use hypo_relay::{
             claim_pairing_code, create_pairing_code, poll_ack, poll_challenge, submit_ack,
             submit_challenge,
         },
+        status::status_handler,
         websocket::websocket_handler,
     },
     services::{
@@ -47,9 +48,21 @@ async fn main() -> std::io::Result<()> {
         error!("Failed to initialize metrics: {}", e);
     }
 
-    let redis_client = RedisClient::new(&redis_url)
-        .await
-        .expect("Failed to connect to Redis");
+    let redis_client = match RedisClient::new(&redis_url).await {
+        Ok(client) => {
+            info!("Successfully connected to Redis at {}", redis_url);
+            client
+        }
+        Err(e) => {
+            error!("Failed to connect to Redis at {}: {:?}", redis_url, e);
+            error!("Server will continue without Redis (sessions will be in-memory only)");
+            // For now, we'll still require Redis, but log the error clearly
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                format!("Redis connection failed: {:?}", e)
+            ));
+        }
+    };
 
     let app_state = AppState {
         redis: redis_client,
@@ -66,6 +79,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Logger::default())
             .route("/ws", web::get().to(websocket_handler))
             .route("/health", web::get().to(health_check))
+            .route("/status", web::get().to(status_handler))
             .route("/metrics", web::get().to(metrics_handler))
             .service(
                 web::scope("/pairing")

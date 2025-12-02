@@ -35,14 +35,14 @@ import okio.ByteString
 import okio.ByteString.Companion.of
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class LanWebSocketClientTest {
+class WebSocketTransportClientTest {
     @Test
     fun `send enqueues framed payload`() = runTest {
         val dispatcher = UnconfinedTestDispatcher(testScheduler)
         val scope = TestScope(dispatcher)
         val connector = FakeConnector()
         val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null)
-        val client = LanWebSocketClient(config, connector, TransportFrameCodec(), scope, FakeClock(Instant.now()))
+        val client = WebSocketTransportClient(config, connector, TransportFrameCodec(), scope, FakeClock(Instant.now()))
 
         val result = runCatching {
             val envelope = sampleEnvelope()
@@ -81,7 +81,7 @@ class LanWebSocketClientTest {
         val metrics = RecordingMetricsRecorder()
         val codec = TransportFrameCodec()
         val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null)
-        val client = LanWebSocketClient(config, connector, codec, scope, clock, metrics)
+        val client = WebSocketTransportClient(config, connector, TransportFrameCodec(), scope, clock, metrics)
 
         val result = runCatching {
             val envelope = sampleEnvelope()
@@ -121,7 +121,7 @@ class LanWebSocketClientTest {
             fingerprintSha256 = null,
             idleTimeoutMillis = 10
         )
-        val client = LanWebSocketClient(config, connector, TransportFrameCodec(), scope, clock)
+        val client = WebSocketTransportClient(config, connector, TransportFrameCodec(), scope, clock)
 
         val firstEnvelope = sampleEnvelope()
         val firstJob = scope.launch { client.send(firstEnvelope) }
@@ -172,7 +172,7 @@ class LanWebSocketClientTest {
             fingerprintSha256 = "abcd",
             environment = "cloud"
         )
-        val client = LanWebSocketClient(
+        val client = WebSocketTransportClient(
             config,
             connector,
             TransportFrameCodec(),
@@ -207,7 +207,7 @@ class LanWebSocketClientTest {
         val connector = FakeConnector()
         val clock = FakeClock(Instant.parse("2025-10-07T00:00:00Z"))
         val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null)
-        val client = LanWebSocketClient(config, connector, TransportFrameCodec(), scope, clock)
+        val client = WebSocketTransportClient(config, connector, TransportFrameCodec(), scope, clock)
 
         val firstEnvelope = sampleEnvelope()
         val firstJob = scope.launch { client.send(firstEnvelope) }
@@ -230,10 +230,10 @@ class LanWebSocketClientTest {
         runCurrent()
         secondJob.join()
 
-        val webSocketField = LanWebSocketClient::class.java.getDeclaredField("webSocket").apply {
+        val webSocketField = WebSocketTransportClient::class.java.getDeclaredField("webSocket").apply {
             isAccessible = true
         }
-        val shutdownMethod = LanWebSocketClient::class.java.getDeclaredMethod(
+        val shutdownMethod = WebSocketTransportClient::class.java.getDeclaredMethod(
             "shutdownSocket",
             WebSocket::class.java
         ).apply {

@@ -212,7 +212,10 @@ private fun ClipboardCard(
     val formatter = DateTimeFormatter.ofPattern("MMM d, HH:mm")
     val isLocal = item.deviceId.lowercase() == currentDeviceId.lowercase()
     val scope = rememberCoroutineScope()
-    var isCopying by remember { mutableStateOf(false) }
+    // Use Job to track active copy operation - more reliable than boolean flag
+    // Job state is atomic and prevents race conditions
+    var copyJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val isCopying = copyJob?.isActive == true
     
     // Determine origin display name: "Local" for this device, device name for paired devices
     val originName = when {
@@ -231,7 +234,12 @@ private fun ClipboardCard(
     val itemId = remember(item.id) { item.id }  // Capture item ID to verify we're copying the right item
     
     fun copyToClipboard() {
-        if (isCopying) return  // Prevent multiple rapid clicks
+        // Prevent multiple rapid clicks by checking if job is already active
+        // Job state is atomic, so this check is thread-safe
+        if (copyJob?.isActive == true) {
+            android.util.Log.d("HistoryScreen", "⏸️ Copy already in progress, ignoring click")
+            return
+        }
         
         val manager = clipboardManager ?: return
         // Use the remembered content, which is keyed by item.id
@@ -241,10 +249,12 @@ private fun ClipboardCard(
             return
         }
         
-        isCopying = true
-        // Perform clipboard operation - setPrimaryClip must be on main thread
-        // But we can make it non-blocking by using a coroutine
-        scope.launch(Dispatchers.Main) {
+        // Cancel any existing job (shouldn't happen due to check above, but defensive)
+        copyJob?.cancel()
+        
+        // Launch new job and store it immediately - this makes isCopying true synchronously
+        // The job is stored before it starts executing, preventing race conditions
+        copyJob = scope.launch(Dispatchers.Main) {
             try {
                 val clip = ClipData.newPlainText("Hypo Clipboard", content)
                 manager.setPrimaryClip(clip)
@@ -262,7 +272,9 @@ private fun ClipboardCard(
             } catch (e: Exception) {
                 android.util.Log.e("HistoryScreen", "❌ Failed to copy to clipboard: ${e.message}", e)
             } finally {
-                isCopying = false
+                // Clear the job reference when done - this makes isCopying false
+                // Since we're on Main dispatcher, this update happens synchronously with UI
+                copyJob = null
             }
         }
     }

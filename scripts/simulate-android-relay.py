@@ -1,230 +1,143 @@
 #!/usr/bin/env python3
 """
-Simulate Android clipboard copy signal to macOS via cloud relay server.
+Simulate Android clipboard sync via cloud relay.
 
-This script connects to the cloud relay WebSocket server and sends a clipboard
-sync message in the format expected by the relay (JSON text, not frame-encoded).
+This script is a wrapper around clipboard_sender.send_via_cloud_relay() for command-line use.
+It mimics the paired Android device sending clipboard data via the cloud relay.
 
 Usage:
-    python3 scripts/simulate-android-relay.py [--text TEXT] [--target TARGET_DEVICE_ID]
+    python3 scripts/simulate-android-relay.py [--text TEXT] [--target-device-id ID] [--encrypted] [--key KEY]
     
 Example:
-    python3 scripts/simulate-android-relay.py --text "Hello via relay!" --target macos-007E4A95-0E1A-4B10-91FA-87942EFAA68E
+    python3 scripts/simulate-android-relay.py --text "Hello from relay!"
+    python3 scripts/simulate-android-relay.py --text "Encrypted" --encrypted --key <hex_key>
 """
 
 import argparse
-import base64
-import json
-import struct
-import time
-import uuid
-from datetime import datetime
 import sys
+import os
 
-try:
-    import websocket
-    from websocket import create_connection, WebSocketException
-except ImportError:
-    print("❌ Error: websocket-client library not installed")
-    print("   Install it with: pip3 install websocket-client")
-    sys.exit(1)
+# Add scripts directory to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Cloud relay URL
-RELAY_URL = "wss://hypo.fly.dev/ws"
-
-def create_sync_envelope(text: str, device_id: str = None, device_name: str = None, target: str = None):
-    """Create a SyncEnvelope in the same format as Android."""
-    if device_id is None:
-        device_id = f"android-{uuid.uuid4()}"
-    if device_name is None:
-        device_name = "Test Android Device"
-    
-    # Create plaintext payload (for testing, we'll use plaintext mode)
-    plaintext = json.dumps({
-        "content_type": "text",
-        "data_base64": base64.b64encode(text.encode('utf-8')).decode('utf-8'),
-        "metadata": {}
-    }).encode('utf-8')
-    
-    # For testing, use plaintext mode (empty nonce/tag)
-    ciphertext_base64 = base64.b64encode(plaintext).decode('utf-8')
-    
-    envelope = {
-        "id": str(uuid.uuid4()),
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "version": "1.0",
-        "type": "clipboard",
-        "payload": {
-            "content_type": "text",
-            "ciphertext": ciphertext_base64,
-            "device_id": device_id,
-            "device_name": device_name,
-            "target": target,
-            "encryption": {
-                "algorithm": "AES-256-GCM",
-                "nonce": "",  # Plaintext mode
-                "tag": ""     # Plaintext mode
-            }
-        }
-    }
-    
-    return envelope
-
-def send_via_relay(text: str, device_id: str = None, device_name: str = None, target: str = None):
-    """Connect to cloud relay and send clipboard sync message."""
-    print(f"🔌 Connecting to cloud relay: {RELAY_URL}...")
-    
-    try:
-        # Create WebSocket connection
-        # Note: websocket-client doesn't support custom headers in create_connection
-        # The relay requires X-Device-Id and X-Device-Platform headers
-        # We'll need to use a workaround or different library
-        # For testing, let's try connecting and see what happens
-        
-        # Generate device ID if not provided
-        if device_id is None:
-            device_id = f"android-{uuid.uuid4()}"
-        
-        print(f"   Device ID: {device_id}")
-        print(f"   Platform: android")
-        
-        # Create WebSocket connection with required headers
-        headers = [
-            f"X-Device-Id: {device_id}",
-            "X-Device-Platform: android",
-            "X-Hypo-Client: 0.2.0",
-            "X-Hypo-Environment: production"
-        ]
-        
-        # Create connection with timeout
-        ws = create_connection(RELAY_URL, timeout=10, header=headers)
-        print(f"✅ Connected to cloud relay")
-        
-        # Set socket timeout for receive operations
-        ws.settimeout(10)  # 10 second timeout for all operations
-        
-        # Create sync envelope
-        envelope = create_sync_envelope(text, device_id, device_name, target)
-        print(f"📦 Created sync envelope: id={envelope['id'][:8]}...")
-        print(f"   Target: {target or '(broadcast)'}")
-        
-        # Convert envelope to JSON string
-        json_str = json.dumps(envelope, separators=(',', ':'))
-        json_bytes = json_str.encode('utf-8')
-        
-        # Encode as binary frame (4-byte big-endian length + JSON payload)
-        length_prefix = struct.pack('>I', len(json_bytes))
-        frame = length_prefix + json_bytes
-        
-        print(f"📤 Sending binary frame: {len(frame)} bytes (JSON: {len(json_bytes)} bytes)")
-        
-        # Send as BINARY message (Android/macOS use binary frames)
-        ws.send(frame, opcode=websocket.ABNF.OPCODE_BINARY)
-        print(f"✅ Sent clipboard sync message via relay")
-        print(f"   Text: {text}")
-        print(f"   Device: {envelope['payload']['device_name']} ({envelope['payload']['device_id'][:20]}...)")
-        
-        # Wait for reply with timeout
-        print(f"\n📥 Waiting for reply from relay (10s timeout)...")
-        try:
-            ws.settimeout(10)  # 10 second timeout
-            reply = ws.recv()
-            
-            if isinstance(reply, bytes):
-                print(f"📥 Received binary reply: {len(reply)} bytes")
-                try:
-                    # Decode binary frame (4-byte length + JSON)
-                    if len(reply) >= 4:
-                        length = struct.unpack('>I', reply[:4])[0]
-                        if len(reply) >= 4 + length:
-                            json_bytes = reply[4:4+length]
-                            json_str = json_bytes.decode('utf-8')
-                            reply_envelope = json.loads(json_str)
-                            print(f"✅ Decoded reply envelope: type={reply_envelope.get('type')}")
-                            payload = reply_envelope.get('payload', {})
-                            print(f"   From: {payload.get('device_name', 'Unknown')}")
-                            print(f"   Content type: {payload.get('content_type', 'Unknown')}")
-                        else:
-                            print(f"⚠️ Frame truncated: expected {4+length} bytes, got {len(reply)}")
-                    else:
-                        print(f"⚠️ Frame too short: {len(reply)} bytes")
-                except Exception as e:
-                    print(f"⚠️ Failed to decode reply: {e}")
-                    import traceback
-                    traceback.print_exc()
-            elif isinstance(reply, str):
-                print(f"📥 Received text reply: {len(reply)} bytes")
-                try:
-                    reply_envelope = json.loads(reply)
-                    print(f"✅ Decoded reply envelope: type={reply_envelope.get('type')}")
-                except json.JSONDecodeError as e:
-                    print(f"⚠️ Failed to parse reply as JSON: {e}")
-            else:
-                print(f"📥 Received unknown reply type: {type(reply)}")
-        except Exception as e:
-            print(f"⚠️ No reply received: {e}")
-        
-        # Close connection
-        ws.close()
-        print(f"🔌 Connection closed")
-        
-        return True
-        
-    except WebSocketException as e:
-        print(f"❌ WebSocket error: {e}")
-        return False
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+from clipboard_sender import (
+    create_text_payload,
+    create_image_payload,
+    create_link_payload,
+    send_via_cloud_relay,
+    get_device_config,
+    DEFAULT_ANDROID_DEVICE_ID,
+    DEFAULT_ANDROID_DEVICE_NAME
+)
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Simulate Android clipboard copy signal via cloud relay to macOS"
+        description="Simulate Android clipboard sync via cloud relay"
     )
     parser.add_argument(
         "--text",
-        default="Test clipboard from relay script",
-        help="Text to send in clipboard sync (default: 'Test clipboard from relay script')"
+        default="Test clipboard from script",
+        help="Text to send in clipboard sync (default: 'Test clipboard from script')"
     )
     parser.add_argument(
         "--device-id",
-        help="Device ID to use (default: auto-generated android-UUID)"
+        default=None,
+        help="Device ID to use (default: auto-generated or from clipboard_sender defaults)"
     )
     parser.add_argument(
         "--device-name",
-        default="Test Android Device",
-        help="Device name to use (default: 'Test Android Device')"
+        default="[SIM] Test Device",
+        help="Device name to use (default: '[SIM] Test Device')"
     )
     parser.add_argument(
-        "--target",
-        help="Target device ID (required for relay routing - use macOS device ID)"
+        "--target-device-id",
+        default=None,
+        help="Target device ID for routing (optional)"
+    )
+    parser.add_argument(
+        "--session-device-id",
+        default=None,
+        help="Device ID for WebSocket session (default: same as --device-id)"
+    )
+    parser.add_argument(
+        "--encrypted",
+        action="store_true",
+        help="Encrypt the message (requires --key or --encryption-device-id)"
+    )
+    parser.add_argument(
+        "--key",
+        default=None,
+        help="Encryption key as hex string (32 bytes = 64 hex chars)"
+    )
+    parser.add_argument(
+        "--encryption-device-id",
+        default=None,
+        help="Device ID to use for encryption key lookup (default: --device-id)"
+    )
+    parser.add_argument(
+        "--relay-url",
+        default="wss://hypo.fly.dev/ws",
+        help="Cloud relay WebSocket URL (default: wss://hypo.fly.dev/ws)"
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress output (for batch operations)"
     )
     
     args = parser.parse_args()
     
-    if not args.target:
-        print("⚠️  Warning: No target device ID specified")
-        print("   The relay routes messages based on the 'target' field in the payload")
-        print("   Without a target, the message will be broadcast to all connected devices")
-        print("   Use --target <macos-device-id> to send to a specific device")
-        print()
+    # Determine device IDs
+    device_id = args.device_id or DEFAULT_ANDROID_DEVICE_ID
+    device_name = args.device_name or DEFAULT_ANDROID_DEVICE_NAME
+    session_device_id = args.session_device_id or device_id
+    encryption_device_id = args.encryption_device_id or device_id
     
-    print("🚀 Simulating Android clipboard copy via cloud relay")
-    print(f"   Relay: {RELAY_URL}")
-    print(f"   Text: {args.text}")
-    print(f"   Target: {args.target or '(broadcast)'}")
-    print()
+    # Create text payload
+    payload = create_text_payload(args.text)
     
-    success = send_via_relay(
-        text=args.text,
-        device_id=args.device_id,
-        device_name=args.device_name,
-        target=args.target
+    # Handle encryption
+    key_bytes = None
+    if args.encrypted:
+        if args.key:
+            try:
+                key_bytes = bytes.fromhex(args.key)
+                if len(key_bytes) != 32:
+                    print(f"❌ Error: Key must be 32 bytes (64 hex chars), got {len(key_bytes)} bytes")
+                    sys.exit(1)
+            except ValueError as e:
+                print(f"❌ Error: Invalid hex key: {e}")
+                sys.exit(1)
+        else:
+            # Try to load from keychain (macOS only)
+            from clipboard_sender import load_key_from_keychain
+            key_bytes = load_key_from_keychain(encryption_device_id)
+            if not key_bytes:
+                print(f"❌ Error: Encryption requested but no key provided and key not found in keychain for device: {encryption_device_id}")
+                print("   Use --key <hex_key> or ensure device is paired")
+                sys.exit(1)
+    
+    # Send via cloud relay
+    success = send_via_cloud_relay(
+        payload=payload,
+        sender_device_id=encryption_device_id,  # Use encryption_device_id for key lookup
+        sender_device_name=device_name,
+        target_device_id=args.target_device_id,
+        encrypted=args.encrypted,
+        key=key_bytes,
+        relay_url=args.relay_url,
+        session_device_id=session_device_id,  # Use session_device_id for WebSocket headers
+        quiet=args.quiet
     )
     
-    sys.exit(0 if success else 1)
+    if success:
+        if not args.quiet:
+            print("✅ Clipboard sync message sent successfully")
+        sys.exit(0)
+    else:
+        if not args.quiet:
+            print("❌ Failed to send clipboard sync message")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

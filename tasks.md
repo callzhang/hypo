@@ -1,7 +1,7 @@
 # Hypo Development Tasks
 
-Version: 0.1.0
-Last Updated: October 11, 2025
+Version: 0.1.1
+Last Updated: December 1, 2025
 
 ---
 
@@ -240,7 +240,7 @@ Last Updated: October 11, 2025
 - [x] Android: Parse QR data, extract public key
 - [x] Implement ECDH key exchange
 - [x] Challenge-response authentication
-- [x] Store shared key in Keychain/EncryptedSharedPreferences
+- [x] Store shared key in encrypted storage (macOS: file-based, Android: EncryptedSharedPreferences)
 - [x] UI feedback for pairing success/failure
 - [x] macOS: Unit tests for pairing failure paths (expired QR, stale challenge, tampering)
 
@@ -292,7 +292,7 @@ Last Updated: October 11, 2025
 
 ---
 
-## Sprint 8: Polish & Deployment (Weeks 15-16) ✅ 90% Complete
+## Sprint 8: Polish & Deployment (Weeks 15-16) ✅ 95% Complete
 
 ### Phase 8.1: Bug Fixes ✅ Critical Issues Resolved
 - [x] Address all P0/P1 bugs from testing *(see `docs/sprint8_bug_report.md` for comprehensive analysis)*
@@ -321,11 +321,12 @@ Last Updated: October 11, 2025
 - [x] API documentation *(protocol spec - see `docs/protocol.md`)*
 - [x] FAQ and support resources
 
-### Phase 8.3: Deployment Preparation 📋 Pending
+### Phase 8.3: Deployment Preparation 📋 In Progress
+- [x] macOS: Replace Keychain with file-based storage (improves Notarization compatibility) *(Dec 1, 2025)*
 - [ ] macOS: Code signing with Developer ID
 - [ ] macOS: Notarization for distribution
 - [ ] Android: Generate signed APK
-- [ ] Backend: Production deployment to Fly.io *(staging already deployed)*
+- [x] Backend: Production deployment to Fly.io ✅ *(Oct 12, 2025 - deployed to https://hypo.fly.dev)*
 - [ ] Set up monitoring (Prometheus, Grafana)
 - [ ] Set up error tracking (Sentry)
 - [ ] Create automated build and release pipeline
@@ -375,9 +376,9 @@ Last Updated: October 11, 2025
 ## Notes
 
 ### Current Status (Sprint 8)
-- **Overall Progress**: 90% complete (up from 85% after documentation completion)
+- **Overall Progress**: 95% complete (up from 90% after storage migration and logging improvements)
 - **Current Phase**: Sprint 8 - Polish & Deployment (Week 15-16)
-- **Last Updated**: October 12, 2025
+- **Last Updated**: December 1, 2025
 
 ### Blockers & Critical Issues - MAJOR PROGRESS ✅
 - ✅ **Android Compilation RESOLVED**: All P0 build issues fixed, APK successfully generated *(Oct 12, 2025)*
@@ -395,6 +396,8 @@ Last Updated: October 11, 2025
 - ✅ **Backend Stable**: All tests passing, code quality improved, warnings reduced
 - ✅ **Clear Roadmap**: Comprehensive bug analysis and prioritization completed
 - ✅ **Sprint Methodology**: Systematic approach to polish and deployment established
+- ✅ **macOS Storage Migration** (Dec 1): Replaced Keychain with encrypted file-based storage for better Notarization compatibility
+- ✅ **Logging Improvements** (Dec 1): Reduced verbosity and improved debugging clarity across macOS and Android
 
 ### Risks & Mitigation
 - ✅ **Android Complexity RESOLVED**: All Room/Gradle/DI issues successfully resolved
@@ -404,7 +407,7 @@ Last Updated: October 11, 2025
 
 ---
 
-**Current Sprint**: Sprint 8 - Polish & Deployment (90% Complete)  
-**Next Review**: After Android device testing  
+**Current Sprint**: Sprint 8 - Polish & Deployment (95% Complete)  
+**Next Review**: After code signing and Notarization setup  
 **Team**: Autonomous Principal Engineer
 

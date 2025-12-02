@@ -16,8 +16,12 @@ if [ -z "$DEVICE_ID" ]; then
     exit 1
 fi
 
-ADB="adb -s $DEVICE_ID"
 PACKAGE_NAME="com.hypo.clipboard.debug"
+
+# Function to run adb commands with device ID
+adb_cmd() {
+    adb -s "$DEVICE_ID" "$@"
+}
 
 echo "=== Simulating SMS Reception ==="
 echo "Device: $DEVICE_ID"
@@ -26,14 +30,14 @@ echo "Message: $MESSAGE"
 echo ""
 
 # Check if app is installed
-if ! "$ADB" shell pm list packages | grep -q "$PACKAGE_NAME"; then
+if ! adb_cmd shell pm list packages | grep -q "$PACKAGE_NAME"; then
     echo "❌ App not installed. Please install the app first:"
     echo "   ./scripts/build-android.sh"
     exit 1
 fi
 
 # Check if RECEIVE_SMS permission is granted
-PERMISSION_CHECK=$("$ADB" shell dumpsys package "$PACKAGE_NAME" | grep -A 1 "android.permission.RECEIVE_SMS" | grep "granted=true" || echo "")
+PERMISSION_CHECK=$(adb_cmd shell dumpsys package "$PACKAGE_NAME" | grep -A 1 "android.permission.RECEIVE_SMS" | grep "granted=true" || echo "")
 if [ -z "$PERMISSION_CHECK" ]; then
     echo "⚠️  RECEIVE_SMS permission may not be granted"
     echo "   Grant permission in: Settings → Apps → Hypo → Permissions → SMS"
@@ -44,7 +48,7 @@ fi
 if echo "$DEVICE_ID" | grep -q "emulator"; then
     echo "📱 Emulator detected - using adb emu sms command..."
     echo ""
-    "$ADB" emu sms send "$SENDER" "$MESSAGE"
+    adb_cmd emu sms send "$SENDER" "$MESSAGE"
     echo "✅ SMS sent via emulator command"
     echo ""
     echo "📋 Waiting 2 seconds for processing..."
@@ -53,7 +57,7 @@ if echo "$DEVICE_ID" | grep -q "emulator"; then
     # Try to read clipboard (may require root)
     echo ""
     echo "=== Checking Results ==="
-    CLIPBOARD=$("$ADB" shell service call clipboard 1 2>/dev/null | grep -oP "(?<=text=')[^']*" || echo "")
+    CLIPBOARD=$(adb_cmd shell service call clipboard 1 2>/dev/null | grep -oP "(?<=text=')[^']*" || echo "")
     if [ -n "$CLIPBOARD" ]; then
         echo "✅ Clipboard content detected:"
         echo "   $CLIPBOARD"
@@ -64,7 +68,7 @@ if echo "$DEVICE_ID" | grep -q "emulator"; then
     
     echo ""
     echo "📊 Recent logs:"
-    "$ADB" logcat -d -t 20 | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep -E "SmsReceiver|ClipboardListener" | tail -10 || echo "   No recent SMS-related logs"
+    adb_cmd logcat -d -t 20 | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep -E "SmsReceiver|ClipboardListener" | tail -10 || echo "   No recent SMS-related logs"
     
 else
     echo "📱 Physical device detected"
@@ -84,7 +88,7 @@ else
     echo "Option 3: Monitor for Real SMS"
     echo "  Press Ctrl+C to stop monitoring"
     echo ""
-    "$ADB" logcat -c  # Clear logs
-    "$ADB" logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|📱|✅.*SMS"
+    adb_cmd logcat -c  # Clear logs
+    adb_cmd logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|📱|✅.*SMS"
 fi
 

@@ -110,6 +110,23 @@ run_tests() {
     fi
 }
 
+# Scale to single machine
+scale_to_one() {
+    log_section "Scaling to Single Machine"
+    
+    log_info "Ensuring only one machine is running..."
+    
+    # Scale to 1 machine
+    if $FLYCTL_CMD scale count 1 --app "$APP_NAME" 2>&1 | tee -a /tmp/hypo_backend_deploy.log; then
+        log_success "Scaled to 1 machine"
+        return 0
+    else
+        log_warning "Failed to scale (may already be at 1 machine or app not created yet)"
+        # Don't fail deployment if scaling fails - it might be first deploy
+        return 0
+    fi
+}
+
 # Deploy to Fly.io
 deploy() {
     log_section "Deploying to Fly.io"
@@ -130,6 +147,10 @@ deploy() {
         --app "$APP_NAME" \
         2>&1 | tee /tmp/hypo_backend_deploy.log; then
         log_success "Deployment completed successfully"
+        
+        # Scale to 1 machine after deployment
+        scale_to_one
+        
         return 0
     else
         log_error "Deployment failed. Check /tmp/hypo_backend_deploy.log"
@@ -235,14 +256,20 @@ case "${1:-deploy}" in
     info)
         show_deployment_info
         ;;
+    scale)
+        check_prerequisites
+        scale_to_one
+        log_success "Scaled to 1 machine"
+        ;;
     *)
-        echo "Usage: $0 [deploy|test|verify|info]"
+        echo "Usage: $0 [deploy|test|verify|info|scale]"
         echo ""
         echo "Commands:"
         echo "  deploy  - Full deployment (default)"
         echo "  test    - Run tests only"
         echo "  verify  - Verify existing deployment"
         echo "  info    - Show deployment information"
+        echo "  scale   - Scale to 1 machine"
         echo ""
         echo "Environment variables:"
         echo "  FLYCTL_PATH  - Path to flyctl binary (default: /Users/derek/.fly/bin/flyctl)"

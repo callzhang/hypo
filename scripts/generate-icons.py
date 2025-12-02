@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
 Generate app icons for Android and macOS from vector design.
-Creates minimal, vectorized icons for both platforms.
+Creates minimal, vectorized icons with ripple design.
 """
 
 import os
 import sys
+import math
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFilter
 except ImportError:
     print("❌ PIL (Pillow) not found. Install with: pip install Pillow")
     sys.exit(1)
@@ -18,15 +19,16 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 
-# Icon color scheme from SVG
-BG_START = "#020617"  # Dark blue-black
-BG_END = "#02091A"    # Slightly lighter dark blue
-CYAN = "#22D3EE"      # Bright cyan for H
-RING_COLORS = [
-    ("#22D3EE", 0.95),  # Bright cyan
-    ("#2DD4BF", 0.75),  # Teal-cyan
-    ("#38BDF8", 0.55),  # Sky blue
-    ("#0EA5E9", 0.35), # Blue
+# Icon color scheme from SVG (hypo_minimal_ripple_purple.svg)
+BG_START = "#05010F"  # Dark futuristic background start
+BG_END = "#0B0220"    # Dark futuristic background end
+
+# Ripple gradient colors (cyan -> purple)
+RIPPLE_COLORS = [
+    ("#7DD3FC", 0.9),   # Soft cyan (center)
+    ("#38BDF8", 0.7),   # Sky blue
+    ("#8B5CF6", 0.55),  # Purple-blue
+    ("#9333EA", 0.9),   # Neon purple (outer)
 ]
 
 def hex_to_rgb(hex_color):
@@ -66,122 +68,127 @@ def draw_rounded_rectangle(draw, bbox, radius, fill=None):
         draw.ellipse([x1, y2 - radius*2, x1 + radius*2, y2], fill=fill)
         draw.ellipse([x2 - radius*2, y2 - radius*2, x2, y2], fill=fill)
 
+def get_gradient_color_at_distance(distance, max_distance, colors):
+    """Get color from radial gradient at given distance."""
+    t = min(distance / max_distance, 1.0) if max_distance > 0 else 0
+    
+    # Map t to color stops (0%, 40%, 70%, 100%)
+    stops = [0.0, 0.4, 0.7, 1.0]
+    
+    # Find which segment we're in
+    if t <= stops[0]:
+        return colors[0]
+    elif t >= stops[-1]:
+        return colors[-1]
+    else:
+        for i in range(len(stops) - 1):
+            if stops[i] <= t <= stops[i + 1]:
+                local_t = (t - stops[i]) / (stops[i + 1] - stops[i])
+                c1_hex, o1 = colors[i]
+                c2_hex, o2 = colors[i + 1]
+                c1 = hex_to_rgb(c1_hex)
+                c2 = hex_to_rgb(c2_hex)
+                
+                r = int(c1[0] * (1 - local_t) + c2[0] * local_t)
+                g = int(c1[1] * (1 - local_t) + c2[1] * local_t)
+                b = int(c1[2] * (1 - local_t) + c2[2] * local_t)
+                opacity = o1 * (1 - local_t) + o2 * local_t
+                return ((r, g, b), opacity)
+    
+    return colors[-1]
+
 def create_icon_image(size):
     """Create the icon image at specified size based on the SVG design."""
     # Create gradient background
     img = create_gradient_background(size, BG_START, BG_END)
-    draw = ImageDraw.Draw(img, "RGBA")
     
-    # Scale factor (SVG is 1024x1024)
-    scale = size / 1024.0
+    # Scale factor (SVG is 512x512)
+    scale = size / 512.0
     center = size / 2
     
     def scale_val(v):
         return int(v * scale)
     
-    # Draw squircle (rounded rectangle background)
-    squircle_radius = scale_val(64)  # Corner radius
-    padding = scale_val(64)
+    # Squircle corner radius (rx=120 in SVG)
+    squircle_radius = scale_val(120)
     
-    # Draw energy rings (concentric circles with gradient)
-    ring_radii = [80, 130, 190, 250, 320, 390]
-    stroke_width = max(2, scale_val(6))
+    # Create rounded rectangle mask for squircle
+    squircle_mask = Image.new("L", (size, size), 0)
+    squircle_draw = ImageDraw.Draw(squircle_mask)
+    squircle_draw.rounded_rectangle([0, 0, size, size], radius=squircle_radius, fill=255)
     
-    for i, radius in enumerate(ring_radii):
+    # Apply squircle mask to background
+    img = Image.composite(img, Image.new("RGB", (size, size), (0, 0, 0)), squircle_mask)
+    
+    # Convert to RGBA for compositing
+    img = img.convert("RGBA")
+    
+    # Draw ripples (three concentric circles)
+    # Core pulse: r=22, stroke-width=6
+    # Main ripple: r=110, stroke-width=10
+    # Outer echo: r=180, stroke-width=6, opacity=0.6
+    
+    ripple_layers = [
+        (22, 6, 1.0),   # Core pulse
+        (110, 10, 1.0), # Main ripple
+        (180, 6, 0.6),  # Outer echo
+    ]
+    
+    # Create composite image for ripples
+    ripple_composite = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ripple_draw = ImageDraw.Draw(ripple_composite)
+    
+    max_radius = scale_val(180) + scale_val(6)
+    
+    for radius, stroke_width, opacity in ripple_layers:
         r = scale_val(radius)
-        # Use gradient colors based on ring position
-        color_idx = min(i // 2, len(RING_COLORS) - 1)
-        ring_color_hex, opacity = RING_COLORS[color_idx]
-        ring_color = hex_to_rgb(ring_color_hex)
-        # Create RGBA color
-        ring_color_rgba = (*ring_color, int(255 * opacity))
+        sw = max(1, scale_val(stroke_width))
         
-        # Draw circle with gradient-like effect
-        # For simplicity, we'll use a solid color with some alpha
-        bbox = [center - r, center - r, center + r, center + r]
-        # For outline, we need to draw multiple circles to simulate stroke
-        for offset in range(stroke_width):
-            bbox_outline = [center - r - offset, center - r - offset, 
-                          center + r + offset, center + r + offset]
-            draw.ellipse(bbox_outline, outline=ring_color_rgba, width=1)
-    
-    # Draw letter "H" with glow effect
-    h_color = hex_to_rgb(CYAN)
-    h_color_rgba = (*h_color, 255)
-    
-    # H dimensions (from SVG: x=-150, y=-190, width=110, height=380, rx=55)
-    h_left_x = center + scale_val(-150)
-    h_right_x = center + scale_val(40)
-    h_top_y = center + scale_val(-190)
-    h_bottom_y = center + scale_val(190)
-    h_width = scale_val(110)
-    h_radius = scale_val(55)
-    h_center_y = center + scale_val(-55)
-    h_bar_height = scale_val(110)
-    
-    # Draw H with glow (simulate by drawing slightly larger version first)
-    glow_offset = max(2, scale_val(4))
-    glow_color = (*h_color, 80)  # Semi-transparent for glow
-    
-    # Glow layers
-    for glow_size in [glow_offset * 3, glow_offset * 2, glow_offset]:
-        glow_alpha = 80 // (glow_size // glow_offset) if glow_size > 0 else 80
-        glow_rgba = (*h_color, glow_alpha)
+        # Get color for this radius
+        color_rgb, color_opacity = get_gradient_color_at_distance(r, max_radius, RIPPLE_COLORS)
+        final_opacity = color_opacity * opacity
         
-        # Left vertical bar glow
-        draw_rounded_rectangle(
-            draw,
-            [h_left_x - glow_size, h_top_y - glow_size, 
-             h_left_x + h_width + glow_size, h_bottom_y + glow_size],
-            h_radius + glow_size,
-            fill=glow_rgba
+        # Create a temporary layer for this ripple
+        ripple_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        layer_draw = ImageDraw.Draw(ripple_layer)
+        
+        # Draw outer circle filled with RGB color
+        bbox_outer = [center - r - sw//2, center - r - sw//2,
+                      center + r + sw//2, center + r + sw//2]
+        layer_draw.ellipse(bbox_outer, fill=color_rgb)
+        
+        # Erase inner circle to create stroke effect
+        bbox_inner = [center - r + sw//2, center - r + sw//2,
+                      center + r - sw//2, center + r - sw//2]
+        # Draw inner circle with transparent color to erase
+        erase_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        erase_draw = ImageDraw.Draw(erase_layer)
+        erase_draw.ellipse(bbox_inner, fill=(0, 0, 0, 255))
+        # Composite to erase inner
+        ripple_layer = Image.composite(
+            Image.new("RGBA", (size, size), (0, 0, 0, 0)),
+            ripple_layer,
+            erase_layer.split()[3]  # Use alpha as mask
         )
         
-        # Right vertical bar glow
-        draw_rounded_rectangle(
-            draw,
-            [h_right_x - glow_size, h_top_y - glow_size,
-             h_right_x + h_width + glow_size, h_bottom_y + glow_size],
-            h_radius + glow_size,
-            fill=glow_rgba
-        )
+        # Apply opacity to the layer
+        if final_opacity < 1.0:
+            alpha = ripple_layer.split()[3]
+            alpha = alpha.point(lambda p: int(p * final_opacity))
+            ripple_layer.putalpha(alpha)
         
-        # Horizontal bar glow
-        draw_rounded_rectangle(
-            draw,
-            [h_left_x - glow_size, h_center_y - h_bar_height//2 - glow_size,
-             h_right_x + h_width + glow_size, h_center_y + h_bar_height//2 + glow_size],
-            h_radius + glow_size,
-            fill=glow_rgba
-        )
+        # Composite onto main ripple image
+        ripple_composite = Image.alpha_composite(ripple_composite, ripple_layer)
     
-    # Draw H solid (main shape)
-    # Left vertical bar
-    draw_rounded_rectangle(
-        draw,
-        [h_left_x, h_top_y, h_left_x + h_width, h_bottom_y],
-        h_radius,
-        fill=h_color_rgba
-    )
+    # Apply glow effect (Gaussian blur)
+    glow_radius = max(1, scale_val(10))
+    blurred_ripples = ripple_composite.filter(ImageFilter.GaussianBlur(radius=glow_radius))
     
-    # Right vertical bar
-    draw_rounded_rectangle(
-        draw,
-        [h_right_x, h_top_y, h_right_x + h_width, h_bottom_y],
-        h_radius,
-        fill=h_color_rgba
-    )
+    # Composite blurred ripples first (glow), then sharp ripples
+    img = Image.alpha_composite(img, blurred_ripples)
+    img = Image.alpha_composite(img, ripple_composite)
     
-    # Horizontal bar
-    draw_rounded_rectangle(
-        draw,
-        [h_left_x, h_center_y - h_bar_height//2,
-         h_right_x + h_width, h_center_y + h_bar_height//2],
-        h_radius,
-        fill=h_color_rgba
-    )
-    
-    return img
+    return img.convert("RGB")
 
 def generate_android_icons():
     """Generate Android mipmap icons."""
@@ -210,6 +217,39 @@ def generate_android_icons():
     
     print("✅ Android icons generated")
 
+def create_menu_bar_icon(size):
+    """Create a simplified monochrome icon for menu bar (template image)."""
+    # Create transparent background
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    center = size / 2
+    scale = size / 512.0
+    
+    def scale_val(v):
+        return int(v * scale)
+    
+    # Draw simplified ripple design in white/black for template
+    # Use white circles on transparent background (macOS will invert as needed)
+    ripple_layers = [
+        (22, 3),   # Core pulse
+        (110, 5),  # Main ripple
+        (180, 3),  # Outer echo
+    ]
+    
+    for radius, stroke_width in ripple_layers:
+        r = scale_val(radius)
+        sw = max(1, scale_val(stroke_width))
+        
+        # Draw white circle outline (will be rendered as black in menu bar)
+        bbox = [center - r, center - r, center + r, center + r]
+        # Draw multiple circles for stroke width
+        for i in range(sw):
+            bbox_stroke = [center - r - i, center - r - i, center + r + i, center + r + i]
+            draw.ellipse(bbox_stroke, outline=(255, 255, 255, 255), width=1)
+    
+    return img
+
 def generate_macos_icons():
     """Generate macOS iconset."""
     print("🍎 Generating macOS icons...")
@@ -217,6 +257,10 @@ def generate_macos_icons():
     macos_res = PROJECT_ROOT / "macos" / "HypoApp.app" / "Contents" / "Resources"
     iconset_dir = macos_res / "AppIcon.iconset"
     iconset_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Also create menu bar icon directory
+    menu_bar_dir = macos_res / "MenuBarIcon.iconset"
+    menu_bar_dir.mkdir(parents=True, exist_ok=True)
     
     # macOS icon sizes
     icon_sizes = [
@@ -236,6 +280,18 @@ def generate_macos_icons():
         icon = create_icon_image(size)
         icon.save(iconset_dir / filename, "PNG")
         print(f"  ✓ {filename}: {size}x{size}")
+    
+    # Generate menu bar icons (monochrome template versions)
+    print("  Generating menu bar icons (template)...")
+    menu_bar_sizes = [
+        (16, "icon_16x16.png"),
+        (32, "icon_16x16@2x.png"),
+    ]
+    
+    for size, filename in menu_bar_sizes:
+        menu_icon = create_menu_bar_icon(size)
+        menu_icon.save(menu_bar_dir / filename, "PNG")
+        print(f"  ✓ MenuBar {filename}: {size}x{size}")
     
     # Create Contents.json
     contents_json = """{

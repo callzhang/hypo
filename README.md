@@ -5,6 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Android%208%2B-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
 [![Status](https://img.shields.io/badge/status-Production%20Beta-green)]()
+[![Deploy Backend Relay](https://github.com/callzhang/hypo/actions/workflows/backend-deploy.yml/badge.svg)](https://github.com/callzhang/hypo/actions/workflows/backend-deploy.yml)
 
 ---
 

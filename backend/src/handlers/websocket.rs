@@ -185,14 +185,22 @@ async fn handle_binary_message(
     // Decode binary frame to get JSON string
     let json_str = decode_binary_frame(frame)
         .map_err(|e| {
-            warn!("Failed to decode binary frame from {}: {}", sender_id, e);
+            error!(
+                "Failed to decode binary frame from {}: {} (frame length: {} bytes, first 20 bytes: {:?})",
+                sender_id, e, frame.len(),
+                if frame.len() >= 20 { &frame[..20] } else { frame }
+            );
             SessionError::InvalidMessage
         })?;
     
     // Parse JSON to ClipboardMessage
     let parsed: ClipboardMessage = serde_json::from_str(&json_str)
         .map_err(|err| {
-            warn!("Received invalid message from {}: {}", sender_id, err);
+            error!(
+                "Received invalid message from {}: {} (JSON length: {} bytes, first 200 chars: {})",
+                sender_id, err, json_str.len(),
+                json_str.chars().take(200).collect::<String>()
+            );
             SessionError::InvalidMessage
         })?;
 
@@ -421,27 +429,27 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
     }
 
     // Encrypted message - validate nonce and tag
-    BASE64
+    // Android uses Base64.withoutPadding(), so we need to handle unpadded base64
+    // The STANDARD engine should handle both, but let's add explicit error handling
+    let nonce_decoded = BASE64
         .decode(nonce.as_bytes())
-        .map_err(|_| "invalid nonce encoding")
-        .and_then(|decoded| {
-            if decoded.len() == 12 {
-                Ok(())
-            } else {
-                Err("nonce must be 12 bytes")
-            }
+        .map_err(|e| {
+            warn!("Failed to decode nonce: {} (nonce string: '{}', length: {})", e, nonce, nonce.len());
+            "invalid nonce encoding"
         })?;
+    if nonce_decoded.len() != 12 {
+        return Err("nonce must be 12 bytes");
+    }
 
-    BASE64
+    let tag_decoded = BASE64
         .decode(tag.as_bytes())
-        .map_err(|_| "invalid tag encoding")
-        .and_then(|decoded| {
-            if decoded.len() == 16 {
-                Ok(())
-            } else {
-                Err("tag must be 16 bytes")
-            }
+        .map_err(|e| {
+            warn!("Failed to decode tag: {} (tag string: '{}', length: {})", e, tag, tag.len());
+            "invalid tag encoding"
         })?;
+    if tag_decoded.len() != 16 {
+        return Err("tag must be 16 bytes");
+    }
 
     // Validate ciphertext/data field for encrypted messages
     let data = payload

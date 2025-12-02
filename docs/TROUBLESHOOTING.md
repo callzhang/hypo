@@ -487,7 +487,13 @@ Settings → Battery → More battery settings → Protected apps → Hypo
 
 **Symptoms**: Sync service notification disappears
 
-**Solutions**:
+**Diagnostic Script**:
+```bash
+# Use the notification status check script
+./scripts/check-notification-status.sh <device_id>
+```
+
+**Manual Solutions**:
 ```bash
 # Check notification channel settings
 adb shell cmd notification allow_listener com.hypo.clipboard
@@ -495,6 +501,9 @@ adb shell cmd notification allow_listener com.hypo.clipboard
 # Reset notification permissions
 adb shell pm revoke com.hypo.clipboard android.permission.POST_NOTIFICATIONS
 adb shell pm grant com.hypo.clipboard android.permission.POST_NOTIFICATIONS
+
+# Check notification logs (filter MIUIInput)
+adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep -E "Notification|ClipboardSyncService"
 ```
 
 #### Problem: "ClipboardManager Access Issues"
@@ -532,6 +541,21 @@ adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipb
 
 # Check WebSocket connection
 adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep -E "WebSocket|Connection"
+```
+
+**Emulating Clipboard Copy for Testing**:
+```bash
+# Method 1: Direct clipboard service (requires root on Android 10+)
+adb -s $device_id shell "service call clipboard 2 s16 'Test clipboard content'"
+
+# Method 2: Copy keyevent (requires text selection in an app)
+adb -s $device_id shell input keyevent 278  # KEYCODE_COPY
+
+# Method 3: Use simulation script (recommended)
+python3 scripts/simulate-android-copy.py --text "Test message" --target-device-id <macos_device_id>
+
+# Verify clipboard was set
+adb -s $device_id shell service call clipboard 1 | grep -oP "(?<=text=')[^']*"
 ```
 
 **Common Causes**:
@@ -670,6 +694,39 @@ The `test-sync-matrix.sh` script detects messages by:
    - Cloud: `onMessage` calls
    - LAN: `Binary frame received`
 
+### Debugging Scripts
+
+**Recent debugging scripts for common tasks:**
+
+#### SMS-to-Clipboard Testing
+```bash
+# Simulate SMS reception (emulator only)
+./scripts/simulate-sms.sh <device_id> "+1234567890" "Test SMS message"
+
+# Comprehensive SMS testing suite
+./scripts/test-sms-clipboard.sh <device_id>
+```
+
+#### Notification Status Check
+```bash
+# Check notification permission and channel status
+./scripts/check-notification-status.sh <device_id>
+```
+
+#### Clipboard Simulation
+```bash
+# Simulate Android clipboard copy via LAN WebSocket
+python3 scripts/simulate-android-copy.py --text "Test message" --target-device-id <macos_device_id>
+
+# Simulate via cloud relay
+python3 scripts/simulate-android-relay.py --text "Test message" --target-device-id <device_id>
+```
+
+**Note**: All Android log commands should filter MIUIInput noise:
+```bash
+adb -s $device_id logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread"
+```
+
 ### Manual Testing Procedures
 
 #### Device Pairing
@@ -702,6 +759,35 @@ echo "Test from macOS" | pbcopy
 
 # Monitor Android logs (filter MIUIInput)
 adb -s $device_id logcat | grep -v "MIUIInput" | grep -E "Clipboard|Sync|Received"
+```
+
+**Android → macOS (Emulate System Copy via ADB)**:
+```bash
+# Method 1: Direct clipboard service call (requires root on Android 10+)
+# Set clipboard content directly
+adb -s $device_id shell "service call clipboard 2 s16 'Test clipboard from adb'"
+
+# Method 2: Using input text + copy keyevent (requires text selection)
+# First, select text in an app, then:
+adb -s $device_id shell input keyevent 278  # KEYCODE_COPY
+
+# Method 3: Using am broadcast (may require special permissions)
+adb -s $device_id shell am broadcast -a android.intent.action.CLIPBOARD_CHANGED
+
+# Method 4: Use Python simulation script (recommended for testing)
+python3 scripts/simulate-android-copy.py --text "Test from script" --target-device-id <macos_device_id>
+
+# Monitor macOS logs
+log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep -E "Received clipboard|content:"
+```
+
+**Reading Clipboard via ADB**:
+```bash
+# Read clipboard content (may require root)
+adb -s $device_id shell service call clipboard 1 | grep -oP "(?<=text=')[^']*"
+
+# Alternative: Check app's clipboard history database
+adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 1;'"
 ```
 
 **Verification**:
@@ -915,8 +1001,20 @@ adb shell am start -n com.hypo.clipboard/.MainActivity
 
 **Android** (filter MIUIInput):
 ```bash
+# View recent clipboard content from logs and database
 adb -s $device_id logcat -d -t 500 | grep -v "MIUIInput" | grep -F "content:" && \
 adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 5;'"
+
+# Emulate clipboard copy and monitor
+adb -s $device_id shell "service call clipboard 2 s16 'Test clipboard'" && \
+adb -s $device_id logcat -c && \
+adb -s $device_id logcat | grep -v "MIUIInput" | grep -E "ClipboardListener|content:"
+
+# Check SMS-to-clipboard functionality
+./scripts/test-sms-clipboard.sh <device_id>
+
+# Check notification status
+./scripts/check-notification-status.sh <device_id>
 ```
 
 **macOS**:

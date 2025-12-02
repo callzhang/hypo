@@ -14,22 +14,26 @@ if [ -z "$DEVICE_ID" ]; then
     exit 1
 fi
 
-ADB="adb -s $DEVICE_ID"
 PACKAGE_NAME="com.hypo.clipboard.debug"
+
+# Function to run adb commands with device ID
+adb_cmd() {
+    adb -s "$DEVICE_ID" "$@"
+}
 
 echo "=== SMS-to-Clipboard Test Suite ==="
 echo "Device: $DEVICE_ID"
 echo ""
 
 # Check app installation
-if ! "$ADB" shell pm list packages | grep -q "$PACKAGE_NAME"; then
+if ! adb_cmd shell pm list packages | grep -q "$PACKAGE_NAME"; then
     echo "❌ App not installed"
     exit 1
 fi
 
 # Check permissions
 echo "📋 Checking permissions..."
-RECEIVE_SMS=$("$ADB" shell dumpsys package "$PACKAGE_NAME" | grep -A 1 "android.permission.RECEIVE_SMS" | grep "granted=true" || echo "")
+RECEIVE_SMS=$(adb_cmd shell dumpsys package "$PACKAGE_NAME" | grep -A 1 "android.permission.RECEIVE_SMS" | grep "granted=true" || echo "")
 if [ -z "$RECEIVE_SMS" ]; then
     echo "⚠️  RECEIVE_SMS permission not granted"
     echo "   Grant in: Settings → Apps → Hypo → Permissions → SMS"
@@ -40,7 +44,7 @@ fi
 # Check if receiver is registered
 echo ""
 echo "📱 Checking SMS receiver registration..."
-RECEIVER=$("$ADB" shell dumpsys package "$PACKAGE_NAME" | grep -A 5 "SmsReceiver" | grep "android.provider.Telephony.SMS_RECEIVED" || echo "")
+RECEIVER=$(adb_cmd shell dumpsys package "$PACKAGE_NAME" | grep -A 5 "SmsReceiver" | grep "android.provider.Telephony.SMS_RECEIVED" || echo "")
 if [ -z "$RECEIVER" ]; then
     echo "⚠️  SMS receiver may not be registered"
 else
@@ -48,12 +52,12 @@ else
 fi
 
 # Get app PID for log filtering
-APP_PID=$("$ADB" shell pidof -s "$PACKAGE_NAME" 2>/dev/null || echo "")
+APP_PID=$(adb_cmd shell pidof -s "$PACKAGE_NAME" 2>/dev/null || echo "")
 if [ -z "$APP_PID" ]; then
     echo "⚠️  App is not running. Starting app..."
-    "$ADB" shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" >/dev/null 2>&1
+    adb_cmd shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" >/dev/null 2>&1
     sleep 2
-    APP_PID=$("$ADB" shell pidof -s "$PACKAGE_NAME" 2>/dev/null || echo "")
+    APP_PID=$(adb_cmd shell pidof -s "$PACKAGE_NAME" 2>/dev/null || echo "")
 fi
 
 if [ -n "$APP_PID" ]; then
@@ -82,7 +86,14 @@ echo "=== Monitoring Logs (Press Ctrl+C to stop) ==="
 echo ""
 
 # Monitor logs for SMS and clipboard events
-"$ADB" logcat -c  # Clear logs first
-"$ADB" logcat --pid=$APP_PID 2>/dev/null | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|clipboard" || \
-"$ADB" logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|clipboard"
+adb_cmd logcat -c  # Clear logs first
+
+# Only use --pid filter if we have a valid PID
+if [ -n "$APP_PID" ]; then
+    adb_cmd logcat --pid="$APP_PID" 2>/dev/null | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|clipboard" || \
+    adb_cmd logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|clipboard"
+else
+    # No PID available - monitor all logs
+    adb_cmd logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|clipboard"
+fi
 

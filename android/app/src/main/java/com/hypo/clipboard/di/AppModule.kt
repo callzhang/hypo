@@ -136,20 +136,10 @@ object AppModule {
             environment = "lan"
         )
 
-    @Provides
-    @Singleton
-    @Named("lan_ws_connector")
-    fun provideLanWebSocketConnector(
-        @Named("lan_ws_config") config: TlsWebSocketConfig
-    ): WebSocketConnector {
-        // LAN connectors are created dynamically after peer discovery
-        // This provider should never be called for LAN connections since config.url is null
-        // If it is called, it means there's a configuration error
-        if (config.url == null) {
-            throw IllegalStateException("LAN WebSocket connector cannot be provided during DI. Connectors must be created after peer discovery.")
-        }
-        return OkHttpWebSocketConnector(config)
-    }
+    // NOTE: LAN WebSocket connectors are NOT provided via DI
+    // They are created dynamically in LanPeerConnectionManager after peer discovery
+    // This provider is intentionally omitted to prevent eager initialization
+    // If you need a LAN connector, create it in LanPeerConnectionManager with the discovered peer URL
 
     @Provides
     @Singleton

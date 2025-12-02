@@ -553,7 +553,7 @@ public struct HypoMenuBarApp: App {
     }
 
     public var body: some Scene {
-        MenuBarExtra("Hypo", systemImage: "clipboard") {
+        MenuBarExtra(content: {
             MenuBarContentView(viewModel: viewModel, applySwiftUIBackground: false)
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)
@@ -593,7 +593,9 @@ public struct HypoMenuBarApp: App {
                     Task { await viewModel.handleDeepLink(url) }
                 }
                 .background(MenuBarIconRightClickHandler(viewModel: viewModel))
-        }
+        }, label: {
+            menuBarIcon()
+        })
         .menuBarExtraStyle(.window)
     }
     
@@ -756,6 +758,44 @@ private enum MenuSection: String, CaseIterable, Identifiable {
         switch self {
         case .history: return "clock"
         case .settings: return "gear"
+        }
+    }
+}
+
+extension HypoMenuBarApp {
+    /// Helper to create a template image for menu bar
+    private func makeTemplateImage(_ image: NSImage) -> NSImage {
+        image.isTemplate = true
+        return image
+    }
+    
+    /// Load the menu bar icon from the app bundle
+    @ViewBuilder
+    func menuBarIcon() -> some View {
+        // Try to load from MenuBarIcon.iconset (monochrome template version)
+        if let iconPath = Bundle.main.path(forResource: "MenuBarIcon", ofType: "iconset"),
+           let iconImage = NSImage(contentsOfFile: "\(iconPath)/icon_16x16.png") {
+            // Menu bar icon is already designed as template
+            Image(nsImage: makeTemplateImage(iconImage))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 16, height: 16)
+        } else if let iconPath = Bundle.main.path(forResource: "AppIcon", ofType: "iconset"),
+                  let iconImage = NSImage(contentsOfFile: "\(iconPath)/icon_16x16.png") {
+            // Fallback: Use AppIcon but convert to template
+            Image(nsImage: makeTemplateImage(iconImage))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 16, height: 16)
+        } else if let iconImage = NSImage(named: "AppIcon") {
+            // Fallback: Try loading from icns file
+            Image(nsImage: makeTemplateImage(iconImage))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 16, height: 16)
+        } else {
+            // Final fallback: Use system clipboard icon
+            Image(systemName: "clipboard")
         }
     }
 }

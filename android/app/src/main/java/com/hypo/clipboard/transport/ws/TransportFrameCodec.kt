@@ -22,7 +22,8 @@ class TransportFrameCodec(
         if (payload.size > maxPayloadBytes) {
             throw TransportFrameException("payload exceeds $maxPayloadBytes bytes")
         }
-        val buffer = ByteBuffer.allocate(4 + payload.size)
+        // Explicitly use BIG_ENDIAN byte order to match backend and macOS expectations
+        val buffer = ByteBuffer.allocate(4 + payload.size).order(java.nio.ByteOrder.BIG_ENDIAN)
         buffer.putInt(payload.size)
         buffer.put(payload)
         return buffer.array()
@@ -30,7 +31,8 @@ class TransportFrameCodec(
 
     fun decode(frame: ByteArray): SyncEnvelope {
         require(frame.size >= 4) { "frame truncated" }
-        val buffer = ByteBuffer.wrap(frame)
+        // Explicitly use BIG_ENDIAN byte order to match backend and macOS expectations
+        val buffer = ByteBuffer.wrap(frame).order(java.nio.ByteOrder.BIG_ENDIAN)
         val length = buffer.int
         if (length < 0 || length > frame.size - 4) {
             throw TransportFrameException("frame truncated")

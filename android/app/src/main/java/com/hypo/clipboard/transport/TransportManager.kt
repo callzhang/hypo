@@ -114,15 +114,62 @@ class TransportManager(
             android.util.Log.w("TransportManager", "⚠️ No SharedPreferences available, cannot persist device name for device: $deviceId")
             return
         }
-        val key = "device_name_$deviceId"
+        // Normalize device ID to lowercase for consistent storage
+        val normalizedId = deviceId.lowercase().removePrefix("macos-").removePrefix("android-")
+        val key = "device_name_$normalizedId"
         prefs?.edit()?.putString(key, deviceName)?.commit()
-        android.util.Log.d("TransportManager", "💾 Persisted device name: device=$deviceId, name=$deviceName")
+        android.util.Log.d("TransportManager", "💾 Persisted device name: device=$deviceId (normalized: $normalizedId), name=$deviceName")
     }
     
     fun getDeviceName(deviceId: String): String? {
         if (prefs == null) return null
-        val key = "device_name_$deviceId"
-        return prefs?.getString(key, null)
+        
+        // Normalize device ID to lowercase for consistent lookup
+        val normalizedId = deviceId.lowercase()
+        
+        // Try with the normalized device ID first
+        var key = "device_name_$normalizedId"
+        var name = prefs?.getString(key, null)
+        if (name != null) {
+            android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (normalized: $normalizedId): $name")
+            return name
+        }
+        
+        // Try with original case (in case it was stored with original case)
+        if (deviceId != normalizedId) {
+            key = "device_name_$deviceId"
+            name = prefs?.getString(key, null)
+            if (name != null) {
+                android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (original case): $name")
+                return name
+            }
+        }
+        
+        // If not found, try with migrated format (remove prefixes)
+        // This handles cases where persistDeviceName was called with prefixed ID
+        // but getAllDeviceIds returns migrated (unprefixed) IDs
+        val migratedId = normalizedId.removePrefix("macos-").removePrefix("android-")
+        if (migratedId != normalizedId) {
+            key = "device_name_$migratedId"
+            name = prefs?.getString(key, null)
+            if (name != null) {
+                android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (migrated: $migratedId): $name")
+                return name
+            }
+        }
+        
+        // Also try with prefixes added (in case getAllDeviceIds returned unprefixed but name was stored with prefix)
+        for (prefix in listOf("macos-", "android-")) {
+            key = "device_name_${prefix}$normalizedId"
+            name = prefs?.getString(key, null)
+            if (name != null) {
+                android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (with prefix $prefix): $name")
+                return name
+            }
+        }
+        
+        android.util.Log.w("TransportManager", "⚠️ No device name found for $deviceId (tried: $normalizedId, $deviceId, $migratedId, and with prefixes)")
+        return null
     }
     
     private fun clearPersistedTransportStatus(deviceId: String) {

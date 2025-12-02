@@ -23,7 +23,7 @@ public struct CloudRelayConfiguration: Sendable, Equatable {
 }
 
 public final class CloudRelayTransport: SyncTransport {
-    private let delegate: LanWebSocketTransport
+    private let delegate: WebSocketTransport
 
     public init(
         configuration: CloudRelayConfiguration,
@@ -32,20 +32,26 @@ public final class CloudRelayTransport: SyncTransport {
         analytics: TransportAnalytics = NoopTransportAnalytics(),
         sessionFactory: @escaping @Sendable (URLSessionDelegate, TimeInterval) -> URLSessionProviding = { delegate, timeout in
             let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = timeout
-            config.timeoutIntervalForResource = timeout
+            // WebSocket connections should stay open indefinitely
+            // Use a very long timeout (1 year) instead of greatestFiniteMagnitude which may not work
+            let oneYear: TimeInterval = 365 * 24 * 60 * 60
+            config.timeoutIntervalForRequest = oneYear
+            config.timeoutIntervalForResource = oneYear
+            config.waitsForConnectivity = true
+            config.isDiscretionary = false
+            config.allowsCellularAccess = true
             return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         }
     ) {
-        let lanConfiguration = LanWebSocketConfiguration(
+        let webSocketConfiguration = WebSocketConfiguration(
             url: configuration.url,
             pinnedFingerprint: configuration.fingerprint,
             headers: configuration.headers,
             idleTimeout: configuration.idleTimeout,
             environment: "cloud"
         )
-        delegate = LanWebSocketTransport(
-            configuration: lanConfiguration,
+        delegate = WebSocketTransport(
+            configuration: webSocketConfiguration,
             frameCodec: frameCodec,
             metricsRecorder: metricsRecorder,
             analytics: analytics,
@@ -69,7 +75,7 @@ public final class CloudRelayTransport: SyncTransport {
         delegate.handleOpen(task: task)
     }
 
-    var underlying: LanWebSocketTransport { delegate }
+    var underlying: WebSocketTransport { delegate }
     
     /// Check if the cloud transport is currently connected
     public func isConnected() -> Bool {
@@ -77,7 +83,16 @@ public final class CloudRelayTransport: SyncTransport {
     }
     
     /// Set handler for incoming messages from cloud relay
-    public func setOnIncomingMessage(_ handler: @escaping (Data) async -> Void) {
+    public func setOnIncomingMessage(_ handler: @escaping (Data, TransportOrigin) async -> Void) {
         delegate.setOnIncomingMessage(handler)
+    }
+    
+    /// Force reconnection by disconnecting and reconnecting.
+    /// Used when network changes to ensure connection uses new IP address.
+    public func reconnect() async {
+        await delegate.disconnect()
+        // Small delay to let connection close
+        try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+        try? await delegate.connect()
     }
 }

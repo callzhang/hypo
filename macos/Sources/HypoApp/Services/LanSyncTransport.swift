@@ -3,28 +3,172 @@ import Foundation
 import os
 #endif
 
+// Import DiscoveredPeer for client-side LAN connections
+// DiscoveredPeer is defined in BonjourBrowser.swift
+
 @MainActor
 public final class LanSyncTransport: SyncTransport {
     private let server: LanWebSocketServer
     private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
+    private let frameCodec = TransportFrameCodec()
     private var isConnected = false
     private var messageHandlers: [UUID: (Data) async throws -> Void] = [:]
+    private var getDiscoveredPeers: (() -> [DiscoveredPeer])?
+    // Persistent connections: one WebSocketTransport per peer (deviceId)
+    // Connections are maintained for all discovered peers, mirroring Android's architecture
+    private var clientTransports: [String: WebSocketTransport] = [:] // deviceId -> transport
+    // Track URLs for each peer to detect IP changes
+    private var peerURLs: [String: URL] = [:] // deviceId -> URL
+    // Track connection tasks for each peer to enable cleanup
+    private var connectionTasks: [String: Task<Void, Never>] = [:] // deviceId -> connection maintenance task
     
     #if canImport(os)
-    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "lan-transport")
+    private let logger = HypoLogger(category: "lan-transport")
     #endif
     
-    public init(server: LanWebSocketServer) {
+    public init(server: LanWebSocketServer, getDiscoveredPeers: (() -> [DiscoveredPeer])? = nil) {
         self.server = server
+        self.getDiscoveredPeers = getDiscoveredPeers
         
         self.decoder = JSONDecoder()
         self.decoder.keyDecodingStrategy = .convertFromSnakeCase
         self.decoder.dateDecodingStrategy = .iso8601
+    }
+    
+    public func setGetDiscoveredPeers(_ closure: @escaping () -> [DiscoveredPeer]) {
+        self.getDiscoveredPeers = closure
+    }
+    
+    /// Maintain persistent connections to all discovered peers (mirrors Android architecture)
+    /// Called when peers are discovered/removed to keep connections in sync
+    public func syncPeerConnections() async {
+        guard let getDiscoveredPeers = getDiscoveredPeers else { return }
+        let discoveredPeers = getDiscoveredPeers()
+        let discoveredDeviceIds = Set(discoveredPeers.compactMap { peer in
+            peer.endpoint.metadata["device_id"] ?? peer.serviceName
+        })
         
-        self.encoder = JSONEncoder()
-        self.encoder.keyEncodingStrategy = .convertToSnakeCase
-        self.encoder.dateEncodingStrategy = .iso8601
+        // Remove connections for peers that are no longer discovered
+        let currentDeviceIds = Set(clientTransports.keys)
+        let removedDeviceIds = currentDeviceIds.subtracting(discoveredDeviceIds)
+        for deviceId in removedDeviceIds {
+            #if canImport(os)
+            logger.info("🔌 [LanSyncTransport] Removing connection for peer \(deviceId) (no longer discovered)")
+            #endif
+            connectionTasks[deviceId]?.cancel()
+            connectionTasks.removeValue(forKey: deviceId)
+            clientTransports.removeValue(forKey: deviceId)
+            peerURLs.removeValue(forKey: deviceId)
+        }
+        
+        // Create/maintain connections for newly discovered peers
+        for peer in discoveredPeers {
+            let deviceId = peer.endpoint.metadata["device_id"] ?? peer.serviceName
+            let urlString = "ws://\(peer.endpoint.host):\(peer.endpoint.port)"
+            guard let url = URL(string: urlString) else {
+                #if canImport(os)
+                logger.warning("⚠️ [LanSyncTransport] Invalid URL for peer \(peer.serviceName): \(urlString)")
+                #endif
+                continue
+            }
+            
+            // Create transport if it doesn't exist
+            if clientTransports[deviceId] == nil {
+                #if canImport(os)
+                logger.info("🔌 [LanSyncTransport] Creating persistent connection for peer \(peer.serviceName) (\(deviceId))")
+                #endif
+                
+                let deviceIdentity = DeviceIdentity()
+                let pinnedFingerprint: String? = {
+                    if let fp = peer.endpoint.fingerprint, fp.lowercased() != "uninitialized" { return fp }
+                    return nil
+                }()
+                let config = WebSocketConfiguration(
+                    url: url,
+                    pinnedFingerprint: pinnedFingerprint,
+                    headers: [
+                        "X-Device-Id": deviceIdentity.deviceId.uuidString,
+                        "X-Device-Platform": "macos"
+                    ],
+                    idleTimeout: 3600, // 1 hour
+                    environment: "lan",
+                    roundTripTimeout: 60
+                )
+                
+                let clientTransport = WebSocketTransport(
+                    configuration: config,
+                    frameCodec: TransportFrameCodec(),
+                    metricsRecorder: NullTransportMetricsRecorder(),
+                    analytics: NoopTransportAnalytics()
+                )
+                clientTransports[deviceId] = clientTransport
+                peerURLs[deviceId] = url
+                
+                // Start persistent connection maintenance task
+                connectionTasks[deviceId] = Task { [weak self] in
+                    await self?.maintainPeerConnection(deviceId: deviceId, transport: clientTransport, peerName: peer.serviceName)
+                }
+            } else {
+                // Update URL if peer IP changed (reconnect if needed)
+                let existingURL = peerURLs[deviceId]
+                if existingURL != url {
+                    #if canImport(os)
+                    logger.info("🔄 [LanSyncTransport] Peer \(peer.serviceName) IP changed: \(existingURL?.absoluteString ?? "nil") → \(url.absoluteString), reconnecting...")
+                    #endif
+                    // Cancel old connection task and create new transport
+                    connectionTasks[deviceId]?.cancel()
+                    connectionTasks.removeValue(forKey: deviceId)
+                    clientTransports.removeValue(forKey: deviceId)
+                    peerURLs.removeValue(forKey: deviceId)
+                    
+                    // Recreate with new URL (will be picked up in next iteration)
+                    await syncPeerConnections()
+                } else {
+                    // Update URL in case it's nil (shouldn't happen, but be safe)
+                    peerURLs[deviceId] = url
+                }
+            }
+        }
+    }
+    
+    /// Maintain persistent connection to a peer with automatic reconnection.
+    /// Reuses unified event-driven reconnection logic from WebSocketTransport.
+    /// Simply calls connect() once - all reconnection is handled by receiveNext() callbacks
+    /// with the same exponential backoff as cloud connections.
+    private func maintainPeerConnection(deviceId: String, transport: WebSocketTransport, peerName: String) async {
+        #if canImport(os)
+        logger.info("🔌 [LanSyncTransport] Starting connection maintenance for peer \(peerName) (\(deviceId))")
+        #endif
+        
+        // Start connection - this will establish connection and maintain it
+        // WebSocketTransport handles all reconnection via receiveNext() callbacks
+        // with unified exponential backoff (same as cloud connections)
+        do {
+            if !transport.isConnected() {
+                #if canImport(os)
+                logger.info("🔌 [LanSyncTransport] Connecting to peer \(peerName) (\(deviceId))")
+                #endif
+                try await transport.connect()
+                #if canImport(os)
+                logger.info("✅ [LanSyncTransport] Connected to peer \(peerName) (\(deviceId))")
+                #endif
+            }
+        } catch {
+            #if canImport(os)
+            logger.warning("⚠️ [LanSyncTransport] Initial connection to peer \(peerName) (\(deviceId)) failed: \(error.localizedDescription)")
+            logger.info("🔄 [LanSyncTransport] WebSocketTransport will handle reconnection via receiveNext() callbacks")
+            #endif
+        }
+        
+        // Keep this task alive while peer is still in our map
+        // The connection is maintained by WebSocketTransport's event-driven reconnection
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 10_000_000_000) // Just keep alive - reconnection handled by WebSocketTransport
+        }
+        
+        #if canImport(os)
+        logger.info("🔌 [LanSyncTransport] Connection maintenance ended for peer \(peerName) (\(deviceId))")
+        #endif
     }
     
     public func connect() async throws {
@@ -35,6 +179,9 @@ public final class LanSyncTransport: SyncTransport {
         #endif
         
         isConnected = true
+        
+        // Sync peer connections when transport connects (establish persistent connections)
+        await syncPeerConnections()
     }
     
     public func send(_ envelope: SyncEnvelope) async throws {
@@ -46,18 +193,83 @@ public final class LanSyncTransport: SyncTransport {
             )
         }
         
-        let data = try encoder.encode(envelope)
-        
         #if canImport(os)
-        logger.info("Sending clipboard envelope (type: \(envelope.type.rawValue), size: \(data.count) bytes)")
+        logger.info("Sending clipboard envelope (type: \(envelope.type.rawValue))")
         #endif
         
-        // Send to all connected clients
-        server.sendToAll(data)
+        let framed = try frameCodec.encode(envelope)
+        
+        // 1) Send to all currently connected peers (inbound connections to our server)
+        let activeConnections = server.activeConnections()
+        #if canImport(os)
+        logger.info("📡 [LanSyncTransport] Broadcasting to all \(activeConnections.count) connected peer(s)")
+        #endif
+        server.sendToAll(framed)
+        
+        // 2) Best-effort: Also try to send to all discovered peers (even if not currently connected)
+        // This uses their last seen address for maximum delivery reliability
+        if let getDiscoveredPeers = getDiscoveredPeers {
+            let discoveredPeers = getDiscoveredPeers()
+            let activeDeviceIds = Set(activeConnections.compactMap { connectionId in
+                server.connectionMetadata(for: connectionId)?.deviceId
+            })
+            
+            // Filter out peers that are already connected (we already sent to them above)
+            let disconnectedPeers = discoveredPeers.filter { peer in
+                guard let deviceId = peer.endpoint.metadata["device_id"] else { return false }
+                return !activeDeviceIds.contains(deviceId)
+            }
+            
+            #if canImport(os)
+            logger.info("📡 [LanSyncTransport] Attempting best-effort delivery to \(disconnectedPeers.count) disconnected peer(s) using last seen address")
+            #endif
+            
+            // Send to disconnected peers using persistent connections (maintained by syncPeerConnections)
+            // These connections are already established and maintained, so we can send directly
+            for peer in disconnectedPeers {
+                let deviceId = peer.endpoint.metadata["device_id"] ?? peer.serviceName
+                
+                // Use persistent connection if available
+                if let clientTransport = clientTransports[deviceId] {
+                    // Connection is maintained by syncPeerConnections, just send
+                    Task {
+                        do {
+                            // Ensure connected (should already be, but check just in case)
+                            if !clientTransport.isConnected() {
+                                try await clientTransport.connect()
+                            }
+                            try await clientTransport.send(envelope)
+                            #if canImport(os)
+                            logger.info("✅ [LanSyncTransport] Sent to peer \(peer.serviceName) via persistent connection")
+                            #endif
+                        } catch {
+                            #if canImport(os)
+                            logger.debug("⏭️ [LanSyncTransport] Failed to send to peer \(peer.serviceName): \(error.localizedDescription) (best-effort, continuing)")
+                            #endif
+                        }
+                    }
+                } else {
+                    #if canImport(os)
+                    logger.debug("⏭️ [LanSyncTransport] No persistent connection for peer \(peer.serviceName), skipping (will be created by syncPeerConnections)")
+                    #endif
+                }
+            }
+        }
     }
     
     public func disconnect() async {
         isConnected = false
+        
+        // Cancel all peer connection maintenance tasks
+        for (deviceId, task) in connectionTasks {
+            task.cancel()
+            #if canImport(os)
+            logger.info("🔌 [LanSyncTransport] Cancelled connection maintenance for peer \(deviceId)")
+            #endif
+        }
+        connectionTasks.removeAll()
+        clientTransports.removeAll()
+        peerURLs.removeAll()
         
         #if canImport(os)
         logger.info("LAN transport disconnected")
@@ -87,4 +299,3 @@ public final class LanSyncTransport: SyncTransport {
         messageHandlers.removeValue(forKey: id)
     }
 }
-

@@ -114,7 +114,7 @@ public final class ClipboardMonitor {
         // Check for URLs (links)
         if types.contains(.URL), let urlString = pasteboard.string(forType: .URL), let url = URL(string: urlString) {
             let entry = ClipboardEntry(
-                originDeviceId: deviceId.uuidString,
+                deviceId: deviceId.uuidString,
                 originPlatform: platform,
                 originDeviceName: deviceName,
                 content: .link(url),
@@ -129,7 +129,7 @@ public final class ClipboardMonitor {
         // Check for plain text LAST - this catches text that isn't a file path or URL
         if types.contains(.string), let string = pasteboard.string(forType: .string), !string.isEmpty {
             let entry = ClipboardEntry(
-                originDeviceId: deviceId.uuidString,
+                deviceId: deviceId.uuidString,
                 originPlatform: platform,
                 originDeviceName: deviceName,
                 content: .text(string),
@@ -204,7 +204,7 @@ public final class ClipboardMonitor {
                 )
                 
                 
-                return ClipboardEntry(originDeviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .image(metadata), isEncrypted: false, transportOrigin: nil)
+                return ClipboardEntry(deviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .image(metadata), isEncrypted: false, transportOrigin: nil)
             }
         }
         
@@ -280,7 +280,7 @@ public final class ClipboardMonitor {
                 )
                 
                 
-                return ClipboardEntry(originDeviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .image(metadata), isEncrypted: false, transportOrigin: nil)
+                return ClipboardEntry(deviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .image(metadata), isEncrypted: false, transportOrigin: nil)
             }
         }
         
@@ -296,7 +296,7 @@ public final class ClipboardMonitor {
             url: fileURL,
             base64: data.base64EncodedString()
         )
-        return ClipboardEntry(originDeviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .file(metadata), isEncrypted: false, transportOrigin: nil)
+        return ClipboardEntry(deviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .file(metadata), isEncrypted: false, transportOrigin: nil)
     }
 }
 

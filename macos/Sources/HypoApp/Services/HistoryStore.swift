@@ -54,21 +54,13 @@ public actor HistoryStore {
         let now = Date()
         
         // Simplified duplicate detection (no time windows):
-        // 1. If new message matches the current clipboard (latest entry) → discard
-        // 2. If new message matches something in history → move that history item to the top
-        // 3. Otherwise → add new entry
+        // 1. If new message matches something in history:
+        //    - Local entry → move to top (even if it's the latest entry)
+        //    - Remote entry → discard duplicate to preserve chronological order
+        // 2. Otherwise → add new entry
         
-        // Check if matches current clipboard (latest entry)
-        if let latestEntry = entries.first {
-            if entry.matchesContent(latestEntry) {
-                logger.debug("⏭️ [HistoryStore] New message matches current clipboard, discarding: \(entry.previewText.prefix(50))")
-                return entries
-            }
-        }
-        
-        // Check if matches something in history (excluding the latest entry)
-        let historyEntries = Array(entries.dropFirst()) // Skip latest entry
-        if let matchingEntry = historyEntries.first(where: { existingEntry in
+        // Check if matches something in history (including the latest entry)
+        if let matchingEntry = entries.first(where: { existingEntry in
             entry.matchesContent(existingEntry)
         }) {
             // Found matching entry in history
@@ -77,10 +69,13 @@ public actor HistoryStore {
                 // For received entries, preserve chronological order by keeping original timestamp
                 if entry.transportOrigin == nil {
                     // Local entry - move to top by updating timestamp
+                    // Preserve pin state - if it was pinned, keep it pinned (it will move to top of pinned items)
+                    // If it wasn't pinned, keep it unpinned (it will move to top of unpinned items)
                     entries[index].timestamp = now
+                    // Don't change isPinned - preserve user's pin preference
                     sortEntries()
                     persistEntries()
-                    logger.debug("🔄 [HistoryStore] Local entry matches history item, moved to top: \(matchingEntry.previewText.prefix(50))")
+                    logger.debug("🔄 [HistoryStore] Local entry matches history item, moved to top (pinned: \(entries[index].isPinned)): \(matchingEntry.previewText.prefix(50))")
                 } else {
                     // Received entry - discard duplicate to preserve chronological order
                     logger.debug("⏭️ [HistoryStore] Received entry matches history item, discarding duplicate: \(entry.previewText.prefix(50))")
@@ -148,6 +143,7 @@ public actor HistoryStore {
 
     private func sortEntries() {
         entries.sort { lhs, rhs in
+            // Standard sorting: pinned items first, then by timestamp (newest first)
             if lhs.isPinned != rhs.isPinned {
                 return lhs.isPinned && !rhs.isPinned
             }
@@ -206,6 +202,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
     private var syncMessageQueue: [QueuedSyncMessage] = []
     private var queueProcessingTask: Task<Void, Never>?
+    private var queueProcessingContinuation: CheckedContinuation<Void, Never>?
     @Published public private(set) var connectionState: ConnectionState = .idle
 
     private let store: HistoryStore
@@ -310,7 +307,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             logger.debug("🔌 [ClipboardHistoryViewModel] Initial connection state: \(connectionState)")
             logger.debug("🔌 [ClipboardHistoryViewModel] TransportManager connectionState: \(transportManager.connectionState)")
             
-            // Observe changes
+            // Observe changes (event-driven via Combine publisher)
             connectionStateCancellable = transportManager.connectionStatePublisher
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] newState in
@@ -318,19 +315,11 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                     logger.debug("🔌 [ClipboardHistoryViewModel] Connection state updated from publisher: \(newState)")
                     self.connectionState = newState
                     logger.debug("🔌 [ClipboardHistoryViewModel] Updated self.connectionState to: \(self.connectionState)")
-                }
-            
-            // Also set up a timer to periodically check the state (fallback)
-            Task { @MainActor in
-                while true {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000) // Every 2 seconds
-                    let currentState = transportManager.connectionState
-                    if currentState != connectionState {
-                        logger.debug("🔌 [ClipboardHistoryViewModel] State mismatch detected! Publisher: \(connectionState), Direct: \(currentState)")
-                        connectionState = currentState
+                    // Trigger sync queue processing when connection becomes available (event-driven)
+                    if newState != .idle {
+                        self.triggerSyncQueueProcessing()
                     }
                 }
-            }
 #endif
         } else {
             logger.info("⚠️ [ClipboardHistoryViewModel] No TransportManager provided, connection state will remain idle")
@@ -595,14 +584,15 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         
         // ⚠️ CRITICAL: Only forward entries that originated from the local device
         // Skip forwarding if entry came from a remote device (has transportOrigin set)
-        // or if originDeviceId doesn't match local device ID
+        // or if deviceId doesn't match local device ID
         if entry.transportOrigin != nil {
             logger.debug("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry came from remote device (transportOrigin: \(entry.transportOrigin!))")
             return
         }
         
-        if entry.originDeviceId != localDeviceId {
-            logger.debug("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry originated from different device: \(entry.originDeviceId) (local: \(localDeviceId))")
+        // Compare using lowercase normalization
+        if entry.deviceId != localDeviceId.lowercased() {
+            logger.debug("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry originated from different device: \(entry.deviceId) (local: \(localDeviceId.lowercased()))")
             return
         }
         
@@ -615,13 +605,13 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             payload = ClipboardPayload(
                 contentType: .text,
                 data: Data(text.utf8),
-                metadata: ["device_id": entry.originDeviceId, "device_name": entry.originDeviceName ?? ""]
+                metadata: ["device_id": entry.deviceId, "device_name": entry.originDeviceName ?? ""]
             )
         case .link(let url):
             payload = ClipboardPayload(
                 contentType: .link,
                 data: Data(url.absoluteString.utf8),
-                metadata: ["device_id": entry.originDeviceId, "device_name": entry.originDeviceName ?? ""]
+                metadata: ["device_id": entry.deviceId, "device_name": entry.originDeviceName ?? ""]
             )
         case .image, .file:
             // Skip images/files for now (would need more complex handling)
@@ -642,6 +632,17 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             syncMessageQueue.append(queuedMessage)
         }
         
+        // Trigger immediate queue processing (event-driven)
+        triggerSyncQueueProcessing()
+    }
+    
+    /// Trigger sync queue processing (event-driven)
+    @MainActor
+    private func triggerSyncQueueProcessing() {
+        // Resume continuation if waiting
+        queueProcessingContinuation?.resume()
+        queueProcessingContinuation = nil
+        
         // Start queue processor if not running
         if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
             queueProcessingTask = Task { [weak self] in
@@ -650,18 +651,23 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
     }
     
-    /// Process the sync message queue, retrying messages until sent or expired (1 minute)
+    /// Process the sync message queue (event-driven: triggered when connection available or message queued)
     private func processSyncQueue() async {
         while !Task.isCancelled {
             let now = Date()
             guard let transportManager = transportManager else {
-                // If transport manager is not available, wait and retry
-                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                // If transport manager is not available, wait for event (connection available or message queued)
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    Task { @MainActor [weak self] in
+                        self?.queueProcessingContinuation = continuation
+                    }
+                }
                 continue
             }
             
             // Process queue
             var remainingMessages: [QueuedSyncMessage] = []
+            var hasMessagesToRetry = false
             for message in syncMessageQueue {
                 // Expire messages older than 1 minute
                 if now.timeIntervalSince(message.queuedAt) > 60 {
@@ -681,13 +687,31 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 } else {
                     // Failed - keep in queue for retry
                     remainingMessages.append(message)
+                    hasMessagesToRetry = true
                 }
             }
             
             syncMessageQueue = remainingMessages
             
-            // Wait 5 seconds before next retry
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            if hasMessagesToRetry && connectionState != .idle {
+                // If we have messages to retry and connection is available, wait for next event
+                // (connection state change or new message queued) instead of polling
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    Task { @MainActor [weak self] in
+                        self?.queueProcessingContinuation = continuation
+                    }
+                }
+            } else if hasMessagesToRetry {
+                // Connection not available, wait for connection state change (event-driven)
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    Task { @MainActor [weak self] in
+                        self?.queueProcessingContinuation = continuation
+                    }
+                }
+            } else {
+                // No messages to process, exit (will restart when new message is queued)
+                return
+            }
         }
     }
     
@@ -1090,9 +1114,9 @@ extension ClipboardHistoryViewModel: ClipboardMonitorDelegate {
     nonisolated public func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture entry: ClipboardEntry) {
         let logger = HypoLogger(category: "ClipboardHistoryViewModel")
         Task { @MainActor in
-            let localId = deviceIdentity.deviceId.uuidString
-            let isLocal = entry.originDeviceId == localId
-            logger.info("📋 [ClipboardHistoryViewModel] clipboardMonitor didCapture: \(entry.previewText.prefix(50)), originDeviceId: \(entry.originDeviceId), localDeviceId: \(localId), isLocal: \(isLocal), transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
+            let localId = deviceIdentity.deviceId.uuidString.lowercased()
+            let isLocal = entry.deviceId == localId
+            logger.info("📋 [ClipboardHistoryViewModel] clipboardMonitor didCapture: \(entry.previewText.prefix(50)), deviceId: \(entry.deviceId), localDeviceId: \(localId), isLocal: \(isLocal), transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
             await self.add(entry)
         }
     }

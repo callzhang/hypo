@@ -228,7 +228,7 @@ public final class IncomingClipboardHandler {
         let entry = ClipboardEntry(
             id: UUID(),
             timestamp: timestamp,  // Use envelope timestamp (when message was created on Android) instead of current time
-            originDeviceId: finalDeviceId,
+            deviceId: finalDeviceId,
             originPlatform: finalPlatform,
             originDeviceName: finalDeviceName,
             content: content,

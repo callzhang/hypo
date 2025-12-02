@@ -12,6 +12,9 @@ import os
 #if canImport(Network)
 import Network
 #endif
+#if canImport(Darwin)
+import Darwin
+#endif
 
 @MainActor
 public final class TransportManager {
@@ -37,6 +40,7 @@ public final class TransportManager {
 #if canImport(Network)
     private var hasSeenNetworkPathUpdate = false
     private var lastNetworkPathStatus: NWPath.Status?
+    private var lastKnownIP: String?
 #endif
     private var isAdvertising = false
     private var isServerRunning = false
@@ -531,17 +535,27 @@ public func updateConnectionState(_ newState: ConnectionState) {
                     if !self.hasSeenNetworkPathUpdate {
                         self.hasSeenNetworkPathUpdate = true
                         self.lastNetworkPathStatus = path.status
-                        self.logger.info("🌐 [TransportManager] Initial network path: \(path.status) – not restarting LAN services")
+                        // Capture initial IP address
+                        self.lastKnownIP = self.getCurrentIPAddress()
+                        self.logger.info("🌐 [TransportManager] Initial network path: \(path.status) – IP: \(self.lastKnownIP ?? "unknown")")
                         return
                     }
                     
                     if path.status == .satisfied {
+                        // Check if IP address has changed
+                        let currentIP = self.getCurrentIPAddress()
+                        let ipChanged = currentIP != nil && currentIP != self.lastKnownIP
+                        
                         // Only restart when transitioning from a non-satisfied state
-                        // to satisfied; avoid repeated restarts when the path
-                        // remains satisfied.
+                        // to satisfied, OR when IP address changes while path remains satisfied
                         if self.lastNetworkPathStatus != .satisfied {
                             self.logger.info("🌐 [TransportManager] Network path became satisfied. Restarting LAN services to update IP address...")
                             self.lastNetworkPathStatus = .satisfied
+                            self.lastKnownIP = currentIP
+                            await self.restartLanServicesForNetworkChange()
+                        } else if ipChanged {
+                            self.logger.info("🌐 [TransportManager] IP address changed: \(self.lastKnownIP ?? "unknown") -> \(currentIP ?? "unknown"). Restarting LAN services...")
+                            self.lastKnownIP = currentIP
                             await self.restartLanServicesForNetworkChange()
                         } else {
                             self.logger.info("🌐 [TransportManager] Network path still satisfied – skipping LAN restart")
@@ -549,14 +563,26 @@ public func updateConnectionState(_ newState: ConnectionState) {
                     } else {
                         self.logger.info("🌐 [TransportManager] Network path not satisfied. Status: \(path.status)")
                         self.lastNetworkPathStatus = path.status
+                        self.lastKnownIP = nil
                     }
                 }
             }
             monitor.start(queue: queue)
             
-            // Keep task alive
+            // Also periodically check IP address changes (every 10 seconds)
+            // This catches IP changes that might not trigger path status changes
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
+                if Task.isCancelled { break }
+                Task { @MainActor [weak self] in
+                    guard let self, self.isAdvertising else { return }
+                    let currentIP = self.getCurrentIPAddress()
+                    if let currentIP = currentIP, currentIP != self.lastKnownIP {
+                        self.logger.info("🌐 [TransportManager] Periodic check: IP address changed: \(self.lastKnownIP ?? "unknown") -> \(currentIP). Restarting LAN services...")
+                        self.lastKnownIP = currentIP
+                        await self.restartLanServicesForNetworkChange()
+                    }
+                }
             }
             monitor.cancel()
             #else
@@ -585,9 +611,20 @@ public func updateConnectionState(_ newState: ConnectionState) {
         let wasAdvertising = isAdvertising
         let wasServerRunning = isServerRunning
         
-        // Stop current services
+        // Stop current services and wait for them to fully stop
         if wasAdvertising {
-            publisher.stop()
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                // Cast to concrete type to access stop(completion:) method
+                if let bonjourPublisher = publisher as? BonjourPublisher {
+                    bonjourPublisher.stop {
+                        continuation.resume()
+                    }
+                } else {
+                    // Fallback for protocol-only implementation
+                    publisher.stop()
+                    continuation.resume()
+                }
+            }
             isAdvertising = false
         }
         if wasServerRunning {
@@ -595,7 +632,7 @@ public func updateConnectionState(_ newState: ConnectionState) {
             isServerRunning = false
         }
         
-        // Small delay to let network stack settle
+        // Small delay to let network stack settle and ensure old service is fully unregistered
         try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
         
         // Restart services with new network configuration
@@ -1360,5 +1397,45 @@ extension TransportManager: LanWebSocketServerDelegate {
                 )
             }
         }
+    }
+    
+    /// Get the current primary IP address for the active network interface
+    private func getCurrentIPAddress() -> String? {
+        var address: String?
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        
+        guard getifaddrs(&ifaddr) == 0 else { return nil }
+        defer { freeifaddrs(ifaddr) }
+        
+        var ptr = ifaddr
+        while ptr != nil {
+            defer { ptr = ptr?.pointee.ifa_next }
+            
+            guard let interface = ptr?.pointee else { continue }
+            let flags = Int32(interface.ifa_flags)
+            
+            // Check if interface is up and not loopback
+            if (flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING) && (flags & IFF_LOOPBACK) == 0 {
+                if let addr = interface.ifa_addr {
+                    let addrFamily = addr.pointee.sa_family
+                    if addrFamily == AF_INET {
+                        let sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+                        if let addrString = inet_ntoa(sin.sin_addr) {
+                            let ip = String(cString: addrString)
+                            // Prefer non-link-local addresses (not 169.254.x.x)
+                            if !ip.hasPrefix("169.254.") {
+                                address = ip
+                                break
+                            } else if address == nil {
+                                // Fallback to link-local if no other address found
+                                address = ip
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return address
     }
 }

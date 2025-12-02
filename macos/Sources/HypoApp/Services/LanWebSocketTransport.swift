@@ -32,29 +32,8 @@ public struct LanWebSocketConfiguration: Sendable, Equatable {
     }
 }
 
-public protocol WebSocketTasking: AnyObject {
-    func resume()
-    func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping @Sendable (Error?) -> Void)
-    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
-    func receive(completionHandler: @escaping @Sendable (Result<URLSessionWebSocketTask.Message, Error>) -> Void)
-    func sendPing(pongReceiveHandler: @escaping @Sendable (Error?) -> Void)
-}
-
-extension URLSessionWebSocketTask: WebSocketTasking {
-    // URLSessionWebSocketTask uses sendPing(pongReceiveHandler:), which matches the protocol
-    // The protocol conformance is automatic
-}
-
-public protocol URLSessionProviding {
-    func webSocketTask(with request: URLRequest) -> WebSocketTasking
-    func invalidateAndCancel()
-}
-
-extension URLSession: URLSessionProviding {
-    public func webSocketTask(with request: URLRequest) -> WebSocketTasking {
-        return (self as URLSession).webSocketTask(with: request) as URLSessionWebSocketTask
-    }
-}
+// Protocols WebSocketTasking and URLSessionProviding are defined in WebSocketTransport.swift
+// Import them from there to avoid duplicate definitions
 
 public final class LanWebSocketTransport: NSObject, SyncTransport {
     private let logger = HypoLogger(category: "LanWebSocketTransport")

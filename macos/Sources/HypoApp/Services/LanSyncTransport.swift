@@ -14,7 +14,7 @@ public final class LanSyncTransport: SyncTransport {
     private var isConnected = false
     private var messageHandlers: [UUID: (Data) async throws -> Void] = [:]
     private var getDiscoveredPeers: (() -> [DiscoveredPeer])?
-    private var clientTransports: [String: LanWebSocketTransport] = [:] // deviceId -> transport
+    private var clientTransports: [String: WebSocketTransport] = [:] // deviceId -> transport
     
     #if canImport(os)
     private let logger = HypoLogger(category: "lan-transport")
@@ -96,7 +96,7 @@ public final class LanSyncTransport: SyncTransport {
                 let deviceId = peer.endpoint.metadata["device_id"] ?? peer.serviceName
                 
                 // Reuse existing client transport if available, or create new one
-                let clientTransport: LanWebSocketTransport
+                let clientTransport: WebSocketTransport
                 if let existing = clientTransports[deviceId] {
                     clientTransport = existing
                 } else {
@@ -105,7 +105,7 @@ public final class LanSyncTransport: SyncTransport {
                         if let fp = peer.endpoint.fingerprint, fp.lowercased() != "uninitialized" { return fp }
                         return nil
                     }()
-                    let config = LanWebSocketConfiguration(
+                    let config = WebSocketConfiguration(
                         url: url,
                         pinnedFingerprint: pinnedFingerprint,
                         headers: [
@@ -117,7 +117,7 @@ public final class LanSyncTransport: SyncTransport {
                         roundTripTimeout: 60
                     )
                     
-                    clientTransport = LanWebSocketTransport(
+                    clientTransport = WebSocketTransport(
                         configuration: config,
                         frameCodec: TransportFrameCodec(),
                         metricsRecorder: NullTransportMetricsRecorder(),

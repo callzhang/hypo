@@ -203,8 +203,8 @@ extension ClipboardEntry {
     var estimatedMemoryFootprint: Int {
         var size = 0
         
-        // UUID (16 bytes) + Date (8 bytes) + Bool (1 byte) + String (originDeviceId)
-        size += 25 + originDeviceId.utf8.count
+        // UUID (16 bytes) + Date (8 bytes) + Bool (1 byte) + String (deviceId)
+        size += 25 + deviceId.utf8.count
         
         // Content estimation
         switch content {

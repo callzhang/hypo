@@ -342,15 +342,16 @@ public final actor SyncEngine {
         } else {
             // Normal encryption mode
             let key = try await keyProvider.key(for: targetDeviceId)
-            // Use entry.originDeviceId as AAD (sender's device ID) so it matches what Android expects
+            // Use entry.deviceId as AAD (sender's device ID) so it matches what Android expects
             // Android decrypts using envelope.payload.deviceId as AAD, so they must match
-            let aad = Data(entry.originDeviceId.utf8)
+            // deviceId is already normalized to lowercase in ClipboardEntry.init
+            let aad = Data(entry.deviceId.utf8)
             let sealed = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
             ciphertext = sealed.ciphertext
             nonce = sealed.nonce
             tag = sealed.tag
             
-            logger.info("🔒 [SyncEngine] ENCRYPTED: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes, AAD=deviceId=\(entry.originDeviceId)")
+            logger.info("🔒 [SyncEngine] ENCRYPTED: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes, AAD=deviceId=\(entry.deviceId)")
         }
 
         let envelope = SyncEnvelope(
@@ -358,7 +359,7 @@ public final actor SyncEngine {
             payload: .init(
                 contentType: payload.contentType,
                 ciphertext: ciphertext,
-                deviceId: entry.originDeviceId,  // UUID string (pure UUID)
+                deviceId: entry.deviceId,  // UUID string (pure UUID, already normalized to lowercase)
                 devicePlatform: entry.originPlatform?.rawValue ?? localPlatform.rawValue,  // Platform string (use local if not set)
                 deviceName: entry.originDeviceName,
                 target: targetDeviceId,

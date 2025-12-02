@@ -483,11 +483,14 @@ public final class LanWebSocketServer {
                     self.closeConnection(connectionId)
                     return
                 }
+                // Get device ID from metadata for logging
+                let deviceId = self.connectionMetadata[connectionId]?.deviceId ?? "unknown"
                 #if canImport(os)
                 self.logger.info("✅ CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded for \(connectionId.uuidString.prefix(8))")
                 #endif
                 self.logger.info("✅ [LanWebSocketServer] HTTP 101 response sent successfully, connection upgraded")
                 self.logger.info("🔗 [LanWebSocketServer] Connection state after handshake: \(context.connection.state)")
+                self.logger.info("📱 [LanWebSocketServer] Client connected: deviceId=\(deviceId), connectionId=\(connectionId.uuidString.prefix(8))")
                 
                 // Notify delegate that connection is accepted
                 self.delegate?.server(self, didAcceptConnection: connectionId)
@@ -719,6 +722,22 @@ public final class LanWebSocketServer {
         }
         switch opcode {
         case 0x1, 0x2:
+            // Skip empty payloads (could be ping/pong or malformed frames)
+            guard !payload.isEmpty else {
+                logger.info("⏭️ [LanWebSocketServer] Skipping empty data frame from \(connectionId.uuidString.prefix(8))")
+                #if canImport(os)
+                logger.info("⏭️ Skipping empty data frame")
+                #endif
+                return
+            }
+            // Skip frames that are too small to contain a valid frame header (4 bytes minimum for TransportFrameCodec)
+            guard payload.count >= 4 else {
+                logger.info("⏭️ [LanWebSocketServer] Skipping truncated frame from \(connectionId.uuidString.prefix(8)) (\(payload.count) bytes < 4)")
+                #if canImport(os)
+                logger.info("⏭️ Skipping truncated frame (\(payload.count) bytes < 4)")
+                #endif
+                return
+            }
             logger.info("📨 [LanWebSocketServer] FRAME HANDLED: data frame opcode=\(opcode), \(payload.count) bytes")
             #if canImport(os)
             logger.info("📨 FRAME HANDLED: data frame opcode=\(opcode), \(payload.count) bytes from \(connectionId.uuidString.prefix(8))")
@@ -801,6 +820,18 @@ public final class LanWebSocketServer {
         #if canImport(os)
         logger.info("📨 CLIPBOARD DATA RECEIVED: \(data.count) bytes from connection \(connectionId.uuidString.prefix(8))")
         #endif
+        
+        // Skip empty data (should have been caught in handleFrame, but double-check here)
+        guard !data.isEmpty else {
+            logger.info("⏭️ [LanWebSocketServer] Skipping empty data in handleReceivedData from \(connectionId.uuidString.prefix(8))")
+            return
+        }
+        
+        // Skip frames that are too small to contain a valid frame header (4 bytes minimum)
+        guard data.count >= 4 else {
+            logger.info("⏭️ [LanWebSocketServer] Skipping truncated frame in handleReceivedData from \(connectionId.uuidString.prefix(8)) (\(data.count) bytes < 4)")
+            return
+        }
         
         // Simple test log to verify execution continues
         logger.info("🔍 TEST: After CLIPBOARD DATA RECEIVED log")

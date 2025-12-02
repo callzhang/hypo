@@ -23,7 +23,7 @@ public struct CloudRelayConfiguration: Sendable, Equatable {
 }
 
 public final class CloudRelayTransport: SyncTransport {
-    private let delegate: LanWebSocketTransport
+    private let delegate: WebSocketTransport
 
     public init(
         configuration: CloudRelayConfiguration,
@@ -43,15 +43,15 @@ public final class CloudRelayTransport: SyncTransport {
             return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         }
     ) {
-        let lanConfiguration = LanWebSocketConfiguration(
+        let webSocketConfiguration = WebSocketConfiguration(
             url: configuration.url,
             pinnedFingerprint: configuration.fingerprint,
             headers: configuration.headers,
             idleTimeout: configuration.idleTimeout,
             environment: "cloud"
         )
-        delegate = LanWebSocketTransport(
-            configuration: lanConfiguration,
+        delegate = WebSocketTransport(
+            configuration: webSocketConfiguration,
             frameCodec: frameCodec,
             metricsRecorder: metricsRecorder,
             analytics: analytics,
@@ -75,7 +75,7 @@ public final class CloudRelayTransport: SyncTransport {
         delegate.handleOpen(task: task)
     }
 
-    var underlying: LanWebSocketTransport { delegate }
+    var underlying: WebSocketTransport { delegate }
     
     /// Check if the cloud transport is currently connected
     public func isConnected() -> Bool {

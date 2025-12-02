@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build and relaunch macOS Hypo app
 # Always builds the app to ensure latest code changes are included
-# Usage: ./scripts/build-macos.sh [clean]
+# Usage: ./scripts/build-macos.sh [clean] [release]
 
 set -e
 
@@ -33,8 +33,28 @@ log_success() {
     echo -e "${GREEN}✅ $1${NC}"
 }
 
-# Check if we should clean build
-if [ "$1" == "clean" ]; then
+# Parse arguments
+CLEAN_BUILD=false
+BUILD_CONFIG="debug"  # default: debug build
+
+for arg in "$@"; do
+    case "$arg" in
+        clean)
+            CLEAN_BUILD=true
+            ;;
+        release)
+            BUILD_CONFIG="release"
+            ;;
+        *)
+            log_warn "Unknown argument: $arg"
+            log_info "Usage: $0 [clean] [release]"
+            log_info "Default: debug build"
+            ;;
+    esac
+done
+
+# Clean build if requested
+if [ "$CLEAN_BUILD" = true ]; then
     log_info "Cleaning build artifacts..."
     cd "$MACOS_DIR"
     swift package clean
@@ -127,8 +147,13 @@ if [ -d ".build" ]; then
 fi
 
 # Build the app and capture exit status
-log_info "Running 'swift build'..."
-swift build 2>&1 | tee /tmp/hypo_build.log
+if [ "$BUILD_CONFIG" = "release" ]; then
+    log_info "Building release configuration..."
+    swift build -c release 2>&1 | tee /tmp/hypo_build.log
+else
+    log_info "Building debug configuration (default)..."
+    swift build 2>&1 | tee /tmp/hypo_build.log
+fi
 BUILD_EXIT_CODE=${PIPESTATUS[0]}
 
 # Check if build failed
@@ -148,8 +173,20 @@ if [ $BUILD_EXIT_CODE -ne 0 ]; then
     exit 1
 fi
 
-# Find the built binary (prefer debug, fallback to release)
-BUILT_BINARY=$(find "$MACOS_DIR/.build" -name "$BINARY_NAME" -type f 2>/dev/null | head -1)
+# Find the built binary (look in the appropriate build directory)
+if [ "$BUILD_CONFIG" = "release" ]; then
+    BUILT_BINARY="$MACOS_DIR/.build/release/$BINARY_NAME"
+    if [ ! -f "$BUILT_BINARY" ]; then
+        # Fallback: search for it
+        BUILT_BINARY=$(find "$MACOS_DIR/.build" -path "*/release/$BINARY_NAME" -type f 2>/dev/null | head -1)
+    fi
+else
+    BUILT_BINARY="$MACOS_DIR/.build/debug/$BINARY_NAME"
+    if [ ! -f "$BUILT_BINARY" ]; then
+        # Fallback: search for it
+        BUILT_BINARY=$(find "$MACOS_DIR/.build" -name "$BINARY_NAME" -type f 2>/dev/null | head -1)
+    fi
+fi
 
 if [ -z "$BUILT_BINARY" ]; then
     log_error "Built binary not found in .build directory"

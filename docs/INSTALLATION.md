@@ -1,8 +1,8 @@
 # Hypo Installation Guide
 
 **Quick setup guide for macOS and Android**  
-**Version**: 0.2.3 Beta  
-**Last Updated**: November 26, 2025
+**Version**: 0.2.2 Beta  
+**Last Updated**: December 2, 2025
 
 ---
 
@@ -13,8 +13,10 @@
 | Platform | Minimum Requirements |
 |----------|---------------------|
 | **macOS** | macOS 14.0+, 4GB RAM, 50MB storage |
-| **Android** | Android 8.0+ (API 26), 2GB RAM, 100MB storage |
+| **Android** | Android 8.0+ (API 26), 2GB RAM, 20MB storage (release APK) |
 | **Network** | Wi-Fi connection required for both devices |
+
+**Note**: Android release APK is optimized (~15-20MB). Debug APK is larger (~47MB) for development.
 
 ### Before You Begin
 
@@ -70,11 +72,30 @@
    
    # Clone repository
    git clone https://github.com/hypo-app/hypo.git
-   cd hypo/macos
+   cd hypo
    ```
 
-2. **Build Application**
+2. **Build Application Using Build Script (Recommended)**
    ```bash
+   # Build macOS app (debug, default)
+   ./scripts/build-macos.sh
+   
+   # Build release version
+   ./scripts/build-macos.sh release
+   
+   # Clean build (removes build cache)
+   ./scripts/build-macos.sh clean
+   ```
+
+   The script will:
+   - Build the app using Swift Package Manager
+   - Create `HypoApp.app` bundle
+   - Optionally install and launch the app
+
+3. **Build Application Using Xcode**
+   ```bash
+   cd macos
+   
    # Open in Xcode
    open HypoApp.xcworkspace
    
@@ -85,8 +106,12 @@
               -derivedDataPath build/
    ```
 
-3. **Install Built App**
+4. **Install Built App**
    ```bash
+   # From build script output
+   # App is built at: macos/HypoApp.app
+   
+   # Or from Xcode build
    cp -r build/Build/Products/Release/Hypo.app /Applications/
    ```
 
@@ -188,31 +213,66 @@ Google Play Store → Search "Hypo Clipboard" → Install
 
 1. **Setup Development Environment**
    ```bash
-   # Install Android Studio
-   # Download Android SDK
+   # Install OpenJDK 17
+   brew install openjdk@17
+   
+   # Setup Android SDK (if not using Android Studio)
+   ./scripts/setup-android-sdk.sh
    
    # Clone repository
    git clone https://github.com/hypo-app/hypo.git
-   cd hypo/android
+   cd hypo
    ```
 
-2. **Build APK**
+2. **Build APK Using Build Script (Recommended)**
    ```bash
-   # Set Android SDK path
+   # Build debug APK (default, for development/testing)
+   ./scripts/build-android.sh
+   
+   # Build release APK (optimized, ~15-20MB)
+   ./scripts/build-android.sh release
+   
+   # Build both debug and release APKs
+   ./scripts/build-android.sh both
+   
+   # Clean build (removes build cache)
+   ./scripts/build-android.sh clean
+   ```
+
+   **Build Output**:
+   - Debug APK: `android/app/build/outputs/apk/debug/app-debug.apk` (~47MB)
+   - Release APK: `android/app/build/outputs/apk/release/app-release.apk` (~15-20MB)
+
+3. **Build APK Using Gradle Directly**
+   ```bash
+   cd android
+   
+   # Set Android SDK path (if not set)
    export ANDROID_SDK_ROOT=/path/to/android-sdk
+   export JAVA_HOME=/path/to/java-17
    
    # Build debug APK
    ./gradlew assembleDebug
    
-   # Build release APK (requires signing)
+   # Build release APK (optimized with R8/ProGuard)
    ./gradlew assembleRelease
    ```
 
-3. **Install Built APK**
+4. **Install Built APK**
    ```bash
-   # Install via ADB
-   adb install app/build/outputs/apk/debug/app-debug.apk
+   # Install debug APK via ADB (auto-installs if device connected, default)
+   ./scripts/build-android.sh
+   
+   # Or manually install
+   adb install android/app/build/outputs/apk/debug/app-debug.apk
+   adb install android/app/build/outputs/apk/release/app-release.apk
    ```
+
+**Build Optimizations**:
+- Release builds are optimized with R8/ProGuard minification
+- Only arm64-v8a ABI included in release (saves ~15MB)
+- Unused dependencies removed (ML Kit, Camera libraries)
+- Resource shrinking enabled
 
 ---
 
@@ -421,13 +481,19 @@ security delete-generic-password -s "Hypo" -a "$(whoami)"
 ### Android Removal
 
 ```bash
-# Via ADB
+# Via ADB (debug build)
+adb uninstall com.hypo.clipboard.debug
+
+# Via ADB (release build)
 adb uninstall com.hypo.clipboard
 
 # Or manually: Settings → Apps → Hypo → Uninstall
 ```
 
-**Note**: All clipboard history and pairing keys will be permanently deleted.
+**Note**: 
+- Debug builds use package name: `com.hypo.clipboard.debug`
+- Release builds use package name: `com.hypo.clipboard`
+- All clipboard history and pairing keys will be permanently deleted
 
 ---
 
@@ -451,6 +517,35 @@ adb uninstall com.hypo.clipboard
 
 ---
 
-**Installation Guide Version**: 1.0  
-**Compatible with Hypo**: 0.2.3 Beta  
-**Last Updated**: November 26, 2025
+**Installation Guide Version**: 1.1  
+**Compatible with Hypo**: 0.2.2 Beta  
+**Last Updated**: December 2, 2025
+
+## 📦 Build Information
+
+### Android APK Sizes
+
+| Build Type | Size | Use Case |
+|------------|------|----------|
+| **Debug APK** | ~47MB | Development, testing, emulator |
+| **Release APK** | ~15-20MB | Production distribution |
+| **Release AAB** | ~12-15MB | Google Play Store (when available) |
+
+### Build Optimizations
+
+The release APK includes the following optimizations:
+- **Code minification**: R8/ProGuard removes unused code (~20-25MB savings)
+- **Resource shrinking**: Unused resources removed
+- **ABI filtering**: Only arm64-v8a included (~15MB savings)
+- **Dependency optimization**: Removed unused libraries (ML Kit, Camera, etc.)
+
+### Building App Bundle (AAB) for Play Store
+
+```bash
+cd android
+./gradlew bundleRelease
+
+# Output: app/build/outputs/bundle/release/app-release.aab
+```
+
+The App Bundle format allows Google Play to generate optimized APKs per device, resulting in smaller downloads for end users.

@@ -11,9 +11,14 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Get project root (script is in scripts/ directory)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_DIR="$PROJECT_ROOT/backend"
+
 # Configuration
 APP_NAME="hypo"
-FLY_CONFIG="fly.toml"
+FLY_CONFIG="$BACKEND_DIR/fly.toml"
 FLYCTL_PATH="${FLYCTL_PATH:-/Users/derek/.fly/bin/flyctl}"
 DEPLOY_ENV="${DEPLOY_ENV:-production}"
 
@@ -64,7 +69,7 @@ check_prerequisites() {
     
     # Check fly.toml exists
     if [ ! -f "$FLY_CONFIG" ]; then
-        log_error "fly.toml not found in current directory"
+        log_error "fly.toml not found at $FLY_CONFIG"
         exit 1
     fi
     
@@ -86,6 +91,7 @@ run_tests() {
     
     if command -v cargo &> /dev/null; then
         log_info "Running backend tests..."
+        cd "$BACKEND_DIR"
         if cargo test --all-features --locked 2>&1 | tee /tmp/hypo_backend_tests.log; then
             log_success "All tests passed"
             return 0
@@ -117,6 +123,7 @@ deploy() {
     log_info "Starting deployment (remote build)..."
     echo ""
     
+    cd "$BACKEND_DIR"
     if $FLYCTL_CMD deploy \
         --remote-only \
         --config "$FLY_CONFIG" \

@@ -5,9 +5,31 @@ This directory contains automation scripts for building, testing, and managing t
 ## Quick Reference
 
 ### Build Scripts
-- **`build-android.sh`** - Build and install Android APK on connected devices
-- **`build-macos.sh`** - Build and launch macOS menu bar app
+- **`build-android.sh`** - Build and install Android APK on connected devices (default: debug)
+  ```bash
+  ./scripts/build-android.sh              # Build debug (default)
+  ./scripts/build-android.sh release     # Build release
+  ./scripts/build-android.sh both        # Build both debug and release
+  ./scripts/build-android.sh clean       # Clean and build debug
+  ```
+- **`build-macos.sh`** - Build and launch macOS menu bar app (default: debug)
+  ```bash
+  ./scripts/build-macos.sh               # Build debug (default)
+  ./scripts/build-macos.sh release        # Build release
+  ./scripts/build-macos.sh clean         # Clean and build debug
+  ```
 - **`build-all.sh`** - Build both Android and macOS apps
+  ```bash
+  ./scripts/build-all.sh                  # Build both platforms (debug)
+  ./scripts/build-all.sh deploy           # Build both platforms and deploy backend
+  ```
+- **`deploy.sh`** - Deploy backend to Fly.io production
+  ```bash
+  ./scripts/deploy.sh deploy              # Full deployment (default)
+  ./scripts/deploy.sh test                # Run tests only
+  ./scripts/deploy.sh verify              # Verify existing deployment
+  ./scripts/deploy.sh info                # Show deployment information
+  ```
 
 ### Testing Scripts
 All test scripts are now in the `tests/` directory:
@@ -46,6 +68,7 @@ All test scripts are now in the `tests/` directory:
 ### Utility Scripts
 - **`check-android-device.sh`** - Check if Android device is connected
 - **`check-accessibility.sh`** - Check Android accessibility service status
+- **`check-notification-status.sh`** - Check Android notification permission and channel status
 - **`reopen-android-app.sh`** - Reopen Android app
 - **`timeout.sh`** - Timeout wrapper for long-running commands
 
@@ -57,6 +80,14 @@ All test scripts are now in the `tests/` directory:
 - **`simulate-android-relay.py`** - Simulate clipboard sync via cloud relay
   ```bash
   python3 scripts/simulate-android-relay.py --text "Test message" --target-device-id <device_id>
+  ```
+- **`simulate-sms.sh`** - Simulate SMS reception on Android (emulator only)
+  ```bash
+  ./scripts/simulate-sms.sh <device_id> "+1234567890" "Test SMS message"
+  ```
+- **`test-sms-clipboard.sh`** - Comprehensive SMS-to-clipboard testing suite
+  ```bash
+  ./scripts/test-sms-clipboard.sh <device_id>
   ```
 - **`clipboard_sender.py`** - Common module providing `send_via_lan()` and `send_via_cloud_relay()` functions
 
@@ -77,8 +108,11 @@ These scripts are for specific debugging scenarios:
 
 ### Build and Test Workflow
 ```bash
-# Build both apps
+# Build both apps (debug)
 ./scripts/build-all.sh
+
+# Build both apps and deploy backend
+./scripts/build-all.sh deploy
 
 # Run comprehensive sync test
 ./tests/test-sync.sh
@@ -89,32 +123,53 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep 
 
 ### Android Development
 ```bash
-# Build and install on connected device
+# Build and install debug APK on connected device (default)
 ./scripts/build-android.sh
+
+# Build release APK
+./scripts/build-android.sh release
 
 # Check device connection
 ./scripts/check-android-device.sh
 
 # Check accessibility service
 ./scripts/check-accessibility.sh
+
+# Check notification status
+./scripts/check-notification-status.sh <device_id>
+
+# Test SMS-to-clipboard functionality
+./scripts/test-sms-clipboard.sh <device_id>
 ```
 
 ### macOS Development
 ```bash
-# Build and launch app
+# Build and launch app (debug, default)
 ./scripts/build-macos.sh
+
+# Build release version
+./scripts/build-macos.sh release
 
 # App will appear in menu bar
 # Click icon to open popup window
 ```
 
-### Backend Testing
+### Backend Testing & Deployment
 ```bash
 # Test all backend endpoints
 ./tests/test-server-all.sh
 
 # Run transport regression tests
 ./scripts/run-transport-regression.sh
+
+# Deploy backend to Fly.io
+./scripts/deploy.sh deploy
+
+# Run backend tests only
+./scripts/deploy.sh test
+
+# Verify deployment
+./scripts/deploy.sh verify
 ```
 
 ## Script Dependencies
@@ -139,7 +194,8 @@ The following scripts have been consolidated or removed:
 - ✅ `screenshot-simple.sh` → Removed (redundant with `screenshot-android.sh`)
 - ✅ `capture-window-auto.sh` → Removed (redundant with `screenshot-android.sh`)
 - ✅ `monitor-pairing.sh` → Removed (use unified logging: `log stream --predicate 'subsystem == "com.hypo.clipboard"'`)
-- ✅ `simulate-android-relay.py` → Created (was missing, now available as wrapper around `clipboard_sender.send_via_cloud_relay()`)
+- ✅ `generate-icons.sh` → Removed (redundant with `generate-icons.py`, which is used by build scripts)
+- ✅ `detect-cloud-disconnection.sh` → Removed (hardcoded device ID, use general log monitoring instead)
 
 **All test scripts are now in the `tests/` directory:**
 - `tests/test-sync.sh` - Comprehensive sync testing suite

@@ -197,7 +197,6 @@ class SettingsViewModel @Inject constructor(
                     plainTextModeEnabled = settings.plainTextModeEnabled,
                     discoveredPeers = pairedPeersForUi,
                     deviceStatuses = peerStatuses,
-                    isNotificationPermissionGranted = isNotificationPermissionGranted,
                     deviceTransports = peerTransports,
                     isAccessibilityServiceEnabled = isAccessibilityEnabled,
                     isSmsPermissionGranted = isSmsPermissionGranted,
@@ -284,6 +283,15 @@ class SettingsViewModel @Inject constructor(
             return true // Permission granted by default on older Android versions
         }
         return ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+    }
+    
+    private fun checkNotificationPermissionStatus(): Boolean {
+        // Notification permission is only required on Android 13+ (API 33+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        }
+        // On older versions, notifications are always allowed
+        return true
     }
 }
 

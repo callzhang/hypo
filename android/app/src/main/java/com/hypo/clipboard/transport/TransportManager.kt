@@ -101,14 +101,7 @@ class TransportManager(
             }
             editor.putString(key, transport.name)
             val success = editor.commit()
-            if (success) {
-                // Update the StateFlow to ensure it reflects the persisted value
-                _lastSuccessfulTransport.update { current ->
-                    val updated = HashMap(current)
-                    updated[deviceId] = transport
-                    updated
-                }
-            } else {
+            if (!success) {
                 android.util.Log.e("TransportManager", "❌ commit() returned false for key=$key")
             }
         } catch (e: Exception) {

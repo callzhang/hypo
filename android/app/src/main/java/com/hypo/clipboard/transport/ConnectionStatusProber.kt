@@ -24,7 +24,7 @@ import javax.inject.Singleton
 
 /**
  * Periodically probes connection status to paired devices and updates their online status.
- * Checks on app launch, when app comes to foreground, and every 10 minutes.
+ * Checks on app launch, when app comes to foreground, and every 1 minute.
  */
 @Singleton
 class ConnectionStatusProber @Inject constructor(
@@ -57,7 +57,7 @@ class ConnectionStatusProber @Inject constructor(
             probeConnections()
         }
         
-        // Periodic probe every 10 minutes
+        // Periodic probe every 1 minute
         periodicJob = scope.launch {
             while (isActive) {
                 delay(PROBE_INTERVAL_MS)
@@ -244,4 +244,3 @@ class ConnectionStatusProber @Inject constructor(
         }
     }
 }
-

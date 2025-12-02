@@ -51,22 +51,23 @@ class LanDiscoveryRepository(
                     override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                         val resolvedIP = serviceInfo.host?.hostAddress
                         val resolvedHostname = serviceInfo.host?.hostName
-                        android.util.Log.d("LanDiscoveryRepository", "✅ Service resolved: ${serviceInfo.serviceName} at $resolvedIP:$serviceInfo.port (hostname: $resolvedHostname)")
+                        val ownIPs = getLocalIPAddresses()
                         
-                        // Log additional details for debugging IP resolution issues
-                        if (serviceInfo.host != null) {
-                            val addresses = serviceInfo.host.address
-                            android.util.Log.d("LanDiscoveryRepository", "   Host address bytes: ${addresses?.contentToString()}")
-                            android.util.Log.d("LanDiscoveryRepository", "   Host canonical name: ${serviceInfo.host.canonicalHostName}")
-                        }
+                        // Log comprehensive resolution details for debugging
+                        val addressBytes = serviceInfo.host?.address?.contentToString() ?: "null"
+                        val canonicalName = serviceInfo.host?.canonicalHostName ?: "null"
+                        android.util.Log.w("LanDiscoveryRepository", 
+                            "✅ Service resolved: ${serviceInfo.serviceName} -> IP=$resolvedIP:$serviceInfo.port, " +
+                            "hostname=$resolvedHostname, canonical=$canonicalName, addressBytes=$addressBytes, " +
+                            "ownIPs=[${ownIPs.joinToString()}]")
                         
                         // Validate that resolved IP is not our own IP address
                         // Android NSD sometimes incorrectly resolves services to the device's own IP
                         if (resolvedIP != null) {
-                            val ownIPs = getLocalIPAddresses()
                             if (resolvedIP in ownIPs) {
-                                android.util.Log.w("LanDiscoveryRepository", "⚠️ Rejecting service ${serviceInfo.serviceName}: resolved IP $resolvedIP matches own IP (${ownIPs.joinToString()})")
-                                android.util.Log.w("LanDiscoveryRepository", "   This is likely an NSD resolution bug - will wait for correct resolution")
+                                android.util.Log.w("LanDiscoveryRepository", 
+                                    "⚠️ Rejecting service ${serviceInfo.serviceName}: resolved IP $resolvedIP matches own IP " +
+                                    "(ownIPs=[${ownIPs.joinToString()}]) - NSD resolution bug, waiting for correct resolution")
                                 return // Don't process this peer - wait for correct resolution
                             }
                         }

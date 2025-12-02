@@ -299,7 +299,16 @@ class WebSocketTransportClient @Inject constructor(
                 // Peer URL matches lastKnownUrl - ensure it's set
                 lastKnownUrl = peerUrl
             } else {
-                android.util.Log.w("WebSocketTransportClient", "⚠️ Target device $targetDeviceId not found in discovered peers, using lastKnownUrl: $lastKnownUrl")
+                // Peer not in current discovery cache - this is normal if:
+                // 1. Discovery hasn't completed yet (NSD can take a few seconds)
+                // 2. Peer was temporarily removed from cache but we have lastKnownUrl
+                // 3. Network conditions changed but discovery hasn't refreshed yet
+                // Using lastKnownUrl is a valid fallback - connection will work if peer is still reachable
+                if (lastKnownUrl != null) {
+                    android.util.Log.d("WebSocketTransportClient", "ℹ️ Target device $targetDeviceId not in discovery cache (${peers.size} peers), using lastKnownUrl: $lastKnownUrl")
+                } else {
+                    android.util.Log.w("WebSocketTransportClient", "⚠️ Target device $targetDeviceId not found in discovered peers (${peers.size} peers) and no lastKnownUrl available")
+                }
             }
         }
         
@@ -955,28 +964,21 @@ class WebSocketTransportClient @Inject constructor(
                     val idleTime = Duration.between(lastActivity, now).seconds
                     
                     // Enhanced logging for debugging
-                    android.util.Log.w("WebSocketTransportClient", "🔴 WebSocket closed:")
-                    android.util.Log.w("WebSocketTransportClient", "   Close code: $code ($closeCodeMsg)")
-                    android.util.Log.w("WebSocketTransportClient", "   Reason: $reason")
-                    android.util.Log.w("WebSocketTransportClient", "   URL: $connUrl")
-                    android.util.Log.w("WebSocketTransportClient", "   Is cloud: $isCloudConnection")
-                    android.util.Log.w("WebSocketTransportClient", "   Connection duration: ${connectionDuration}s")
-                    android.util.Log.w("WebSocketTransportClient", "   Last activity: ${idleTime}s ago")
-                    android.util.Log.w("WebSocketTransportClient", "   Is open state: ${isOpen.get()}")
-                    android.util.Log.w("WebSocketTransportClient", "   Is closed state: ${isClosed.get()}")
-                    
-                    // Determine if this was likely server-initiated or client-initiated
                     val likelyServerInitiated = code == 1001 || code == 1006 || code == 1011 || code == 1015
-                    if (likelyServerInitiated) {
-                        android.util.Log.w("WebSocketTransportClient", "   ⚠️ Likely SERVER-initiated closure (code $code)")
-                    } else if (code == 1000) {
-                        android.util.Log.w("WebSocketTransportClient", "   ℹ️ Normal closure (could be client or server)")
-                    } else {
-                        android.util.Log.w("WebSocketTransportClient", "   ℹ️ Likely CLIENT-initiated closure (code $code)")
+                    val closureType = when {
+                        likelyServerInitiated -> "SERVER-initiated"
+                        code == 1000 -> "Normal"
+                        else -> "CLIENT-initiated"
                     }
+                    android.util.Log.w("WebSocketTransportClient", 
+                        "🔴 WebSocket closed: code=$code ($closeCodeMsg), reason=$reason, type=$closureType, " +
+                        "url=$connUrl, cloud=$isCloudConnection, duration=${connectionDuration}s, idle=${idleTime}s, " +
+                        "state=[open=${isOpen.get()}, closed=${isClosed.get()}], " +
+                        "signals=[closedSignal=${closedSignal.isCompleted}, sendQueue=${sendQueue.isClosedForReceive}]")
                     
                     isOpen.set(false) // Mark as not open
                     isClosed.set(true) // Mark as closed
+                    val signalWasCompleted = closedSignal.isCompleted
                     if (!closedSignal.isCompleted) {
                         closedSignal.complete(Unit)
                     }
@@ -988,8 +990,10 @@ class WebSocketTransportClient @Inject constructor(
                         transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.Disconnected)
                     }
                     
-                    // Don't trigger reconnection here - let runConnectionLoop() handle retries with exponential backoff
-                    // The connection loop will automatically retry when closedSignal is completed
+                    android.util.Log.w("WebSocketTransportClient", 
+                        "📢 onClosed: completed closedSignal (wasCompleted=$signalWasCompleted), " +
+                        "updated TransportManager=${transportManager != null && isCloudConnection}, " +
+                        "retry will be handled by connection loop")
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -1030,16 +1034,10 @@ class WebSocketTransportClient @Inject constructor(
                         // Mark as closed and complete closedSignal so connection loop exits cleanly
                         isOpen.set(false)
                         isClosed.set(true)
-                        android.util.Log.d("WebSocketTransportClient", "   Completing closedSignal to trigger connection loop exit")
+                        val signalWasCompleted = closedSignal.isCompleted
                         if (!closedSignal.isCompleted) {
                             closedSignal.complete(Unit)
-                            android.util.Log.d("WebSocketTransportClient", "   ✅ closedSignal completed")
-                        } else {
-                            android.util.Log.d("WebSocketTransportClient", "   ⚠️ closedSignal already completed")
                         }
-                        
-                        // Don't trigger reconnection immediately - let the normal reconnection logic handle it
-                        // Just update state and let shutdownSocket handle cleanup
                         shutdownSocket(webSocket)
                         handshakeStarted = null
                         
@@ -1048,8 +1046,10 @@ class WebSocketTransportClient @Inject constructor(
                             transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.Disconnected)
                         }
                         
-                        // Don't trigger reconnection here - let runConnectionLoop() handle retries with exponential backoff
-                        // The connection loop will automatically retry when closedSignal is completed
+                        android.util.Log.w("WebSocketTransportClient", 
+                            "📢 onFailure (RST): completed closedSignal (wasCompleted=$signalWasCompleted), " +
+                            "updated TransportManager=${transportManager != null && isCloudConnection}, " +
+                            "retry will be handled by connection loop")
                         
                         // Return early - don't execute the rest of onFailure logic
                         return@onFailure
@@ -1325,8 +1325,6 @@ class WebSocketTransportClient @Inject constructor(
                 }
             }
             
-            android.util.Log.d("WebSocketTransportClient", "🔌 Inner connection loop exited, checking retry logic (isCloud=$isCloudConnection, sendQueueClosed=${sendQueue.isClosedForReceive})")
-            
             // After connection loop exits (either failed connection or disconnection), retry if needed
             // This handles the case where a successful connection later disconnects
             if (isCloudConnection && !sendQueue.isClosedForReceive) {
@@ -1337,7 +1335,9 @@ class WebSocketTransportClient @Inject constructor(
                 } else {
                     maxRetryDelay // Keep retrying every 128s indefinitely
                 }
-                android.util.Log.w("WebSocketTransportClient", "⚠️ Cloud connection disconnected, retrying in ${retryDelay}ms (attempt $retryCount)")
+                android.util.Log.w("WebSocketTransportClient", 
+                    "⚠️ Cloud connection disconnected, retrying in ${retryDelay}ms (attempt $retryCount, " +
+                    "state=[closedSignal=${closedSignal.isCompleted}, isOpen=${isOpen.get()}, isClosed=${isClosed.get()}, sendQueue=${sendQueue.isClosedForReceive}])")
                 delay(retryDelay)
                 continue // Continue outer while loop to retry connection
             } else if (!isCloudConnection && lastKnownUrl != null && !sendQueue.isClosedForReceive) {
@@ -1358,7 +1358,8 @@ class WebSocketTransportClient @Inject constructor(
                 return // Exit loop - will reconnect when peer is discovered
             } else {
                 // sendQueue is closed - client is shutting down permanently
-                android.util.Log.w("WebSocketTransportClient", "⚠️ Connection loop exiting - sendQueue is closed (client shutting down)")
+                android.util.Log.w("WebSocketTransportClient", 
+                    "⚠️ Connection loop exiting - sendQueue is closed (client shutting down, isCloud=$isCloudConnection)")
                 return
             }
         }
@@ -1438,13 +1439,31 @@ class WebSocketTransportClient @Inject constructor(
                                 touch() // Update last activity on successful ping
                                 android.util.Log.d("WebSocketTransportClient", "💓 Cloud ping sent successfully (idle=${idleTime}s)")
                             } else {
-                                android.util.Log.w("WebSocketTransportClient", "⚠️ Cloud ping send failed, connection may be closed")
+                                android.util.Log.w("WebSocketTransportClient", "⚠️ Cloud ping send failed, closing socket to trigger retry")
+                                try {
+                                    socket?.close(1006, "Ping failed")
+                                } catch (e: Exception) {
+                                    android.util.Log.w("WebSocketTransportClient", "⚠️ Error closing socket after ping failure: ${e.message}")
+                                }
                             }
                         } catch (e: Exception) {
-                            android.util.Log.w("WebSocketTransportClient", "⚠️ Error sending cloud ping: ${e.message}")
+                            android.util.Log.w("WebSocketTransportClient", "⚠️ Cloud ping exception: ${e.message}, closing socket to trigger retry")
+                            try {
+                                socket?.close(1006, "Ping failed")
+                            } catch (closeException: Exception) {
+                                android.util.Log.w("WebSocketTransportClient", "⚠️ Error closing socket after ping exception: ${closeException.message}")
+                            }
                         }
                     } else {
-                        android.util.Log.w("WebSocketTransportClient", "⚠️ Connection health check failed: socket=${socket != null}, isOpen=$isOpenState, isClosed=$isClosedState")
+                        android.util.Log.w("WebSocketTransportClient", 
+                            "⚠️ Connection health check failed: socket=${socket != null}, isOpen=$isOpenState, isClosed=$isClosedState, closing socket")
+                        if (socket != null && !isClosedState) {
+                            try {
+                                socket.close(1006, "Connection health check failed")
+                            } catch (e: Exception) {
+                                android.util.Log.w("WebSocketTransportClient", "⚠️ Error closing socket after health check failure: ${e.message}")
+                            }
+                        }
                     }
                 }
             }

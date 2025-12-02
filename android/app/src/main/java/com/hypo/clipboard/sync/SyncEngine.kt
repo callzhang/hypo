@@ -130,7 +130,11 @@ class SyncEngine @Inject constructor(
                 encryption = EncryptionMetadata(
                     nonce = nonceBase64,
                     tag = tagBase64
-                )
+                ),
+                code = null,
+                message = null,
+                originalMessageId = null,
+                targetDeviceId = null
             )
         )
 
@@ -166,16 +170,30 @@ class SyncEngine @Inject constructor(
     }
 
     suspend fun decode(envelope: SyncEnvelope): ClipboardPayload {
+        // Check if this is an error message
+        if (envelope.type == MessageType.ERROR) {
+            throw IllegalArgumentException("Cannot decode error message as ClipboardPayload")
+        }
+        
         // Check if this is a plain text message (empty nonce/tag indicates no encryption)
-        val isPlainText = envelope.payload.encryption.nonce.isEmpty() || envelope.payload.encryption.tag.isEmpty()
+        val encryption = envelope.payload.encryption
+        val ciphertext = envelope.payload.ciphertext
+        if (encryption == null || ciphertext == null) {
+            throw IllegalArgumentException("Missing encryption or ciphertext in payload")
+        }
+        
+        val isPlainText = encryption.nonce.isEmpty() || encryption.tag.isEmpty()
         
         val decoded = if (isPlainText) {
             android.util.Log.w("SyncEngine", "⚠️ PLAIN TEXT MODE: Receiving unencrypted payload")
             // Decode base64-encoded plaintext directly
-            val plaintext = envelope.payload.ciphertext.fromBase64()
+            val plaintext = ciphertext.fromBase64()
             plaintext.decodeToString()
         } else {
             val deviceId = envelope.payload.deviceId
+            if (deviceId == null) {
+                throw IllegalArgumentException("Missing deviceId in payload")
+            }
             android.util.Log.d("SyncEngine", "🔓 DECODING: deviceId=$deviceId")
             
             // Key lookup handles normalization internally - no need to normalize here
@@ -193,11 +211,11 @@ class SyncEngine @Inject constructor(
             
             android.util.Log.d("SyncEngine", "✅ Key loaded: ${key.size} bytes for device: $deviceId")
 
-            val ciphertext = envelope.payload.ciphertext.fromBase64()
-            val nonce = envelope.payload.encryption.nonce.fromBase64()
-            val tag = envelope.payload.encryption.tag.fromBase64()
+            val ciphertextBytes = ciphertext.fromBase64()
+            val nonce = encryption.nonce.fromBase64()
+            val tag = encryption.tag.fromBase64()
             
-            android.util.Log.d("SyncEngine", "🔓 Decryption params: ciphertext=${ciphertext.size} bytes, nonce=${nonce.size} bytes, tag=${tag.size} bytes")
+            android.util.Log.d("SyncEngine", "🔓 Decryption params: ciphertext=${ciphertextBytes.size} bytes, nonce=${nonce.size} bytes, tag=${tag.size} bytes")
             
             // Normalize device ID to lowercase for AAD to match macOS encryption
             // macOS encrypts with entry.deviceId (already lowercase) as AAD
@@ -207,7 +225,7 @@ class SyncEngine @Inject constructor(
 
             val decrypted = cryptoService.decrypt(
                 encrypted = com.hypo.clipboard.crypto.EncryptedData(
-                    ciphertext = ciphertext,
+                    ciphertext = ciphertextBytes,
                     nonce = nonce,
                     tag = tag
                 ),

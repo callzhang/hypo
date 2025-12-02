@@ -21,18 +21,26 @@ enum class MessageType {
     CLIPBOARD,
 
     @SerialName("control")
-    CONTROL
+    CONTROL,
+
+    @SerialName("error")
+    ERROR
 }
 
 @Serializable
 data class Payload(
-    @SerialName("content_type") val contentType: ClipboardType,
-    val ciphertext: String,
-    @SerialName("device_id") val deviceId: String,  // UUID string (pure UUID, no prefix)
+    @SerialName("content_type") val contentType: ClipboardType? = null,
+    val ciphertext: String? = null,
+    @SerialName("device_id") val deviceId: String? = null,  // UUID string (pure UUID, no prefix)
     @SerialName("device_platform") val devicePlatform: String? = null,  // Platform: "macos", "android", etc.
     @SerialName("device_name") val deviceName: String? = null,
     val target: String? = null,
-    val encryption: EncryptionMetadata
+    val encryption: EncryptionMetadata? = null,
+    // Error payload fields (when type is ERROR) - these are only present for error messages
+    val code: String? = null,
+    val message: String? = null,
+    @SerialName("original_message_id") val originalMessageId: String? = null,
+    @SerialName("target_device_id") val targetDeviceId: String? = null
 )
 
 @Serializable

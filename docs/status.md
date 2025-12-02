@@ -289,6 +289,23 @@
   - Consolidated notification observer logs
 
 ### December 2, 2025
+- **Backend Error Response Feature** ✅: Added error responses when target device not found
+  - Backend sends error message with type `"error"` when routing fails
+  - Error payload includes code, message, and target device ID
+  - Normalizes device IDs to lowercase for consistent matching
+  - Enables client-side error handling and user feedback
+
+- **Android Error Handling & Toast Notifications** ✅: Client-side sync failure feedback
+  - Added `ERROR` message type and error payload support
+  - Shows toast notification: "Failed to sync to {deviceName}: incorrect device_id ({deviceId})"
+  - Resolves device name from device ID for user-friendly error messages
+  - Logs errors for debugging
+
+- **Transport Origin Bug Fix** ✅: Fixed cloud messages incorrectly marked as LAN
+  - Fixed `RelayWebSocketClient.setIncomingClipboardHandler()` to use two-parameter lambda
+  - Ensures cloud messages correctly marked with `TransportOrigin.CLOUD`
+  - Prevents incorrect sync behavior from transport origin tracking bug
+
 - **SMS Auto-Sync Feature** ✅: Implemented automatic SMS copying and syncing
   - Added `SmsReceiver` BroadcastReceiver to listen for incoming SMS
   - Automatically copies SMS content to clipboard and syncs to macOS

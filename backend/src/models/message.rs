@@ -31,6 +31,7 @@ pub enum CompressionAlgorithm {
 pub enum MessageType {
     Clipboard,
     Control,
+    Error,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -63,9 +63,19 @@ class RelayWebSocketClient @Inject constructor(
      * Wraps the handler to mark messages as coming from cloud transport.
      */
     fun setIncomingClipboardHandler(handler: (com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit) {
-        delegate.setIncomingClipboardHandler { envelope ->
+        // Explicitly use the two-parameter overload to ensure CLOUD origin is passed correctly
+        // If we pass a single-parameter lambda, it would match the backward-compatibility overload
+        // which ignores the TransportOrigin parameter and defaults to LAN
+        delegate.setIncomingClipboardHandler { envelope, _ ->
             handler(envelope, com.hypo.clipboard.domain.model.TransportOrigin.CLOUD)
         }
+    }
+    
+    /**
+     * Set handler for sync error messages from cloud relay.
+     */
+    fun setSyncErrorHandler(handler: (String, String) -> Unit) {
+        delegate.setSyncErrorHandler(handler)
     }
     
     /**

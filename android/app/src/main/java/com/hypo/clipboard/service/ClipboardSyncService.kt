@@ -157,6 +157,22 @@ class ClipboardSyncService : Service() {
         relayWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
             incomingClipboardHandler.handle(envelope, origin)
         }
+        
+        // Set up error handlers for sync failures
+        val errorHandler: (String, String) -> Unit = { deviceId, errorMessage ->
+            scope.launch(Dispatchers.Main) {
+                val deviceName = transportManager.getDeviceName(deviceId) ?: deviceId.take(20)
+                val toastMessage = "Failed to sync to $deviceName: incorrect device_id ($deviceId)"
+                android.util.Log.e(TAG, "❌ $toastMessage")
+                android.widget.Toast.makeText(
+                    this@ClipboardSyncService,
+                    toastMessage,
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+        lanWebSocketClient.setSyncErrorHandler(errorHandler)
+        relayWebSocketClient.setSyncErrorHandler(errorHandler)
         // Set handler for LAN WebSocket server (incoming connections from other devices)
         transportManager.setIncomingClipboardHandler { envelope, origin ->
             incomingClipboardHandler.handle(envelope, origin)

@@ -2,6 +2,7 @@ use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_ws::Message;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{error, info, warn};
@@ -34,7 +35,9 @@ pub async fn websocket_handler(
         })));
     }
 
-    let device_id = device_id.unwrap();
+    // Normalize device ID to lowercase for consistent matching across platforms
+    // Android sends uppercase UUIDs, macOS sends lowercase UUIDs
+    let device_id = device_id.unwrap().to_lowercase();
     let platform = platform.unwrap();
 
     info!(
@@ -94,7 +97,7 @@ pub async fn websocket_handler(
                 Message::Text(text) => {
                     // Legacy text format - decode and convert to binary frame
                     if let Err(err) =
-                        handle_text_message(&reader_device_id, &text, &reader_sessions, &key_store)
+                        handle_text_message(&reader_device_id, &text, &reader_sessions, &key_store, &mut reader_session)
                             .await
                     {
                         error!(
@@ -106,7 +109,7 @@ pub async fn websocket_handler(
                 Message::Binary(bytes) => {
                     // Binary frame format (4-byte length + JSON) - forward as-is
                     if let Err(err) =
-                        handle_binary_message(&reader_device_id, &bytes, &reader_sessions, &key_store)
+                        handle_binary_message(&reader_device_id, &bytes, &reader_sessions, &key_store, &mut reader_session)
                             .await
                     {
                         error!(
@@ -177,6 +180,7 @@ async fn handle_binary_message(
     frame: &[u8],
     sessions: &crate::services::session_manager::SessionManager,
     key_store: &crate::services::device_key_store::DeviceKeyStore,
+    sender_session: &mut actix_ws::Session,
 ) -> Result<(), SessionError> {
     // Decode binary frame to get JSON string
     let json_str = decode_binary_frame(frame)
@@ -207,7 +211,7 @@ async fn handle_binary_message(
     let target_device = payload
         .get("target")
         .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
+        .map(|s| s.to_lowercase()); // Normalize target device ID to lowercase for consistent matching
 
     // Forward the binary frame as-is (already in correct format)
     if let Some(target) = target_device {
@@ -219,6 +223,28 @@ async fn handle_binary_message(
             }
             Err(SessionError::DeviceNotConnected) => {
                 warn!("Target device {} not connected, message not delivered", target);
+                
+                // Send error response back to sender
+                let error_message = serde_json::json!({
+                    "id": parsed.id,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "version": "1.0",
+                    "type": "error",
+                    "payload": {
+                        "code": "device_not_connected",
+                        "message": format!("Failed to sync to target device: incorrect device_id ({})", target),
+                        "original_message_id": parsed.id,
+                        "target_device_id": target
+                    }
+                });
+                
+                let error_frame = encode_binary_frame(&error_message.to_string());
+                if let Err(e) = sender_session.binary(error_frame).await {
+                    error!("Failed to send error response to {}: {:?}", sender_id, e);
+                } else {
+                    info!("Sent error response to {} for failed delivery to {}", sender_id, target);
+                }
+                
                 Err(SessionError::DeviceNotConnected)
             }
             Err(e) => {
@@ -238,6 +264,7 @@ async fn handle_text_message(
     message: &str,
     sessions: &crate::services::session_manager::SessionManager,
     key_store: &crate::services::device_key_store::DeviceKeyStore,
+    sender_session: &mut actix_ws::Session,
 ) -> Result<(), SessionError> {
     let parsed: ClipboardMessage = match serde_json::from_str(message) {
         Ok(value) => value,
@@ -262,13 +289,42 @@ async fn handle_text_message(
     let target_device = payload
         .get("target")
         .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
+        .map(|s| s.to_lowercase()); // Normalize target device ID to lowercase for consistent matching
 
     // Convert text message to binary frame format for forwarding
     let binary_frame = encode_binary_frame(message);
     
     if let Some(target) = target_device {
-        sessions.send_binary(&target, binary_frame).await
+        match sessions.send_binary(&target, binary_frame).await {
+            Ok(()) => Ok(()),
+            Err(SessionError::DeviceNotConnected) => {
+                warn!("Target device {} not connected, message not delivered", target);
+                
+                // Send error response back to sender
+                let error_message = serde_json::json!({
+                    "id": parsed.id,
+                    "timestamp": Utc::now().to_rfc3339(),
+                    "version": "1.0",
+                    "type": "error",
+                    "payload": {
+                        "code": "device_not_connected",
+                        "message": format!("Failed to sync to target device: incorrect device_id ({})", target),
+                        "original_message_id": parsed.id,
+                        "target_device_id": target
+                    }
+                });
+                
+                let error_frame = encode_binary_frame(&error_message.to_string());
+                if let Err(e) = sender_session.binary(error_frame).await {
+                    error!("Failed to send error response to {}: {:?}", sender_id, e);
+                } else {
+                    info!("Sent error response to {} for failed delivery to {}", sender_id, target);
+                }
+                
+                Err(SessionError::DeviceNotConnected)
+            }
+            Err(e) => Err(e)
+        }
     } else {
         sessions.broadcast_except_binary(sender_id, binary_frame).await;
         Ok(())

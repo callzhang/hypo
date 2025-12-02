@@ -56,7 +56,8 @@ class IncomingClipboardHandler @Inject constructor(
                 Log.d(TAG, "📥 Received clipboard from deviceId=${senderDeviceId.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
                 
                 // Check if message was encrypted (non-empty nonce and tag)
-                val isEncrypted = envelope.payload.encryption.nonce.isNotEmpty() && envelope.payload.encryption.tag.isNotEmpty()
+                val encryption = envelope.payload.encryption
+                val isEncrypted = encryption != null && encryption.nonce.isNotEmpty() && encryption.tag.isNotEmpty()
                 
                 // Decode the encrypted clipboard payload using key fetched by UUID (device ID)
                 // The syncEngine.decode() will fetch the key using envelope.payload.deviceId

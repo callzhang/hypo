@@ -1,6 +1,6 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 0.3.7  
+Version: 0.3.8  
 Date: December 2, 2025  
 Status: Production Beta
 
@@ -943,6 +943,10 @@ This section compares the implementation details between Android and macOS clien
   - Devices without keys are skipped with warning logs
   - Failed sends are kept in queue for retry
   - Processing continues for all devices regardless of individual failures
+- **Backend Error Responses**: When target device is not connected, backend sends error response to sender
+  - Error message type: `"error"` with payload containing `code`, `message`, and `target_device_id`
+  - Android client receives error and shows toast notification: "Failed to sync to {deviceName}: incorrect device_id ({deviceId})"
+  - Enables user feedback when sync fails due to device not being connected
 - **Duplicate Handling**: When a received clipboard item matches an existing item in history, the existing item is moved to the top instead of being discarded
   - Ensures cross-platform user actions (e.g., clicking an item in Android that originated from macOS) are reflected in macOS history
   - Preserves pin state when moving items to top

@@ -181,6 +181,7 @@ class WebSocketTransportClient @Inject constructor(
     private var onIncomingClipboard: ((SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit)? = null
     private var onPairingAck: ((String) -> Unit)? = null  // ACK as JSON string
     private var onPairingChallenge: (suspend (String) -> String?)? = null  // Challenge as JSON string -> ACK JSON or null
+    private var onSyncError: ((String, String) -> Unit)? = null  // Error handler: (deviceName, errorMessage) -> Unit
     @Volatile private var connectionSignal = CompletableDeferred<Unit>()
     @Volatile private var currentConnector: WebSocketConnector? = connector // Nullable for LAN (created after discovery)
     @Volatile private var lastKnownUrl: String? = null  // Use only lastKnownUrl - updated when peer is discovered
@@ -215,6 +216,10 @@ class WebSocketTransportClient @Inject constructor(
     
     fun setPairingChallengeHandler(handler: (suspend (String) -> String?)) {
         onPairingChallenge = handler
+    }
+    
+    fun setSyncErrorHandler(handler: (String, String) -> Unit) {
+        onSyncError = handler
     }
 
     /** Allow caller to restrict which discovered peers we connect to (e.g., only paired devices). */
@@ -253,68 +258,79 @@ class WebSocketTransportClient @Inject constructor(
     }
 
     override suspend fun send(envelope: SyncEnvelope) {
-        // Resolve target device's IP address from discovered peers
-        val targetDeviceId = envelope.payload.target
-        if (targetDeviceId != null && transportManager != null) {
-            val peers = transportManager.currentPeers()
-            val peer = peers.find { 
-                val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
-                peerDeviceId == targetDeviceId || peerDeviceId.equals(targetDeviceId, ignoreCase = true)
-            }
-            
-            val peerUrl = when {
-                peer != null && peer.host != "unknown" && peer.host != "127.0.0.1" -> {
-                    // Use discovered peer's IP address
-                    "ws://${peer.host}:${peer.port}"
+        val isCloudConnection = config.environment == "cloud"
+        
+        // Only resolve peer URLs for LAN connections - cloud connections always use config.url
+        if (!isCloudConnection) {
+            // Resolve target device's IP address from discovered peers (LAN only)
+            val targetDeviceId = envelope.payload.target
+            if (targetDeviceId != null && transportManager != null) {
+                val peers = transportManager.currentPeers()
+                val peer = peers.find { 
+                    val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
+                    peerDeviceId == targetDeviceId || peerDeviceId.equals(targetDeviceId, ignoreCase = true)
                 }
-                peer != null && peer.host == "127.0.0.1" -> {
-                    // Emulator case: replace localhost with host IP
-                    // For emulator, 10.0.2.2 is the special IP to reach host machine
-                    val emulatorHost = "10.0.2.2"
-                    "ws://$emulatorHost:${peer.port}"
-                }
-                else -> null
-            }
-            
-            if (peerUrl != null && peerUrl != lastKnownUrl) {
-                // Peer IP changed - update lastKnownUrl and trigger reconnection
-                android.util.Log.d("WebSocketTransportClient", "🔄 Peer IP changed in send(): $peerUrl (was: $lastKnownUrl) - reconnecting")
-                lastKnownUrl = peerUrl
-                val isSecure = peerUrl.startsWith("wss://", ignoreCase = true)
-                val peerConfig = TlsWebSocketConfig(
-                    url = peerUrl,
-                    fingerprintSha256 = if (isSecure) peer?.fingerprint else null, // No pinning for ws://
-                    headers = config.headers,
-                    environment = config.environment,
-                    idleTimeoutMillis = config.idleTimeoutMillis,
-                    roundTripTimeoutMillis = config.roundTripTimeoutMillis
-                )
-                val newConnector = OkHttpWebSocketConnector(peerConfig)
                 
-                mutex.withLock {
-                    webSocket?.close(1000, "Peer IP changed")
-                    webSocket = null
-                    isOpen.set(false)
-                    connectionJob?.cancel()
-                    connectionJob = null
-                    currentConnector = newConnector
+                val peerUrl = when {
+                    peer != null && peer.host != "unknown" && peer.host != "127.0.0.1" -> {
+                        // Use discovered peer's IP address
+                        "ws://${peer.host}:${peer.port}"
+                    }
+                    peer != null && peer.host == "127.0.0.1" -> {
+                        // Emulator case: replace localhost with host IP
+                        // For emulator, 10.0.2.2 is the special IP to reach host machine
+                        val emulatorHost = "10.0.2.2"
+                        "ws://$emulatorHost:${peer.port}"
+                    }
+                    else -> null
                 }
-                // Trigger reconnection with new URL
-                ensureConnection()
-            } else if (peerUrl != null) {
-                // Peer URL matches lastKnownUrl - ensure it's set
-                lastKnownUrl = peerUrl
-            } else {
-                // Peer not in current discovery cache - this is normal if:
-                // 1. Discovery hasn't completed yet (NSD can take a few seconds)
-                // 2. Peer was temporarily removed from cache but we have lastKnownUrl
-                // 3. Network conditions changed but discovery hasn't refreshed yet
-                // Using lastKnownUrl is a valid fallback - connection will work if peer is still reachable
-                if (lastKnownUrl != null) {
-                    android.util.Log.d("WebSocketTransportClient", "ℹ️ Target device $targetDeviceId not in discovery cache (${peers.size} peers), using lastKnownUrl: $lastKnownUrl")
+                
+                if (peerUrl != null && peerUrl != lastKnownUrl) {
+                    // Peer IP changed - update lastKnownUrl and trigger reconnection (LAN only)
+                    android.util.Log.d("WebSocketTransportClient", "🔄 Peer IP changed in send(): $peerUrl (was: $lastKnownUrl) - reconnecting")
+                    lastKnownUrl = peerUrl
+                    val isSecure = peerUrl.startsWith("wss://", ignoreCase = true)
+                    val peerConfig = TlsWebSocketConfig(
+                        url = peerUrl,
+                        fingerprintSha256 = if (isSecure) peer?.fingerprint else null, // No pinning for ws://
+                        headers = config.headers,
+                        environment = config.environment,
+                        idleTimeoutMillis = config.idleTimeoutMillis,
+                        roundTripTimeoutMillis = config.roundTripTimeoutMillis
+                    )
+                    val newConnector = OkHttpWebSocketConnector(peerConfig)
+                    
+                    mutex.withLock {
+                        webSocket?.close(1000, "Peer IP changed")
+                        webSocket = null
+                        isOpen.set(false)
+                        connectionJob?.cancel()
+                        connectionJob = null
+                        currentConnector = newConnector
+                    }
+                    // Trigger reconnection with new URL
+                    ensureConnection()
+                } else if (peerUrl != null) {
+                    // Peer URL matches lastKnownUrl - ensure it's set (LAN only)
+                    lastKnownUrl = peerUrl
                 } else {
-                    android.util.Log.w("WebSocketTransportClient", "⚠️ Target device $targetDeviceId not found in discovered peers (${peers.size} peers) and no lastKnownUrl available")
+                    // Peer not in current discovery cache - this is normal if:
+                    // 1. Discovery hasn't completed yet (NSD can take a few seconds)
+                    // 2. Peer was temporarily removed from cache but we have lastKnownUrl
+                    // 3. Network conditions changed but discovery hasn't refreshed yet
+                    // Using lastKnownUrl is a valid fallback - connection will work if peer is still reachable
+                    if (lastKnownUrl != null) {
+                        android.util.Log.d("WebSocketTransportClient", "ℹ️ Target device $targetDeviceId not in discovery cache (${peers.size} peers), using lastKnownUrl: $lastKnownUrl")
+                    } else {
+                        android.util.Log.w("WebSocketTransportClient", "⚠️ Target device $targetDeviceId not found in discovered peers (${peers.size} peers) and no lastKnownUrl available")
+                    }
                 }
+            }
+        } else {
+            // Cloud connections: ensure lastKnownUrl is null (should never be set for cloud)
+            if (lastKnownUrl != null) {
+                android.util.Log.w("WebSocketTransportClient", "⚠️ Cloud connection has lastKnownUrl set ($lastKnownUrl) - clearing it (should always use config.url)")
+                lastKnownUrl = null
             }
         }
         
@@ -1614,6 +1630,20 @@ class WebSocketTransportClient @Inject constructor(
         if (envelope.type == com.hypo.clipboard.sync.MessageType.CLIPBOARD) {
             android.util.Log.d("WebSocketTransportClient", "📋 Invoking onIncomingClipboard handler: origin=$transportOrigin")
             onIncomingClipboard?.invoke(envelope, transportOrigin)
+        } else if (envelope.type == com.hypo.clipboard.sync.MessageType.ERROR) {
+            // Handle error messages from backend
+            val errorCode = envelope.payload.code
+            val errorMessage = envelope.payload.message
+            val targetDeviceId = envelope.payload.targetDeviceId
+            
+            android.util.Log.e("WebSocketTransportClient", "❌ Sync error: code=$errorCode, message=$errorMessage, target=$targetDeviceId")
+            
+            // Invoke error handler with device ID (handler will resolve device name)
+            if (!targetDeviceId.isNullOrEmpty() && !errorMessage.isNullOrEmpty()) {
+                onSyncError?.invoke(targetDeviceId, errorMessage)
+            } else {
+                android.util.Log.w("WebSocketTransportClient", "⚠️ Error message missing target_device_id or message")
+            }
         } else {
             android.util.Log.w("WebSocketTransportClient", "⚠️ Received non-clipboard message type: ${envelope.type}")
         }

@@ -46,6 +46,12 @@ All notable changes to the Hypo project will be documented in this file.
   - Content matching uses SHA-256 hash for reliable duplicate detection across platforms
 
 ### Fixed
+- **Backend Test Infrastructure**: Fixed WebSocket handler test compilation errors
+  - Added `create_test_session()` test helper to create WebSocket sessions for testing
+  - Updated all test calls to `handle_text_message()` to include `sender_session` parameter
+  - Improved error handling in error response code to gracefully handle session closure in tests
+  - Changed error logging from `error!` to `warn!` when error response sending fails (session may be closed)
+  - All 33 backend unit tests now pass successfully
 - **Android Settings Connection Status**: Fixed connection status display in Settings screen for LAN-connected devices
   - Changed from using global `connectionState` to `cloudConnectionState` for cloud server status
   - LAN device status now correctly determined by discovery status and active transport

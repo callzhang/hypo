@@ -68,6 +68,7 @@
 - [x] Reduce logging verbosity (info → debug) ✅ *(Nov 30, 2025)*
 - [x] Replace Keychain with file-based storage ✅ *(Dec 1, 2025)*
 - [x] Improve macOS logging clarity ✅ *(Dec 1, 2025)*
+- [x] Fix backend test infrastructure and deployment ✅ *(Dec 2, 2025)*
 - [ ] Beta testing recruitment
 - [ ] Production release preparation
 

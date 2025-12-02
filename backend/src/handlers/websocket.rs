@@ -239,8 +239,11 @@ async fn handle_binary_message(
                 });
                 
                 let error_frame = encode_binary_frame(&error_message.to_string());
+                // Send error response - handle gracefully if session is closed (e.g., in tests)
+                // In tests, the session might not be fully functional, so we handle errors gracefully
                 if let Err(e) = sender_session.binary(error_frame).await {
-                    error!("Failed to send error response to {}: {:?}", sender_id, e);
+                    // Log but don't fail - session might be closed (e.g., in tests or connection dropped)
+                    warn!("Failed to send error response to {}: {:?} (session may be closed)", sender_id, e);
                 } else {
                     info!("Sent error response to {} for failed delivery to {}", sender_id, target);
                 }
@@ -315,8 +318,11 @@ async fn handle_text_message(
                 });
                 
                 let error_frame = encode_binary_frame(&error_message.to_string());
+                // Send error response - handle gracefully if session is closed (e.g., in tests)
+                // In tests, the session might not be fully functional, so we handle errors gracefully
                 if let Err(e) = sender_session.binary(error_frame).await {
-                    error!("Failed to send error response to {}: {:?}", sender_id, e);
+                    // Log but don't fail - session might be closed (e.g., in tests or connection dropped)
+                    warn!("Failed to send error response to {}: {:?} (session may be closed)", sender_id, e);
                 } else {
                     info!("Sent error response to {} for failed delivery to {}", sender_id, target);
                 }
@@ -457,6 +463,52 @@ mod tests {
     use serde_json::json;
     use tokio::time::{timeout, Duration};
     use uuid::Uuid;
+    
+    // Test helper to create a test session for testing
+    // Creates a real WebSocket session using actix_ws::handle with a test request
+    // Note: This creates a minimal session that may not be fully functional for sending,
+    // but it's sufficient for testing the message handling logic. Error sending will fail
+    // gracefully in tests, which is handled in the error response code.
+    async fn create_test_session() -> actix_ws::Session {
+        use actix_web::http::Method;
+        
+        // For tests, create two requests (one for HttpRequest, one for web::Payload)
+        // since to_http_request() and to_request() both take ownership
+        let test_req_http = actix_web::test::TestRequest::default()
+            .method(Method::GET)
+            .insert_header(("Upgrade", "websocket"))
+            .insert_header(("Connection", "Upgrade"))
+            .insert_header(("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="))
+            .insert_header(("Sec-WebSocket-Version", "13"))
+            .set_payload(actix_web::web::Bytes::new());
+        
+        let test_req_web = actix_web::test::TestRequest::default()
+            .method(Method::GET)
+            .insert_header(("Upgrade", "websocket"))
+            .insert_header(("Connection", "Upgrade"))
+            .insert_header(("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="))
+            .insert_header(("Sec-WebSocket-Version", "13"))
+            .set_payload(actix_web::web::Bytes::new());
+        
+        // Get HttpRequest for actix_ws::handle
+        let http_req = test_req_http.to_http_request();
+        
+        // Get web::Request to extract web::Payload
+        let mut web_req = test_req_web.to_request();
+        // take_payload() on web::Request returns dev::Payload, but we need web::Payload
+        // Since web::Payload is just a newtype wrapper, we can safely transmute in tests
+        let dev_payload = web_req.take_payload();
+        // Unsafe transmute: web::Payload(dev::Payload) - safe because it's just a wrapper
+        let body = unsafe {
+            std::mem::transmute::<actix_web::dev::Payload, actix_web::web::Payload>(dev_payload)
+        };
+        
+        // Create the WebSocket session using the web::Payload
+        // The session creation should succeed, and error sending will fail gracefully
+        // in tests, which is handled in the error response code
+        let (_, session, _) = actix_ws::handle(&http_req, body).unwrap();
+        session
+    }
 
     #[actix_rt::test]
     async fn register_key_control_message_stores_key() {
@@ -552,7 +604,9 @@ mod tests {
 
         let message = base_message(payload);
 
-        handle_text_message("sender", &message, &sessions, &key_store)
+        // Create a test session for testing (error responses will be handled gracefully)
+        let mut test_session = create_test_session().await;
+        handle_text_message("sender", &message, &sessions, &key_store, &mut test_session)
             .await
             .expect("message handled");
 
@@ -586,7 +640,9 @@ mod tests {
 
         let message = base_message(payload);
 
-        handle_text_message("sender", &message, &sessions, &key_store)
+        // Create a test session for testing (error responses will be handled gracefully)
+        let mut test_session = create_test_session().await;
+        handle_text_message("sender", &message, &sessions, &key_store, &mut test_session)
             .await
             .expect("message handled");
 
@@ -614,7 +670,8 @@ mod tests {
 
         let mut receiver_rx = sessions.register("receiver".into()).await.receiver;
 
-        handle_text_message("sender", "not-json", &sessions, &key_store)
+        let mut test_session = create_test_session().await;
+        handle_text_message("sender", "not-json", &sessions, &key_store, &mut test_session)
             .await
             .expect("invalid payload should be ignored");
 
@@ -639,7 +696,9 @@ mod tests {
 
         let message = base_message(payload);
 
-        handle_text_message("sender", &message, &sessions, &key_store)
+        // Create a test session for testing (error responses will be handled gracefully)
+        let mut test_session = create_test_session().await;
+        handle_text_message("sender", &message, &sessions, &key_store, &mut test_session)
             .await
             .expect("message handled");
 
@@ -665,7 +724,8 @@ mod tests {
 
         let message = base_message(payload);
 
-        handle_text_message("sender", &message, &sessions, &key_store)
+        let mut test_session = create_test_session().await;
+        handle_text_message("sender", &message, &sessions, &key_store, &mut test_session)
             .await
             .expect("invalid payload should be ignored");
 
@@ -690,7 +750,8 @@ mod tests {
 
         let message = base_message(payload);
 
-        let err = handle_text_message("sender", &message, &sessions, &key_store)
+        let mut test_session = create_test_session().await;
+        let err = handle_text_message("sender", &message, &sessions, &key_store, &mut test_session)
             .await
             .expect_err("missing target should return error");
         assert!(matches!(err, SessionError::DeviceNotConnected));
@@ -715,7 +776,9 @@ mod tests {
 
         let message = base_message(payload);
 
-        handle_text_message("sender", &message, &sessions, &key_store)
+        // Create a test session for testing (error responses will be handled gracefully)
+        let mut test_session = create_test_session().await;
+        handle_text_message("sender", &message, &sessions, &key_store, &mut test_session)
             .await
             .expect("message handled");
 

@@ -1,32 +1,48 @@
 import Foundation
+import CryptoKit
+
+public enum TransportOrigin: String, Codable {
+    case lan
+    case cloud
+}
 
 public struct ClipboardEntry: Identifiable, Equatable, Codable {
     public let id: UUID
-    public let timestamp: Date
-    public let originDeviceId: String
+    public var timestamp: Date
+    public let deviceId: String  // UUID string (pure UUID, no prefix) - normalized to lowercase
+    public let originPlatform: DevicePlatform?  // Platform: macOS, Android, etc.
     public let originDeviceName: String?
     public let content: ClipboardContent
     public var isPinned: Bool
+    public let isEncrypted: Bool  // Whether the message was encrypted
+    public let transportOrigin: TransportOrigin?  // LAN or cloud relay
 
     public init(
         id: UUID = UUID(),
         timestamp: Date = Date(),
-        originDeviceId: String,
+        deviceId: String,
+        originPlatform: DevicePlatform? = nil,
         originDeviceName: String? = nil,
         content: ClipboardContent,
-        isPinned: Bool = false
+        isPinned: Bool = false,
+        isEncrypted: Bool = false,
+        transportOrigin: TransportOrigin? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
-        self.originDeviceId = originDeviceId
+        // Normalize device ID to lowercase for consistent matching
+        self.deviceId = deviceId.lowercased()
+        self.originPlatform = originPlatform
         self.originDeviceName = originDeviceName
         self.content = content
         self.isPinned = isPinned
+        self.isEncrypted = isEncrypted
+        self.transportOrigin = transportOrigin
     }
 
     public func matches(query: String) -> Bool {
         let lowered = query.lowercased()
-        if originDeviceId.lowercased().contains(lowered) {
+        if deviceId.contains(lowered) {
             return true
         }
         switch content {
@@ -75,9 +91,22 @@ public enum ClipboardContent: Equatable, Codable {
             let absolute = url.absoluteString
             return absolute.count > 100 ? "\(absolute.prefix(100))…" : absolute
         case .image(let metadata):
+            if let fileName = metadata.altText, !fileName.isEmpty {
+                return "\(fileName) · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+            }
             return "Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
         case .file(let metadata):
             return "\(metadata.fileName) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+        }
+    }
+    
+    /// Returns true if this content type should show a preview button
+    public var isPreviewable: Bool {
+        switch self {
+        case .text, .link:
+            return false
+        case .image, .file:
+            return true
         }
     }
 }
@@ -132,31 +161,31 @@ public extension ClipboardEntry {
     }
     
     /// Returns the display name for the origin device
-    /// - Parameter localDeviceId: The current device's ID to compare against
+    /// - Parameter localDeviceId: The current device's ID to compare against (will be normalized to lowercase)
     /// - Returns: "Local" if from this device, otherwise the device name or a fallback
     func originDisplayName(localDeviceId: String) -> String {
-        if originDeviceId == localDeviceId {
+        if deviceId == localDeviceId.lowercased() {
             return "Local"
         }
         return originDeviceName ?? "Unknown Device"
     }
     
     /// Returns true if this entry is from the local device
-    /// - Parameter localDeviceId: The current device's ID to compare against
+    /// - Parameter localDeviceId: The current device's ID to compare against (will be normalized to lowercase)
     func isLocal(localDeviceId: String) -> Bool {
-        originDeviceId == localDeviceId
+        deviceId == localDeviceId.lowercased()
     }
 
     func accessibilityDescription() -> String {
         switch content {
         case .text(let text):
-            return "Text from \(originDeviceId): \(text)"
+            return "Text from \(deviceId): \(text)"
         case .link(let url):
-            return "Link from \(originDeviceId): \(url.absoluteString)"
+            return "Link from \(deviceId): \(url.absoluteString)"
         case .image(let metadata):
-            return "Image from \(originDeviceId), format \(metadata.format), size \(metadata.pixelSize.width) by \(metadata.pixelSize.height)"
+            return "Image from \(deviceId), format \(metadata.format), size \(metadata.pixelSize.width) by \(metadata.pixelSize.height)"
         case .file(let metadata):
-            return "File from \(originDeviceId): \(metadata.fileName)"
+            return "File from \(deviceId): \(metadata.fileName)"
         }
     }
 
@@ -174,5 +203,68 @@ public extension ClipboardEntry {
             }
             return nil
         }
+    }
+    
+    /// Unified content matching function: content length, then SHA-256 hash of full content
+    /// Returns true if entries match based on the unified matching criteria
+    /// Note: Metadata (device UUID, timestamp) is not used for matching - we match by content only
+    func matchesContent(_ other: ClipboardEntry) -> Bool {
+        // 1. Check content type
+        switch (content, other.content) {
+        case (.text(let text1), .text(let text2)):
+            // For text: compare length first, then full-content SHA-256
+            if text1.count != text2.count {
+                return false
+            }
+            let data1 = Data(text1.utf8)
+            let data2 = Data(text2.utf8)
+            let hash1 = sha256(data1)
+            let hash2 = sha256(data2)
+            return hash1 == hash2
+            
+        case (.link(let url1), .link(let url2)):
+            // For links: compare length first, then full-content SHA-256
+            let str1 = url1.absoluteString
+            let str2 = url2.absoluteString
+            if str1.count != str2.count {
+                return false
+            }
+            let data1 = Data(str1.utf8)
+            let data2 = Data(str2.utf8)
+            let hash1 = sha256(data1)
+            let hash2 = sha256(data2)
+            return hash1 == hash2
+            
+        case (.image(let meta1), .image(let meta2)):
+            // For images: compare length (byteSize) first, then full-content SHA-256
+            if meta1.byteSize != meta2.byteSize {
+                return false
+            }
+            let data1 = meta1.data ?? Data()
+            let data2 = meta2.data ?? Data()
+            let hash1 = sha256(data1)
+            let hash2 = sha256(data2)
+            return hash1 == hash2
+            
+        case (.file(let meta1), .file(let meta2)):
+            // For files: compare length (byteSize) first, then full-content SHA-256
+            if meta1.byteSize != meta2.byteSize {
+                return false
+            }
+            let data1 = meta1.base64.flatMap { Data(base64Encoded: $0) } ?? Data()
+            let data2 = meta2.base64.flatMap { Data(base64Encoded: $0) } ?? Data()
+            let hash1 = sha256(data1)
+            let hash2 = sha256(data2)
+            return hash1 == hash2
+            
+        default:
+            return false
+        }
+    }
+    
+    /// Cryptographic hash (SHA-256) of the full content for content matching
+    private func sha256(_ data: Data) -> Data {
+        let digest = SHA256.hash(data: data)
+        return Data(digest)
     }
 }

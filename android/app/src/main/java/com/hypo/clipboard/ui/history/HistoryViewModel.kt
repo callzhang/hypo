@@ -52,7 +52,7 @@ class HistoryViewModel @Inject constructor(
                 searchQuery,
                 transportManager.cloudConnectionState
             ) { items, settings, query, connectionState ->
-                android.util.Log.d("HistoryViewModel", "📋 History Flow emitted: ${items.size} items, limit=${settings.historyLimit}, query='$query'")
+                android.util.Log.d("HistoryViewModel", "📋 History Flow emitted: ${items.size} items, limit=${settings.historyLimit}, query='$query', connectionState=$connectionState")
                 // Apply limit in ViewModel (Room query no longer has LIMIT to ensure Flow emits)
                 val limited = items.take(settings.historyLimit)
                 val filtered = if (query.isBlank()) {

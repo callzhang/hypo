@@ -32,7 +32,7 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val transportManager: TransportManager,
     private val deviceKeyStore: com.hypo.clipboard.sync.DeviceKeyStore,
-    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient,
+    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
     private val syncCoordinator: SyncCoordinator,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -40,15 +40,7 @@ class SettingsViewModel @Inject constructor(
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
     
-    // Flow that emits periodically to trigger connectivity checks
-    private val connectivityCheckTrigger = flow {
-        while (true) {
-            delay(5_000L) // Check every 5 seconds
-            emit(Unit)
-        }
-    }
-    
-    // Flow that emits accessibility service status
+    // Flow that emits accessibility service status periodically (needed for UI updates)
     private val accessibilityStatusFlow = flow {
         while (true) {
             delay(2_000L) // Check every 2 seconds
@@ -62,30 +54,31 @@ class SettingsViewModel @Inject constructor(
 
     private fun observeState() {
         viewModelScope.launch {
+            // Event-driven: UI updates automatically when any of these flows emit
             combine(
                 settingsRepository.settings,
-                transportManager.peers,
-                transportManager.lastSuccessfulTransport,
-                transportManager.cloudConnectionState,  // Only show cloud server status in UI
-                connectivityCheckTrigger.onStart { emit(Unit) } // Emit immediately on start
-            ) { settings, peers, lastTransport, connectionState, _ ->
-                val isAccessibilityEnabled = checkAccessibilityServiceStatus()
+                transportManager.peers,  // Emits when peers are discovered/lost
+                transportManager.lastSuccessfulTransport,  // Emits when transport status changes
+                transportManager.cloudConnectionState,  // Emits when cloud connection state changes
+                accessibilityStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) } // Emit immediately on start
+            ) { settings, peers, lastTransport, connectionState, isAccessibilityEnabled ->
                 // Load all paired devices directly from persistent storage
                 val allPairedDeviceIds = runCatching { 
                     deviceKeyStore.getAllDeviceIds() 
                 }.getOrElse { emptyList() }
                 
-                android.util.Log.d("SettingsViewModel", "📋 Found ${allPairedDeviceIds.size} paired devices: $allPairedDeviceIds")
-                android.util.Log.d("SettingsViewModel", "📋 Discovered peers: ${peers.size}, lastTransport size: ${lastTransport.size}")
-                
                 // Build list of paired devices from storage (not synthetic peers)
                 val pairedDevices = allPairedDeviceIds.mapNotNull { deviceId ->
                     val deviceName = transportManager.getDeviceName(deviceId)
                     if (deviceName != null) {
-                        // Find discovered peer for this device (if any)
+                        // Find discovered peer for this device (if any) - use case-insensitive matching
+                        val normalizedDeviceId = deviceId.lowercase()
                         val discoveredPeer = peers.firstOrNull { peer ->
                             val peerDeviceId = peer.attributes["device_id"] ?: peer.serviceName
-                            peerDeviceId == deviceId || peer.serviceName == deviceId
+                            peerDeviceId.lowercase() == normalizedDeviceId || 
+                            peer.serviceName.lowercase() == normalizedDeviceId ||
+                            peerDeviceId == deviceId || 
+                            peer.serviceName == deviceId
                         }
                         PairedDeviceInfo(
                             deviceId = deviceId,
@@ -97,8 +90,6 @@ class SettingsViewModel @Inject constructor(
                         null
                     }
                 }
-                
-                android.util.Log.d("SettingsViewModel", "📋 Built ${pairedDevices.size} paired devices from storage")
                 
                 // Convert paired devices to DiscoveredPeer for UI (since UI still expects DiscoveredPeer)
                 // This is cleaner than "synthetic peers" - we're converting from storage to display format
@@ -126,16 +117,15 @@ class SettingsViewModel @Inject constructor(
                         }?.value
                     
                     val isServerConnected = connectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedCloud
-                    val isServerIdle = connectionState == com.hypo.clipboard.transport.ConnectionState.Idle
+                    val isLanConnected = connectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedLan
                     
-                    // Determine status: mark online if discovered on LAN or connected via cloud
-                    val status = if (isServerIdle) {
-                        DeviceConnectionStatus.Disconnected
-                    } else when {
-                        // Device is discovered on LAN AND has cloud transport AND server is connected → Connected via LAN and server
-                        isDiscovered && transport == ActiveTransport.CLOUD && isServerConnected -> DeviceConnectionStatus.ConnectedLan
-                        // Device is discovered on LAN → Connected via LAN
+                    // Determine status: prioritize discovery status since LAN connections are on-demand
+                    val status = when {
+                        // Device is discovered on LAN → Connected via LAN (regardless of global connection state)
+                        // LAN connections are established on-demand, so discovery means the device is reachable
                         isDiscovered -> DeviceConnectionStatus.ConnectedLan
+                        // We have an active LAN connection AND device has LAN transport → Connected via LAN (even if not currently discovered)
+                        isLanConnected && transport == ActiveTransport.LAN -> DeviceConnectionStatus.ConnectedLan
                         // Device has CLOUD transport AND server is connected → Connected via Cloud
                         transport == ActiveTransport.CLOUD && isServerConnected -> DeviceConnectionStatus.ConnectedCloud
                         // Device has CLOUD transport but server is offline → Disconnected

@@ -194,7 +194,7 @@ private fun ClipboardCard(item: ClipboardItem, currentDeviceId: String) {
         context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     }
     val formatter = DateTimeFormatter.ofPattern("MMM d, HH:mm")
-    val isLocal = item.deviceId == currentDeviceId
+    val isLocal = item.deviceId.lowercase() == currentDeviceId.lowercase()
     val scope = rememberCoroutineScope()
     var isCopying by remember { mutableStateOf(false) }
     

@@ -3,8 +3,10 @@ package com.hypo.clipboard
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -130,7 +132,31 @@ class MainActivity : ComponentActivity() {
 
     private fun openBatterySettings() {
         runCatching {
-            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            // Directly open Hypo app's battery optimization settings
+            // This opens the app details page where user can find battery optimization option
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+            
+            // Alternative: Try to directly request ignore battery optimizations
+            // This shows a system dialog asking user to allow/deny
+            // Only works if app doesn't already have the permission
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val powerManager = getSystemService(PowerManager::class.java)
+                if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                    // App doesn't have permission yet, could show dialog
+                    // But we'll let user navigate from app details page instead
+                    android.util.Log.d("MainActivity", "Battery optimization not granted, opened app details page")
+                }
+            }
+        }.onFailure { e ->
+            android.util.Log.e("MainActivity", "Failed to open battery settings: ${e.message}", e)
+            // Fallback: open general battery optimization settings
+            runCatching {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            }
         }
     }
     

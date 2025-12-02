@@ -19,6 +19,18 @@ All notable changes to the Hypo project will be documented in this file.
   - User-friendly permission request button in Settings
   - Android 10+ limitation warnings displayed to users
 
+### Fixed
+- **Android Notification Visibility**: Changed notification channel importance from `IMPORTANCE_LOW` to `IMPORTANCE_DEFAULT`
+  - Ensures persistent notification showing latest clipboard item is visible in notification list
+  - Previously, `IMPORTANCE_LOW` notifications were hidden on Android 8.0+ by default
+  - Notification updates automatically when latest clipboard item changes
+  - Sound disabled for persistent notification to avoid intrusive alerts
+- **macOS History Duplicate Handling**: Fixed duplicate item handling to move existing items to top instead of discarding
+  - When Android clicks an item that originated from macOS, the existing macOS item now moves to top
+  - Preserves pin state when moving items to top
+  - Updates timestamp to reflect user's active use of the item
+  - Ensures cross-platform user actions are reflected in both platforms' history
+
 ## [0.3.3] - 2025-12-02 - Device-Agnostic Pairing & Storage Improvements
 
 ### Added

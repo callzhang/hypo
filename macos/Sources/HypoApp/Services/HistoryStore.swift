@@ -14,26 +14,92 @@ import UniformTypeIdentifiers
 #endif
 
 public actor HistoryStore {
+    private let logger = HypoLogger(category: "HistoryStore")
     private var entries: [ClipboardEntry] = []
     private var maxEntries: Int
+    private let defaults: UserDefaults
+    private static let entriesKey = "com.hypo.clipboard.history_entries"
 
-    public init(maxEntries: Int = 200) {
+    public init(maxEntries: Int = 200, defaults: UserDefaults = .standard) {
         self.maxEntries = max(1, maxEntries)
+        self.defaults = defaults
+        // Load persisted entries on init (nonisolated context, so we do it synchronously)
+        if let data = defaults.data(forKey: Self.entriesKey),
+           let decoded = try? JSONDecoder().decode([ClipboardEntry].self, from: data) {
+            let count = decoded.count
+            self.entries = decoded
+            // Note: sortEntries() and trimIfNeeded() are actor-isolated, so we'll call them in the first insert/query
+            #if canImport(os)
+            let logger = HypoLogger(category: "history")
+            logger.info("✅ Loaded \(count) clipboard entries from persistence")
+            #endif
+        }
+    }
+    
+    private func persistEntries() {
+        if let encoded = try? JSONEncoder().encode(self.entries) {
+            defaults.set(encoded, forKey: Self.entriesKey)
+            logger.info("💾 [HistoryStore] Persisted \(self.entries.count) clipboard entries")
+            #if canImport(os)
+            let logger = HypoLogger(category: "history")
+            logger.debug("💾 Persisted \(self.entries.count) clipboard entries")
+            #endif
+        } else {
+            logger.error("❌ [HistoryStore] Failed to encode entries for persistence")
+        }
     }
 
     @discardableResult
     public func insert(_ entry: ClipboardEntry) -> [ClipboardEntry] {
-        if let index = entries.firstIndex(where: { $0.id == entry.id || $0.content == entry.content }) {
-            entries.remove(at: index)
+        let now = Date()
+        
+        // Simplified duplicate detection (no time windows):
+        // 1. If new message matches something in history:
+        //    - Local entry → move to top (even if it's the latest entry)
+        //    - Remote entry → discard duplicate to preserve chronological order
+        // 2. Otherwise → add new entry
+        
+        // Check if matches something in history (including the latest entry)
+        if let matchingEntry = entries.first(where: { existingEntry in
+            entry.matchesContent(existingEntry)
+        }) {
+            // Found matching entry in history
+            if let index = entries.firstIndex(where: { $0.id == matchingEntry.id }) {
+                // Move matching entry to top regardless of whether incoming entry is local or received
+                // This ensures that when Android clicks an item (which sends it back to macOS),
+                // the existing macOS item moves to top, reflecting the user's active use of the item
+                // Preserve pin state - if it was pinned, keep it pinned (it will move to top of pinned items)
+                // If it wasn't pinned, keep it unpinned (it will move to top of unpinned items)
+                entries[index].timestamp = now
+                // Don't change isPinned - preserve user's pin preference
+                sortEntries()
+                persistEntries()
+                if entry.transportOrigin == nil {
+                    logger.debug("🔄 [HistoryStore] Local entry matches history item, moved to top (pinned: \(entries[index].isPinned)): \(matchingEntry.previewText.prefix(50))")
+                } else {
+                    logger.debug("🔄 [HistoryStore] Received entry matches history item, moved existing item to top (pinned: \(entries[index].isPinned)): \(matchingEntry.previewText.prefix(50))")
+                }
+                return entries
+            }
         }
+        
+        // Not a duplicate - add to history
+        let beforeCount = entries.count
         entries.append(entry)
         sortEntries()
         trimIfNeeded()
+        persistEntries()
+        let afterCount = entries.count
+        logger.debug("✅ [HistoryStore] Inserted entry: \(entry.previewText.prefix(50)), before: \(beforeCount), after: \(afterCount)")
         return entries
     }
 
     public func all() -> [ClipboardEntry] {
-        entries
+        // Ensure entries are sorted after loading from persistence
+        if !entries.isEmpty {
+            sortEntries()
+        }
+        return entries
     }
 
     public func entry(withID id: UUID) -> ClipboardEntry? {
@@ -42,17 +108,25 @@ public actor HistoryStore {
 
     public func remove(id: UUID) {
         entries.removeAll { $0.id == id }
+        persistEntries()
     }
 
     public func clear() {
         entries.removeAll()
+        persistEntries()
     }
 
     @discardableResult
     public func updatePinState(id: UUID, isPinned: Bool) -> [ClipboardEntry] {
-        guard let index = entries.firstIndex(where: { $0.id == id }) else { return entries }
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { 
+            logger.warning("⚠️ [HistoryStore] Cannot find entry with id \(id) to update pin state")
+            return entries 
+        }
+        // Allow unpinning any item, including the first one
         entries[index].isPinned = isPinned
         sortEntries()
+        persistEntries()
+        logger.debug("📌 [HistoryStore] Updated pin state for entry \(id): isPinned=\(isPinned)")
         return entries
     }
 
@@ -60,6 +134,7 @@ public actor HistoryStore {
     public func updateLimit(_ newLimit: Int) -> [ClipboardEntry] {
         maxEntries = max(1, newLimit)
         trimIfNeeded()
+        persistEntries()
         return entries
     }
 
@@ -67,6 +142,7 @@ public actor HistoryStore {
 
     private func sortEntries() {
         entries.sort { lhs, rhs in
+            // Standard sorting: pinned items first, then by timestamp (newest first)
             if lhs.isPinned != rhs.isPinned {
                 return lhs.isPinned && !rhs.isPinned
             }
@@ -76,7 +152,17 @@ public actor HistoryStore {
 
     private func trimIfNeeded() {
         if entries.count > maxEntries {
-            entries.removeLast(entries.count - maxEntries)
+            // Protect pinned items during trim (like Android)
+            let pinnedItems = entries.filter { $0.isPinned }
+            let unpinnedItems = entries.filter { !$0.isPinned }
+            
+            // Keep all pinned items + most recent unpinned items up to limit
+            let keepUnpinnedCount = max(0, maxEntries - pinnedItems.count)
+            let sortedUnpinned = unpinnedItems.sorted { $0.timestamp > $1.timestamp }
+            let keepUnpinned = Array(sortedUnpinned.prefix(keepUnpinnedCount))
+            
+            entries = pinnedItems + keepUnpinned
+            sortEntries() // Re-sort to maintain order
         }
     }
 }
@@ -91,14 +177,32 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     @Published public private(set) var items: [ClipboardEntry] = []
     @Published public private(set) var latestItem: ClipboardEntry?
     @Published public var historyLimit: Int = 200
-    @Published public var transportPreference: TransportPreference
     @Published public var allowsCloudFallback: Bool
     @Published public var appearancePreference: AppearancePreference
     @Published public var autoDeleteAfterHours: Int
-    @Published public var plainTextModeEnabled: Bool
+    @Published public var plainTextModeEnabled: Bool {
+        didSet {
+            logger.debug("🔧 [ClipboardHistoryViewModel] plainTextModeEnabled changed to: \(plainTextModeEnabled)")
+            defaults.set(plainTextModeEnabled, forKey: DefaultsKey.plainTextMode)
+            // Verify it was saved
+            let saved = defaults.bool(forKey: DefaultsKey.plainTextMode)
+            logger.debug("🔧 [ClipboardHistoryViewModel] Saved to UserDefaults: \(saved)")
+        }
+    }
     @Published public private(set) var pairedDevices: [PairedDevice] = []
     @Published public private(set) var encryptionKeySummary: String
-    @Published public private(set) var connectionState: ConnectionState = .idle
+    
+    // Message queue for sync messages with 1-minute window
+    private struct QueuedSyncMessage {
+        let entry: ClipboardEntry
+        let payload: ClipboardPayload
+        let queuedAt: Date
+        let targetDeviceId: String
+    }
+    private var syncMessageQueue: [QueuedSyncMessage] = []
+    private var queueProcessingTask: Task<Void, Never>?
+    private var queueProcessingContinuation: CheckedContinuation<Void, Never>?
+    @Published public private(set) var connectionState: ConnectionState = .disconnected
 
     private let store: HistoryStore
     public let transportManager: TransportManager?
@@ -109,7 +213,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 #endif
     private var loadTask: Task<Void, Never>?
 #if canImport(os)
-    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "transport")
+    private let logger = HypoLogger(category: "transport")
 #endif
     private let deviceIdentity: DeviceIdentityProviding
 
@@ -132,7 +236,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         self.transportManager = transportManager
         self.defaults = defaults
         self.deviceIdentity = deviceIdentity
-        self.transportPreference = transportManager?.currentPreference() ?? .lanFirst
         self.allowsCloudFallback = defaults.object(forKey: DefaultsKey.allowsCloudFallback) as? Bool ?? true
         self.autoDeleteAfterHours = defaults.object(forKey: DefaultsKey.autoDeleteHours) as? Int ?? 0
         self.plainTextModeEnabled = defaults.object(forKey: DefaultsKey.plainTextMode) as? Bool ?? false
@@ -170,29 +273,28 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            print("🔔 [HistoryStore] PairingCompleted notification received!")
+            guard let self = self else { return }
             let userInfo = notification.userInfo ?? [:]
-            print("   Full userInfo: \(userInfo)")
-            
-            // Write to debug log
-            try? "🔔 [HistoryStore] PairingCompleted notification received!\n".appendToFile(path: "/tmp/hypo_debug.log")
-            try? "   Full userInfo: \(userInfo)\n".appendToFile(path: "/tmp/hypo_debug.log")
-            guard let deviceIdString = userInfo["deviceId"] as? String,
-                  let deviceName = userInfo["deviceName"] as? String else {
-                print("⚠️ [HistoryStore] PairingCompleted notification missing required fields")
-                print("   userInfo keys: \(userInfo.keys)")
-                print("   deviceId type: \(type(of: userInfo["deviceId"]))")
-                print("   deviceName type: \(type(of: userInfo["deviceName"]))")
-#if canImport(os)
-                self?.logger.warning("⚠️ PairingCompleted notification missing required fields")
-#endif
-                return
-            }
-            
-            print("📱 [HistoryStore] Processing device: \(deviceName), ID: \(deviceIdString)")
             
             Task { @MainActor in
-                await self?.handlePairingCompleted(deviceId: deviceIdString, deviceName: deviceName)
+                self.logger.debug("🔔 [HistoryStore] PairingCompleted notification received!")
+                self.logger.debug("   Full userInfo: \(userInfo)")
+                
+                // Write to debug log
+                guard let deviceIdString = userInfo["deviceId"] as? String,
+                      let deviceName = userInfo["deviceName"] as? String else {
+                    self.logger.debug("⚠️ [HistoryStore] PairingCompleted notification missing required fields")
+                    self.logger.debug("   userInfo keys: \(userInfo.keys)")
+                    self.logger.debug("   deviceId type: \(type(of: userInfo["deviceId"]))")
+                    self.logger.debug("   deviceName type: \(type(of: userInfo["deviceName"]))")
+#if canImport(os)
+                    self.logger.warning("⚠️ PairingCompleted notification missing required fields")
+#endif
+                    return
+                }
+                
+                self.logger.debug("📱 [HistoryStore] Processing device: \(deviceName), ID: \(deviceIdString)")
+                await self.handlePairingCompleted(deviceId: deviceIdString, deviceName: deviceName)
             }
         }
         
@@ -201,33 +303,25 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 #if canImport(Combine)
             // Set initial state first
             connectionState = transportManager.connectionState
-            print("🔌 [ClipboardHistoryViewModel] Initial connection state: \(connectionState)")
-            print("🔌 [ClipboardHistoryViewModel] TransportManager connectionState: \(transportManager.connectionState)")
+            logger.debug("🔌 [ClipboardHistoryViewModel] Initial connection state: \(connectionState)")
+            logger.debug("🔌 [ClipboardHistoryViewModel] TransportManager connectionState: \(transportManager.connectionState)")
             
-            // Observe changes
+            // Observe changes (event-driven via Combine publisher)
             connectionStateCancellable = transportManager.connectionStatePublisher
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] newState in
                     guard let self = self else { return }
-                    print("🔌 [ClipboardHistoryViewModel] Connection state updated from publisher: \(newState)")
+                    logger.debug("🔌 [ClipboardHistoryViewModel] Connection state updated from publisher: \(newState)")
                     self.connectionState = newState
-                    print("🔌 [ClipboardHistoryViewModel] Updated self.connectionState to: \(self.connectionState)")
-                }
-            
-            // Also set up a timer to periodically check the state (fallback)
-            Task { @MainActor in
-                while true {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000) // Every 2 seconds
-                    let currentState = transportManager.connectionState
-                    if currentState != connectionState {
-                        print("🔌 [ClipboardHistoryViewModel] State mismatch detected! Publisher: \(connectionState), Direct: \(currentState)")
-                        connectionState = currentState
+                    logger.debug("🔌 [ClipboardHistoryViewModel] Updated self.connectionState to: \(self.connectionState)")
+                    // Trigger sync queue processing when connection becomes available (event-driven)
+                    if newState != .disconnected {
+                        self.triggerSyncQueueProcessing()
                     }
                 }
-            }
 #endif
         } else {
-            print("⚠️ [ClipboardHistoryViewModel] No TransportManager provided, connection state will remain idle")
+            logger.info("⚠️ [ClipboardHistoryViewModel] No TransportManager provided, connection state will remain idle")
         }
         
         // Listen for connection status changes
@@ -236,17 +330,19 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            print("🔔 [HistoryStore] DeviceConnectionStatusChanged notification received")
-            print("🔔 [HistoryStore] userInfo: \(notification.userInfo ?? [:])")
-            guard let userInfo = notification.userInfo,
-                  let deviceId = userInfo["deviceId"] as? String,
-                  let isOnline = userInfo["isOnline"] as? Bool else {
-                print("⚠️ [HistoryStore] Invalid notification userInfo: \(notification.userInfo ?? [:])")
-                return
-            }
-            print("🔔 [HistoryStore] Calling updateDeviceOnlineStatus: deviceId=\(deviceId), isOnline=\(isOnline)")
+            guard let self = self else { return }
+            let userInfo = notification.userInfo ?? [:]
+            
             Task { @MainActor in
-                await self?.updateDeviceOnlineStatus(deviceId: deviceId, isOnline: isOnline)
+                self.logger.debug("🔔 [HistoryStore] DeviceConnectionStatusChanged notification received")
+                self.logger.debug("🔔 [HistoryStore] userInfo: \(userInfo)")
+                guard let deviceId = userInfo["deviceId"] as? String,
+                      let isOnline = userInfo["isOnline"] as? Bool else {
+                    self.logger.info("⚠️ [HistoryStore] Invalid notification userInfo: \(userInfo)")
+                    return
+                }
+                self.logger.debug("🔔 [HistoryStore] Calling updateDeviceOnlineStatus: deviceId=\(deviceId), isOnline=\(isOnline)")
+                await self.updateDeviceOnlineStatus(deviceId: deviceId, isOnline: isOnline)
             }
         }
         
@@ -267,28 +363,67 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
     
     private func handlePairingCompleted(deviceId: String, deviceName: String) async {
-        print("📝 [HistoryStore] handlePairingCompleted called: \(deviceName) (\(deviceId))")
+        logger.info("📝 [HistoryStore] handlePairingCompleted called: \(deviceName) (\(deviceId))")
+        
+        // Check if device is currently discovered on LAN to get discovery info
+        var discoveredPeer: DiscoveredPeer? = nil
+        if let transportManager = transportManager {
+            let discoveredPeers = transportManager.lanDiscoveredPeers()
+            discoveredPeer = discoveredPeers.first(where: { peer in
+                if let peerDeviceId = peer.endpoint.metadata["device_id"] {
+                    return peerDeviceId.lowercased() == deviceId.lowercased()
+                }
+                return false
+            })
+        }
         
         // Remove any duplicates first (by ID or by name+platform)
         pairedDevices.removeAll { $0.id == deviceId || ($0.name == deviceName && $0.platform == "Android") }
         
-        // Add the device
-        let device = PairedDevice(
-            id: deviceId,
-            name: deviceName,
-            platform: "Android",
-            lastSeen: Date(),
-            isOnline: true
-        )
+        // Add the device with discovery info if available
+        let device: PairedDevice
+        if let peer = discoveredPeer {
+            // Device is discovered on LAN - include discovery info
+            device = PairedDevice(
+                id: deviceId,
+                name: deviceName,
+                platform: "Android",
+                lastSeen: Date(),
+                isOnline: true,
+                serviceName: peer.serviceName,
+                bonjourHost: peer.endpoint.host,
+                bonjourPort: peer.endpoint.port,
+                fingerprint: peer.endpoint.fingerprint
+            )
+            logger.info("✅ [HistoryStore] Device paired and discovered on LAN: \(peer.endpoint.host):\(peer.endpoint.port)")
+        } else {
+            // Device not discovered yet - will be updated by ConnectionStatusProber when discovered
+            device = PairedDevice(
+                id: deviceId,
+                name: deviceName,
+                platform: "Android",
+                lastSeen: Date(),
+                isOnline: true
+            )
+            logger.info("✅ [HistoryStore] Device paired but not yet discovered on LAN (will update when discovered)")
+        }
+        
         pairedDevices.append(device)
         
         // Deduplicate and sort
         pairedDevices = Self.deduplicateDevices(pairedDevices).sorted { $0.lastSeen > $1.lastSeen }
         persistPairedDevices()
-        print("✅ [HistoryStore] Device saved! Total paired devices: \(pairedDevices.count)")
+        logger.info("✅ [HistoryStore] Device saved! Total paired devices: \(pairedDevices.count)")
 #if canImport(os)
         logger.info("✅ Paired device saved: \(deviceName)")
 #endif
+        
+        // Trigger connection status probe to update device with discovery info if not already set
+        // This ensures the device gets updated with LAN connection details if discovered
+        if discoveredPeer == nil, let transportManager = transportManager {
+            // Device not discovered yet - trigger probe to check again
+            await transportManager.probeConnectionStatus()
+        }
     }
     
     private static func deduplicateDevices(_ devices: [PairedDevice]) -> [PairedDevice] {
@@ -357,7 +492,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             let deduplicated = Self.deduplicateDevices(decoded).sorted { $0.lastSeen > $1.lastSeen }
             let afterCount = deduplicated.count
             if beforeCount != afterCount {
-                print("🔄 [HistoryStore] Reload deduplication: \(beforeCount) → \(afterCount) devices")
+                logger.info("🔄 [HistoryStore] Reload deduplication: \(beforeCount) → \(afterCount) devices")
             }
             self.pairedDevices = deduplicated
             if let encoded = try? JSONEncoder().encode(deduplicated) {
@@ -370,9 +505,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         // Ensure setHistoryViewModel is called if transportManager is available
         // This handles cases where SwiftUI doesn't call the custom init()
         if let transportManager = transportManager {
-            let startMsg = "🚀 [ClipboardHistoryViewModel] start() called, ensuring setHistoryViewModel\n"
-            print(startMsg)
-            try? startMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("🚀 [ClipboardHistoryViewModel] start() called, ensuring setHistoryViewModel")
             transportManager.setHistoryViewModel(self)
         }
         // Reload and deduplicate paired devices on startup
@@ -404,22 +537,35 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         guard let transportManager = transportManager,
               let report = transportManager.handleDeepLink(url) else { return }
 #if canImport(os)
-        logger.info("\n\(report, privacy: .public)")
+        logger.info("\n\(report)")
 #else
-        print(report)
+        logger.info("\(report)")
 #endif
     }
 
     public func add(_ entry: ClipboardEntry) async {
+        logger.debug("📥 [ClipboardHistoryViewModel] add() called for entry: \(entry.previewText.prefix(50))")
+        
         if autoDeleteAfterHours > 0 {
             let expireDate = Date().addingTimeInterval(TimeInterval(autoDeleteAfterHours) * 3600)
             scheduleExpiry(for: entry.id, date: expireDate)
         }
-        let updated = await store.insert(entry)
+        
+        // Insert entry into store (for local entries from ClipboardMonitor)
+        // Remote entries are already inserted by IncomingClipboardHandler, but local entries need to be inserted here
+        let insertedEntries = await store.insert(entry)
+        logger.debug("💾 [ClipboardHistoryViewModel] Inserted entry into store: \(insertedEntries.count) total entries")
+        
+        // Reload all entries from store to get the latest state including any sorting/trimming that happened
+        let updated = await store.all()
+        logger.debug("🔄 [ClipboardHistoryViewModel] Reloading items from store: current=\(self.items.count), store=\(updated.count) entries")
+        
         await MainActor.run {
             self.items = updated
             self.latestItem = updated.first
         }
+        
+        logger.debug("✅ [ClipboardHistoryViewModel] items array updated: \(updated.count) entries")
 #if canImport(UserNotifications)
         notificationController?.deliverNotification(for: entry)
 #endif
@@ -429,7 +575,44 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
     
     private func syncToPairedDevices(_ entry: ClipboardEntry) async {
-        guard !pairedDevices.isEmpty, let transportManager = transportManager else { return }
+#if canImport(os)
+        logger.info("🔄 [HistoryStore] syncToPairedDevices called for entry: \(entry.previewText.prefix(50))")
+        logger.info("🔄 [HistoryStore] Entry deviceId: \(entry.deviceId), localDeviceId: \(localDeviceId.lowercased())")
+        logger.info("🔄 [HistoryStore] Entry transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
+        logger.info("🔄 [HistoryStore] TransportManager is \(transportManager != nil ? "set" : "nil")")
+        logger.info("🔄 [HistoryStore] Paired devices count: \(pairedDevices.count)")
+        for (idx, device) in pairedDevices.enumerated() {
+            logger.info("🔄 [HistoryStore] Paired device[\(idx)]: id=\(device.id), name=\(device.name), isOnline=\(device.isOnline)")
+        }
+#endif
+        guard transportManager != nil else {
+#if canImport(os)
+            logger.warning("⏭️ [HistoryStore] Skipping sync - transportManager is nil")
+#endif
+            return
+        }
+        
+        // ⚠️ CRITICAL: Only forward entries that originated from the local device
+        // Skip forwarding if entry came from a remote device (has transportOrigin set)
+        // or if deviceId doesn't match local device ID
+        if entry.transportOrigin != nil {
+#if canImport(os)
+            logger.info("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry came from remote device (transportOrigin: \(entry.transportOrigin!))")
+#endif
+            return
+        }
+        
+        // Compare using lowercase normalization
+        if entry.deviceId != localDeviceId.lowercased() {
+#if canImport(os)
+            logger.info("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry originated from different device: \(entry.deviceId) (local: \(localDeviceId.lowercased()))")
+#endif
+            return
+        }
+        
+#if canImport(os)
+        logger.info("✅ [HistoryStore] Entry is local, proceeding with sync. Paired devices: \(pairedDevices.count)")
+#endif
         
         // Convert clipboard entry to payload
         let payload: ClipboardPayload
@@ -438,46 +621,268 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             payload = ClipboardPayload(
                 contentType: .text,
                 data: Data(text.utf8),
-                metadata: ["device_id": entry.originDeviceId, "device_name": entry.originDeviceName ?? ""]
+                metadata: ["device_id": entry.deviceId, "device_name": entry.originDeviceName ?? ""]
             )
         case .link(let url):
             payload = ClipboardPayload(
                 contentType: .link,
                 data: Data(url.absoluteString.utf8),
-                metadata: ["device_id": entry.originDeviceId, "device_name": entry.originDeviceName ?? ""]
+                metadata: ["device_id": entry.deviceId, "device_name": entry.originDeviceName ?? ""]
             )
         case .image, .file:
             // Skip images/files for now (would need more complex handling)
             return
         }
         
+        // Queue messages for all paired devices that have encryption keys
+        // Skip devices without keys to avoid unnecessary retries
+        let keyProvider = KeychainDeviceKeyProvider()
+        var devicesWithKeys: [PairedDevice] = []
+        var devicesWithoutKeys: [PairedDevice] = []
+        
+        for device in pairedDevices {
+            if keyProvider.hasKey(for: device.id) {
+                devicesWithKeys.append(device)
+            } else {
+                devicesWithoutKeys.append(device)
+            }
+        }
+        
+#if canImport(os)
+        logger.info("📤 [HistoryStore] Queuing messages for \(devicesWithKeys.count) paired device(s) with keys (skipping \(devicesWithoutKeys.count) device(s) without keys)")
+        if pairedDevices.isEmpty {
+            logger.warning("⚠️ [HistoryStore] No paired devices found! Clipboard sync will not be sent to any peers.")
+            logger.warning("⚠️ [HistoryStore] To sync clipboard, you need to pair with at least one device first.")
+        }
+        if !devicesWithoutKeys.isEmpty {
+            for device in devicesWithoutKeys {
+                logger.warning("⏭️ [HistoryStore] Skipping device \(device.name) (id: \(device.id)) - no encryption key found. Device may need to be re-paired.")
+            }
+        }
+#endif
+        
+        // Queue a separate message for each device with a key
+        // Each device gets its own message, so failures for one device don't affect others
+        for device in devicesWithKeys {
+#if canImport(os)
+            logger.info("📤 [HistoryStore] Queuing message for device: \(device.name) (id: \(device.id), isOnline: \(device.isOnline))")
+#endif
+            let queuedMessage = QueuedSyncMessage(
+                entry: entry,
+                payload: payload,
+                queuedAt: Date(),
+                targetDeviceId: device.id
+            )
+            syncMessageQueue.append(queuedMessage)
+        }
+        
+        // Trigger immediate queue processing (event-driven)
+#if canImport(os)
+        logger.info("📤 [HistoryStore] Triggering sync queue processing, queue size: \(syncMessageQueue.count)")
+#endif
+        triggerSyncQueueProcessing()
+    }
+    
+    /// Trigger sync queue processing (event-driven)
+    @MainActor
+    private func triggerSyncQueueProcessing() {
+#if canImport(os)
+        logger.info("🔄 [HistoryStore] triggerSyncQueueProcessing() called, queue size: \(syncMessageQueue.count), connectionState: \(connectionState)")
+        logger.info("🔄 [HistoryStore] queueProcessingTask state: \(queueProcessingTask == nil ? "nil" : (queueProcessingTask?.isCancelled == true ? "cancelled" : "active"))")
+#endif
+        // Resume continuation if waiting
+        if queueProcessingContinuation != nil {
+#if canImport(os)
+            logger.info("🔄 [HistoryStore] Resuming waiting queue processing continuation")
+#endif
+            queueProcessingContinuation?.resume()
+            queueProcessingContinuation = nil
+        }
+        
+        // Start queue processor if not running
+        if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
+#if canImport(os)
+            logger.info("🔄 [HistoryStore] Starting new queue processing task")
+#endif
+            queueProcessingTask = Task { [weak self] in
+                await self?.processSyncQueue()
+            }
+        } else {
+#if canImport(os)
+            logger.info("🔄 [HistoryStore] Queue processing task already running, continuation resumed")
+#endif
+        }
+    }
+    
+    /// Process the sync message queue (event-driven: triggered when connection available or message queued)
+    private func processSyncQueue() async {
+#if canImport(os)
+        logger.info("🔄 [HistoryStore] processSyncQueue() started, queue size: \(syncMessageQueue.count), connectionState: \(connectionState)")
+#else
+        // No-op
+#endif
+        // When this task finishes (normal exit or cancellation), allow a new processor to be started
+        defer {
+            queueProcessingTask = nil
+        }
+        while !Task.isCancelled {
+            let now = Date()
+            guard let transportManager = transportManager else {
+#if canImport(os)
+                logger.warning("⚠️ [HistoryStore] processSyncQueue() waiting: transportManager is nil")
+#endif
+                // If transport manager is not available, wait for event (connection available or message queued)
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    Task { @MainActor [weak self] in
+                        self?.queueProcessingContinuation = continuation
+                    }
+                }
+                continue
+            }
+            
+#if canImport(os)
+            logger.info("🔄 [HistoryStore] processSyncQueue() processing, queue size: \(syncMessageQueue.count), connectionState: \(connectionState)")
+#endif
+            // Process queue - send to all devices independently
+            // Each message targets a specific device, so failures for one device don't block others
+            var remainingMessages: [QueuedSyncMessage] = []
+            var hasMessagesToRetry = false
+            var successCount = 0
+            var failureCount = 0
+            
+            for message in syncMessageQueue {
+                // Expire messages older than 1 minute
+                if now.timeIntervalSince(message.queuedAt) > 60 {
+#if canImport(os)
+                    logger.info("⏭️ Expired sync message for device \(message.targetDeviceId) (queued \(Int(now.timeIntervalSince(message.queuedAt)))s ago)")
+#endif
+                    continue // Drop expired message
+                }
+                
+                // Try to send message to this specific device
+                // Note: Each device is processed independently - failure for one doesn't affect others
+#if canImport(os)
+            logger.info("🔄 [HistoryStore] Processing queued message for device \(message.targetDeviceId), queue size: \(syncMessageQueue.count)")
+#endif
+                if await trySendMessage(message, transportManager: transportManager) {
+                    // Success - message cleared from queue
+                    successCount += 1
+#if canImport(os)
+                    logger.info("✅ [HistoryStore] Successfully sent queued message to device \(message.targetDeviceId)")
+#endif
+                    continue
+                } else {
+                    // Failed - keep in queue for retry
+                    failureCount += 1
+#if canImport(os)
+                    logger.warning("⚠️ [HistoryStore] Failed to send message to \(message.targetDeviceId), keeping in queue for retry")
+#endif
+                    remainingMessages.append(message)
+                    hasMessagesToRetry = true
+                }
+            }
+            
+#if canImport(os)
+            if successCount > 0 || failureCount > 0 {
+                logger.info("📊 [HistoryStore] Queue processing summary: \(successCount) succeeded, \(failureCount) failed, \(remainingMessages.count) remaining")
+            }
+#endif
+            
+            syncMessageQueue = remainingMessages
+            
+#if canImport(os)
+            logger.info("🔄 [HistoryStore] processSyncQueue() completed iteration: hasMessagesToRetry=\(hasMessagesToRetry), connectionState=\(connectionState), remaining queue size=\(syncMessageQueue.count)")
+#endif
+            
+            if hasMessagesToRetry && connectionState != .disconnected {
+                // If we have messages to retry and connection is available, wait for next event
+                // (connection state change or new message queued) instead of polling
+#if canImport(os)
+                logger.info("🔄 [HistoryStore] processSyncQueue() waiting for next event (hasMessagesToRetry=true, connectionState != .disconnected)")
+#endif
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    Task { @MainActor [weak self] in
+                        self?.queueProcessingContinuation = continuation
+                    }
+                }
+#if canImport(os)
+                logger.info("🔄 [HistoryStore] processSyncQueue() continuation resumed after waiting for event, continuing loop (queue size: \(syncMessageQueue.count))")
+#endif
+                // Continue loop to process queue again
+                continue
+            } else if hasMessagesToRetry {
+                // Connection not available, wait for connection state change (event-driven)
+#if canImport(os)
+                logger.info("🔄 [HistoryStore] processSyncQueue() waiting for connection (hasMessagesToRetry=true, connectionState=\(connectionState))")
+#endif
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    Task { @MainActor [weak self] in
+                        self?.queueProcessingContinuation = continuation
+                    }
+                }
+#if canImport(os)
+                logger.info("🔄 [HistoryStore] processSyncQueue() continuation resumed after waiting for connection, continuing loop (queue size: \(syncMessageQueue.count))")
+#endif
+                // Continue loop to process queue again
+                continue
+            } else {
+                // No messages to process, exit (will restart when new message is queued)
+#if canImport(os)
+                logger.info("🔄 [HistoryStore] processSyncQueue() exiting (no messages to retry, queue size=\(syncMessageQueue.count))")
+#endif
+                return
+            }
+        }
+    }
+    
+    /// Attempt to send a queued sync message
+    private func trySendMessage(_ message: QueuedSyncMessage, transportManager: TransportManager) async -> Bool {
+        do {
+#if canImport(os)
+        logger.info("📤 [HistoryStore] Attempting to send message to device \(message.targetDeviceId)")
+        logger.info("📤 [HistoryStore] Entry preview: \(message.entry.previewText.prefix(50))")
+        logger.info("📤 [HistoryStore] Payload type: \(message.payload.contentType.rawValue), size: \(message.payload.data.count) bytes")
+#endif
         // Get sync engine with transport
         let transport = transportManager.loadTransport()
         let keyProvider = KeychainDeviceKeyProvider()
         let syncEngine = SyncEngine(
             transport: transport,
             keyProvider: keyProvider,
-            localDeviceId: deviceIdentity.deviceIdString
+                localDeviceId: deviceIdentity.deviceId.uuidString,
+                localPlatform: deviceIdentity.platform
         )
         
+#if canImport(os)
+        logger.info("📤 [HistoryStore] SyncEngine created, establishing connection...")
+#endif
         // Ensure transport is connected
         await syncEngine.establishConnection()
         
-        // Send to each paired device
-        for device in pairedDevices {
-            guard device.isOnline else { continue }
-            do {
-                try await syncEngine.transmit(entry: entry, payload: payload, targetDeviceId: device.id)
 #if canImport(os)
-                logger.info("✅ Synced clipboard to device: \(device.name, privacy: .public)")
+        logger.info("📤 [HistoryStore] Connection established, transmitting message...")
 #endif
-                // Update lastSeen timestamp after successful sync
+            // Attempt to send (best-effort - try regardless of device online status)
+            try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
+            
+#if canImport(os)
+        logger.info("✅ [HistoryStore] Successfully transmitted message to \(message.targetDeviceId)")
+#endif
+            // Update lastSeen timestamp after successful sync
+            if let device = pairedDevices.first(where: { $0.id == message.targetDeviceId }) {
                 await updateDeviceLastSeen(deviceId: device.id)
+            }
+            
+            return true // Success
             } catch {
 #if canImport(os)
-                logger.error("❌ Failed to sync to \(device.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-#endif
+            logger.error("❌ [HistoryStore] Failed to send queued message to \(message.targetDeviceId): \(error.localizedDescription)")
+            logger.error("❌ [HistoryStore] Error type: \(String(describing: type(of: error)))")
+            if let nsError = error as NSError? {
+                logger.error("❌ [HistoryStore] NSError domain: \(nsError.domain), code: \(nsError.code)")
             }
+#endif
+            return false // Failed, will retry
         }
     }
 
@@ -513,24 +918,21 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func togglePin(_ entry: ClipboardEntry) {
+        logger.debug("📌 [ClipboardHistoryViewModel] togglePin called for entry: \(entry.id), current isPinned: \(entry.isPinned)")
         Task {
-            let updated = await store.updatePinState(id: entry.id, isPinned: !entry.isPinned)
+            let newPinState = !entry.isPinned
+            logger.debug("📌 [ClipboardHistoryViewModel] Setting pin state to: \(newPinState)")
+            let updated = await store.updatePinState(id: entry.id, isPinned: newPinState)
             await MainActor.run {
                 self.items = updated
                 self.latestItem = updated.first
+                logger.debug("📌 [ClipboardHistoryViewModel] Pin state updated. First item isPinned: \(updated.first?.isPinned ?? false)")
             }
         }
     }
 
-    public func updateTransportPreference(_ preference: TransportPreference) {
-        transportManager?.update(preference: preference)
-        transportPreference = preference
-    }
-
-    public func setAllowsCloudFallback(_ allowed: Bool) {
-        allowsCloudFallback = allowed
-        defaults.set(allowed, forKey: DefaultsKey.allowsCloudFallback)
-    }
+    // Note: allowsCloudFallback is deprecated - we always dual-send now
+    // Keeping the property for backward compatibility but it's no longer used
 
     public func setAutoDelete(hours: Int) {
         autoDeleteAfterHours = max(0, hours)
@@ -543,41 +945,43 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func registerPairedDevice(_ device: PairedDevice) {
-        if let index = pairedDevices.firstIndex(where: { $0.id == device.id }) {
-            pairedDevices[index] = device
-        } else if let existingIndex = pairedDevices.firstIndex(where: { $0.name == device.name && $0.platform == device.platform }) {
-            pairedDevices[existingIndex] = device
+        // Create a new array to ensure SwiftUI detects the change
+        var updatedDevices = pairedDevices
+        
+        if let index = updatedDevices.firstIndex(where: { $0.id == device.id }) {
+            updatedDevices[index] = device
+            logger.info("🔄 [HistoryStore] Updated existing device: \(device.name) (id: \(device.id), bonjourHost: \(device.bonjourHost ?? "nil"), bonjourPort: \(device.bonjourPort?.description ?? "nil"))")
+        } else if let existingIndex = updatedDevices.firstIndex(where: { $0.name == device.name && $0.platform == device.platform }) {
+            updatedDevices[existingIndex] = device
+            logger.info("🔄 [HistoryStore] Updated device by name: \(device.name) (id: \(device.id), bonjourHost: \(device.bonjourHost ?? "nil"), bonjourPort: \(device.bonjourPort?.description ?? "nil"))")
         } else {
-            pairedDevices.append(device)
+            updatedDevices.append(device)
+            logger.info("🔄 [HistoryStore] Added new device: \(device.name) (id: \(device.id), bonjourHost: \(device.bonjourHost ?? "nil"), bonjourPort: \(device.bonjourPort?.description ?? "nil"))")
         }
-        pairedDevices.sort { $0.lastSeen > $1.lastSeen }
+        
+        updatedDevices.sort { $0.lastSeen > $1.lastSeen }
+        
+        // Replace the entire array to trigger SwiftUI update
+        pairedDevices = updatedDevices
         persistPairedDevices()
     }
     
     public func updateDeviceOnlineStatus(deviceId: String, isOnline: Bool) async {
-        let callMsg = "🔍 [HistoryStore] updateDeviceOnlineStatus called: deviceId=\(deviceId), isOnline=\(isOnline)\n"
-        print(callMsg)
-        try? callMsg.appendToFile(path: "/tmp/hypo_debug.log")
-        let countMsg = "🔍 [HistoryStore] Current paired devices count: \(pairedDevices.count)\n"
-        print(countMsg)
-        try? countMsg.appendToFile(path: "/tmp/hypo_debug.log")
+        logger.info("🔍 [HistoryStore] updateDeviceOnlineStatus called: deviceId=\(deviceId), isOnline=\(isOnline)")
+        logger.info("🔍 [HistoryStore] Current paired devices count: \(pairedDevices.count)")
         for (idx, device) in pairedDevices.enumerated() {
-            let deviceMsg = "🔍 [HistoryStore] Paired device[\(idx)]: id=\(device.id), name=\(device.name), isOnline=\(device.isOnline)\n"
-            print(deviceMsg)
-            try? deviceMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("🔍 [HistoryStore] Paired device[\(idx)]: id=\(device.id), name=\(device.name), isOnline=\(device.isOnline)")
         }
         
         guard let index = pairedDevices.firstIndex(where: { $0.id == deviceId }) else {
-            print("⚠️ [HistoryStore] Cannot update online status - device not found: \(deviceId)")
-            print("⚠️ [HistoryStore] Available device IDs: \(pairedDevices.map { $0.id }.joined(separator: ", "))")
+            logger.info("⚠️ [HistoryStore] Cannot update online status - device not found: \(deviceId)")
+            logger.info("⚠️ [HistoryStore] Available device IDs: \(pairedDevices.map { $0.id }.joined(separator: ", "))")
             // Try case-insensitive matching as fallback
             if let caseInsensitiveIndex = pairedDevices.firstIndex(where: { $0.id.lowercased() == deviceId.lowercased() }) {
-                print("✅ [HistoryStore] Found device with case-insensitive match, updating...")
+                logger.info("✅ [HistoryStore] Found device with case-insensitive match, updating...")
                 let device = pairedDevices[caseInsensitiveIndex]
                 if device.isOnline != isOnline {
-                    let updateMsg = "🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)\n"
-                    print(updateMsg)
-                    try? updateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)")
                     
                     // Create a new array with the updated device to ensure SwiftUI detects the change
                     var updatedDevices: [PairedDevice] = []
@@ -606,22 +1010,16 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                     // Force UI update by triggering objectWillChange BEFORE the @Published change
                     objectWillChange.send()
                     
-                    let uiUpdateMsg = "🔄 [HistoryStore] Updated pairedDevices array (count: \(updatedDevices.count)) and triggered objectWillChange.send() (case-insensitive)\n"
-                    print(uiUpdateMsg)
-                    try? uiUpdateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("🔄 [HistoryStore] Updated pairedDevices array (count: \(updatedDevices.count)) and triggered objectWillChange.send() (case-insensitive)")
                     
                     // Verify the update immediately
                     if let updatedDevice = pairedDevices.first(where: { $0.id == device.id }) {
-                        let verifyMsg = "✅ [HistoryStore] Verified update: device \(device.name) isOnline=\(updatedDevice.isOnline) in array\n"
-                        print(verifyMsg)
-                        try? verifyMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                        logger.info("✅ [HistoryStore] Verified update: device \(device.name) isOnline=\(updatedDevice.isOnline) in array")
                     }
                     
                     persistPairedDevices()
                     
-                    let persistedMsg = "✅ [HistoryStore] Device \(device.name) status updated (case-insensitive) and persisted: isOnline=\(isOnline)\n"
-                    print(persistedMsg)
-                    try? persistedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                    logger.info("✅ [HistoryStore] Device \(device.name) status updated (case-insensitive) and persisted: isOnline=\(isOnline)")
                 }
                 return
             }
@@ -629,9 +1027,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         let device = pairedDevices[index]
         if device.isOnline != isOnline {
-            let updateMsg = "🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)\n"
-            print(updateMsg)
-            try? updateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)")
             
             // Create a new array with the updated device to ensure SwiftUI detects the change
             // This replaces the entire array, which triggers @Published change detection
@@ -663,31 +1059,21 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             // This ensures SwiftUI sees the change
             objectWillChange.send()
             
-            let uiUpdateMsg = "🔄 [HistoryStore] Updated pairedDevices array (count: \(updatedDevices.count)) and triggered objectWillChange.send()\n"
-            print(uiUpdateMsg)
-            try? uiUpdateMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("🔄 [HistoryStore] Updated pairedDevices array (count: \(updatedDevices.count)) and triggered objectWillChange.send()")
             
             // Verify the update immediately
             if let updatedDevice = pairedDevices.first(where: { $0.id == device.id }) {
-                let verifyMsg = "✅ [HistoryStore] Verified update: device \(device.name) isOnline=\(updatedDevice.isOnline) in array\n"
-                print(verifyMsg)
-                try? verifyMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.info("✅ [HistoryStore] Verified update: device \(device.name) isOnline=\(updatedDevice.isOnline) in array")
             } else {
-                let errorMsg = "❌ [HistoryStore] ERROR: Device \(device.name) not found in updated array!\n"
-                print(errorMsg)
-                try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+                logger.error("❌ [HistoryStore] ERROR: Device \(device.name) not found in updated array!")
             }
             
             // Persist to UserDefaults
             persistPairedDevices()
             
-            let persistedMsg = "✅ [HistoryStore] Device \(device.name) status updated and persisted: isOnline=\(isOnline) (array replaced, count: \(updatedDevices.count))\n"
-            print(persistedMsg)
-            try? persistedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("✅ [HistoryStore] Device \(device.name) status updated and persisted: isOnline=\(isOnline) (array replaced, count: \(updatedDevices.count))")
         } else {
-            let unchangedMsg = "ℹ️ [HistoryStore] Device \(device.name) online status unchanged: \(isOnline)\n"
-            print(unchangedMsg)
-            try? unchangedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.debug("ℹ️ [HistoryStore] Device \(device.name) online status unchanged: \(isOnline)")
         }
     }
     
@@ -697,17 +1083,17 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         // which are posted when connections are established/closed.
         // On startup, we mark all devices as offline initially, and they'll be marked
         // online when connections are actually established.
-        print("🔍 [HistoryStore] Initializing device status - connections will update via notifications")
+        logger.info("🔍 [HistoryStore] Initializing device status - connections will update via notifications")
         
         // Mark all devices as offline initially (they'll be updated when connections are established)
         var updated = false
         for (index, device) in pairedDevices.enumerated() {
             if device.isOnline {
-                print("🔄 [HistoryStore] Marking device \(device.name) as offline on startup (will update when connection established)")
-                pairedDevices[index] = PairedDevice(
-                    id: device.id,
-                    name: device.name,
-                    platform: device.platform,
+                logger.info("🔄 [HistoryStore] Marking device \(device.name) as offline on startup (will update when connection established)")
+            pairedDevices[index] = PairedDevice(
+                id: device.id,
+                name: device.name,
+                platform: device.platform,
                     lastSeen: device.lastSeen,
                     isOnline: false
                 )
@@ -722,14 +1108,14 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     /// Update lastSeen timestamp for a device (public method for external callers)
     public func updateDeviceLastSeen(deviceId: String) async {
         guard let index = pairedDevices.firstIndex(where: { $0.id == deviceId }) else {
-            print("⚠️ [HistoryStore] Cannot update lastSeen - device not found: \(deviceId)")
+            logger.info("⚠️ [HistoryStore] Cannot update lastSeen - device not found: \(deviceId)")
             return
         }
         let device = pairedDevices[index]
         let now = Date()
         // Only update if it's been more than 1 second since last update (avoid excessive updates)
         if now.timeIntervalSince(device.lastSeen) > 1.0 {
-            print("🔄 [HistoryStore] Updating device \(device.name) lastSeen: \(device.lastSeen) → \(now)")
+            logger.info("🔄 [HistoryStore] Updating device \(device.name) lastSeen: \(device.lastSeen) → \(now)")
             pairedDevices[index] = PairedDevice(
                 id: device.id,
                 name: device.name,
@@ -743,9 +1129,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 
 
     public func makeRemotePairingViewModel() -> RemotePairingViewModel {
-        RemotePairingViewModel(identity: deviceIdentity) { [weak self] device in
+        RemotePairingViewModel(identity: deviceIdentity, onDevicePaired: { [weak self] device in
             self?.registerPairedDevice(device)
-        }
+        })
     }
 
     public func pairingParameters() -> (service: String, port: Int, relayHint: URL?) {
@@ -789,7 +1175,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     
     /// Returns the local device ID for comparing entry origins
     public var localDeviceId: String {
-        deviceIdentity.deviceIdString
+        deviceIdentity.deviceId.uuidString  // UUID string (pure UUID, no prefix)
     }
     #endif
 
@@ -864,7 +1250,13 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 #if canImport(AppKit)
 extension ClipboardHistoryViewModel: ClipboardMonitorDelegate {
     nonisolated public func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture entry: ClipboardEntry) {
-        Task { await self.add(entry) }
+        let logger = HypoLogger(category: "ClipboardHistoryViewModel")
+        Task { @MainActor in
+            let localId = deviceIdentity.deviceId.uuidString.lowercased()
+            let isLocal = entry.deviceId == localId
+            logger.info("📋 [ClipboardHistoryViewModel] clipboardMonitor didCapture: \(entry.previewText.prefix(50)), deviceId: \(entry.deviceId), localDeviceId: \(localId), isLocal: \(isLocal), transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
+            await self.add(entry)
+        }
     }
 }
 #endif
@@ -920,7 +1312,7 @@ public struct PairedDevice: Identifiable, Equatable, Codable {
     public let platform: String
     public let lastSeen: Date
     public let isOnline: Bool
-    
+
     // Bonjour/discovery information
     public let serviceName: String?
     public let bonjourHost: String?
@@ -977,3 +1369,4 @@ public struct PairedDevice: Identifiable, Equatable, Codable {
         )
     }
 }
+

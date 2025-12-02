@@ -550,6 +550,13 @@ class ClipboardSyncService : Service() {
 }
 ```
 
+**Notification Channel Configuration**:
+- **Importance**: `IMPORTANCE_DEFAULT` (ensures notification is visible in notification list)
+- **Purpose**: Persistent foreground service notification showing latest clipboard item preview
+- **Behavior**: Updates automatically when latest clipboard item changes via `observeLatestItem()`
+- **Visibility**: Always visible in notification list (not minimized like `IMPORTANCE_LOW`)
+- **Sound**: Disabled (`setSound(null, null)`) to avoid intrusive alerts for persistent notification
+
 #### 4.2.3 Room Database Schema
 ```kotlin
 @Entity(tableName = "clipboard_history")
@@ -887,6 +894,10 @@ This section compares the implementation details between Android and macOS clien
   - Devices without keys are skipped with warning logs
   - Failed sends are kept in queue for retry
   - Processing continues for all devices regardless of individual failures
+- **Duplicate Handling**: When a received clipboard item matches an existing item in history, the existing item is moved to the top instead of being discarded
+  - Ensures cross-platform user actions (e.g., clicking an item in Android that originated from macOS) are reflected in macOS history
+  - Preserves pin state when moving items to top
+  - Updates timestamp to reflect the user's active use of the item
 
 **Key Differences**:
 | Feature | Android | macOS |
@@ -1208,7 +1219,7 @@ docker run -p 8080:8080 hypo-relay
 
 ---
 
-**Document Version**: 0.3.4  
+**Document Version**: 0.3.5  
 **Last Updated**: December 2, 2025  
 **Status**: Production Beta  
 **Authors**: Principal Engineering Team

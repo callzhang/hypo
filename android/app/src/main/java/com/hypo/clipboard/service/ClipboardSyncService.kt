@@ -247,6 +247,14 @@ class ClipboardSyncService : Service() {
             }
             manager.createNotificationChannel(channel)
             
+            // Verify channel was created with correct importance
+            val createdChannel = manager.getNotificationChannel(CHANNEL_ID)
+            if (createdChannel != null) {
+                Log.d(TAG, "✅ Notification channel created: id=$CHANNEL_ID, importance=${createdChannel.importance} (${if (createdChannel.importance == NotificationManager.IMPORTANCE_DEFAULT) "DEFAULT - visible" else "NOT DEFAULT - may be hidden"})")
+            } else {
+                Log.w(TAG, "⚠️ Failed to create notification channel: $CHANNEL_ID")
+            }
+            
             // Warning channel (for file size warnings)
             val warningChannel = NotificationChannel(
                 WARNING_CHANNEL_ID,
@@ -331,7 +339,39 @@ class ClipboardSyncService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification)
             }
-            Log.d(TAG, "✅ Notification updated: status=$awaitingClipboardPermission, paused=$isPaused")
+            
+            // Verify notification is actually shown (for debugging)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val isNotificationEnabled = notificationManager.areNotificationsEnabled()
+                val channel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    notificationManager.getNotificationChannel(CHANNEL_ID)
+                } else {
+                    null
+                }
+                val channelBlocked = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && channel != null) {
+                    channel.importance == NotificationManager.IMPORTANCE_NONE
+                } else {
+                    false
+                }
+                val channelImportance = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && channel != null) {
+                    channel.importance
+                } else {
+                    -1
+                }
+                
+                Log.d(TAG, "✅ Notification updated: status=$awaitingClipboardPermission, paused=$isPaused, " +
+                        "notificationsEnabled=$isNotificationEnabled, channelBlocked=$channelBlocked, " +
+                        "channelImportance=$channelImportance, preview=${latestPreview?.take(30) ?: "none"}")
+                
+                if (!isNotificationEnabled) {
+                    Log.w(TAG, "⚠️ Notifications are disabled for this app - notification will not be shown")
+                }
+                if (channelBlocked) {
+                    Log.w(TAG, "⚠️ Notification channel is blocked (IMPORTANCE_NONE) - notification will not be shown")
+                }
+            } else {
+                Log.d(TAG, "✅ Notification updated: status=$awaitingClipboardPermission, paused=$isPaused, preview=${latestPreview?.take(30) ?: "none"}")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to update notification: ${e.message}", e)
         }
@@ -912,7 +952,9 @@ class ClipboardSyncService : Service() {
 
     companion object {
         private const val TAG = "ClipboardSyncService"
-        private const val CHANNEL_ID = "clipboard-sync"
+        // Changed channel ID to force recreation with IMPORTANCE_DEFAULT
+        // Old channel with IMPORTANCE_LOW cannot be changed programmatically on Android 8.0+
+        private const val CHANNEL_ID = "clipboard-sync-v2"
         private const val WARNING_CHANNEL_ID = "clipboard-warnings"
         private const val NOTIFICATION_ID = 42
         private const val WARNING_NOTIFICATION_ID = 43

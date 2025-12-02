@@ -30,7 +30,7 @@ import com.hypo.clipboard.transport.lan.LanDiscoveryRepository
 import com.hypo.clipboard.transport.lan.LanDiscoverySource
 import com.hypo.clipboard.transport.lan.LanRegistrationController
 import com.hypo.clipboard.transport.lan.LanRegistrationManager
-import com.hypo.clipboard.transport.ws.LanWebSocketClient
+import com.hypo.clipboard.transport.ws.WebSocketTransportClient
 import com.hypo.clipboard.transport.ws.OkHttpWebSocketConnector
 import com.hypo.clipboard.transport.ws.RelayWebSocketClient
 import com.hypo.clipboard.transport.ws.TlsWebSocketConfig
@@ -140,8 +140,15 @@ object AppModule {
     @Named("lan_ws_connector")
     fun provideLanWebSocketConnector(
         @Named("lan_ws_config") config: TlsWebSocketConfig
-    ): WebSocketConnector =
-        OkHttpWebSocketConnector(config)
+    ): WebSocketConnector {
+        // LAN connectors are created dynamically after peer discovery
+        // This provider should never be called for LAN connections since config.url is null
+        // If it is called, it means there's a configuration error
+        if (config.url == null) {
+            throw IllegalStateException("LAN WebSocket connector cannot be provided during DI. Connectors must be created after peer discovery.")
+        }
+        return OkHttpWebSocketConnector(config)
+    }
 
     @Provides
     @Singleton
@@ -177,13 +184,12 @@ object AppModule {
     @Singleton
     fun provideLanWebSocketClient(
         @Named("lan_ws_config") config: TlsWebSocketConfig,
-        @Named("lan_ws_connector") connector: WebSocketConnector,
         frameCodec: TransportFrameCodec,
         analytics: TransportAnalytics,
         transportManager: com.hypo.clipboard.transport.TransportManager
-    ): com.hypo.clipboard.transport.ws.LanWebSocketClient = com.hypo.clipboard.transport.ws.LanWebSocketClient(
+    ): com.hypo.clipboard.transport.ws.WebSocketTransportClient = com.hypo.clipboard.transport.ws.WebSocketTransportClient(
         config,
-        connector,
+        null, // LAN connectors are created after peer discovery, not during DI
         frameCodec,
         CoroutineScope(SupervisorJob() + Dispatchers.IO),
         Clock.systemUTC(),
@@ -194,7 +200,7 @@ object AppModule {
     @Provides
     @Singleton
     fun provideSyncTransport(
-        lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient,
+        lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
         relayWebSocketClient: RelayWebSocketClient,
         transportManager: com.hypo.clipboard.transport.TransportManager
     ): SyncTransport = com.hypo.clipboard.transport.ws.FallbackSyncTransport(

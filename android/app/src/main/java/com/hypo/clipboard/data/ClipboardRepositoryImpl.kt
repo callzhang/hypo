@@ -90,7 +90,7 @@ class ClipboardRepositoryImpl @Inject constructor(
         content = content,
         preview = preview,
         metadata = metadata,
-        deviceId = deviceId,
+        deviceId = deviceId.lowercase(),  // Normalize to lowercase for consistent matching
         deviceName = deviceName,
         createdAt = createdAt,
         isPinned = isPinned,
@@ -104,7 +104,7 @@ class ClipboardRepositoryImpl @Inject constructor(
         content = content,
         preview = preview,
         metadata = metadata,
-        deviceId = deviceId,
+        deviceId = deviceId.lowercase(),  // Normalize to lowercase for consistent matching
         deviceName = deviceName,
         createdAt = createdAt,
         isPinned = isPinned,

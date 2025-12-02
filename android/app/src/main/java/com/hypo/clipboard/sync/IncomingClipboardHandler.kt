@@ -17,7 +17,8 @@ import javax.inject.Singleton
 @Singleton
 class IncomingClipboardHandler @Inject constructor(
     private val syncEngine: SyncEngine,
-    private val syncCoordinator: SyncCoordinator
+    private val syncCoordinator: SyncCoordinator,
+    private val identity: DeviceIdentity
 ) {
     private val scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     
@@ -33,7 +34,26 @@ class IncomingClipboardHandler @Inject constructor(
                 val senderDeviceId = envelope.payload.deviceId
                 val senderDeviceName = envelope.payload.deviceName
                 
-                Log.d(TAG, "📥 Received clipboard from deviceId=${senderDeviceId.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}")
+                // Normalize device IDs to lowercase for comparison
+                val normalizedSenderId = senderDeviceId?.lowercase()
+                val normalizedLocalId = identity.deviceId.lowercase()
+                
+                // Log device IDs for debugging
+                Log.d(TAG, "🔍 Checking device IDs - sender: $normalizedSenderId, local: $normalizedLocalId")
+                
+                // Filter out messages from our own device ID (prevent echo loops)
+                if (normalizedSenderId != null && normalizedSenderId == normalizedLocalId) {
+                    Log.d(TAG, "⏭️ Skipping clipboard from own device ID: $normalizedSenderId (preventing echo loop)")
+                    return@launch
+                }
+                
+                // Also check if senderDeviceId is null - this shouldn't happen but handle it gracefully
+                if (senderDeviceId == null) {
+                    Log.w(TAG, "⚠️ Received clipboard with null deviceId, skipping")
+                    return@launch
+                }
+                
+                Log.d(TAG, "📥 Received clipboard from deviceId=${senderDeviceId.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
                 
                 // Check if message was encrypted (non-empty nonce and tag)
                 val isEncrypted = envelope.payload.encryption.nonce.isNotEmpty() && envelope.payload.encryption.tag.isNotEmpty()
@@ -42,7 +62,7 @@ class IncomingClipboardHandler @Inject constructor(
                 // The syncEngine.decode() will fetch the key using envelope.payload.deviceId
                 val clipboardPayload = syncEngine.decode(envelope)
                 
-                // Convert to ClipboardEvent with source device info
+                // Convert to ClipboardEvent with device info (normalized to lowercase)
                 val event = ClipboardEvent(
                     id = java.util.UUID.randomUUID().toString(),
                     type = clipboardPayload.contentType,
@@ -50,8 +70,8 @@ class IncomingClipboardHandler @Inject constructor(
                     preview = String(java.util.Base64.getDecoder().decode(clipboardPayload.dataBase64)).take(100),
                     metadata = clipboardPayload.metadata,
                     createdAt = java.time.Instant.now(),
-                    sourceDeviceId = senderDeviceId, // ✅ Preserve source device ID
-                    sourceDeviceName = senderDeviceName, // ✅ Preserve source device name
+                    deviceId = senderDeviceId.lowercase(), // ✅ Normalize to lowercase for consistent matching
+                    deviceName = senderDeviceName,
                     skipBroadcast = true, // ✅ Don't re-broadcast received clipboard
                     isEncrypted = isEncrypted,
                     transportOrigin = transportOrigin

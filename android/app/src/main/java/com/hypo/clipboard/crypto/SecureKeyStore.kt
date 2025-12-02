@@ -28,70 +28,94 @@ class SecureKeyStore @Inject constructor(
         )
     }
 
+    /**
+     * Normalizes device ID for consistent storage and lookup.
+     * - Converts to lowercase
+     * - Removes platform prefix if present (macos-/android-)
+     * - Returns pure UUID in lowercase
+     */
+    private fun normalizeDeviceId(deviceId: String): String {
+        // Remove platform prefix if present
+        val withoutPrefix = migrateDeviceId(deviceId)
+        // Normalize to lowercase for consistent storage
+        return withoutPrefix.lowercase()
+    }
+
     override suspend fun saveKey(deviceId: String, key: ByteArray) {
         withContext(Dispatchers.IO) {
+            val normalizedId = normalizeDeviceId(deviceId)
             val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
-            prefs.edit().putString(deviceId, encoded).commit()
+            prefs.edit().putString(normalizedId, encoded).commit()
+            android.util.Log.d("SecureKeyStore", "💾 Saved key for device: $normalizedId (original: $deviceId)")
         }
     }
 
     override suspend fun loadKey(deviceId: String): ByteArray? = withContext(Dispatchers.IO) {
-        // Try exact match first (as-is, no preprocessing)
-        var encoded = prefs.getString(deviceId, null)
+        // Normalize device ID for consistent lookup
+        val normalizedId = normalizeDeviceId(deviceId)
         
-        // Case-insensitive fallback: try lowercase UUID form if different
-        if (encoded == null) {
-            val lower = deviceId.lowercase()
-            if (lower != deviceId) {
-                encoded = prefs.getString(lower, null)
-                if (encoded != null) {
-                    android.util.Log.d("SecureKeyStore", "🔄 Found key using lowercase deviceId fallback: $deviceId -> $lower")
-                }
-            }
+        // Try normalized ID first (primary lookup)
+        var encoded = prefs.getString(normalizedId, null)
+        
+        if (encoded != null) {
+            android.util.Log.d("SecureKeyStore", "✅ Found key using normalized ID: $normalizedId (original: $deviceId)")
+            return@withContext Base64.decode(encoded, Base64.DEFAULT)
         }
         
-        // If not found and deviceId has prefix, try without prefix
-        if (encoded == null && (deviceId.startsWith("macos-") || deviceId.startsWith("android-"))) {
-            val migratedId = migrateDeviceId(deviceId)
-            encoded = prefs.getString(migratedId, null)
+        // Fallback: Try original device ID (for backward compatibility with old keys)
+        if (deviceId != normalizedId) {
+            encoded = prefs.getString(deviceId, null)
             if (encoded != null) {
-                android.util.Log.d("SecureKeyStore", "🔄 Found key using migrated ID: $deviceId -> $migratedId")
+                android.util.Log.d("SecureKeyStore", "🔄 Found key using original ID (fallback): $deviceId")
+                // Migrate to normalized ID for future lookups
+                prefs.edit()
+                    .putString(normalizedId, encoded)
+                    .remove(deviceId)
+                    .commit()
+                return@withContext Base64.decode(encoded, Base64.DEFAULT)
             }
         }
         
-        // Do not attempt lowercase fallback; store and look up exactly as provided.
-        
-        // If still not found, try old format (with prefix) for backward compatibility
-        if (encoded == null && !deviceId.startsWith("macos-") && !deviceId.startsWith("android-")) {
+        // Fallback: Try with platform prefix (for backward compatibility)
+        if (!deviceId.startsWith("macos-") && !deviceId.startsWith("android-")) {
             // Try with "macos-" prefix
             encoded = prefs.getString("macos-$deviceId", null)
             if (encoded != null) {
                 android.util.Log.d("SecureKeyStore", "🔄 Found key using old format: macos-$deviceId")
-                // Migrate it
+                // Migrate to normalized ID
                 prefs.edit()
-                    .putString(deviceId, encoded)
+                    .putString(normalizedId, encoded)
                     .remove("macos-$deviceId")
                     .commit()
-            } else {
-                // Try with "android-" prefix
-                encoded = prefs.getString("android-$deviceId", null)
-                if (encoded != null) {
-                    android.util.Log.d("SecureKeyStore", "🔄 Found key using old format: android-$deviceId")
-                    // Migrate it
-                    prefs.edit()
-                        .putString(deviceId, encoded)
-                        .remove("android-$deviceId")
-                        .commit()
-                }
+                return@withContext Base64.decode(encoded, Base64.DEFAULT)
+            }
+            
+            // Try with "android-" prefix
+            encoded = prefs.getString("android-$deviceId", null)
+            if (encoded != null) {
+                android.util.Log.d("SecureKeyStore", "🔄 Found key using old format: android-$deviceId")
+                // Migrate to normalized ID
+                prefs.edit()
+                    .putString(normalizedId, encoded)
+                    .remove("android-$deviceId")
+                    .commit()
+                return@withContext Base64.decode(encoded, Base64.DEFAULT)
             }
         }
         
-        encoded?.let { Base64.decode(it, Base64.DEFAULT) }
+        // Not found
+        android.util.Log.d("SecureKeyStore", "❌ Key not found for device: $normalizedId (original: $deviceId)")
+        null
     }
 
     override suspend fun deleteKey(deviceId: String) {
         withContext(Dispatchers.IO) {
-            prefs.edit().remove(deviceId).commit()
+            val normalizedId = normalizeDeviceId(deviceId)
+            prefs.edit().remove(normalizedId).commit()
+            // Also try to remove original format for cleanup
+            if (deviceId != normalizedId) {
+                prefs.edit().remove(deviceId).commit()
+            }
         }
     }
 

@@ -11,7 +11,7 @@ import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
 import com.hypo.clipboard.transport.lan.LanDiscoveryEvent
 import com.hypo.clipboard.transport.lan.LanDiscoverySource
-import com.hypo.clipboard.transport.ws.LanWebSocketClient
+import com.hypo.clipboard.transport.ws.WebSocketTransportClient
 import com.hypo.clipboard.transport.ws.TlsWebSocketConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CompletableDeferred
@@ -55,7 +55,7 @@ class LanPairingViewModel @Inject constructor(
     private val discoveredDevices = mutableMapOf<String, DiscoveredPeer>()
     private var discoveryJob: Job? = null
     private var pairingJob: Job? = null
-    private var wsClient: LanWebSocketClient? = null
+    private var wsClient: WebSocketTransportClient? = null
     
     private val json = Json {
         ignoreUnknownKeys = true
@@ -223,7 +223,7 @@ class LanPairingViewModel @Inject constructor(
                         val connector = com.hypo.clipboard.transport.ws.OkHttpWebSocketConnector(config)
                         val frameCodec = com.hypo.clipboard.transport.ws.TransportFrameCodec()
                         
-                        wsClient = LanWebSocketClient(
+                        wsClient = WebSocketTransportClient(
                             config = config,
                             connector = connector,
                             frameCodec = frameCodec,
@@ -242,7 +242,6 @@ class LanPairingViewModel @Inject constructor(
                         }
                         
                         // Step 4: Ensure connection is established before sending challenge
-                        Log.d(TAG, "Ensuring WebSocket connection is established...")
                         wsClient?.let { client ->
                             withContext(Dispatchers.IO) {
                                 delay(100)
@@ -250,20 +249,14 @@ class LanPairingViewModel @Inject constructor(
                         }
                         
                         // Step 5: Send pairing challenge as raw JSON (not wrapped in SyncEnvelope)
-                        // Peer device expects raw JSON with challenge_id at top level for pairing detection
                         val challengeJson = json.encodeToString(sessionState.challenge)
-                        Log.d(TAG, "Sending pairing challenge to peer device as raw JSON")
-                        Log.d(TAG, "Challenge JSON: $challengeJson")
-                        Log.d(TAG, "Challenge ID: ${sessionState.challenge.challengeId}")
                         val challengeData = challengeJson.toByteArray(Charsets.UTF_8)
                         
                         try {
-                            Log.d(TAG, "Calling sendRawJson...")
+                            Log.d(TAG, "📤 Pairing: Sending challenge (ID: ${sessionState.challenge.challengeId.take(8)}...)")
                             wsClient?.sendRawJson(challengeData)
-                            Log.d(TAG, "sendRawJson completed, waiting for ACK (timeout: 30s)")
                         } catch (e: Exception) {
-                            // Transport failures (socket closed, handshake failure) shouldn't crash the pairing job; surface a friendly error.
-                            Log.e(TAG, "❌ Failed to send challenge: ${e.message}", e)
+                            Log.e(TAG, "❌ Pairing: Failed to send challenge - ${e.message}", e)
                             _state.value = LanPairingUiState.Error("Failed to send pairing challenge: ${e.message ?: "Unknown error"}")
                             return@launch
                         }
@@ -276,15 +269,16 @@ class LanPairingViewModel @Inject constructor(
                                 }
                             }
                         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                            Log.e(TAG, "❌ Pairing timeout: No ACK received within 30 seconds")
+                            Log.e(TAG, "❌ Pairing: Timeout waiting for ACK (30s)")
                             _state.value = LanPairingUiState.Error("Pairing timeout: Peer device did not respond. Please ensure the other device is running Hypo and try again.")
                             return@launch
                         } catch (e: Exception) {
-                            // JSON decode or network errors while awaiting ACK must be propagated to UI.
-                            Log.e(TAG, "❌ Error waiting for ACK: ${e.message}", e)
+                            Log.e(TAG, "❌ Pairing: Error waiting for ACK - ${e.message}", e)
                             _state.value = LanPairingUiState.Error("Failed to receive pairing response: ${e.message ?: "Unknown error"}")
                             return@launch
                         }
+                        
+                        Log.d(TAG, "✅ Pairing: ACK received (${ackJson.length} chars)")
                         
                         // Step 7: Complete pairing handshake to save encryption key
                         Log.d(TAG, "Processing pairing ACK and completing handshake...")
@@ -308,19 +302,13 @@ class LanPairingViewModel @Inject constructor(
                                 Log.d(TAG, "📋 Device service name: ${device.serviceName}")
                                 
                                 // Step 1: Verify key was saved (Issue 2b checklist)
+                                // Key store handles normalization internally - no need to normalize deviceId here
                                 Log.d(TAG, "🔑 Verifying key was saved for device: $deviceId")
                                 val savedKey = deviceKeyStore.loadKey(deviceId)
                                 if (savedKey != null) {
                                     Log.d(TAG, "✅ Key exists in store: ${savedKey.size} bytes")
                                 } else {
                                     Log.e(TAG, "❌ Key missing from store! Available keys: ${deviceKeyStore.getAllDeviceIds()}")
-                                    // Try to find the key with case-insensitive matching
-                                    val allKeys = deviceKeyStore.getAllDeviceIds()
-                                    val matchingKey = allKeys.find { it.equals(deviceId, ignoreCase = true) }
-                                    if (matchingKey != null) {
-                                        Log.w(TAG, "⚠️ Found key with case-insensitive match: $matchingKey (requested: $deviceId)")
-                                        Log.w(TAG, "💡 This suggests a device ID format mismatch - key was saved with different case/format")
-                                    }
                                 }
                                 
                                 // Add to transport manager

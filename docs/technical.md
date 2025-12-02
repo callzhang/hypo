@@ -565,27 +565,70 @@ class ClipboardSyncService : Service() {
 
 #### 4.2.3 Room Database Schema
 ```kotlin
-@Entity(tableName = "clipboard_history")
-data class ClipboardItem(
+@Entity(tableName = "clipboard_items")
+data class ClipboardEntity(
     @PrimaryKey val id: String,
-    val timestamp: Long,
-    val type: ClipType,
+    val type: String,  // ClipboardType enum as string
     val content: String,
-    val previewText: String,
+    val preview: String,
     val metadata: String, // JSON
     val deviceId: String,
-    val isPinned: Boolean = false
+    val deviceName: String?,
+    @ColumnInfo(name = "created_at") val createdAt: Instant,
+    @ColumnInfo(name = "is_pinned") val isPinned: Boolean,
+    @ColumnInfo(name = "is_encrypted") val isEncrypted: Boolean = false,
+    @ColumnInfo(name = "transport_origin") val transportOrigin: String? = null  // "LAN" or "CLOUD"
 )
+
+@Database(entities = [ClipboardEntity::class], version = 3)
+abstract class HypoDatabase : RoomDatabase() {
+    abstract fun clipboardDao(): ClipboardDao
+}
 
 @Dao
 interface ClipboardDao {
-    @Query("SELECT * FROM clipboard_history ORDER BY timestamp DESC LIMIT :limit")
-    fun getRecent(limit: Int = 200): Flow<List<ClipboardItem>>
-
-    @Query("SELECT * FROM clipboard_history WHERE previewText LIKE '%' || :query || '%'")
-    fun search(query: String): Flow<List<ClipboardItem>>
+    @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC")
+    fun observeHistory(limit: Int = 200): Flow<List<ClipboardEntity>>
+    
+    @Query("SELECT * FROM clipboard_items WHERE preview LIKE '%' || :query || '%' ORDER BY created_at DESC")
+    fun search(query: String): Flow<List<ClipboardEntity>>
+    
+    @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC LIMIT 1")
+    suspend fun getLatestEntry(): ClipboardEntity?
+    
+    @Query("""
+        SELECT * FROM clipboard_items 
+        WHERE content = :content AND type = :type 
+        AND id != (SELECT id FROM clipboard_items ORDER BY created_at DESC LIMIT 1)
+        ORDER BY created_at DESC LIMIT 1
+    """)
+    suspend fun findMatchingEntryInHistory(content: String, type: String): ClipboardEntity?
+    
+    @Query("UPDATE clipboard_items SET created_at = :newTimestamp WHERE id = :id")
+    suspend fun updateTimestamp(id: String, newTimestamp: Instant)
+    
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entity: ClipboardEntity)
+    
+    @Query("DELETE FROM clipboard_items WHERE id = :id")
+    suspend fun delete(id: String)
 }
 ```
+
+**Database Schema Changes (Version 3)**:
+- Added `isEncrypted` field to track encryption status of clipboard items
+- Added `transportOrigin` field to track whether item was received via LAN or CLOUD transport
+- Changed timestamp field from `timestamp: Long` to `createdAt: Instant` for better type safety
+- Added helper methods for duplicate detection and timestamp updates:
+  - `getLatestEntry()`: Get the most recent clipboard entry
+  - `findMatchingEntryInHistory()`: Find matching entry by content and type (excluding latest)
+  - `updateTimestamp()`: Update entry timestamp to move it to top of history
+
+**Content Matching**:
+- `ClipboardItem.matchesContent()`: Uses SHA-256 hash of content for reliable matching
+  - Compares content type, length, and cryptographic hash
+  - Ensures duplicate detection works across platforms and transport origins
+  - Used to move existing items to top instead of creating duplicates
 
 #### 4.2.4 NSD Discovery & Registration
 
@@ -921,17 +964,19 @@ This section compares the implementation details between Android and macOS clien
 
 **Current Status**: ✅ **Aligned** - Both platforms always dual-send (LAN + cloud simultaneously) with separate connections per peer.
 
-**Android** (`FallbackSyncTransport.kt` + `LanPeerConnectionManager.kt`):
+**Android** (`FallbackSyncTransport.kt` + `LanPeerConnectionManager.kt` + `LanWebSocketServer.kt`):
 - **Always Dual-Send**: Always sends to both LAN (all peers) and cloud simultaneously
   - No conditional check - always attempts both transports
   - Best-effort practice for maximum reliability
 - **Multi-Peer Support**: Maintains separate `WebSocketTransportClient` connection for each discovered peer
   - `LanPeerConnectionManager` manages peer connection lifecycle
+  - `LanWebSocketServer` handles incoming LAN connections (Android can act as server)
   - Sends to specific peer if `targetDeviceId` is set, otherwise broadcasts to all connected peers
   - Can communicate with all peers simultaneously (no connection switching)
 - **LAN Timeout**: 3-second timeout for LAN transport
 - **Transport Marking**: Marks device as connected via LAN or cloud after successful send
 - **Error Handling**: Requires at least one transport to succeed (throws if both fail)
+- **Payload Size**: Increased from 256KB to 10MB to support larger clipboard content (images, files)
 
 **macOS** (`DualSyncTransport.swift` + `LanSyncTransport.swift`):
 - **Always Dual-Send**: Always sends to both LAN (all peers) and cloud simultaneously
@@ -1079,6 +1124,10 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 - **Android**: JUnit + MockK for repositories, services
   - Test naming aligned with production code: `WebSocketTransportClientTest` (renamed from `LanWebSocketClientTest`)
   - Connection state enums match runtime: `ConnectionState.Disconnected` (renamed from `Idle`)
+  - **Settings Screen Connection Status**: Uses `cloudConnectionState` to track cloud server status separately from LAN connections
+    - LAN device status determined by discovery status and active transport (not global connection state)
+    - Cloud device status determined by cloud server connection state and active transport
+    - Fixes issue where LAN-connected devices were incorrectly shown as disconnected
 - **Backend**: Rust `#[cfg(test)]` modules
 
 ### 5.2 Integration Tests

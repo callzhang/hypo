@@ -19,17 +19,44 @@ All notable changes to the Hypo project will be documented in this file.
   - User-friendly permission request button in Settings
   - Android 10+ limitation warnings displayed to users
 
+### Changed
+- **Build System**: Improved build scripts and dependencies
+  - Android: Added Java-WebSocket dependency (1.5.4) for LAN WebSocket server
+  - macOS: Removed swift-crypto dependency (use CryptoKit directly)
+  - Build scripts: Always build apps to ensure latest code changes
+  - .gitignore: Added Cargo.lock comment, Python cache files, .secrets
+- **Android Transport Layer**: Refactored LAN WebSocket implementation
+  - Removed `LanWebSocketClient.kt` (replaced with `LanPeerConnectionManager` and `LanWebSocketServer`)
+  - Added `LanPeerConnectionManager` for managing peer connections
+  - Added `LanWebSocketServer` to allow Android to act as WebSocket server
+  - Increased payload size limit from 256KB to 10MB in `TransportFrameCodec`
+  - Made `TlsWebSocketConfig.url` nullable for LAN connections (URL comes from peer discovery)
+- **Database Schema (Version 3)**: Enhanced clipboard history database schema
+  - Added `isEncrypted` field to track encryption status
+  - Added `transportOrigin` field to track LAN vs CLOUD transport
+  - Changed timestamp from `Long` to `Instant` for better type safety
+  - Added helper methods: `getLatestEntry()`, `findMatchingEntryInHistory()`, `updateTimestamp()`
+  - Content matching uses SHA-256 hash for reliable duplicate detection across platforms
+
 ### Fixed
+- **Android Settings Connection Status**: Fixed connection status display in Settings screen for LAN-connected devices
+  - Changed from using global `connectionState` to `cloudConnectionState` for cloud server status
+  - LAN device status now correctly determined by discovery status and active transport
+  - Previously, LAN-connected devices were incorrectly shown as disconnected when cloud server was offline
+  - Cloud device status correctly shows disconnected when cloud server is offline
 - **Android Notification Visibility**: Changed notification channel importance from `IMPORTANCE_LOW` to `IMPORTANCE_DEFAULT`
   - Ensures persistent notification showing latest clipboard item is visible in notification list
   - Previously, `IMPORTANCE_LOW` notifications were hidden on Android 8.0+ by default
   - Notification updates automatically when latest clipboard item changes
   - Sound disabled for persistent notification to avoid intrusive alerts
-- **macOS History Duplicate Handling**: Fixed duplicate item handling to move existing items to top instead of discarding
-  - When Android clicks an item that originated from macOS, the existing macOS item now moves to top
+- **Cross-Platform History Sync**: Enhanced duplicate handling to move existing items to top
+  - Android: Added `deviceId`, `deviceName`, `isEncrypted`, `transportOrigin` fields to `ClipboardEvent`
+  - Android: `IncomingClipboardHandler` now moves matching items to top instead of creating duplicates
+  - macOS: `HistoryStore.insert()` moves matching items to top regardless of transport origin
   - Preserves pin state when moving items to top
   - Updates timestamp to reflect user's active use of the item
-  - Ensures cross-platform user actions are reflected in both platforms' history
+  - Ensures cross-platform user actions (e.g., clicking Android item that originated from macOS) are reflected in both platforms' history
+  - Uses SHA-256 content matching for reliable duplicate detection across platforms
 
 ## [0.3.3] - 2025-12-02 - Device-Agnostic Pairing & Storage Improvements
 

@@ -141,9 +141,18 @@ fun HistoryScreen(
             val listState = rememberLazyListState()
             val scope = rememberCoroutineScope()
             
-            // Scroll to top when items change (new item added or item moved to top)
-            LaunchedEffect(items.size, items.firstOrNull()?.id) {
+            // Track the first item's timestamp to detect when an item moves to top
+            // When an item is clicked and moved to top, its timestamp changes, triggering scroll
+            val firstItemTimestamp = items.firstOrNull()?.createdAt
+            
+            // Scroll to top when:
+            // 1. Items list size changes (new item added)
+            // 2. First item changes (different item at top)
+            // 3. First item's timestamp changes (same item moved to top via click)
+            LaunchedEffect(items.size, items.firstOrNull()?.id, firstItemTimestamp) {
                 if (items.isNotEmpty()) {
+                    // Use a small delay to ensure the list has been recomposed with new order
+                    kotlinx.coroutines.delay(50)
                     listState.animateScrollToItem(0)
                 }
             }
@@ -158,10 +167,16 @@ fun HistoryScreen(
                         item = item,
                         currentDeviceId = currentDeviceId,
                         onItemClicked = {
-                            // When item is clicked, scroll to top after a short delay
-                            // This allows the database update to complete and item to move to top
+                            // When item is clicked, it will be copied to clipboard
+                            // The clipboard listener will detect the change and update the database,
+                            // moving the item to the top. The LaunchedEffect above will detect
+                            // the timestamp change and automatically scroll to top.
+                            // We also trigger an immediate scroll as a fallback in case the
+                            // LaunchedEffect doesn't trigger quickly enough.
                             scope.launch {
-                                kotlinx.coroutines.delay(100) // Small delay for database update
+                                // Wait for database update and Flow emission
+                                kotlinx.coroutines.delay(200)
+                                // Scroll to top - the item should now be at index 0
                                 listState.animateScrollToItem(0)
                             }
                         }

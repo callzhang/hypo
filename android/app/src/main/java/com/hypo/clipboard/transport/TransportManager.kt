@@ -19,6 +19,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
@@ -41,16 +44,20 @@ class TransportManager(
     private val staleThreshold: Duration = Duration.ofMinutes(5),
     private val analytics: TransportAnalytics = NoopTransportAnalytics
 ) {
+    private var webSocketServer: com.hypo.clipboard.transport.ws.LanWebSocketServer? = null
     private val stateLock = Any()
     private val peersByService = mutableMapOf<String, DiscoveredPeer>()
     private val lastSeenByService = mutableMapOf<String, Instant>()
+    // Track cloud and LAN connection states separately to prevent one from overwriting the other
+    private val _cloudConnectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+    private val _lanConnectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     // Keep track of pending removals for cancellation (but we don't actually remove peers anymore)
     private val pendingPeerRemovalJobs = mutableMapOf<String, Job>()
 
     private val _peers = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
     private val _lastSeen = MutableStateFlow<Map<String, Instant>>(emptyMap())
     private val _isAdvertising = MutableStateFlow(false)
-    private val _connectionState = MutableStateFlow(ConnectionState.Idle)
+    private val _connectionState = MutableStateFlow(ConnectionState.Disconnected)
     private val prefs: SharedPreferences? = context?.getSharedPreferences("transport_status", Context.MODE_PRIVATE)
     private val _lastSuccessfulTransport = MutableStateFlow<Map<String, ActiveTransport>>(loadPersistedTransportStatus())
     
@@ -85,7 +92,6 @@ class TransportManager(
             android.util.Log.w("TransportManager", "⚠️ No SharedPreferences available, cannot persist transport status for device: $deviceId")
             return
         }
-        android.util.Log.d("TransportManager", "💾 Persisting transport status: device=$deviceId, transport=$transport")
         val key = "transport_$deviceId"
         try {
             val editor = prefs?.edit()
@@ -95,21 +101,7 @@ class TransportManager(
             }
             editor.putString(key, transport.name)
             val success = editor.commit()
-            if (success) {
-                android.util.Log.d("TransportManager", "✅ Transport status persisted successfully: key=$key, value=${transport.name}")
-                // Verify it was saved immediately
-                val saved = prefs?.getString(key, null)
-                android.util.Log.d("TransportManager", "🔍 Verification: saved value=$saved")
-                // Also verify all entries
-                val allEntries = prefs?.all
-                android.util.Log.d("TransportManager", "🔍 All SharedPreferences entries: ${allEntries?.keys}")
-                // Update the StateFlow to ensure it reflects the persisted value
-                _lastSuccessfulTransport.update { current ->
-                    val updated = HashMap(current)
-                    updated[deviceId] = transport
-                    updated
-                }
-            } else {
+            if (!success) {
                 android.util.Log.e("TransportManager", "❌ commit() returned false for key=$key")
             }
         } catch (e: Exception) {
@@ -139,23 +131,74 @@ class TransportManager(
 
     private var discoveryJob: Job? = null
     private var pruneJob: Job? = null
+    private var healthCheckJob: Job? = null
     private var connectionJob: Job? = null
     private var networkSignalJob: Job? = null
     private var currentConfig: LanRegistrationConfig? = null
     private val manualRetryRequested = AtomicBoolean(false)
     private val networkChangeDetected = AtomicBoolean(false)
+    private var onPairingChallenge: (suspend (String) -> String?)? = null
+    private var onIncomingClipboard: ((com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit)? = null
+    private var lanPeerConnectionManager: com.hypo.clipboard.transport.ws.LanPeerConnectionManager? = null
 
     val peers: StateFlow<List<DiscoveredPeer>> = _peers.asStateFlow()
     val isAdvertising: StateFlow<Boolean> = _isAdvertising.asStateFlow()
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    // Cloud-only connection state for UI - tracks cloud state separately from LAN
+    val cloudConnectionState: StateFlow<ConnectionState> = _cloudConnectionState.asStateFlow()
     val lastSuccessfulTransport: StateFlow<Map<String, ActiveTransport>> =
         _lastSuccessfulTransport.asStateFlow()
     
     /**
      * Update the connection state (used by ConnectionStatusProber)
+     * Now tracks cloud and LAN states separately to prevent one from overwriting the other
      */
     fun updateConnectionState(newState: ConnectionState) {
-        _connectionState.value = newState
+        val oldState = _connectionState.value
+        android.util.Log.d("TransportManager", "🔄 Updating connection state: $oldState -> $newState")
+        
+        // Update the appropriate state based on connection type
+        when (newState) {
+            ConnectionState.ConnectedCloud, ConnectionState.ConnectingCloud, ConnectionState.Disconnected -> {
+                // Cloud connection state change - update cloud state
+                val oldCloudState = _cloudConnectionState.value
+                _cloudConnectionState.value = newState
+                android.util.Log.d("TransportManager", "☁️ Cloud connection state: $oldCloudState -> $newState")
+            }
+            ConnectionState.ConnectedLan, ConnectionState.ConnectingLan -> {
+                // LAN connection state change - update LAN state only, don't affect cloud
+                val oldLanState = _lanConnectionState.value
+                _lanConnectionState.value = newState
+                android.util.Log.d("TransportManager", "📡 LAN connection state: $oldLanState -> $newState")
+                // Don't update _connectionState for LAN - keep cloud state if cloud is connected
+                if (_cloudConnectionState.value == ConnectionState.ConnectedCloud || 
+                    _cloudConnectionState.value == ConnectionState.ConnectingCloud) {
+                    android.util.Log.d("TransportManager", "   Cloud is connected, keeping cloud state as primary")
+                    return // Don't overwrite cloud state
+                }
+            }
+            else -> {
+                // Other states (Error, etc.) - update both if needed
+            }
+        }
+        
+        // Update primary connection state (prioritize cloud over LAN)
+        _connectionState.value = when {
+            _cloudConnectionState.value == ConnectionState.ConnectedCloud -> ConnectionState.ConnectedCloud
+            _cloudConnectionState.value == ConnectionState.ConnectingCloud -> ConnectionState.ConnectingCloud
+            _lanConnectionState.value == ConnectionState.ConnectedLan -> ConnectionState.ConnectedLan
+            _lanConnectionState.value == ConnectionState.ConnectingLan -> ConnectionState.ConnectingLan
+            else -> newState
+        }
+        
+        // Log the mapped cloudConnectionState for debugging
+        val mapped = when (_connectionState.value) {
+            ConnectionState.ConnectedCloud -> ConnectionState.ConnectedCloud
+            ConnectionState.ConnectingCloud -> ConnectionState.ConnectingCloud
+            ConnectionState.ConnectedLan, ConnectionState.ConnectingLan -> ConnectionState.Disconnected
+            else -> _connectionState.value
+        }
+        android.util.Log.d("TransportManager", "🌐 cloudConnectionState will be: $mapped (from ${_connectionState.value})")
     }
 
     fun start(config: LanRegistrationConfig) {
@@ -165,10 +208,96 @@ class TransportManager(
         registrationController.start(config)
         android.util.Log.d("TransportManager", "✅ registrationController.start() called, isAdvertising=${_isAdvertising.value}")
         _isAdvertising.value = true
+        
+        // Start WebSocket server to accept incoming connections
+        if (webSocketServer == null && config.port > 0) {
+            android.util.Log.d("TransportManager", "🚀 Starting WebSocket server on port ${config.port}")
+            webSocketServer = com.hypo.clipboard.transport.ws.LanWebSocketServer(config.port, scope)
+            webSocketServer?.delegate = object : com.hypo.clipboard.transport.ws.LanWebSocketServerDelegate {
+                override fun onPairingChallenge(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, challenge: com.hypo.clipboard.pairing.PairingChallengeMessage, connectionId: String) {
+                    android.util.Log.d("TransportManager", "📱 Received pairing challenge from $connectionId")
+                    // Delegate to service-level handler (set via setPairingChallengeHandler)
+                    scope.launch {
+                        val challengeJson = com.hypo.clipboard.transport.ws.LanWebSocketServer.json.encodeToString(
+                            com.hypo.clipboard.pairing.PairingChallengeMessage.serializer(),
+                            challenge
+                        )
+                        val ackJson = onPairingChallenge?.invoke(challengeJson)
+                        if (ackJson != null) {
+                            android.util.Log.d("TransportManager", "📤 Sending pairing ACK to $connectionId")
+                            server.sendPairingAck(ackJson, connectionId)
+                        } else {
+                            android.util.Log.w("TransportManager", "⚠️ Pairing challenge handler returned null ACK")
+                        }
+                    }
+                }
+                
+                override fun onClipboardData(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, data: ByteArray, connectionId: String) {
+                    android.util.Log.d("TransportManager", "📋 Received clipboard data from connection $connectionId (${data.size} bytes)")
+                    
+                    // Skip empty frames (could be ping/pong or malformed)
+                    if (data.isEmpty()) {
+                        android.util.Log.w("TransportManager", "⚠️ Received empty frame from connection $connectionId, skipping")
+                        return
+                    }
+                    
+                    // Skip frames that are too small to contain a valid frame header (4 bytes)
+                    if (data.size < 4) {
+                        android.util.Log.w("TransportManager", "⚠️ Received truncated frame from connection $connectionId (${data.size} bytes < 4), skipping")
+                        return
+                    }
+                    
+                    // Decode the binary frame and process clipboard data
+                    scope.launch {
+                        try {
+                            // Decode the binary frame (4-byte length prefix + JSON payload)
+                            val frameCodec = com.hypo.clipboard.transport.ws.TransportFrameCodec()
+                            val envelope = frameCodec.decode(data)
+                            android.util.Log.d("TransportManager", "✅ Decoded envelope: type=${envelope.type}, id=${envelope.id.take(8)}..., senderDeviceId=${envelope.payload.deviceId?.take(20)}...")
+                            
+                            // Check if this is from our own device ID (prevent echo loops)
+                            val senderDeviceId = envelope.payload.deviceId?.lowercase()
+                            // Note: We need access to DeviceIdentity to compare - this check will be done in IncomingClipboardHandler
+                            // For now, we'll pass it through and let IncomingClipboardHandler filter it
+                            
+                            // No target filtering - process all messages and verify with UUID/key pairs only
+                            // The message handler will verify decryption using the sender's device ID and stored keys
+                            
+                            // Pass to handler if set
+                            if (envelope.type == com.hypo.clipboard.sync.MessageType.CLIPBOARD) {
+                                if (onIncomingClipboard != null) {
+                                    android.util.Log.d("TransportManager", "📤 Invoking incoming clipboard handler")
+                                    onIncomingClipboard?.invoke(envelope, com.hypo.clipboard.domain.model.TransportOrigin.LAN)
+                                } else {
+                                    android.util.Log.w("TransportManager", "⚠️ No incoming clipboard handler set, message dropped")
+                                }
+                            } else {
+                                android.util.Log.w("TransportManager", "⚠️ Received non-clipboard message type: ${envelope.type}")
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("TransportManager", "❌ Failed to decode clipboard data: ${e.message}", e)
+                        }
+                    }
+                }
+                
+                override fun onConnectionAccepted(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, connectionId: String) {
+                    android.util.Log.d("TransportManager", "✅ Connection accepted: $connectionId")
+                }
+                
+                override fun onConnectionClosed(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, connectionId: String) {
+                    android.util.Log.d("TransportManager", "🔌 Connection closed: $connectionId")
+                }
+            }
+            webSocketServer?.start()
+        }
         if (discoveryJob == null) {
             discoveryJob = scope.launch {
-                discoverySource.discover().collect { event ->
-                    handleEvent(event)
+                try {
+                    discoverySource.discover().collect { event ->
+                        handleEvent(event)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("TransportManager", "❌ Discovery job error: ${e.message}", e)
                 }
             }
         }
@@ -181,6 +310,29 @@ class TransportManager(
                 }
             }
         }
+
+        // Start health check task to verify advertising is still active
+        if (healthCheckJob == null) {
+            healthCheckJob = scope.launch {
+                while (isActive) {
+                    delay(30_000) // 30 seconds
+                    if (!isActive) break
+                    
+                    // Check if advertising should be active but isn't
+                    val config = currentConfig
+                    if (config != null && config.port > 0 && !_isAdvertising.value) {
+                        android.util.Log.w("TransportManager", "⚠️ Health check: Advertising should be active but isn't. Restarting...")
+                        start(config)
+                    }
+                    
+                    // Check if WebSocket server should be running but isn't
+                    if (config != null && config.port > 0 && webSocketServer == null) {
+                        android.util.Log.w("TransportManager", "⚠️ Health check: WebSocket server should be running but isn't. Restarting...")
+                        start(config)
+                    }
+                }
+            }
+        }
     }
 
     fun stop() {
@@ -188,11 +340,15 @@ class TransportManager(
         discoveryJob = null
         pruneJob?.cancel()
         pruneJob = null
+        healthCheckJob?.cancel()
+        healthCheckJob = null
         stopConnectionSupervisor()
         if (_isAdvertising.value) {
             registrationController.stop()
             _isAdvertising.value = false
         }
+        webSocketServer?.stop()
+        webSocketServer = null
         synchronized(stateLock) {
             peersByService.clear()
             lastSeenByService.clear()
@@ -221,6 +377,26 @@ class TransportManager(
             registrationController.start(updated)
             _isAdvertising.value = true
         }
+    }
+
+    /**
+     * Restart LAN services when network changes to update IP address
+     * This ensures Bonjour/NSD service and WebSocket server rebind to new IP
+     */
+    fun restartForNetworkChange() {
+        val config = currentConfig ?: return
+        android.util.Log.d("TransportManager", "🌐 Network changed - restarting LAN services to update IP address")
+        
+        // Stop current services
+        if (_isAdvertising.value) {
+            registrationController.stop()
+            _isAdvertising.value = false
+        }
+        webSocketServer?.stop()
+        webSocketServer = null
+        
+        // Restart with same configuration (will bind to new IP)
+        start(config)
     }
 
     fun currentPeers(): List<DiscoveredPeer> = peers.value
@@ -341,7 +517,7 @@ class TransportManager(
         networkSignalJob = null
         manualRetryRequested.set(false)
         networkChangeDetected.set(false)
-        _connectionState.value = ConnectionState.Idle
+        _connectionState.value = ConnectionState.Disconnected
     }
 
     suspend fun shutdown(gracefulShutdown: suspend () -> Unit) {
@@ -356,17 +532,36 @@ class TransportManager(
         }
     }
 
+    /**
+     * Set the LanPeerConnectionManager to sync peer connections when peers are discovered/removed.
+     * Called during DI setup.
+     */
+    fun setLanPeerConnectionManager(manager: com.hypo.clipboard.transport.ws.LanPeerConnectionManager) {
+        lanPeerConnectionManager = manager
+    }
+    
     fun addPeer(peer: DiscoveredPeer) {
         // Cancel any pending removal job if peer is rediscovered
         val pendingRemoval = synchronized(stateLock) { pendingPeerRemovalJobs.remove(peer.serviceName) }
-        pendingRemoval?.cancel()
+        val existingPeer = synchronized(stateLock) { peersByService[peer.serviceName] }
+        val ipChanged = existingPeer != null && existingPeer.host != peer.host
+        
         if (pendingRemoval != null) {
             android.util.Log.d("TransportManager", "✅ Peer ${peer.serviceName} rediscovered (was offline, now online)")
         }
+        if (ipChanged) {
+            android.util.Log.d("TransportManager", "🔄 Peer ${peer.serviceName} IP changed: ${existingPeer?.host} -> ${peer.host}")
+        }
+        
         synchronized(stateLock) {
             peersByService[peer.serviceName] = peer
             lastSeenByService[peer.serviceName] = peer.lastSeen
             publishStateLocked()
+        }
+        
+        // Sync peer connections (event-driven: create connection for newly discovered peer)
+        scope.launch {
+            lanPeerConnectionManager?.syncPeerConnections()
         }
     }
 
@@ -379,6 +574,11 @@ class TransportManager(
         // Cancel any pending removal job if peer is rediscovered
         val pendingRemoval = synchronized(stateLock) { pendingPeerRemovalJobs.remove(serviceName) }
         pendingRemoval?.cancel()
+        
+        // Sync peer connections (event-driven: remove connection for peer that's no longer discovered)
+        scope.launch {
+            lanPeerConnectionManager?.syncPeerConnections()
+        }
     }
 
     fun forgetPairedDevice(deviceId: String) {
@@ -394,7 +594,20 @@ class TransportManager(
     }
 
     private fun publishStateLocked() {
-        _peers.value = peersByService.values.sortedByDescending { it.lastSeen }
+        // Deduplicate peers by device_id - keep only the most recent peer for each device_id
+        val peersByDeviceId = mutableMapOf<String, DiscoveredPeer>()
+        for (peer in peersByService.values) {
+            val deviceId = peer.attributes["device_id"] ?: peer.serviceName
+            val existing = peersByDeviceId[deviceId]
+            if (existing == null || peer.lastSeen.isAfter(existing.lastSeen)) {
+                peersByDeviceId[deviceId] = peer
+            }
+        }
+        val deduplicatedPeers = peersByDeviceId.values.sortedByDescending { it.lastSeen }
+        if (deduplicatedPeers.size < peersByService.size) {
+            android.util.Log.d("TransportManager", "🔍 Deduplicated peers: ${peersByService.size} -> ${deduplicatedPeers.size} (removed ${peersByService.size - deduplicatedPeers.size} duplicates by device_id)")
+        }
+        _peers.value = deduplicatedPeers
         _lastSeen.value = HashMap(lastSeenByService)
     }
 
@@ -438,7 +651,7 @@ class TransportManager(
                         config = config
                     )) {
                         MonitorResult.GracefulStop -> {
-                            _connectionState.value = ConnectionState.Idle
+                            _connectionState.value = ConnectionState.Disconnected
                             return
                         }
                         MonitorResult.ManualRetry,
@@ -564,9 +777,19 @@ class TransportManager(
      * This is useful after pairing when a WebSocket connection is already established.
      */
     fun markDeviceConnected(deviceId: String, transport: ActiveTransport) {
-        android.util.Log.d("TransportManager", "🔵 markDeviceConnected called: deviceId=$deviceId, transport=$transport")
         updateLastSuccessfulTransport(deviceId, transport)
-        android.util.Log.d("TransportManager", "🔵 markDeviceConnected completed")
+    }
+    
+    fun setPairingChallengeHandler(handler: (suspend (String) -> String?)) {
+        onPairingChallenge = handler
+    }
+    
+    fun setIncomingClipboardHandler(handler: (com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit) {
+        onIncomingClipboard = handler
+    }
+    
+    fun sendPairingAck(ackJson: String, to: String): Boolean {
+        return webSocketServer?.sendPairingAck(ackJson, to) ?: false
     }
 
     companion object {
@@ -584,7 +807,7 @@ sealed interface LanDialResult {
 }
 
 enum class ConnectionState {
-    Idle,
+    Disconnected,  // Renamed from Idle for clarity - means not connected
     ConnectingLan,
     ConnectedLan,
     ConnectingCloud,

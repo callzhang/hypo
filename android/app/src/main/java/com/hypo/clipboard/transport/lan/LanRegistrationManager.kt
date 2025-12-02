@@ -14,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.hypo.clipboard.util.MiuiAdapter
 import java.time.Duration
 import kotlin.math.min
 
@@ -52,6 +53,29 @@ class LanRegistrationManager(
         if (multicastLock?.isHeld != true) {
             multicastLock?.acquire()
             android.util.Log.d("LanRegistrationManager", "🔒 Multicast lock acquired")
+            
+            // On MIUI/HyperOS, schedule periodic lock refresh to prevent throttling
+            // HyperOS throttles multicast after ~15 minutes of screen-off time
+            if (MiuiAdapter.isMiuiOrHyperOS()) {
+                scheduleMulticastLockRefresh()
+            }
+        }
+    }
+    
+    private fun scheduleMulticastLockRefresh() {
+        val refreshInterval = MiuiAdapter.getRecommendedMulticastLockRefreshInterval()
+        if (refreshInterval != null) {
+            scope.launch(dispatcher) {
+                while (currentConfig != null) {
+                    delay(refreshInterval)
+                    if (currentConfig != null && multicastLock?.isHeld == true) {
+                        // Release and re-acquire to refresh the lock
+                        android.util.Log.d("LanRegistrationManager", "🔄 Refreshing multicast lock (MIUI/HyperOS workaround)")
+                        multicastLock?.release()
+                        multicastLock?.acquire()
+                    }
+                }
+            }
         }
     }
     
@@ -83,7 +107,15 @@ class LanRegistrationManager(
         if (connectivityReceiver != null) return
         connectivityReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                currentConfig?.let { scheduleRetry(it, immediate = true) }
+                android.util.Log.d("LanRegistrationManager", "🌐 Network state changed - re-registering service to update IP address")
+                currentConfig?.let { config ->
+                    // Unregister first to ensure clean restart with new IP
+                    registrationListener?.let { listener ->
+                        runCatching { nsdManager.unregisterService(listener) }
+                    }
+                    // Then re-register with new network configuration
+                    scheduleRetry(config, immediate = true)
+                }
             }
         }
         applicationContext.registerReceiver(
@@ -101,16 +133,25 @@ class LanRegistrationManager(
             setAttribute("fingerprint_sha256", config.fingerprint)
             setAttribute("version", config.version)
             setAttribute("protocols", config.protocols.joinToString(","))
-            // Add device_id attribute so macOS can match discovered devices
+            // Add device_id attribute so devices can match discovered peers
             config.deviceId?.let { deviceId ->
                 setAttribute("device_id", deviceId)
                 android.util.Log.d("LanRegistrationManager", "📝 Added device_id attribute: $deviceId")
+            }
+            // Add public keys for device-agnostic pairing
+            config.publicKey?.let { pubKey ->
+                setAttribute("pub_key", pubKey)
+                android.util.Log.d("LanRegistrationManager", "📝 Added pub_key attribute (${pubKey.length} chars)")
+            }
+            config.signingPublicKey?.let { signingKey ->
+                setAttribute("signing_pub_key", signingKey)
+                android.util.Log.d("LanRegistrationManager", "📝 Added signing_pub_key attribute (${signingKey.length} chars)")
             }
         }
         android.util.Log.d("LanRegistrationManager", "📝 Service info created: name=${info.serviceName}, type=${info.serviceType}, port=${info.port}")
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
-                android.util.Log.i("LanRegistrationManager", "✅ Service registered successfully: ${serviceInfo.serviceName}")
+                android.util.Log.d("LanRegistrationManager", "✅ Service registered successfully: ${serviceInfo.serviceName}")
                 attempts = 0
             }
 
@@ -180,7 +221,9 @@ data class LanRegistrationConfig(
     val version: String,
     val protocols: List<String>,
     val serviceType: String = SERVICE_TYPE,
-    val deviceId: String? = null
+    val deviceId: String? = null,
+    val publicKey: String? = null, // Base64-encoded Curve25519 public key for pairing
+    val signingPublicKey: String? = null // Base64-encoded Ed25519 public key for signature verification
 )
 
 interface LanRegistrationController {

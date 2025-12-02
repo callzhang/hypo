@@ -50,20 +50,21 @@ final class HistoryPopupPresenter {
 
     func show(with viewModel: ClipboardHistoryViewModel) {
         // Save the frontmost app before showing window (for focus restoration)
-        // CRITICAL: Check if current frontmost app is Hypo itself - if so, don't save it
-        // This happens when NSApp.activate() is called before show() in the hotkey handler
+        // CRITICAL: Only update previousFrontmostApp when currentFrontmost is a valid non-Hypo app
+        // When nil or Hypo, preserve the previous value to ensure focus restoration works correctly
+        // This matches the logic in saveFrontmostAppBeforeActivation()
         let currentFrontmost = NSWorkspace.shared.frontmostApplication
         let hypoBundleId = Bundle.main.bundleIdentifier ?? "com.hypo.clipboard"
         
-        if let current = currentFrontmost, current.bundleIdentifier == hypoBundleId {
-            // Hypo is already frontmost - don't save it, keep previous value or use nil
-            // This means we're being called after NSApp.activate(), so we should have
-            // saved the previous app earlier, or we'll skip focus restoration
-            logger.debug("⚠️ Hypo is already frontmost, keeping previous saved app or nil")
+        // Only save if it's a valid non-Hypo application
+        if let current = currentFrontmost, current.bundleIdentifier != hypoBundleId {
+            previousFrontmostApp = current
+            logger.debug("💾 Saved frontmost app: \(current.localizedName ?? "unknown")")
         } else {
-            // Save the actual previous app (not Hypo)
-            previousFrontmostApp = currentFrontmost
-            logger.debug("💾 Saved frontmost app: \(currentFrontmost?.localizedName ?? "unknown")")
+            // Current frontmost is nil or Hypo - preserve previous value
+            // This ensures focus restoration works even if show() is called multiple times
+            // or when currentFrontmost is nil (e.g., during app launch)
+            logger.debug("ℹ️ Current frontmost app is Hypo or nil, keeping previous saved app: \(previousFrontmostApp?.localizedName ?? "none")")
         }
         
         DispatchQueue.main.async {

@@ -1914,7 +1914,7 @@ private struct SettingsSectionView: View {
     
     private func connectionStatusIconName(for state: ConnectionState) -> String {
         switch state {
-        case .idle:
+        case .disconnected:
             return "cloud.slash.fill" // Cloud with slash when disconnected (not wifi)
         case .connectingLan, .connectingCloud:
             return "arrow.triangle.2.circlepath"
@@ -1929,7 +1929,7 @@ private struct SettingsSectionView: View {
     
     private func connectionStatusIconColor(for state: ConnectionState) -> Color {
         switch state {
-        case .idle:
+        case .disconnected:
             return .gray
         case .connectingLan, .connectingCloud:
             return .orange
@@ -1944,7 +1944,7 @@ private struct SettingsSectionView: View {
     
     private func connectionStatusTooltip(for state: ConnectionState) -> String {
         switch state {
-        case .idle:
+        case .disconnected:
             return "Server Offline"
         case .connectingLan:
             return "Connecting via LAN..."
@@ -2236,7 +2236,7 @@ private struct ConnectionStatusView: View {
     
     private var iconName: String {
         switch state {
-        case .idle:
+        case .disconnected:
             return "cloud.slash.fill" // Cloud with slash when disconnected (not wifi)
         case .connectingLan, .connectingCloud:
             return "arrow.triangle.2.circlepath"
@@ -2251,7 +2251,7 @@ private struct ConnectionStatusView: View {
     
     private var iconColor: Color {
         switch state {
-        case .idle:
+        case .disconnected:
             return .gray
         case .connectingLan, .connectingCloud:
             return .orange
@@ -2266,7 +2266,7 @@ private struct ConnectionStatusView: View {
     
     private var statusText: String {
         switch state {
-        case .idle:
+        case .disconnected:
             return "Offline"
         case .connectingLan:
             return "Connecting (LAN)..."

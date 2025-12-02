@@ -9,7 +9,7 @@ public protocol BonjourPublishing: AnyObject {
 }
 
 #if canImport(Darwin)
-public final class BonjourPublisher: BonjourPublishing {
+public final class BonjourPublisher: NSObject, BonjourPublishing {
     public struct Configuration: Equatable {
         public let domain: String
         public let serviceType: String
@@ -71,8 +71,11 @@ public final class BonjourPublisher: BonjourPublishing {
     private var configuration: Configuration?
     private var service: NetService?
     private let queue = DispatchQueue(label: "com.hypo.bonjour.publisher")
+    private var stopCompletion: (() -> Void)?
 
-    public init() {}
+    public override init() {
+        super.init()
+    }
 
     public var currentConfiguration: Configuration? {
         configuration
@@ -100,6 +103,7 @@ public final class BonjourPublisher: BonjourPublishing {
                 port: Int32(configuration.port)
             )
             service.includesPeerToPeer = true
+            service.delegate = self
             service.setTXTRecord(Self.encodeTXT(configuration.txtRecord))
             service.publish()
             self.service = service
@@ -108,8 +112,24 @@ public final class BonjourPublisher: BonjourPublishing {
 
     public func stop() {
         queue.sync {
-            service?.stop()
-            service = nil
+            guard let service = service else { return }
+            service.delegate = self
+            service.stop()
+            // For synchronous stop, we still wait for delegate but don't block
+            // The service will be set to nil in the delegate callback
+        }
+    }
+    
+    public func stop(completion: @escaping () -> Void) {
+        queue.sync {
+            guard let service = service else {
+                completion()
+                return
+            }
+            stopCompletion = completion
+            service.delegate = self
+            service.stop()
+            // Don't set service to nil yet - wait for delegate callback
         }
     }
 
@@ -126,6 +146,22 @@ public final class BonjourPublisher: BonjourPublishing {
             dataRecord[key] = Data(value.utf8)
         }
         return NetService.data(fromTXTRecord: dataRecord)
+    }
+}
+
+extension BonjourPublisher: NetServiceDelegate {
+    public func netServiceDidStop(_ sender: NetService) {
+        queue.sync {
+            if sender === service {
+                service = nil
+                let completion = stopCompletion
+                stopCompletion = nil
+                // Call completion on the queue to ensure it's called after service is nil
+                if let completion = completion {
+                    completion()
+                }
+            }
+        }
     }
 }
 #else

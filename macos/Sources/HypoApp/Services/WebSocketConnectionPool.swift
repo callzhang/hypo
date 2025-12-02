@@ -47,7 +47,7 @@ public actor WebSocketConnectionPool {
     private let idleTimeout: TimeInterval
     private let maxMessageCount: Int
     
-    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "connection-pool")
+    private let logger = HypoLogger(category: "connection-pool")
     private var cleanupTask: Task<Void, Never>?
     
     public init(

@@ -30,7 +30,7 @@ import com.hypo.clipboard.transport.lan.LanDiscoveryRepository
 import com.hypo.clipboard.transport.lan.LanDiscoverySource
 import com.hypo.clipboard.transport.lan.LanRegistrationController
 import com.hypo.clipboard.transport.lan.LanRegistrationManager
-import com.hypo.clipboard.transport.ws.LanWebSocketClient
+import com.hypo.clipboard.transport.ws.WebSocketTransportClient
 import com.hypo.clipboard.transport.ws.OkHttpWebSocketConnector
 import com.hypo.clipboard.transport.ws.RelayWebSocketClient
 import com.hypo.clipboard.transport.ws.TlsWebSocketConfig
@@ -123,12 +123,16 @@ object AppModule {
         deviceIdentity: DeviceIdentity
     ): TlsWebSocketConfig =
         TlsWebSocketConfig(
-            url = "wss://127.0.0.1:${TransportManager.DEFAULT_PORT}/ws",
+            // LAN connections use peer-discovered URLs - no default URL needed
+            // The actual connection URL comes from lastKnownUrl which is set by peer discovery
+            // When a peer is discovered, a new connector is created with the peer's URL
+            url = null, // No default URL for LAN - will be set when peer is discovered
             fingerprintSha256 = null,
             headers = mapOf(
                 "X-Device-Id" to deviceIdentity.deviceId,
                 "X-Device-Platform" to "android"
-            )
+            ),
+            environment = "lan"
         )
 
     @Provides
@@ -136,8 +140,15 @@ object AppModule {
     @Named("lan_ws_connector")
     fun provideLanWebSocketConnector(
         @Named("lan_ws_config") config: TlsWebSocketConfig
-    ): WebSocketConnector =
-        OkHttpWebSocketConnector(config)
+    ): WebSocketConnector {
+        // LAN connectors are created dynamically after peer discovery
+        // This provider should never be called for LAN connections since config.url is null
+        // If it is called, it means there's a configuration error
+        if (config.url == null) {
+            throw IllegalStateException("LAN WebSocket connector cannot be provided during DI. Connectors must be created after peer discovery.")
+        }
+        return OkHttpWebSocketConnector(config)
+    }
 
     @Provides
     @Singleton
@@ -173,13 +184,12 @@ object AppModule {
     @Singleton
     fun provideLanWebSocketClient(
         @Named("lan_ws_config") config: TlsWebSocketConfig,
-        @Named("lan_ws_connector") connector: WebSocketConnector,
         frameCodec: TransportFrameCodec,
         analytics: TransportAnalytics,
         transportManager: com.hypo.clipboard.transport.TransportManager
-    ): com.hypo.clipboard.transport.ws.LanWebSocketClient = com.hypo.clipboard.transport.ws.LanWebSocketClient(
+    ): com.hypo.clipboard.transport.ws.WebSocketTransportClient = com.hypo.clipboard.transport.ws.WebSocketTransportClient(
         config,
-        connector,
+        null, // LAN connectors are created after peer discovery, not during DI
         frameCodec,
         CoroutineScope(SupervisorJob() + Dispatchers.IO),
         Clock.systemUTC(),
@@ -189,12 +199,29 @@ object AppModule {
     
     @Provides
     @Singleton
+    fun provideLanPeerConnectionManager(
+        transportManager: com.hypo.clipboard.transport.TransportManager,
+        frameCodec: TransportFrameCodec,
+        analytics: TransportAnalytics
+    ): com.hypo.clipboard.transport.ws.LanPeerConnectionManager {
+        val manager = com.hypo.clipboard.transport.ws.LanPeerConnectionManager(
+            transportManager = transportManager,
+            frameCodec = frameCodec,
+            analytics = analytics
+        )
+        // Wire up bidirectional reference
+        transportManager.setLanPeerConnectionManager(manager)
+        return manager
+    }
+    
+    @Provides
+    @Singleton
     fun provideSyncTransport(
-        lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient,
+        lanPeerConnectionManager: com.hypo.clipboard.transport.ws.LanPeerConnectionManager,
         relayWebSocketClient: RelayWebSocketClient,
         transportManager: com.hypo.clipboard.transport.TransportManager
     ): SyncTransport = com.hypo.clipboard.transport.ws.FallbackSyncTransport(
-        lanTransport = lanWebSocketClient,
+        lanPeerConnectionManager = lanPeerConnectionManager,
         cloudTransport = relayWebSocketClient,
         transportManager = transportManager
     )
@@ -205,12 +232,14 @@ object AppModule {
         @Named("cloud_ws_config") config: TlsWebSocketConfig,
         @Named("cloud_ws_connector") connector: WebSocketConnector,
         frameCodec: TransportFrameCodec,
-        analytics: TransportAnalytics
+        analytics: TransportAnalytics,
+        transportManager: com.hypo.clipboard.transport.TransportManager
     ): RelayWebSocketClient = RelayWebSocketClient(
         config = config,
         connector = connector,
         frameCodec = frameCodec,
-        analytics = analytics
+        analytics = analytics,
+        transportManager = transportManager
     )
 
     @Provides

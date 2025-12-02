@@ -76,9 +76,9 @@ public final class RemotePairingViewModel: ObservableObject {
                 let client = relayClientFactory(relayHint)
                 self.relayClient = client
                 let code = try await client.createPairingCode(
-                    macDeviceId: payload.macDeviceId,
-                    macDeviceName: identity.deviceName,
-                    macPublicKey: payload.macPublicKey
+                    initiatorDeviceId: payload.peerDeviceId,
+                    initiatorDeviceName: identity.deviceName,
+                    initiatorPublicKey: payload.peerPublicKey
                 )
                 await MainActor.run {
                     self.activeCode = code.code
@@ -140,7 +140,7 @@ public final class RemotePairingViewModel: ObservableObject {
             guard let self, let relayClient else { return }
             while !Task.isCancelled {
                 do {
-                    let challengeJSON = try await relayClient.pollChallenge(code: code, macDeviceId: payload.macDeviceId)
+                    let challengeJSON = try await relayClient.pollChallenge(code: code, initiatorDeviceId: payload.peerDeviceId)
                     let messageData = Data(challengeJSON.utf8)
                     let message = try decoder.decode(PairingChallengeMessage.self, from: messageData)
                     await MainActor.run {
@@ -150,7 +150,7 @@ public final class RemotePairingViewModel: ObservableObject {
                     if let ack = await session.handleChallenge(message) {
                         let ackData = try encoder.encode(ack)
                         let ackJSON = String(decoding: ackData, as: UTF8.self)
-                        try await relayClient.submitAck(code: code, macDeviceId: payload.macDeviceId, ackJSON: ackJSON)
+                        try await relayClient.submitAck(code: code, initiatorDeviceId: payload.peerDeviceId, ackJSON: ackJSON)
                         return
                     }
                 } catch let error as PairingRelayClient.Error {

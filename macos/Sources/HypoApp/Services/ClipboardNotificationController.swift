@@ -127,7 +127,7 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
     private func buildContent(for entry: ClipboardEntry) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = entry.content.title
-        content.subtitle = "From \(entry.originDeviceId)"
+        content.subtitle = "From \(entry.deviceId)"
         content.body = entry.previewText
         content.sound = .default
         content.categoryIdentifier = Constants.categoryIdentifier

@@ -82,8 +82,9 @@ This workspace bundles the Swift package targets that power the menu bar UI, Cor
 3. Choose your development team and keep the bundle identifier `com.hypo.app` (or update it to one registered under your team).
 4. Enable the following capabilities:
    - **App Sandbox** → enable network client access so the UI can reach the sync transports.
-   - **Keychain Sharing** → add group `com.hypo.shared` so pairing keys persist.
    - **User Notifications** → required for rich incoming clipboard alerts.
+
+**Note**: Key storage uses encrypted file-based storage in `~/Library/Application Support/Hypo/` instead of Keychain, improving Notarization compatibility.
 
 ### 3. Pick the UI target
 

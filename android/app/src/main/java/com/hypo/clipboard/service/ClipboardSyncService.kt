@@ -90,10 +90,16 @@ class ClipboardSyncService : Service() {
         
         // Start foreground service immediately to keep app alive
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        Log.d(TAG, "🚀 Starting foreground service with notification ID=$NOTIFICATION_ID, channel=$CHANNEL_ID")
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            Log.d(TAG, "✅ Foreground service started successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to start foreground service: ${e.message}", e)
         }
 
         val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -231,6 +237,10 @@ class ClipboardSyncService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
             
+            // Check if notifications are enabled for the app
+            val areNotificationsEnabled = notificationManager.areNotificationsEnabled()
+            Log.d(TAG, "📱 App notifications enabled: $areNotificationsEnabled")
+            
             // Main sync channel
             // Use IMPORTANCE_DEFAULT to ensure notification is visible in notification list
             // This allows users to see the latest clipboard item persistently
@@ -250,9 +260,25 @@ class ClipboardSyncService : Service() {
             // Verify channel was created with correct importance
             val createdChannel = manager.getNotificationChannel(CHANNEL_ID)
             if (createdChannel != null) {
-                Log.d(TAG, "✅ Notification channel created: id=$CHANNEL_ID, importance=${createdChannel.importance} (${if (createdChannel.importance == NotificationManager.IMPORTANCE_DEFAULT) "DEFAULT - visible" else "NOT DEFAULT - may be hidden"})")
+                val importance = createdChannel.importance
+                val importanceText = when (importance) {
+                    NotificationManager.IMPORTANCE_NONE -> "NONE (blocked)"
+                    NotificationManager.IMPORTANCE_MIN -> "MIN (hidden)"
+                    NotificationManager.IMPORTANCE_LOW -> "LOW (minimized)"
+                    NotificationManager.IMPORTANCE_DEFAULT -> "DEFAULT (visible)"
+                    NotificationManager.IMPORTANCE_HIGH -> "HIGH (visible + sound)"
+                    else -> "UNKNOWN ($importance)"
+                }
+                Log.d(TAG, "✅ Notification channel created: id=$CHANNEL_ID, importance=$importanceText")
+                
+                if (importance == NotificationManager.IMPORTANCE_NONE) {
+                    Log.e(TAG, "❌ CRITICAL: Notification channel is blocked (IMPORTANCE_NONE) - notification will NOT be shown!")
+                    Log.e(TAG, "   User must enable notifications in: Settings → Apps → Hypo → Notifications → Clipboard Sync")
+                } else if (importance != NotificationManager.IMPORTANCE_DEFAULT) {
+                    Log.w(TAG, "⚠️ Notification channel importance is $importanceText (expected DEFAULT)")
+                }
             } else {
-                Log.w(TAG, "⚠️ Failed to create notification channel: $CHANNEL_ID")
+                Log.e(TAG, "❌ CRITICAL: Failed to create notification channel: $CHANNEL_ID")
             }
             
             // Warning channel (for file size warnings)
@@ -303,7 +329,8 @@ class ClipboardSyncService : Service() {
             .setContentIntent(contentPendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            // Use PRIORITY_DEFAULT to match channel importance (PRIORITY_LOW may hide notification)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setStyle(
@@ -378,10 +405,20 @@ class ClipboardSyncService : Service() {
     }
 
     private fun observeLatestItem() {
+        notificationJob?.cancel() // Cancel previous job if exists
         notificationJob = scope.launch {
-            repository.observeHistory(limit = 1).collectLatest { items ->
-                latestPreview = items.firstOrNull()?.preview
-                updateNotification()
+            Log.d(TAG, "👀 Starting to observe latest clipboard item for notification updates")
+            try {
+                repository.observeHistory(limit = 1).collectLatest { items ->
+                    val preview = items.firstOrNull()?.preview
+                    if (preview != latestPreview) {
+                        Log.d(TAG, "📋 Latest item changed: preview=${preview?.take(30) ?: "none"}")
+                        latestPreview = preview
+                        updateNotification()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error observing latest item: ${e.message}", e)
             }
         }
     }

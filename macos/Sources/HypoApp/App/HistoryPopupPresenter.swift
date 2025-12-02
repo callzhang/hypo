@@ -389,19 +389,5 @@ final class HistoryPopupPresenter {
             height: size.height
         )
     }
-
-    private func appendDebug(_ text: String) {
-        let url = URL(fileURLWithPath: "/tmp/hypo_debug.log")
-        guard let data = text.data(using: .utf8) else { return }
-        if FileManager.default.fileExists(atPath: url.path) {
-            if let handle = try? FileHandle(forWritingTo: url) {
-                _ = try? handle.seekToEnd()
-                _ = try? handle.write(contentsOf: data)
-                try? handle.close()
-            }
-        } else {
-            _ = try? data.write(to: url)
-        }
-    }
 }
 #endif

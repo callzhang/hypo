@@ -576,9 +576,20 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
     
     private func syncToPairedDevices(_ entry: ClipboardEntry) async {
-        logger.debug("🔄 [HistoryStore] syncToPairedDevices called for entry: \(entry.previewText.prefix(50))")
+#if canImport(os)
+        logger.info("🔄 [HistoryStore] syncToPairedDevices called for entry: \(entry.previewText.prefix(50))")
+        logger.info("🔄 [HistoryStore] Entry deviceId: \(entry.deviceId), localDeviceId: \(localDeviceId.lowercased())")
+        logger.info("🔄 [HistoryStore] Entry transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
+        logger.info("🔄 [HistoryStore] TransportManager is \(transportManager != nil ? "set" : "nil")")
+        logger.info("🔄 [HistoryStore] Paired devices count: \(pairedDevices.count)")
+        for (idx, device) in pairedDevices.enumerated() {
+            logger.info("🔄 [HistoryStore] Paired device[\(idx)]: id=\(device.id), name=\(device.name), isOnline=\(device.isOnline)")
+        }
+#endif
         guard transportManager != nil else {
-            logger.debug("⏭️ [HistoryStore] Skipping sync - transportManager is nil")
+#if canImport(os)
+            logger.warning("⏭️ [HistoryStore] Skipping sync - transportManager is nil")
+#endif
             return
         }
         
@@ -586,17 +597,23 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         // Skip forwarding if entry came from a remote device (has transportOrigin set)
         // or if deviceId doesn't match local device ID
         if entry.transportOrigin != nil {
-            logger.debug("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry came from remote device (transportOrigin: \(entry.transportOrigin!))")
+#if canImport(os)
+            logger.info("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry came from remote device (transportOrigin: \(entry.transportOrigin!))")
+#endif
             return
         }
         
         // Compare using lowercase normalization
         if entry.deviceId != localDeviceId.lowercased() {
-            logger.debug("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry originated from different device: \(entry.deviceId) (local: \(localDeviceId.lowercased()))")
+#if canImport(os)
+            logger.info("⏭️ [ClipboardHistoryViewModel] Skipping sync - entry originated from different device: \(entry.deviceId) (local: \(localDeviceId.lowercased()))")
+#endif
             return
         }
         
-        logger.debug("✅ [HistoryStore] Entry is local, proceeding with sync. Paired devices: \(pairedDevices.count)")
+#if canImport(os)
+        logger.info("✅ [HistoryStore] Entry is local, proceeding with sync. Paired devices: \(pairedDevices.count)")
+#endif
         
         // Convert clipboard entry to payload
         let payload: ClipboardPayload
@@ -620,9 +637,17 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         
         // Queue messages for all paired devices (best-effort practice - sync regardless of status)
         // If no devices are paired, queue will be empty and nothing will happen
-        logger.debug("📤 [HistoryStore] Queuing messages for \(pairedDevices.count) paired device(s)")
+#if canImport(os)
+        logger.info("📤 [HistoryStore] Queuing messages for \(pairedDevices.count) paired device(s)")
+        if pairedDevices.isEmpty {
+            logger.warning("⚠️ [HistoryStore] No paired devices found! Clipboard sync will not be sent to any peers.")
+            logger.warning("⚠️ [HistoryStore] To sync clipboard, you need to pair with at least one device first.")
+        }
+#endif
         for device in pairedDevices {
-            logger.debug("📤 [HistoryStore] Queuing message for device: \(device.name) (id: \(device.id))")
+#if canImport(os)
+            logger.info("📤 [HistoryStore] Queuing message for device: \(device.name) (id: \(device.id), isOnline: \(device.isOnline))")
+#endif
             let queuedMessage = QueuedSyncMessage(
                 entry: entry,
                 payload: payload,
@@ -633,6 +658,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         
         // Trigger immediate queue processing (event-driven)
+#if canImport(os)
+        logger.info("📤 [HistoryStore] Triggering sync queue processing, queue size: \(syncMessageQueue.count)")
+#endif
         triggerSyncQueueProcessing()
     }
     
@@ -678,14 +706,20 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 }
                 
                 // Try to send message
+#if canImport(os)
+            logger.info("🔄 [HistoryStore] Processing queued message for device \(message.targetDeviceId), queue size: \(syncMessageQueue.count)")
+#endif
                 if await trySendMessage(message, transportManager: transportManager) {
                     // Success - message cleared from queue
 #if canImport(os)
-                    logger.info("✅ Successfully sent queued message to device \(message.targetDeviceId)")
+                    logger.info("✅ [HistoryStore] Successfully sent queued message to device \(message.targetDeviceId)")
 #endif
                     continue
                 } else {
                     // Failed - keep in queue for retry
+#if canImport(os)
+                    logger.warning("⚠️ [HistoryStore] Failed to send message to \(message.targetDeviceId), keeping in queue for retry")
+#endif
                     remainingMessages.append(message)
                     hasMessagesToRetry = true
                 }
@@ -718,6 +752,11 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     /// Attempt to send a queued sync message
     private func trySendMessage(_ message: QueuedSyncMessage, transportManager: TransportManager) async -> Bool {
         do {
+#if canImport(os)
+        logger.info("📤 [HistoryStore] Attempting to send message to device \(message.targetDeviceId)")
+        logger.info("📤 [HistoryStore] Entry preview: \(message.entry.previewText.prefix(50))")
+        logger.info("📤 [HistoryStore] Payload type: \(message.payload.contentType.rawValue), size: \(message.payload.data.count) bytes")
+#endif
         // Get sync engine with transport
         let transport = transportManager.loadTransport()
         let keyProvider = KeychainDeviceKeyProvider()
@@ -728,12 +767,21 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 localPlatform: deviceIdentity.platform
         )
         
+#if canImport(os)
+        logger.info("📤 [HistoryStore] SyncEngine created, establishing connection...")
+#endif
         // Ensure transport is connected
         await syncEngine.establishConnection()
         
+#if canImport(os)
+        logger.info("📤 [HistoryStore] Connection established, transmitting message...")
+#endif
             // Attempt to send (best-effort - try regardless of device online status)
             try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
             
+#if canImport(os)
+        logger.info("✅ [HistoryStore] Successfully transmitted message to \(message.targetDeviceId)")
+#endif
             // Update lastSeen timestamp after successful sync
             if let device = pairedDevices.first(where: { $0.id == message.targetDeviceId }) {
                 await updateDeviceLastSeen(deviceId: device.id)
@@ -742,7 +790,11 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             return true // Success
             } catch {
 #if canImport(os)
-            logger.debug("⏳ Failed to send queued message to \(message.targetDeviceId): \(error.localizedDescription) - will retry")
+            logger.error("❌ [HistoryStore] Failed to send queued message to \(message.targetDeviceId): \(error.localizedDescription)")
+            logger.error("❌ [HistoryStore] Error type: \(String(describing: type(of: error)))")
+            if let nsError = error as NSError? {
+                logger.error("❌ [HistoryStore] NSError domain: \(nsError.domain), code: \(nsError.code)")
+            }
 #endif
             return false // Failed, will retry
         }

@@ -83,7 +83,8 @@ public final class ClipboardMonitor {
         let currentChangeCount = pasteboard.changeCount
         guard currentChangeCount != changeCount else { return nil }
         
-        logger.debug("📋 [ClipboardMonitor] Clipboard changed: \(changeCount) -> \(currentChangeCount)")
+        logger.info("📋 [ClipboardMonitor] Clipboard changed: \(changeCount) -> \(currentChangeCount)")
+        logger.info("📋 [ClipboardMonitor] Delegate is \(delegate != nil ? "set" : "nil")")
         changeCount = currentChangeCount
         
         guard throttle.consume() else {
@@ -96,18 +97,22 @@ public final class ClipboardMonitor {
             return nil
         }
         
-        logger.debug("📋 [ClipboardMonitor] Processing clipboard types: \(types.map { $0.rawValue }.joined(separator: ", "))")
+        logger.info("📋 [ClipboardMonitor] Processing clipboard types: \(types.map { $0.rawValue }.joined(separator: ", "))")
 
         // Check for images FIRST - images copied from files have both .tiff/.png AND .fileURL types,
         // so we need to prioritize image detection before file detection
         if let imageEntry = captureImage(types: types) {
+            logger.info("📋 [ClipboardMonitor] Captured image, calling delegate...")
             delegate?.clipboardMonitor(self, didCapture: imageEntry)
+            logger.info("📋 [ClipboardMonitor] Delegate called for image")
             return imageEntry
         }
 
         // Check for files - non-image files (files that aren't images)
         if let fileEntry = captureFile(types: types) {
+            logger.info("📋 [ClipboardMonitor] Captured file, calling delegate...")
             delegate?.clipboardMonitor(self, didCapture: fileEntry)
+            logger.info("📋 [ClipboardMonitor] Delegate called for file")
             return fileEntry
         }
 
@@ -121,8 +126,9 @@ public final class ClipboardMonitor {
                 isEncrypted: false,
                 transportOrigin: nil  // Explicitly nil for local copies
             )
-            logger.debug("📋 [ClipboardMonitor] Captured local link: \(url.absoluteString.prefix(50))")
+            logger.info("📋 [ClipboardMonitor] Captured local link: \(url.absoluteString.prefix(50)), calling delegate...")
             delegate?.clipboardMonitor(self, didCapture: entry)
+            logger.info("📋 [ClipboardMonitor] Delegate called for link")
             return entry
         }
 
@@ -136,8 +142,9 @@ public final class ClipboardMonitor {
                 isEncrypted: false,
                 transportOrigin: nil  // Explicitly nil for local copies
             )
-            logger.debug("📋 [ClipboardMonitor] Captured local text: \(string.prefix(50))")
+            logger.info("📋 [ClipboardMonitor] Captured local text: \(string.prefix(50)), calling delegate...")
             delegate?.clipboardMonitor(self, didCapture: entry)
+            logger.info("📋 [ClipboardMonitor] Delegate called for text")
             return entry
         }
         

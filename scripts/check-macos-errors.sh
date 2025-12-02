@@ -8,3 +8,6 @@ echo ""
 log stream --predicate 'subsystem == "com.hypo.clipboard"' --level error --style compact
 
 
+
+
+

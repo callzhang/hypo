@@ -31,14 +31,20 @@ class ClipboardListener(
     fun start() {
         if (isListening) return
         try {
-            Log.i(TAG, "📋 ClipboardListener STARTING - registering listener")
+            Log.d(TAG, "📋 ClipboardListener STARTING - registering listener")
             clipboardManager.addPrimaryClipChangedListener(this)
             
-            // Try to process initial clip, but don't fail if access is blocked
+            // Initialize lastSignature from current clipboard to prevent re-sending old content on restart
+            // This ensures we only sync actual clipboard changes, not whatever happens to be in clipboard on startup
+            // IMPORTANT: We do NOT process the initial clipboard here - we only initialize lastSignature
+            // to mark it as "already seen" so it won't be processed if the clipboard hasn't actually changed
             try {
                 clipboardManager.primaryClip?.let { clip ->
-                    Log.i(TAG, "📋 Processing initial clip on start")
-                    process(clip)
+                    val event = parser.parse(clip)
+                    if (event != null) {
+                        lastSignature = event.signature()
+                        Log.d(TAG, "📋 Initialized lastSignature from current clipboard (will not process on startup - only actual changes will trigger sync)")
+                    }
                 }
             } catch (e: SecurityException) {
                 Log.d(TAG, "🔒 Initial clip access blocked: ${e.message}")
@@ -53,7 +59,7 @@ class ClipboardListener(
             }
             
             isListening = true
-            Log.i(TAG, "✅ ClipboardListener is now ACTIVE (listener + ${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "polling" else "no polling"})")
+            Log.d(TAG, "✅ ClipboardListener is now ACTIVE (listener + ${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "polling" else "no polling"})")
         } catch (e: SecurityException) {
             Log.e(TAG, "❌ SecurityException in start(): ${e.message}", e)
             // Don't set isListening = true if we can't register the listener
@@ -82,7 +88,7 @@ class ClipboardListener(
     private fun startPolling() {
         pollingJob?.cancel()
         pollingJob = scope.launch(dispatcher) {
-            Log.i(TAG, "🔄 Starting clipboard polling (Android 10+ workaround)")
+            Log.d(TAG, "🔄 Starting clipboard polling (Android 10+ workaround)")
             var consecutiveBlockedCount = 0
             while (isActive) {
                 delay(2_000) // Poll every 2 seconds
@@ -97,7 +103,7 @@ class ClipboardListener(
                                 // Only process if it's different from what we last polled
                                 // (onPrimaryClipChanged might have already processed it)
                                 if (signature != lastPolledSignature && signature != lastSignature) {
-                                    Log.i(TAG, "🔍 Polling detected new clipboard content (manual paste detected)")
+                                    Log.d(TAG, "🔍 Polling detected new clipboard content (manual paste detected)")
                                     lastPolledSignature = signature
                                     consecutiveBlockedCount = 0 // Reset counter on success
                                     process(clip)
@@ -135,27 +141,32 @@ class ClipboardListener(
     }
 
     override fun onPrimaryClipChanged() {
-        try {
-            Log.i(TAG, "🔔 onPrimaryClipChanged TRIGGERED!")
+        // CRITICAL: This is called synchronously on the main thread when setPrimaryClip is called.
+        // We must return immediately and do all processing in a coroutine to avoid blocking the UI.
+        // Launch processing in a coroutine immediately to avoid blocking the main thread
+        scope.launch(Dispatchers.Default) {
             try {
-                val clip = clipboardManager.primaryClip
-                if (clip != null) {
-                    Log.i(TAG, "📋 Clipboard has content, processing...")
-                    process(clip)
-                } else {
-                    Log.w(TAG, "⚠️  Clipboard clip is null!")
+                Log.d(TAG, "🔔 onPrimaryClipChanged TRIGGERED!")
+                try {
+                    val clip = clipboardManager.primaryClip
+                    if (clip != null) {
+                        Log.d(TAG, "📋 Clipboard has content, processing...")
+                        process(clip)
+                    } else {
+                        Log.w(TAG, "⚠️  Clipboard clip is null!")
+                    }
+                } catch (e: SecurityException) {
+                    // Android 10+ may block clipboard access in background
+                    Log.d(TAG, "🔒 onPrimaryClipChanged: primaryClip access blocked: ${e.message}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error accessing primaryClip in onPrimaryClipChanged: ${e.message}", e)
                 }
             } catch (e: SecurityException) {
                 // Android 10+ may block clipboard access in background
-                Log.d(TAG, "🔒 onPrimaryClipChanged: primaryClip access blocked: ${e.message}")
+                Log.d(TAG, "🔒 onPrimaryClipChanged: Clipboard access blocked (background restriction): ${e.message}")
             } catch (e: Exception) {
-                Log.e(TAG, "❌ Error accessing primaryClip in onPrimaryClipChanged: ${e.message}", e)
+                Log.e(TAG, "❌ Error in onPrimaryClipChanged: ${e.message}", e)
             }
-        } catch (e: SecurityException) {
-            // Android 10+ may block clipboard access in background
-            Log.d(TAG, "🔒 onPrimaryClipChanged: Clipboard access blocked (background restriction): ${e.message}")
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error in onPrimaryClipChanged: ${e.message}", e)
         }
     }
 

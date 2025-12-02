@@ -15,7 +15,7 @@ public final class IncomingClipboardHandler {
     private var onEntryAdded: ((ClipboardEntry) async -> Void)?
     
     #if canImport(os)
-    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "incoming")
+    private let logger = HypoLogger(category: "incoming")
     #endif
     
     public init(
@@ -35,19 +35,22 @@ public final class IncomingClipboardHandler {
     }
     
     /// Handle incoming clipboard data from remote device
-    public func handle(_ data: Data) async {
-        let receivedMsg = "📥 [IncomingClipboardHandler] CLIPBOARD RECEIVED: \(data.count) bytes\n"
-        print(receivedMsg)
-        try? receivedMsg.appendToFile(path: "/tmp/hypo_debug.log")
+    /// - Parameters:
+    ///   - data: The clipboard data (frame-encoded)
+    ///   - transportOrigin: Whether the message came via LAN or cloud relay
+    public func handle(_ data: Data, transportOrigin: TransportOrigin = .lan) async {
         do {
-            #if canImport(os)
-            logger.info("📥 CLIPBOARD RECEIVED: Processing incoming clipboard data (\(data.count) bytes)")
-            #endif
-            
             // Decode envelope to get device info
             let envelope = try frameCodec.decode(data)
-            let deviceId = envelope.payload.deviceId
+            let deviceId = envelope.payload.deviceId  // UUID string (pure UUID)
+            let devicePlatform = envelope.payload.devicePlatform  // Platform string
             let deviceName = envelope.payload.deviceName
+            
+            // Parse platform string to DevicePlatform enum
+            let platform: DevicePlatform? = devicePlatform.flatMap { DevicePlatform(rawValue: $0) }
+            
+            // Check if message was encrypted (non-empty nonce and tag)
+            let isEncrypted = !envelope.payload.encryption.nonce.isEmpty && !envelope.payload.encryption.tag.isEmpty
             
             // Note: We need connectionId to update metadata, but we don't have it here
             // The connectionId is available in TransportManager.server(_:didReceiveClipboardData:from:)
@@ -57,24 +60,30 @@ public final class IncomingClipboardHandler {
             // It will decode the envelope, decrypt the ciphertext, and decode the ClipboardPayload
             let payload = try await syncEngine.decode(data)
             
-            #if canImport(os)
-            logger.info("📋 Envelope decoded: from device \(deviceId), name: \(deviceName ?? "unknown")")
-            #endif
-            let decodedMsg = "📋 [IncomingClipboardHandler] Envelope decoded: deviceId=\(deviceId), deviceName=\(deviceName ?? "unknown")\n"
-            print(decodedMsg)
-            try? decodedMsg.appendToFile(path: "/tmp/hypo_debug.log")
-            #if canImport(os)
-            logger.info("✅ CLIPBOARD DECODED: type=\(payload.contentType.rawValue)")
-            #endif
-            let typeMsg = "✅ [IncomingClipboardHandler] CLIPBOARD DECODED: type=\(payload.contentType.rawValue)\n"
-            print(typeMsg)
-            try? typeMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.info("📥 Received clipboard: \(payload.contentType.rawValue) from \(deviceName ?? "unknown")")
             
-            // Apply to system clipboard
+            // Check if incoming content matches current clipboard - skip if same to avoid unnecessary processing
+            if await matchesCurrentClipboard(payload) {
+                return
+            }
+            
+            // Add to history FIRST (marked as from remote device) with device info from envelope
+            // This ensures the entry is created with the correct origin before ClipboardMonitor detects the change
+            // Use envelope timestamp (when message was created on Android) instead of current time
+            await addToHistory(payload, deviceId: deviceId, devicePlatform: platform, deviceName: deviceName, isEncrypted: isEncrypted, transportOrigin: transportOrigin, timestamp: envelope.timestamp)
+            
+            // Apply to system clipboard AFTER adding to history
+            // Post notification to update ClipboardMonitor's changeCount to prevent duplicate detection
+            let beforeChangeCount = await MainActor.run { pasteboard.changeCount }
             try await applyToClipboard(payload)
+            let afterChangeCount = await MainActor.run { pasteboard.changeCount }
             
-            // Add to history (marked as from remote device) with device info from envelope
-            await addToHistory(payload, deviceId: deviceId, deviceName: deviceName)
+            // Notify ClipboardMonitor to update its changeCount
+            NotificationCenter.default.post(
+                name: NSNotification.Name("ClipboardAppliedFromRemote"),
+                object: nil,
+                userInfo: ["changeCount": afterChangeCount]
+            )
             
             // Notify that clipboard was received from this device (updates lastSeen)
             NotificationCenter.default.post(
@@ -84,14 +93,49 @@ public final class IncomingClipboardHandler {
             )
             
         } catch {
-            let errorMsg = "❌ [IncomingClipboardHandler] CLIPBOARD ERROR: \(error.localizedDescription), type: \(String(describing: type(of: error)))\n"
-            print(errorMsg)
-            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
+            logger.error("❌ [IncomingClipboardHandler] CLIPBOARD ERROR: \(error.localizedDescription), type: \(String(describing: type(of: error)))")
             #if canImport(os)
             logger.error("❌ CLIPBOARD ERROR: Failed to handle incoming clipboard: \(error.localizedDescription)")
             #endif
             if let decodingError = error as? DecodingError {
-                print("❌ [IncomingClipboardHandler] DecodingError details: \(decodingError)")
+                logger.info("❌ [IncomingClipboardHandler] DecodingError details: \(decodingError)")
+            }
+        }
+    }
+    
+    /// Check if incoming payload matches current clipboard content
+    private func matchesCurrentClipboard(_ payload: ClipboardPayload) async -> Bool {
+        await MainActor.run {
+            guard let types = pasteboard.types else { return false }
+            
+            switch payload.contentType {
+            case .text:
+                guard types.contains(.string), let currentText = pasteboard.string(forType: .string) else {
+                    return false
+                }
+                let incomingText = String(data: payload.data, encoding: .utf8) ?? ""
+                return currentText == incomingText
+                
+            case .link:
+                guard types.contains(.string), let currentUrlString = pasteboard.string(forType: .string) else {
+                    return false
+                }
+                let incomingUrlString = String(data: payload.data, encoding: .utf8) ?? ""
+                return currentUrlString == incomingUrlString
+                
+            case .image:
+                // For images, check if pasteboard contains any image type
+                // NSImage can handle all formats, so check if we can read an image
+                let imageObjects = pasteboard.readObjects(forClasses: [NSImage.self], options: nil).compactMap { $0 as? NSImage }
+                guard !imageObjects.isEmpty else {
+                    return false
+                }
+                // If clipboard has image and incoming is image, assume different (could enhance with hash comparison)
+                return false
+                
+            case .file:
+                // Files are more complex, skip comparison for now
+                return false
             }
         }
     }
@@ -139,8 +183,9 @@ public final class IncomingClipboardHandler {
         }
     }
     
-    private func addToHistory(_ payload: ClipboardPayload, deviceId: String, deviceName: String?) async {
-        let finalDeviceId = deviceId
+    private func addToHistory(_ payload: ClipboardPayload, deviceId: String, devicePlatform: DevicePlatform?, deviceName: String?, isEncrypted: Bool, transportOrigin: TransportOrigin, timestamp: Date) async {
+        let finalDeviceId = deviceId  // UUID string (pure UUID)
+        let finalPlatform = devicePlatform
         let finalDeviceName = deviceName ?? "Remote Device"
         
         let content: ClipboardContent
@@ -182,24 +227,21 @@ public final class IncomingClipboardHandler {
         
         let entry = ClipboardEntry(
             id: UUID(),
-            timestamp: Date(),
-            originDeviceId: finalDeviceId,
+            timestamp: timestamp,  // Use envelope timestamp (when message was created on Android) instead of current time
+            deviceId: finalDeviceId,
+            originPlatform: finalPlatform,
             originDeviceName: finalDeviceName,
             content: content,
-            isPinned: false
+            isPinned: false,
+            isEncrypted: isEncrypted,
+            transportOrigin: transportOrigin
         )
         
-        _ = await historyStore.insert(entry)
-        
+        let insertedEntries = await historyStore.insert(entry)
         // Notify callback if provided (e.g., to update viewModel)
         if let onEntryAdded = onEntryAdded {
             await onEntryAdded(entry)
         }
-        
-        #if canImport(os)
-        logger.info("✅ Added to history from device: \(finalDeviceName) (id: \(finalDeviceId))")
-        #endif
-        print("✅ [IncomingClipboardHandler] Added to history: \(finalDeviceName) (id: \(finalDeviceId.prefix(8)))")
     }
 }
 

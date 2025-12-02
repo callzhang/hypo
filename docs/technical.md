@@ -1282,7 +1282,7 @@ docker run -p 8080:8080 hypo-relay
 
 ---
 
-**Document Version**: 0.3.5  
+**Document Version**: 0.3.7  
 **Last Updated**: December 2, 2025  
 **Status**: Production Beta  
 **Authors**: Principal Engineering Team

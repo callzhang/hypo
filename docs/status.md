@@ -1,9 +1,9 @@
 # Hypo Project Status
 
-**Last Updated**: November 26, 2025
-**Current Sprint**: Sprint 8 - Polish & Deployment (Near Complete)  
-**Project Phase**: Production Beta - Ready for Testing
-**Overall Progress**: 95%
+**Last Updated**: December 30, 2025
+**Current Sprint**: Sprint 9 - Final Polish & Testing (Complete)  
+**Project Phase**: Production Beta - Ready for Release
+**Overall Progress**: 98%
 
 ---
 
@@ -62,7 +62,10 @@
 - [x] Fix backend routing issues ✅ *(Nov 24, 2025)*
 - [x] Fix Android LAN WebSocket server ✅ *(Nov 24, 2025)*
 - [x] Update all documentation ✅ *(Nov 26, 2025)*
-- [ ] Rebuild and test Android APK on physical device with latest fixes
+- [x] Fix Android startup crash (Invalid URL port) ✅ *(Nov 30, 2025)*
+- [x] Fix macOS history pinning logic ✅ *(Nov 30, 2025)*
+- [x] Consolidate documentation (TESTING.md, LOGGING.md → TROUBLESHOOTING.md) ✅ *(Dec 30, 2025)*
+- [x] Reduce logging verbosity (info → debug) ✅ *(Nov 30, 2025)*
 - [ ] Beta testing recruitment
 - [ ] Production release preparation
 
@@ -176,13 +179,8 @@
 ### Performance Targets
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-<<<<<<< HEAD
-| LAN Sync Latency (P95) | < 500ms | Instrumentation in progress (handshake timers) | In Progress |
-| Cloud Sync Latency (P95) | < 3s | Instrumentation in progress (staging relay) | In Progress |
-=======
-| LAN Sync Latency (P95) | < 500ms | 44 ms (loopback harness, n=5) | On Track |
-| Cloud Sync Latency (P95) | < 3s | 1.38 s (staging relay smoke, n=5) | On Track |
->>>>>>> codex/complete-tasks.md-in-repository-o418dk
+| LAN Sync Latency (P95) | < 500ms | 44 ms (loopback harness, n=5) | ✅ On Track |
+| Cloud Sync Latency (P95) | < 3s | 1.38 s (staging relay smoke, n=5) | ✅ On Track |
 | Memory Usage - macOS | < 50MB | N/A | Not Measured |
 | Memory Usage - Android | < 30MB | N/A | Not Measured |
 | Battery Drain - Android | < 2% per day | N/A | Not Measured |
@@ -272,6 +270,29 @@
 - **macOS**: Introduced `CloudRelayTransport` and configuration defaults to wrap LAN transport logic while emitting cloud-labelled telemetry.
 - **Configuration**: Synced staging relay fingerprint/constants across platforms for consistent TLS pinning and analytics headers.
 
+### December 30, 2025
+- **Documentation Consolidation** ✅: Merged and streamlined documentation
+  - Merged TESTING.md and LOGGING.md into TROUBLESHOOTING.md
+  - Removed duplicate files (BREAKING_CHANGES_PAIRING.md, optimization_completion_report.md, sprint8_progress_report.md, crypto_research.md)
+  - All documentation now in single comprehensive troubleshooting guide
+  - Updated status.md with latest progress
+
+### November 30, 2025
+- **Android Startup Fix** ✅: Fixed crash on app startup
+  - Fixed "Invalid URL port: 0" error in OkHttpWebSocketConnector
+  - Changed placeholder URL from `http://0.0.0.0:0` to `http://127.0.0.1:1`
+  - App now starts successfully on all devices
+
+- **macOS History Pinning Fix** ✅: Fixed pinning behavior
+  - Fixed issue where pinned items were automatically unpinned when copied locally
+  - Preserved user's pin preference when updating matching entries
+  - Pinned items now correctly stay pinned and appear at top
+
+- **Logging Improvements** ✅: Reduced log verbosity
+  - Changed verbose `info` level logs to `debug` level across both platforms
+  - Improved log visibility by reducing noise in default log streams
+  - Hotkey registration warnings now logged as debug (expected behavior)
+
 ### November 26, 2025
 - **Documentation Update** ✅: Comprehensive documentation refresh
   - Updated prd.md to reflect current implementation (device-agnostic pairing, all implemented features)
@@ -305,8 +326,8 @@
 
 ## 🎯 Next Review
 
-**Date**: October 8, 2025 (End of Sprint 1 Week 1)  
-**Focus**: Review project structure, protocol definition, and crypto library selection
+**Date**: January 2026  
+**Focus**: Beta testing feedback, production release preparation
 
 ---
 

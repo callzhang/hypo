@@ -253,7 +253,14 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 - **Connection triggers**: Connections are only established when:
   1. Peer is discovered (NSD/Bonjour callback → StateFlow update → `startReceiving()`)
   2. Connection disconnects (`onClosed`/`onFailure` → reconnection attempt if URL available)
-- **Maintenance tasks**: Periodic tasks (prune stale peers, health checks) are for maintenance only, not for discovery or connection triggering
+- **UI updates**: Connection state and device status updates are event-driven via Combine publishers (macOS) and StateFlow (Android)
+- **Sync queue processing**: Event-driven - triggered when connection becomes available or new message is queued (no periodic polling)
+- **Maintenance tasks**: Periodic tasks (prune stale peers every 1 minute, health checks every 30 seconds) are for maintenance only, not for discovery or connection triggering
+- **Platform limitations**: Some polling is necessary due to platform APIs:
+  - macOS clipboard monitoring: Timer polling (0.5s) - no event-driven API available
+  - Android clipboard monitoring: Polling (2s) for Android 10+ workaround
+  - Android accessibility status: Polling (2s) - no event-driven API available
+  - IP address monitoring: Periodic check (10s) - IP changes don't always trigger path status changes
 
 **Implementation Details**:
 - Network change handlers are non-blocking and run asynchronously
@@ -590,6 +597,115 @@ class ScreenStateReceiver(
 - **Certificate Pinning**: SHA-256 fingerprint verification prevents MITM attacks
 - **Testing**: Comprehensive unit tests with stub `URLSessionWebSocketTask`s verify send-path delegation and configuration wiring
 
+### 4.4 Platform Implementation Comparison
+
+This section compares the implementation details between Android and macOS clients to highlight alignment and differences.
+
+#### 4.4.1 Clipboard Syncing Logic
+
+**Current Status**: ✅ **Aligned** - Both platforms now implement best-effort sync to all paired devices with message queuing.
+
+**Android** (`SyncCoordinator.kt`):
+- **Target Selection**: Includes ALL paired devices as targets, not just discovered ones
+  - `allPairedTargets = pairedDeviceIds - identity.deviceId`
+  - Ensures sync works even when devices are offline or on different networks
+- **Wait Logic**: Waits up to 10 seconds for targets to be available before broadcasting
+  - Handles race condition with peer discovery
+  - Checks every 100ms if targets are empty
+- **Broadcasting**: Sends to all targets regardless of online status
+- **Error Handling**: Logs errors but continues with other targets
+
+**macOS** (`HistoryStore.swift`):
+- **Target Selection**: Syncs to ALL paired devices (best-effort practice)
+  - No `isOnline` check - attempts sync regardless of device status
+  - Transport layer handles routing (LAN/cloud) correctly
+- **Message Queue**: Implements queue with 1-minute expiration window
+  - Messages queued when targets are not available
+  - Retries every 5 seconds until sent or expired
+  - Prevents message loss during app startup and network transitions
+- **Broadcasting**: Iterates through all `pairedDevices` and queues messages for each
+- **Error Handling**: Logs errors but continues with other devices
+
+**Key Differences**:
+| Feature | Android | macOS |
+|---------|---------|-------|
+| Target Selection | All paired devices ✅ | All paired devices ✅ |
+| Wait/Queue Strategy | 10-second wait | 1-minute queue with retries |
+| Offline Device Handling | Attempts sync anyway ✅ | Attempts sync anyway ✅ |
+| Message Persistence | In-memory wait | Persistent queue with expiration |
+
+**Impact**: Both platforms now follow best-effort practice, attempting sync to all paired devices regardless of online status. macOS uses a more robust queue-based approach, while Android uses a simpler wait strategy.
+
+#### 4.4.2 Transport Strategy
+
+**Current Status**: ✅ **Aligned** - Both platforms always dual-send (LAN + cloud simultaneously).
+
+**Android** (`FallbackSyncTransport.kt`):
+- **Always Dual-Send**: Always sends to both LAN and cloud simultaneously
+  - No conditional check - always attempts both transports
+  - Best-effort practice for maximum reliability
+- **LAN Timeout**: 3-second timeout for LAN transport
+- **Transport Marking**: Marks device as connected via LAN or cloud after successful send
+- **Error Handling**: Requires at least one transport to succeed (throws if both fail)
+
+**macOS** (`DualSyncTransport.swift`):
+- **Always Dual-Send**: Always sends to both LAN and cloud simultaneously
+  - No conditional check - always attempts both transports
+  - Best-effort practice for maximum reliability
+- **LAN Timeout**: 3-second timeout for LAN transport (same as Android)
+- **Error Handling**: Requires at least one transport to succeed (throws if both fail)
+
+**Key Differences**:
+| Feature | Android | macOS |
+|---------|---------|-------|
+| Dual-Send Strategy | Always ✅ | Always ✅ |
+| LAN Timeout | 3 seconds | 3 seconds |
+| Transport Selection | Always dual | Always dual |
+
+**Impact**: Both platforms now implement identical dual-send strategy, ensuring maximum reliability by attempting both LAN and cloud transports simultaneously.
+
+#### 4.4.3 Device Pairing Logic
+
+**Current Status**: ⚠️ **Partially Aligned** - Android supports LAN auto-discovery pairing, macOS primarily uses relay-based pairing.
+
+**Android** (`LanPairingViewModel.kt`):
+- **LAN Auto-Discovery**: Special handling for LAN pairing
+  - Signature verification can be skipped if `payload.signature == "LAN_AUTO_DISCOVERY"`
+  - Relies on TLS fingerprint verification instead
+- **Pairing Methods**: Supports both LAN WebSocket and Relay-based pairing
+- **Device ID Handling**: Uses device ID from pairing result, falls back to peer attributes or service name
+
+**macOS** (`PairingSession.swift`):
+- **Remote Pairing**: Primarily designed for relay-based pairing
+  - No special "LAN_AUTO_DISCOVERY" signature handling
+  - Always verifies signatures
+- **Pairing Methods**: Relay-based primarily
+- **Device ID Handling**: Uses Android device ID from challenge message directly
+
+**Key Differences**:
+| Feature | Android | macOS |
+|---------|---------|-------|
+| LAN Auto-Discovery | Yes (skips signature) | No (always verifies) |
+| Pairing Method | LAN WebSocket + Relay | Relay-based primarily |
+| Signature Verification | Conditional (LAN skips) | Always required |
+
+**Impact**: Android has more flexible pairing options (LAN + Relay), while macOS is primarily relay-based. LAN auto-discovery pairing is a convenience feature that could be added to macOS in the future.
+
+#### 4.4.4 Summary
+
+**Aligned Features** ✅:
+1. **Sync Target Selection**: Both sync to all paired devices (best-effort)
+2. **Dual-Send Strategy**: Both always send to LAN and cloud simultaneously
+3. **Error Handling**: Both continue with other targets/devices on error
+
+**Platform-Specific Optimizations**:
+1. **macOS**: Queue-based message persistence (1-minute window) - more robust for network transitions
+2. **Android**: Simple wait strategy (10 seconds) - lighter weight for mobile
+
+**Future Enhancements**:
+1. **macOS LAN Auto-Discovery**: Add LAN pairing with TLS fingerprint verification (same as Android)
+2. **Unified Pairing Flow**: Consider standardizing pairing methods across platforms
+
 ### 4.3 Backend Relay
 
 #### 4.3.1 Project Structure
@@ -808,8 +924,8 @@ docker run -p 8080:8080 hypo-relay
 
 ---
 
-**Document Version**: 0.2.3  
-**Last Updated**: November 26, 2025  
+**Document Version**: 0.2.4  
+**Last Updated**: December 30, 2025  
 **Status**: Production Beta  
 **Authors**: Principal Engineering Team
 

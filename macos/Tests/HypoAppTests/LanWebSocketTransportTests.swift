@@ -5,12 +5,12 @@ import FoundationNetworking
 import XCTest
 @testable import HypoApp
 
-final class LanWebSocketTransportTests: XCTestCase {
+final class WebSocketTransportTests: XCTestCase {
     func testConnectResolvesAfterHandshake() async throws {
         let expectation = expectation(description: "handshake")
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = LanWebSocketTransport(
+        let transport = WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             sessionFactory: { _, _ in session }
         )
@@ -28,7 +28,7 @@ final class LanWebSocketTransportTests: XCTestCase {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
         let codec = TransportFrameCodec()
-        let transport = LanWebSocketTransport(
+        let transport = WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             frameCodec: codec,
             sessionFactory: { _, _ in session }
@@ -56,7 +56,7 @@ final class LanWebSocketTransportTests: XCTestCase {
     func testIdleTimeoutCancelsTask() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = LanWebSocketTransport(
+        let transport = WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil, idleTimeout: 0.05),
             sessionFactory: { _, _ in session }
         )
@@ -80,7 +80,7 @@ final class LanWebSocketTransportTests: XCTestCase {
         let codec = TransportFrameCodec()
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = LanWebSocketTransport(
+        let transport = WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             frameCodec: codec,
             metricsRecorder: metrics,
@@ -112,7 +112,7 @@ final class LanWebSocketTransportTests: XCTestCase {
     func testReconnectAfterDisconnect() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = LanWebSocketTransport(
+        let transport = WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             sessionFactory: { _, _ in session }
         )

@@ -66,13 +66,16 @@ class SettingsViewModel @Inject constructor(
     private fun observeState() {
         viewModelScope.launch {
             // Event-driven: UI updates automatically when any of these flows emit
+            // The accessibilityStatusFlow and smsPermissionStatusFlow are already included in combine,
+            // so they will emit every 2 seconds and trigger UI updates automatically.
+            // No need for separate collectors - they would never execute anyway since collect() suspends indefinitely.
             combine(
                 settingsRepository.settings,
                 transportManager.peers,  // Emits when peers are discovered/lost
                 transportManager.lastSuccessfulTransport,  // Emits when transport status changes
                 transportManager.cloudConnectionState,  // Emits when cloud connection state changes
-                accessibilityStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) }, // Emit immediately on start
-                smsPermissionStatusFlow.onStart { emit(checkSmsPermissionStatus()) } // Emit immediately on start
+                accessibilityStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) }, // Emit immediately on start, then every 2 seconds
+                smsPermissionStatusFlow.onStart { emit(checkSmsPermissionStatus()) } // Emit immediately on start, then every 2 seconds
             ) { values ->
                 val settings = values[0] as UserSettings
                 val peers = values[1] as List<DiscoveredPeer>
@@ -195,14 +198,10 @@ class SettingsViewModel @Inject constructor(
             }.collect { state ->
                 _state.value = state
             }
-            
-            // Also observe accessibility and SMS permission status separately to update them periodically
-            accessibilityStatusFlow.collect { isEnabled ->
-                _state.value = _state.value.copy(isAccessibilityServiceEnabled = isEnabled)
-            }
-            smsPermissionStatusFlow.collect { isGranted ->
-                _state.value = _state.value.copy(isSmsPermissionGranted = isGranted)
-            }
+            // Note: The separate collectors for accessibilityStatusFlow and smsPermissionStatusFlow
+            // were removed because they would never execute (collect() above suspends indefinitely).
+            // The flows are already included in the combine() above, so they will emit every 2 seconds
+            // and trigger UI updates automatically through the combine collector.
         }
     }
 

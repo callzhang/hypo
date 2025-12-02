@@ -550,7 +550,7 @@ class TransportManagerTest {
         }
 
         assertTrue(flushed)
-        assertEquals(ConnectionState.Idle, manager.connectionState.value)
+        assertEquals(ConnectionState.Disconnected, manager.connectionState.value)
         scope.runCurrent()
         scope.cancel()
     }

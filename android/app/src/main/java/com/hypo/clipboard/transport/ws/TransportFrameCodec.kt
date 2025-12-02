@@ -15,7 +15,7 @@ class TransportFrameCodec(
         ignoreUnknownKeys = false
         namingStrategy = JsonNamingStrategy.SnakeCase
     },
-    private val maxPayloadBytes: Int = 10 * 1024 * 1024 // 10MB
+    private val maxPayloadBytes: Int = 256 * 1024
 ) {
     fun encode(envelope: SyncEnvelope): ByteArray {
         val payload = json.encodeToString(envelope).encodeToByteArray()

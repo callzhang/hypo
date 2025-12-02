@@ -22,7 +22,6 @@ import androidx.core.app.NotificationManagerCompat
 import com.hypo.clipboard.MainActivity
 import com.hypo.clipboard.R
 import com.hypo.clipboard.data.ClipboardRepository
-import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.service.ClipboardAccessibilityService
 import com.hypo.clipboard.sync.ClipboardListener
 import com.hypo.clipboard.sync.ClipboardParser
@@ -30,13 +29,7 @@ import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.sync.SyncCoordinator
 import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.LanRegistrationConfig
-import com.google.crypto.tink.subtle.X25519
-import com.google.crypto.tink.subtle.Ed25519Sign
 import dagger.hilt.android.AndroidEntryPoint
-import android.util.Base64
-import java.security.MessageDigest
-import java.time.Duration
-import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
@@ -57,11 +50,9 @@ class ClipboardSyncService : Service() {
     @Inject lateinit var deviceIdentity: DeviceIdentity
     @Inject lateinit var repository: ClipboardRepository
     @Inject lateinit var incomingClipboardHandler: com.hypo.clipboard.sync.IncomingClipboardHandler
-    @Inject lateinit var lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient
-    @Inject lateinit var relayWebSocketClient: com.hypo.clipboard.transport.ws.RelayWebSocketClient
+    @Inject lateinit var lanWebSocketClient: com.hypo.clipboard.transport.ws.LanWebSocketClient
     @Inject lateinit var clipboardAccessChecker: com.hypo.clipboard.sync.ClipboardAccessChecker
     @Inject lateinit var connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber
-    @Inject lateinit var pairingHandshakeManager: com.hypo.clipboard.pairing.PairingHandshakeManager
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var listener: ClipboardListener
@@ -92,13 +83,7 @@ class ClipboardSyncService : Service() {
         }
 
         val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        val parser = ClipboardParser(
-            contentResolver = contentResolver,
-            onFileTooLarge = { filename, size ->
-                // Show warning notification when file exceeds 10MB
-                showFileTooLargeWarning(filename, size)
-            }
-        )
+        val parser = ClipboardParser(contentResolver)
         val clipboardCallback: suspend (com.hypo.clipboard.sync.ClipboardEvent) -> Unit = { event ->
             syncCoordinator.onClipboardEvent(event)
         }
@@ -111,57 +96,12 @@ class ClipboardSyncService : Service() {
         )
 
         syncCoordinator.start(scope)
-        val lanConfig = buildLanRegistrationConfig()
-        transportManager.start(lanConfig)
-        
-        // Set up pairing challenge handler for WebSocket server (incoming connections)
-        transportManager.setPairingChallengeHandler { challengeJson ->
-            try {
-                // Load persistent LAN pairing private key
-                val prefs = getSharedPreferences("hypo_pairing_keys", Context.MODE_PRIVATE)
-                val privateKeyBase64 = prefs.getString("lan_agreement_private_key", null)
-                if (privateKeyBase64 == null) {
-                    Log.e(TAG, "❌ Pairing: No LAN private key found (available keys: ${prefs.all.keys})")
-                    return@setPairingChallengeHandler null
-                }
-                
-                val privateKey = android.util.Base64.decode(privateKeyBase64, android.util.Base64.NO_WRAP)
-                val ackJson = pairingHandshakeManager.handleChallenge(challengeJson, privateKey)
-                
-                if (ackJson != null) {
-                    Log.d(TAG, "✅ Pairing: Challenge handled → ACK generated (${ackJson.length} chars)")
-                } else {
-                    Log.e(TAG, "❌ Pairing: Failed to generate ACK from challenge")
-                }
-                ackJson
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Pairing: Error handling challenge - ${e.javaClass.simpleName}: ${e.message}", e)
-                null
-            }
+        transportManager.start(buildLanRegistrationConfig())
+        lanWebSocketClient.setIncomingClipboardHandler { envelope ->
+            incomingClipboardHandler.handle(envelope)
         }
-        
-        lanWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
-            incomingClipboardHandler.handle(envelope, origin)
-        }
-        relayWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
-            incomingClipboardHandler.handle(envelope, origin)
-        }
-        // Set handler for LAN WebSocket server (incoming connections from other devices)
-        transportManager.setIncomingClipboardHandler { envelope, origin ->
-            incomingClipboardHandler.handle(envelope, origin)
-        }
-        
-        // Start receiving connections for both LAN and cloud
-        // NOTE: relayWebSocketClient creates its own WebSocketTransportClient instance,
-        // so calling startReceiving() on both creates TWO separate connections.
-        // Only call startReceiving() on relayWebSocketClient for cloud relay.
-        // lanWebSocketClient.startReceiving() is for LAN connections only.
-        lanWebSocketClient.startReceiving()  // For LAN connections
-        relayWebSocketClient.startReceiving()  // For cloud relay (creates separate connection)
         ensureClipboardPermissionAndStartListener()
         observeLatestItem()
-        // Ensure database latest entry matches current clipboard on startup
-        ensureDatabaseMatchesCurrentClipboard()
         registerScreenStateReceiver()
         registerNetworkChangeCallback()
         connectionStatusProber.start()
@@ -205,19 +145,7 @@ class ClipboardSyncService : Service() {
                 stopSelf()
             }
         }
-
-        // Ensure LAN advertising is running (START_STICKY restarts may drop NSD registration)
-        ensureLanAdvertising()
         return START_STICKY
-    }
-
-    private fun ensureLanAdvertising() {
-        // Only start if not already advertising
-        if (!transportManager.isAdvertising.value) {
-            val lanConfig = buildLanRegistrationConfig()
-            Log.d(TAG, "🔁 ensureLanAdvertising: restarting transportManager with serviceName=${lanConfig.serviceName}")
-            transportManager.start(lanConfig)
-        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -225,8 +153,6 @@ class ClipboardSyncService : Service() {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
-            
-            // Main sync channel
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.service_notification_channel_name),
@@ -238,19 +164,6 @@ class ClipboardSyncService : Service() {
                 enableVibration(false)
             }
             manager.createNotificationChannel(channel)
-            
-            // Warning channel (for file size warnings)
-            val warningChannel = NotificationChannel(
-                WARNING_CHANNEL_ID,
-                getString(R.string.warning_notification_channel_name),
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = getString(R.string.warning_notification_channel_description)
-                setShowBadge(true)
-                enableLights(true)
-                enableVibration(true)
-            }
-            manager.createNotificationChannel(warningChannel)
         }
     }
 
@@ -338,86 +251,6 @@ class ClipboardSyncService : Service() {
         }
     }
 
-    /**
-     * Ensures the database's latest entry matches the current clipboard on startup.
-     * If they don't match, updates the database to reflect the current clipboard.
-     * This prevents old items from being considered as "latest" when the app restarts.
-     */
-    private fun ensureDatabaseMatchesCurrentClipboard() {
-        scope.launch(Dispatchers.Default) {
-            try {
-                val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val parser = ClipboardParser(
-                    contentResolver = contentResolver,
-                    onFileTooLarge = { filename, size ->
-                        showFileTooLargeWarning(filename, size)
-                    }
-                )
-                
-                val clip = clipboardManager.primaryClip ?: return@launch
-                val currentEvent = parser.parse(clip) ?: return@launch
-                
-                val latestEntry = repository.getLatestEntry()
-                
-                // If database has a latest entry, check if it matches current clipboard
-                if (latestEntry != null) {
-                    val currentItem = ClipboardItem(
-                        id = currentEvent.id,
-                        type = currentEvent.type,
-                        content = currentEvent.content,
-                        preview = currentEvent.preview,
-                        metadata = currentEvent.metadata.ifEmpty { emptyMap() },
-                        deviceId = deviceIdentity.deviceId,
-                        deviceName = deviceIdentity.deviceName,
-                        createdAt = currentEvent.createdAt,
-                        isPinned = false,
-                        isEncrypted = false,
-                        transportOrigin = null
-                    )
-                    
-                    // If current clipboard doesn't match database latest, update database
-                    if (!currentItem.matchesContent(latestEntry)) {
-                        Log.d(TAG, "🔄 Current clipboard doesn't match database latest entry - updating database")
-                        // Update the timestamp of the matching entry if it exists in history, or create new entry
-                        val matchingEntry = repository.findMatchingEntryInHistory(currentItem)
-                        if (matchingEntry != null) {
-                            // Found in history - move it to top with current time
-                            repository.updateTimestamp(matchingEntry.id, Instant.now())
-                            Log.d(TAG, "✅ Moved matching history item to top")
-                        } else {
-                            // Not in history - add as new entry (but don't send it - it's the current clipboard)
-                            repository.upsert(currentItem)
-                            Log.d(TAG, "✅ Added current clipboard to database as latest entry")
-                        }
-                    } else {
-                        Log.d(TAG, "✅ Database latest entry matches current clipboard")
-                    }
-                } else {
-                    // No latest entry in database - add current clipboard (but don't send it)
-                    val currentItem = ClipboardItem(
-                        id = currentEvent.id,
-                        type = currentEvent.type,
-                        content = currentEvent.content,
-                        preview = currentEvent.preview,
-                        metadata = currentEvent.metadata.ifEmpty { emptyMap() },
-                        deviceId = deviceIdentity.deviceId,
-                        deviceName = deviceIdentity.deviceName,
-                        createdAt = currentEvent.createdAt,
-                        isPinned = false,
-                        isEncrypted = false,
-                        transportOrigin = null
-                    )
-                    repository.upsert(currentItem)
-                    Log.d(TAG, "✅ Added current clipboard to empty database")
-                }
-            } catch (e: SecurityException) {
-                Log.d(TAG, "🔒 Cannot access clipboard to sync with database: ${e.message}")
-            } catch (e: Exception) {
-                Log.w(TAG, "⚠️ Error ensuring database matches current clipboard: ${e.message}", e)
-            }
-        }
-    }
-
     private fun pauseListener() {
         if (isPaused) return
         listener.stop()
@@ -500,69 +333,17 @@ class ClipboardSyncService : Service() {
     
     private fun registerNetworkChangeCallback() {
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        
-        // Get the current active network BEFORE registering callback
-        // This prevents the initial onAvailable() calls from triggering false network changes
-        val currentNetwork = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            connectivityManager.activeNetwork
-        } else {
-            null
-        }
-        val currentNetworkId = currentNetwork?.hashCode()
-        
-        var lastNetworkChangeTime = 0L
-        var lastActiveNetworkId: Int? = currentNetworkId  // Initialize with current network
-        val networkChangeDebounceMs = 5000L // 5 seconds debounce (increased from 2s)
-        
-        android.util.Log.d(TAG, "🌐 Registering network callback - current network ID: $currentNetworkId")
-        
         networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: android.net.Network) {
                 super.onAvailable(network)
-                val now = System.currentTimeMillis()
-                val networkId = network.hashCode()
-                
-                android.util.Log.d(TAG, "🌐 onAvailable() called for network ID: $networkId (current active: $currentNetworkId, lastActive: $lastActiveNetworkId)")
-                
-                // Check if this is actually a new network (different network ID)
-                if (lastActiveNetworkId == networkId) {
-                    android.util.Log.d(TAG, "🌐 Network available but same network ID ($networkId) - ignoring (initial callback)")
-                    return
-                }
-                
-                // If this is the initial callback for the current network, ignore it
-                if (currentNetworkId != null && networkId == currentNetworkId && lastActiveNetworkId == currentNetworkId) {
-                    android.util.Log.d(TAG, "🌐 Initial callback for current network ($networkId) - ignoring")
-                    return
-                }
-                
-                if (now - lastNetworkChangeTime < networkChangeDebounceMs) {
-                    android.util.Log.d(TAG, "🌐 Network change debounced (${now - lastNetworkChangeTime}ms since last)")
-                    return
-                }
-                lastNetworkChangeTime = now
-                lastActiveNetworkId = networkId
-                android.util.Log.d(TAG, "🌐 New network became available (ID: $networkId) - restarting LAN services and reconnecting cloud")
-                // Restart LAN services to update IP address in Bonjour/NSD and WebSocket server
-                transportManager.restartForNetworkChange()
-                // Reconnect cloud WebSocket to use new IP address (debounced to avoid cancelling in-progress connections)
-                scope.launch {
-                    kotlinx.coroutines.delay(1000) // Wait 1 second to let any in-progress connection complete
-                    relayWebSocketClient.reconnect()
-                }
+                android.util.Log.d(TAG, "🌐 Network became available - triggering immediate probe")
                 connectionStatusProber.probeNow()
             }
 
             override fun onLost(network: android.net.Network) {
                 super.onLost(network)
-                val networkId = network.hashCode()
-                if (lastActiveNetworkId == networkId) {
-                    lastActiveNetworkId = null
-                    android.util.Log.d(TAG, "🌐 Network lost (ID: $networkId) - triggering immediate probe")
-                    connectionStatusProber.probeNow()
-                } else {
-                    android.util.Log.d(TAG, "🌐 Network lost but not the active one (ID: $networkId) - ignoring")
-                }
+                android.util.Log.d(TAG, "🌐 Network lost - triggering immediate probe")
+                connectionStatusProber.probeNow()
             }
 
             override fun onCapabilitiesChanged(
@@ -570,10 +351,8 @@ class ClipboardSyncService : Service() {
                 networkCapabilities: android.net.NetworkCapabilities
             ) {
                 super.onCapabilitiesChanged(network, networkCapabilities)
-                // Ignore capability changes - they fire too frequently for minor changes
-                // (signal strength, bandwidth, etc.) without actual network changes
-                // Only react to actual network availability changes (onAvailable/onLost)
-                android.util.Log.v(TAG, "🌐 Network capabilities changed (ID: ${network.hashCode()}) - ignoring (too frequent)")
+                android.util.Log.d(TAG, "🌐 Network capabilities changed - triggering immediate probe")
+                connectionStatusProber.probeNow()
             }
         }
         val request = android.net.NetworkRequest.Builder()
@@ -608,10 +387,6 @@ class ClipboardSyncService : Service() {
         Log.d(TAG, "Screen ON - resuming WebSocket connections")
         // Restart transport will reconnect when needed
         transportManager.start(buildLanRegistrationConfig())
-        // Restart cloud connection to ensure it reconnects after screen was off
-        // The connection loop should handle reconnection automatically, but calling startReceiving()
-        // ensures the connection job is active if it was stopped
-        relayWebSocketClient.startReceiving()
     }
     
     private fun checkAppForegroundState() {
@@ -636,7 +411,7 @@ class ClipboardSyncService : Service() {
         if (isForeground != isAppInForeground) {
             isAppInForeground = isForeground
             val status = if (isForeground) "FOREGROUND" else "BACKGROUND"
-            Log.d(TAG, "📱 App state: $status")
+            Log.i(TAG, "📱 App state: $status")
             if (!isForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAccessibilityServiceEnabled) {
                 Log.w(TAG, "⚠️ Clipboard access BLOCKED in background. Enable accessibility service for background access.")
             }
@@ -739,10 +514,10 @@ class ClipboardSyncService : Service() {
             }
         }
         
-        Log.d(TAG, "📱 Opening clipboard permission settings...")
+        Log.i(TAG, "📱 Opening clipboard permission settings...")
         runCatching { 
             startActivity(intent)
-            Log.d(TAG, "✅ Settings activity started")
+            Log.i(TAG, "✅ Settings activity started")
         }.onFailure { e ->
             Log.e(TAG, "❌ Failed to open settings: ${e.message}", e)
         }
@@ -792,122 +567,20 @@ class ClipboardSyncService : Service() {
             packageInfo.versionName ?: DEFAULT_VERSION
         }.getOrDefault(DEFAULT_VERSION)
 
-        // Load or generate persistent pairing keys for LAN auto-discovery
-        val (publicKeyBase64, signingPublicKeyBase64) = loadOrCreatePairingKeys()
-
-        // Derive fingerprint from the LAN agreement public key (stable across restarts)
-        val fingerprint = publicKeyBase64
-            ?.let { Base64.decode(it, Base64.DEFAULT) }
-            ?.let { sha256Hex(it) }
-            ?: TransportManager.DEFAULT_FINGERPRINT
-
         return LanRegistrationConfig(
             serviceName = deviceIdentity.deviceId,
             port = TransportManager.DEFAULT_PORT,
-            fingerprint = fingerprint,
+            fingerprint = TransportManager.DEFAULT_FINGERPRINT,
             version = version,
             protocols = TransportManager.DEFAULT_PROTOCOLS,
-            deviceId = deviceIdentity.deviceId,
-            publicKey = publicKeyBase64,
-            signingPublicKey = signingPublicKeyBase64
+            deviceId = deviceIdentity.deviceId
         )
-    }
-
-    private fun sha256Hex(bytes: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
-        val sb = StringBuilder(digest.size * 2)
-        for (b in digest) {
-            sb.append(String.format("%02x", b))
-        }
-        return sb.toString()
-    }
-    
-    private fun loadOrCreatePairingKeys(): Pair<String?, String?> {
-        return try {
-            val prefs = getSharedPreferences("hypo_pairing_keys", Context.MODE_PRIVATE)
-            
-            // Load or create Curve25519 key agreement key
-            val agreementKeyBase64 = prefs.getString("lan_agreement_public_key", null)
-            val agreementPublicKey = if (agreementKeyBase64 != null) {
-                agreementKeyBase64
-            } else {
-                // Generate new key pair
-                val privateKey = X25519.generatePrivateKey()
-                val publicKey = X25519.publicFromPrivate(privateKey)
-                val publicKeyBase64 = android.util.Base64.encodeToString(publicKey, android.util.Base64.NO_WRAP)
-                // Store private key (for later use during pairing)
-                val privateKeyBase64 = android.util.Base64.encodeToString(privateKey, android.util.Base64.NO_WRAP)
-                prefs.edit()
-                    .putString("lan_agreement_public_key", publicKeyBase64)
-                    .putString("lan_agreement_private_key", privateKeyBase64)
-                    .apply()
-                Log.d(TAG, "🔑 Generated new LAN pairing agreement key")
-                publicKeyBase64
-            }
-            
-            // Load or create Ed25519 signing key
-            val signingKeyBase64 = prefs.getString("lan_signing_public_key", null)
-            val signingPublicKey = if (signingKeyBase64 != null) {
-                signingKeyBase64
-            } else {
-                // Generate new signing key pair using Ed25519Sign.KeyPair
-                val keyPair = Ed25519Sign.KeyPair.newKeyPair()
-                val publicKey = keyPair.publicKey
-                val privateKey = keyPair.privateKey
-                val publicKeyBase64 = android.util.Base64.encodeToString(publicKey, android.util.Base64.NO_WRAP)
-                // Store private key (for signing QR payloads)
-                val privateKeyBase64 = android.util.Base64.encodeToString(privateKey, android.util.Base64.NO_WRAP)
-                prefs.edit()
-                    .putString("lan_signing_public_key", publicKeyBase64)
-                    .putString("lan_signing_private_key", privateKeyBase64)
-                    .apply()
-                Log.d(TAG, "🔑 Generated new LAN pairing signing key")
-                publicKeyBase64
-            }
-            
-            Pair(agreementPublicKey, signingPublicKey)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load/create pairing keys: ${e.message}", e)
-            Pair(null, null)
-        }
-    }
-
-    private fun showFileTooLargeWarning(filename: String, size: Long) {
-        val sizeMB = size / (1024.0 * 1024.0)
-        val maxMB = 10.0
-        val message = getString(R.string.file_too_large_warning, filename, String.format("%.1f", sizeMB), String.format("%.0f", maxMB))
-        
-        val contentIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val contentPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            contentIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        val notification = NotificationCompat.Builder(this, WARNING_CHANNEL_ID)
-            .setContentTitle(getString(R.string.file_too_large_title))
-            .setContentText(message)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(contentPendingIntent)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ERROR)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .build()
-        
-        notificationManager.notify(WARNING_NOTIFICATION_ID, notification)
-        Log.w(TAG, "⚠️ File too large: $filename (${size / (1024 * 1024)}MB)")
     }
 
     companion object {
         private const val TAG = "ClipboardSyncService"
         private const val CHANNEL_ID = "clipboard-sync"
-        private const val WARNING_CHANNEL_ID = "clipboard-warnings"
         private const val NOTIFICATION_ID = 42
-        private const val WARNING_NOTIFICATION_ID = 43
         private const val DEFAULT_VERSION = "1.0.0"
         private const val ACTION_PAUSE = "com.hypo.clipboard.action.PAUSE"
         private const val ACTION_RESUME = "com.hypo.clipboard.action.RESUME"

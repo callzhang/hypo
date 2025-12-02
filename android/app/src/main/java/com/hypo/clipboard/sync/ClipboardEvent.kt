@@ -10,11 +10,9 @@ data class ClipboardEvent(
     val preview: String,
     val metadata: Map<String, String>,
     val createdAt: Instant,
-    val deviceId: String? = null,  // Normalized to lowercase for consistent matching
-    val deviceName: String? = null,
-    val skipBroadcast: Boolean = false,
-    val isEncrypted: Boolean = false,
-    val transportOrigin: com.hypo.clipboard.domain.model.TransportOrigin? = null
+    val sourceDeviceId: String? = null,
+    val sourceDeviceName: String? = null,
+    val skipBroadcast: Boolean = false
 )
 
 fun ClipboardEvent.signature(): String {

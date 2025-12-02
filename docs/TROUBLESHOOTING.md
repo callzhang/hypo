@@ -1,10 +1,8 @@
 # Hypo Troubleshooting Guide
 
 **Comprehensive troubleshooting for Hypo clipboard sync**  
-**Version**: 0.2.3 Beta  
-**Last Updated**: December 30, 2025
-
-> **Note**: As of November 2025, all critical bugs have been resolved. The system is production-ready. If you encounter issues, they are likely related to network configuration or device-specific settings.
+**Version**: 0.1.0 Beta  
+**Last Updated**: October 11, 2025
 
 ---
 
@@ -30,156 +28,6 @@
    - Check if it appears on the other within 10 seconds
 
 **If these don't work, continue to specific troubleshooting sections below.**
-
----
-
-## 📋 Viewing Logs
-
-Hypo uses `os_log` (via `HypoLogger`) for system-integrated logging on macOS. All logs are visible in Console.app and via the `log` command-line tool.
-
-### macOS Unified Logging
-
-#### Method 1: Console.app (Recommended)
-
-1. Open **Console.app** (Applications → Utilities → Console)
-2. In the sidebar, select your Mac under "Devices"
-3. Use the search bar to filter logs:
-   - **Subsystem**: `com.hypo.clipboard`
-   - **Category**: Filter by specific categories (e.g., `LanWebSocketServer`, `TransportManager`, `SyncEngine`)
-   - **Search terms**: Use keywords like "pairing", "connection", "error", etc.
-
-**Tips:**
-- Enable "Include Info Messages" and "Include Debug Messages" in Console preferences
-- Use the filter bar to narrow down by subsystem/category
-- Logs are color-coded by level (debug=gray, info=blue, error=red)
-
-#### Method 2: Command Line (`log` command)
-
-```bash
-# Real-time streaming (recommended)
-log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug --style compact
-
-# View recent logs
-log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m --level debug --style compact
-
-# Find message by content
-log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m --level debug | grep -F "content: Case 1:"
-
-# Process-based fallback
-log show --predicate 'process == "HypoMenuBar"' --last 5m --style compact
-
-# View logs for a specific category
-log show --predicate 'subsystem == "com.hypo.clipboard" && category == "LanWebSocketServer"' --last 1h
-
-# View only errors
-log show --predicate 'subsystem == "com.hypo.clipboard" && eventType == "errorEvent"' --last 1h
-```
-
-#### Method 3: Filter by Process
-
-```bash
-# Find the process ID
-ps aux | grep HypoMenuBar
-
-# Stream logs for that process
-log stream --predicate 'processID == <PID>' --level debug
-```
-
-### Android Logs
-
-**⚠️ Always filter MIUIInput** - Add `| grep -v "MIUIInput"` to all `adb logcat` commands:
-
-```bash
-# Filter by PID (excludes MIUIInput, SKIA, VRI, RenderThread)
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -vE "MIUIInput|SKIA|VRI|RenderThread"
-
-# Simple usage (shows app logs only, no MIUIInput)
-adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep -v "MIUIInput"
-
-# With custom grep filters (excludes multiple patterns)
-adb -s $device_id logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep -E "SyncEngine|transport"
-
-# View recent logs (filters MIUIInput, SKIA, VRI, RenderThread)
-adb -s $device_id logcat -d -t 300 | grep -vE "MIUIInput|SKIA|VRI|RenderThread"
-
-# Find message by content (filters MIUIInput, SKIA, VRI, RenderThread)
-adb -s $device_id logcat -d | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep -F "content: Case 1:"
-```
-
-**Query database (most reliable, no filtering needed)**:
-```bash
-adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 10;'"
-```
-
-### Backend Logs
-
-```bash
-# View recent logs
-flyctl logs --app hypo --limit 100
-
-# Check routing
-flyctl logs --app hypo --limit 100 | grep -E "\[ROUTING\]|\[SEND_BINARY\]"
-
-# Check connected devices
-curl -s https://hypo.fly.dev/health | jq '.connected_devices'
-```
-
-### Log Categories
-
-Each component has its own category for easier filtering:
-
-| Category | Component |
-|----------|-----------|
-| `LanWebSocketServer` | WebSocket server for LAN connections |
-| `TransportManager` | Transport layer management |
-| `SyncEngine` | Clipboard sync engine |
-| `ClipboardMonitor` | Clipboard change monitoring |
-| `ConnectionStatusProber` | Network connectivity checking |
-| `HistoryStore` | Clipboard history storage |
-| `PairingSession` | Device pairing |
-| `IncomingClipboardHandler` | Incoming clipboard data handler |
-
-### Log Levels
-
-- **Debug**: Detailed diagnostic information (verbose)
-- **Info**: General informational messages (default)
-- **Notice**: Important but not error conditions
-- **Warning**: Warning conditions
-- **Error**: Error conditions
-- **Fault**: Critical errors
-
-### Filtering Examples
-
-```bash
-# View pairing-related logs
-log show --predicate 'subsystem == "com.hypo.clipboard" && composedMessage CONTAINS "pairing"' --last 1h
-
-# View connection errors
-log show --predicate 'subsystem == "com.hypo.clipboard" && (eventType == "errorEvent" || composedMessage CONTAINS "error")' --last 1h
-
-# View WebSocket server activity
-log stream --predicate 'subsystem == "com.hypo.clipboard" && category == "LanWebSocketServer"' --level debug
-
-# Export logs to file
-log show --predicate 'subsystem == "com.hypo.clipboard"' --last 1h > hypo_logs.txt
-```
-
-### Log Privacy
-
-All log messages use `.public` privacy level, meaning they're fully visible in logs. Sensitive data (like device IDs, keys) are logged but can be filtered if needed.
-
-### Log Troubleshooting
-
-**Logs not appearing?**
-1. Ensure the app is running
-2. Check that you're filtering by the correct subsystem: `com.hypo.clipboard`
-3. Enable debug-level logging if looking for debug messages
-4. Check Console.app preferences to ensure all log levels are enabled
-
-**Too many logs?**
-- Use category filters to narrow down (e.g., `category == "LanWebSocketServer"`)
-- Filter by log level (e.g., `eventType == "errorEvent"` for errors only)
-- Use time-based filtering with `--last` option
 
 ---
 
@@ -220,18 +68,6 @@ All log messages use `.public` privacy level, meaning they're fully visible in l
    **Router/Network Firewall**:
    - Ensure mDNS/Bonjour traffic allowed
    - Port range 1024-65535 open for local communication
-
-4. **Check Connection Status**
-   ```bash
-   # Backend health
-   curl -s https://hypo.fly.dev/health | jq '.connected_devices'
-   
-   # Android WebSocket (filter MIUIInput)
-   adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -E "WebSocket|connected|disconnected"
-   
-   # macOS WebSocket
-   log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "WebSocket|connected"
-   ```
 
 **Solutions**:
 
@@ -282,23 +118,6 @@ curl -I https://hypo.fly.dev/health
 - Verify relay server status at status.hypo.app
 - Clear app cache and restart
 - Re-pair devices to refresh cloud credentials
-
-### Problem: "Device Not Appearing After Pairing"
-
-**Debugging**:
-```bash
-# Check pairing completion (filter MIUIInput)
-log show --predicate 'subsystem == "com.hypo.clipboard"' --last 10m | grep "PairingCompleted"
-adb -s $device_id logcat | grep -v "MIUIInput" | grep "Key saved for device"
-
-# Check device ID format
-adb -s $device_id logcat | grep -v "MIUIInput" | grep "Key saved for device"
-```
-
-**Common Causes**:
-- Device ID format mismatch (UUID vs "android-UUID")
-- Notification not being posted/received
-- HistoryStore not processing notification
 
 ---
 
@@ -514,32 +333,6 @@ adb shell getprop ro.build.version.sdk
 adb shell pm grant com.hypo.clipboard android.permission.READ_CLIPBOARD
 ```
 
-#### Problem: "Sync Not Working"
-
-**Debugging** (filter by PID):
-```bash
-# View all logs (excluding MIUIInput)
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput"
-
-# Check clipboard events detected
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep -E "ClipboardListener|onPrimaryClipChanged"
-
-# Check sync targets
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep "Target devices now"
-
-# Check transport.send() called
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep "transport.send()"
-
-# Check WebSocket connection
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep -E "WebSocket|Connection"
-```
-
-**Common Causes**:
-- Clipboard permission not granted
-- Sync targets not including device ID
-- Encryption key missing
-- WebSocket connection not established
-
 ---
 
 ## 🔒 Security & Encryption Issues
@@ -552,16 +345,6 @@ adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipb
 1. Check both devices show same key fingerprint
 2. Verify system clocks are synchronized
 3. Check for pairing corruption
-
-**Debugging**:
-```bash
-# Check key exists
-security find-generic-password -w -s 'com.hypo.clipboard.keys' -a $device_id
-
-# Check decryption errors (filter MIUIInput)
-log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "Decryption failed|BAD_DECRYPT"
-adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -E "BAD_DECRYPT|MissingKey"
-```
 
 **Solutions**:
 
@@ -580,37 +363,6 @@ security delete-generic-password -s "Hypo-DeviceKey" -a "$(whoami)"
 # Android: Clear encrypted preferences
 adb shell pm clear com.hypo.clipboard
 ```
-
-### Problem: "Decryption Failures (BAD_DECRYPT)"
-
-**Causes**:
-- Key rotation (devices re-paired)
-- Wrong key in test script
-- Key not found on receiver
-
-**Solution**:
-
-### NSD/Bonjour IP Resolution Issues
-
-**Symptom**: Android discovers macOS at wrong IP address (e.g., discovers `10.0.0.137` when macOS actually has `10.0.0.146`)
-
-**Root Cause**: Android's NSD (Network Service Discovery) may return stale/cached IP addresses from mDNS cache, especially after network changes or when multiple network interfaces are present.
-
-**Verification**:
-1. On macOS, check actual IP: `ifconfig | grep "inet "` (should show `10.0.0.146`)
-2. On macOS, check Bonjour advertisement: `dns-sd -G v4 dereks-macbook-air-13.local` (should show `10.0.0.146`)
-3. Check Android logs: `adb logcat | grep "Service resolved"` (may show wrong IP like `10.0.0.137`)
-
-**Solution**:
-- NSD cache will eventually expire and refresh (usually within a few minutes)
-- Restart Android's NSD discovery by toggling WiFi or restarting the app
-- The connection will fail with the wrong IP, but retry logic should eventually reconnect with correct IP
-- This is a known Android NSD limitation - the app handles it gracefully with retry logic
-
-**Prevention**: The app logs detailed NSD resolution info (hostname, canonical name, address bytes) to help diagnose these issues.
-1. Re-pair devices to get new key
-2. Update test script key from keychain (prioritizes keychain over .env)
-3. Verify key format matches (64 hex chars)
 
 ### Problem: "Certificate Pinning Failures"
 
@@ -635,79 +387,25 @@ echo | openssl s_client -connect hypo.fly.dev:443 2>/dev/null | openssl x509 -fi
 
 ## 🧪 Testing & Diagnostics
 
-### Automated Test Matrix
+### Debug Mode Activation
 
+**macOS**:
 ```bash
-./tests/test-sync-matrix.sh
+# Enable debug logging
+defaults write com.hypo debugLogging -bool true
+
+# View logs
+tail -f ~/Library/Logs/Hypo/debug.log
 ```
 
-Tests all 8 combinations: Plaintext/Encrypted × Cloud/LAN × macOS/Android
-
-**Prerequisites**:
-- macOS with Xcode and Swift
-- Android device connected via USB with USB debugging enabled
-- OpenJDK 17, Android SDK configured
-- `flyctl` installed (for backend deployment)
-
-### Test Script Detection Logic
-
-The `test-sync-matrix.sh` script detects messages by:
-
-1. **Database Query** (Most Reliable)
-   - Android: SQLite database check
-   - macOS: UserDefaults check
-
-2. **Log Content Search**
-   - Searches for `content: <message>` in logs
-   - macOS: `log show --predicate 'subsystem == "com.hypo.clipboard"'`
-   - Android: `adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -F "content:"`
-
-3. **Handler Success Logs**
-   - macOS: `Received clipboard` or `Inserted entry`
-   - Android: `Decoded clipboard event`
-
-4. **Reception Indicators**
-   - Cloud: `onMessage` calls
-   - LAN: `Binary frame received`
-
-### Manual Testing Procedures
-
-#### Device Pairing
-
-**LAN Auto-Discovery** (Recommended):
-1. Ensure both devices on same Wi-Fi
-2. Android: Pair → LAN tab → Tap macOS device
-3. Verify pairing completes
-
-**QR Code Pairing**:
-1. macOS: Settings → Pair new device → QR tab
-2. Android: Pair → Scan QR Code
-
-#### Clipboard Sync Testing
-
-**Android → macOS**:
+**Android**:
 ```bash
-# Copy text on Android
-adb shell input text "Test from Android"
+# Enable developer options
+adb shell settings put global development_settings_enabled 1
 
-# Monitor logs (filter MIUIInput)
-adb -s $device_id logcat | grep -v "MIUIInput" | grep -E "Clipboard|Sync|transport"
-log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep -E "Received clipboard|content:"
+# Enable debug mode in app
+adb shell am start -n com.hypo.clipboard/.MainActivity --ez debug_mode true
 ```
-
-**macOS → Android**:
-```bash
-# Copy text on macOS
-echo "Test from macOS" | pbcopy
-
-# Monitor Android logs (filter MIUIInput)
-adb -s $device_id logcat | grep -v "MIUIInput" | grep -E "Clipboard|Sync|Received"
-```
-
-**Verification**:
-- Message content is logged: `content: <message>`
-- Check UI: macOS history (Cmd+Shift+V), Android history screen
-- Query logs: `grep -F "content: <message>"`
 
 ### Network Diagnostics
 
@@ -745,50 +443,35 @@ instruments -t "Leaks" -D leak_trace.trace /Applications/Hypo.app
 adb shell am start -n com.hypo.clipboard/.MainActivity --es profiling memory
 ```
 
-### Crash Report Analysis
+### Log Collection
 
-**Finding Crash Reports**:
+**Automated Log Collection**:
 ```bash
-# Find recent crash reports
-find ~/Library/Logs/DiagnosticReports -name "*HypoMenuBar*" -type f -mtime -1
+#!/bin/bash
+# collect_logs.sh - Gather diagnostic information
 
-# Extract crash location
-cat ~/Library/Logs/DiagnosticReports/HypoMenuBar-*.ips | \
-  grep -A 20 '"faultingThread"' | \
-  grep -E '"sourceFile"|"sourceLine"'
+echo "Collecting Hypo diagnostic logs..."
+
+# System information
+echo "=== System Info ===" > hypo_diagnostics.txt
+uname -a >> hypo_diagnostics.txt
+sw_vers >> hypo_diagnostics.txt  # macOS only
+
+# Network configuration
+echo "=== Network Config ===" >> hypo_diagnostics.txt
+ifconfig >> hypo_diagnostics.txt
+netstat -rn >> hypo_diagnostics.txt
+
+# App logs
+echo "=== App Logs ===" >> hypo_diagnostics.txt
+tail -100 ~/Library/Logs/Hypo/*.log >> hypo_diagnostics.txt
+
+# Process information
+echo "=== Process Info ===" >> hypo_diagnostics.txt
+ps aux | grep -i hypo >> hypo_diagnostics.txt
+
+echo "Logs collected in hypo_diagnostics.txt"
 ```
-
-**Common Crash Patterns**:
-
-**Array Index Out of Bounds**:
-- Symptom: `EXC_BREAKPOINT` at `Data.subscript.getter`
-- Fix: Add guard statements before array access
-
-**Force Unwrap Nil**:
-- Symptom: `EXC_BREAKPOINT` with `fatalError` in stack
-- Fix: Use optional binding or provide default values
-
-**Threading Issues**:
-- Symptom: Crashes in async/await code
-- Fix: Ensure `@MainActor` for UI operations, use proper synchronization
-
-### Common Testing Issues
-
-#### Messages Not Detected by Test Script
-
-**Symptoms**: Test script reports FAILED but messages appear in UI
-
-**Debugging**:
-```bash
-# Check database directly (most reliable)
-adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items WHERE preview LIKE \"%Case X:%\" LIMIT 1;'"
-
-# Check logs by content (filter MIUIInput)
-log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -F "content: Case X:"
-adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -F "content: Case X:"
-```
-
-**Solution**: Test script may need time window adjustment or log query refinement
 
 ---
 
@@ -890,6 +573,7 @@ killall Hypo
 # Remove all Hypo data
 rm -rf ~/Library/Preferences/com.hypo.*
 rm -rf ~/Library/Application\ Support/Hypo
+rm -rf ~/Library/Logs/Hypo
 
 # Clear keychain
 security delete-generic-password -s "Hypo" 2>/dev/null
@@ -909,55 +593,7 @@ adb shell am start -n com.hypo.clipboard/.MainActivity
 
 ---
 
-## 📚 Quick Reference
-
-### One-liners
-
-**Android** (filter MIUIInput):
-```bash
-adb -s $device_id logcat -d -t 500 | grep -v "MIUIInput" | grep -F "content:" && \
-adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 5;'"
-```
-
-**macOS**:
-```bash
-log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -F "content:" && \
-defaults read com.hypo.clipboard history_entries | grep -F "Case"
-```
-
-**Backend**:
-```bash
-flyctl logs --app hypo --limit 100 | grep -E "\[ROUTING\]" && \
-curl -s https://hypo.fly.dev/health | jq '.connected_devices'
-```
-
-### Key Files
-
-- **macOS crash reports**: `~/Library/Logs/DiagnosticReports/HypoMenuBar-*.ips`
-- **macOS unified logs**: `log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug`
-- **Android logs**: `adb logcat` (always filter MIUIInput)
-- **Pairing flow**: `macos/Sources/HypoApp/Services/TransportManager.swift`
-- **Sync flow**: `macos/Sources/HypoApp/Services/HistoryStore.swift`
-- **Incoming handler**: `macos/Sources/HypoApp/Services/IncomingClipboardHandler.swift`
-- **WebSocket server**: `macos/Sources/HypoApp/Services/LanWebSocketServer.swift`
-- **Android handler**: `android/app/src/main/java/com/hypo/clipboard/sync/IncomingClipboardHandler.kt`
-
-### Testing Checklist
-
-- [ ] Devices paired (LAN or QR)
-- [ ] Both apps running with latest build
-- [ ] Log monitoring set up
-- [ ] Test matrix run: `./tests/test-sync-matrix.sh`
-- [ ] Android tests: Cases 2, 4, 6, 8 passing
-- [ ] macOS tests: Cases 1, 3, 5, 7 verified
-- [ ] Message content logged on both platforms
-- [ ] Database/UserDefaults verification working
-- [ ] No decryption failures
-- [ ] Connection status correct
-
----
-
-**Troubleshooting Guide Version**: 2.0  
-**Compatible with Hypo**: 0.2.3 Beta  
-**Last Updated**: December 30, 2025  
+**Troubleshooting Guide Version**: 1.0  
+**Compatible with Hypo**: 0.1.0 Beta  
+**Last Updated**: October 11, 2025  
 **For Additional Help**: support@hypo.app

@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 #if canImport(Security)
 import Security
@@ -17,29 +21,10 @@ public final class KeychainKeyStore: Sendable {
         self.service = service
         self.accessGroup = accessGroup
     }
-    
-    /// Normalizes device ID for consistent storage and lookup.
-    /// - Removes platform prefix if present (macos-/android-)
-    /// - Converts to lowercase
-    /// - Returns pure UUID in lowercase
-    private func normalizeDeviceId(_ deviceId: String) -> String {
-        // Remove platform prefix if present
-        let withoutPrefix: String
-        if deviceId.hasPrefix("macos-") {
-            withoutPrefix = String(deviceId.dropFirst("macos-".count))
-        } else if deviceId.hasPrefix("android-") {
-            withoutPrefix = String(deviceId.dropFirst("android-".count))
-        } else {
-            withoutPrefix = deviceId
-        }
-        // Normalize to lowercase for consistent storage
-        return withoutPrefix.lowercased()
-    }
 
     public func save(key: SymmetricKey, for deviceId: String) throws {
-        let normalizedId = normalizeDeviceId(deviceId)
         let data = key.withUnsafeBytes { Data($0) }
-        var query = baseQuery(for: normalizedId)
+        var query = baseQuery(for: deviceId)
         query[kSecValueData as String] = data
         // Set accessibility to avoid password prompts - accessible after first unlock
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -53,7 +38,7 @@ public final class KeychainKeyStore: Sendable {
                 kSecValueData as String: data,
                 kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             ]
-            let updateStatus = SecItemUpdate(baseQuery(for: normalizedId) as CFDictionary, attributes as CFDictionary)
+            let updateStatus = SecItemUpdate(baseQuery(for: deviceId) as CFDictionary, attributes as CFDictionary)
             guard updateStatus == errSecSuccess else {
                 throw KeychainError.unexpectedStatus(updateStatus)
             }
@@ -63,49 +48,6 @@ public final class KeychainKeyStore: Sendable {
     }
 
     public func load(for deviceId: String) throws -> SymmetricKey? {
-        let normalizedId = normalizeDeviceId(deviceId)
-        
-        // Try normalized ID first (primary lookup)
-        if let key = try loadInternal(for: normalizedId) {
-            return key
-        }
-        
-        // Fallback: Try original device ID (for backward compatibility with old keys)
-        if deviceId != normalizedId {
-            if let key = try loadInternal(for: deviceId) {
-                // Migrate to normalized ID for future lookups
-                let keyData = key.withUnsafeBytes { Data($0) }
-                try? save(key: SymmetricKey(data: keyData), for: normalizedId)
-                try? delete(for: deviceId)
-                return key
-            }
-        }
-        
-        // Fallback: Try with platform prefix (for backward compatibility)
-        if !deviceId.hasPrefix("macos-") && !deviceId.hasPrefix("android-") {
-            // Try with "macos-" prefix
-            if let key = try loadInternal(for: "macos-\(deviceId)") {
-                // Migrate to normalized ID
-                let keyData = key.withUnsafeBytes { Data($0) }
-                try? save(key: SymmetricKey(data: keyData), for: normalizedId)
-                try? delete(for: "macos-\(deviceId)")
-                return key
-            }
-            
-            // Try with "android-" prefix
-            if let key = try loadInternal(for: "android-\(deviceId)") {
-                // Migrate to normalized ID
-                let keyData = key.withUnsafeBytes { Data($0) }
-                try? save(key: SymmetricKey(data: keyData), for: normalizedId)
-                try? delete(for: "android-\(deviceId)")
-                return key
-            }
-        }
-        
-        return nil
-    }
-    
-    private func loadInternal(for deviceId: String) throws -> SymmetricKey? {
         var query = baseQuery(for: deviceId)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -127,8 +69,7 @@ public final class KeychainKeyStore: Sendable {
     }
 
     public func delete(for deviceId: String) throws {
-        let normalizedId = normalizeDeviceId(deviceId)
-        let status = SecItemDelete(baseQuery(for: normalizedId) as CFDictionary)
+        let status = SecItemDelete(baseQuery(for: deviceId) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)
         }

@@ -560,14 +560,6 @@ shared_secret = ECDH(client_private_key, server_public_key)
 encryption_key = HKDF-SHA256(shared_secret, salt="hypo-clipboard-v1", length=32)
 ```
 
-**Key Rotation During Pairing** (Implemented November 2025):
-- Keys are always rotated during pairing requests, even when re-pairing with existing devices
-- Both initiator and responder generate new ephemeral Curve25519 key pairs for each pairing attempt
-- The responder includes its ephemeral public key in the ACK message
-- The initiator re-derives the shared key using ephemeral keys on both sides: `derive(initiator_ephemeral_private, responder_ephemeral_public)`
-- This ensures forward secrecy and prevents key reuse attacks
-- No key reuse across pairing sessions
-
 **Encryption Process**:
 ```
 nonce = random_bytes(12)
@@ -657,41 +649,3 @@ See `tests/protocol-test-vectors.json` for encryption/decryption test vectors (c
 **Document Authors**: Principal Engineering Team  
 **Last Updated**: October 1, 2025
 
-
----
-
-## 5. Breaking Changes History
-
-### Device-Agnostic Pairing (November 2025) ✅ Implemented
-
-**Summary**: Pairing system refactored to support pairing between any devices (Android↔Android, macOS↔macOS, Android↔macOS, etc.), not just Android↔macOS.
-
-**Changes**:
-1. **Field Names**: Replaced platform-specific field names with role-based names
-   - `mac_device_id` → `peer_device_id` (QR payload) or `initiator_device_id`/`responder_device_id` (messages)
-   - `android_device_id` → `responder_device_id`
-   - `mac_pub_key` → `peer_pub_key` or `initiator_pub_key`/`responder_pub_key`
-
-2. **Platform Detection**: Platform now automatically detected from device ID prefixes
-   - `macos-{UUID}` for macOS devices
-   - `android-{UUID}` for Android devices
-   - `ios-{UUID}`, `windows-{UUID}`, `linux-{UUID}` for future platforms
-
-3. **Backward Compatibility**: Dual field support maintained during transition
-   - Old field names still accepted but deprecated
-   - New code should use role-based names only
-
-**Migration Path**:
-- **Clients**: Update to use new field names
-- **Backend**: Supports both old and new field names
-- **Timeline**: Old field names will be removed in v2.0
-
-**Status**: Fully deployed and operational in production
-
-For detailed migration information, see `/workspace/docs/archive/breaking_changes_pairing.md`
-
----
-
-**Document Version**: 1.0.0  
-**Last Updated**: November 26, 2025  
-**Status**: Production

@@ -33,9 +33,9 @@ public struct PairingRelayClient {
     }
 
     private struct CreatePairingCodeRequest: Encodable {
-        let initiator_device_id: String
-        let initiator_device_name: String
-        let initiator_public_key: String
+        let mac_device_id: String
+        let mac_device_name: String
+        let mac_public_key: String
     }
 
     private struct CreatePairingCodeResponse: Decodable {
@@ -44,7 +44,7 @@ public struct PairingRelayClient {
     }
 
     private struct ChallengePollQuery: Encodable {
-        let initiator_device_id: String
+        let mac_device_id: String
     }
 
     private struct ChallengeResponse: Decodable {
@@ -52,12 +52,12 @@ public struct PairingRelayClient {
     }
 
     private struct SubmitAckRequest: Encodable {
-        let initiator_device_id: String
+        let mac_device_id: String
         let ack: String
     }
 
     private struct AckPollQuery: Encodable {
-        let responder_device_id: String
+        let android_device_id: String
     }
 
     private struct AckResponse: Decodable {
@@ -90,14 +90,14 @@ public struct PairingRelayClient {
     }
 
     public func createPairingCode(
-        initiatorDeviceId: UUID,
-        initiatorDeviceName: String,
-        initiatorPublicKey: Data
+        macDeviceId: UUID,
+        macDeviceName: String,
+        macPublicKey: Data
     ) async throws -> PairingCode {
         let requestBody = CreatePairingCodeRequest(
-            initiator_device_id: initiatorDeviceId.uuidString,
-            initiator_device_name: initiatorDeviceName,
-            initiator_public_key: initiatorPublicKey.base64EncodedString()
+            mac_device_id: macDeviceId.uuidString,
+            mac_device_name: macDeviceName,
+            mac_public_key: macPublicKey.base64EncodedString()
         )
         let (data, response) = try await send(
             path: "/pairing/code",
@@ -114,9 +114,8 @@ public struct PairingRelayClient {
         throw try parseError(data: data, response: http)
     }
 
-    public func pollChallenge(code: String, initiatorDeviceId: UUID) async throws -> String {
-        let queryParams = ChallengePollQuery(initiator_device_id: initiatorDeviceId.uuidString)
-        let query = URLQueryItem(name: "initiator_device_id", value: queryParams.initiator_device_id)
+    public func pollChallenge(code: String, macDeviceId: UUID) async throws -> String {
+        let query = URLQueryItem(name: "mac_device_id", value: macDeviceId.uuidString)
         let (data, response) = try await send(
             path: "/pairing/code/\(code)/challenge",
             method: "GET",
@@ -132,8 +131,8 @@ public struct PairingRelayClient {
         throw try parseError(data: data, response: http)
     }
 
-    public func submitAck(code: String, initiatorDeviceId: UUID, ackJSON: String) async throws {
-        let request = SubmitAckRequest(initiator_device_id: initiatorDeviceId.uuidString, ack: ackJSON)
+    public func submitAck(code: String, macDeviceId: UUID, ackJSON: String) async throws {
+        let request = SubmitAckRequest(mac_device_id: macDeviceId.uuidString, ack: ackJSON)
         let (data, response) = try await send(
             path: "/pairing/code/\(code)/ack",
             method: "POST",
@@ -148,9 +147,8 @@ public struct PairingRelayClient {
         throw try parseError(data: data, response: http)
     }
 
-    public func pollAck(code: String, responderDeviceId: String) async throws -> String {
-        let queryParams = AckPollQuery(responder_device_id: responderDeviceId)
-        let query = URLQueryItem(name: "responder_device_id", value: queryParams.responder_device_id)
+    public func pollAck(code: String, androidDeviceId: String) async throws -> String {
+        let query = URLQueryItem(name: "android_device_id", value: androidDeviceId)
         let (data, response) = try await send(
             path: "/pairing/code/\(code)/ack",
             method: "GET",

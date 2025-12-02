@@ -12,8 +12,8 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     env:
-      FLY_ACCESS_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      REDIS_URL: ${{ secrets.FLY_REDIS_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,33 +21,23 @@ jobs:
       - name: Install Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Authenticate Fly.io
-        env:
-          FLY_ACCESS_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          if [ -z "$FLY_ACCESS_TOKEN" ]; then
-            echo "ERROR: FLY_ACCESS_TOKEN is not set!"
-            echo "Please ensure FLY_API_TOKEN secret exists in GitHub repository settings"
-            exit 1
-          fi
-          echo "Token is set (length: ${#FLY_ACCESS_TOKEN})"
-          flyctl auth whoami
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Start Redis
-        uses: supercharge/redis-github-action@1.5.0
-        with:
-          redis-version: 7
-
       - name: Run backend tests
         working-directory: backend
-        env:
-          REDIS_URL: redis://127.0.0.1:6379
         run: cargo test --all-features --locked
+
+      - name: Build Docker image
+        working-directory: backend
+        run: |
+          flyctl auth docker
+          docker build -t registry.fly.io/hypo-relay-staging:latest .
+
+      - name: Push image
+        run: docker push registry.fly.io/hypo-relay-staging:latest
 
       - name: Deploy to Fly.io
         working-directory: backend
         run: |
-          timeout 600 flyctl deploy --remote-only --config fly.toml || (echo "Deployment timed out or failed" && exit 1)
+          flyctl deploy --remote-only --image registry.fly.io/hypo-relay-staging:latest --config fly.toml

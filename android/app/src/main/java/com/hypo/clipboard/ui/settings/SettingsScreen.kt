@@ -57,6 +57,7 @@ fun SettingsRoute(
     val state by viewModel.state.collectAsState()
     SettingsScreen(
         state = state,
+        onCloudSyncChanged = viewModel::onCloudSyncChanged,
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
         onAutoDeleteDaysChanged = viewModel::onAutoDeleteDaysChanged,
         onPlainTextModeChanged = viewModel::onPlainTextModeChanged,
@@ -71,6 +72,7 @@ fun SettingsRoute(
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
+    onCloudSyncChanged: (Boolean) -> Unit,
     onHistoryLimitChanged: (Int) -> Unit,
     onAutoDeleteDaysChanged: (Int) -> Unit,
     onPlainTextModeChanged: (Boolean) -> Unit,
@@ -98,7 +100,9 @@ fun SettingsScreen(
             
             item {
                 SyncSection(
+                    cloudEnabled = state.cloudSyncEnabled,
                     plainTextMode = state.plainTextModeEnabled,
+                    onCloudSyncChanged = onCloudSyncChanged,
                     onPlainTextModeChanged = onPlainTextModeChanged
                 )
             }
@@ -208,7 +212,9 @@ private fun ConnectionStatusSection(connectionState: ConnectionState) {
 
 @Composable
 private fun SyncSection(
+    cloudEnabled: Boolean,
     plainTextMode: Boolean,
+    onCloudSyncChanged: (Boolean) -> Unit,
     onPlainTextModeChanged: (Boolean) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -217,6 +223,14 @@ private fun SyncSection(
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold
         )
+        ListItem(
+            headlineContent = { Text(text = stringResource(id = R.string.settings_cloud_sync)) },
+            supportingContent = { Text(text = stringResource(id = R.string.settings_cloud_sync_description)) },
+            trailingContent = {
+                Switch(checked = cloudEnabled, onCheckedChange = onCloudSyncChanged)
+            }
+        )
+        Divider()
         ListItem(
             headlineContent = { Text(text = "Plain Text Mode (Debug)") },
             supportingContent = { Text(text = "⚠️ Send clipboard without encryption. Less secure, for debugging only.") },

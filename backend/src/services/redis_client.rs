@@ -1,10 +1,10 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rand::Rng;
-use redis::{aio::ConnectionManager, Client};
+use redis::{aio::ConnectionManager, AsyncCommands, Client};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PairingCodeError {
@@ -60,20 +60,14 @@ impl actix_web::ResponseError for PairingCodeError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PairingCodeEntry {
     pub code: String,
-    #[serde(rename = "initiator_device_id")]
-    pub initiator_device_id: String,
-    #[serde(rename = "initiator_device_name")]
-    pub initiator_device_name: String,
-    #[serde(rename = "initiator_public_key")]
-    pub initiator_public_key: String,
+    pub mac_device_id: String,
+    pub mac_device_name: String,
+    pub mac_public_key: String,
     pub issued_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
-    #[serde(rename = "responder_device_id")]
-    pub responder_device_id: Option<String>,
-    #[serde(rename = "responder_device_name")]
-    pub responder_device_name: Option<String>,
-    #[serde(rename = "responder_public_key")]
-    pub responder_public_key: Option<String>,
+    pub android_device_id: Option<String>,
+    pub android_device_name: Option<String>,
+    pub android_public_key: Option<String>,
     pub challenge_json: Option<String>,
     pub ack_json: Option<String>,
 }
@@ -162,7 +156,7 @@ impl RedisClient {
     }
 
     pub async fn unregister_devices_batch(&mut self, device_ids: &[String]) -> Result<()> {
-        use redis::Pipeline;
+        use redis::{AsyncCommands, Pipeline};
 
         if device_ids.is_empty() {
             return Ok(());
@@ -201,9 +195,9 @@ impl RedisClient {
 
     pub async fn create_pairing_code(
         &mut self,
-        initiator_device_id: &str,
-        initiator_device_name: &str,
-        initiator_public_key: &str,
+        mac_device_id: &str,
+        mac_device_name: &str,
+        mac_public_key: &str,
         ttl: Duration,
     ) -> Result<PairingCodeEntry, PairingCodeError> {
         let ttl_secs = ttl.as_secs().max(1);
@@ -217,14 +211,14 @@ impl RedisClient {
             let code = format!("{:06}", rng.gen_range(0..1_000_000));
             let entry = PairingCodeEntry {
                 code: code.clone(),
-                initiator_device_id: initiator_device_id.to_string(),
-                initiator_device_name: initiator_device_name.to_string(),
-                initiator_public_key: initiator_public_key.to_string(),
+                mac_device_id: mac_device_id.to_string(),
+                mac_device_name: mac_device_name.to_string(),
+                mac_public_key: mac_public_key.to_string(),
                 issued_at,
                 expires_at,
-                responder_device_id: None,
-                responder_device_name: None,
-                responder_public_key: None,
+                android_device_id: None,
+                android_device_name: None,
+                android_public_key: None,
                 challenge_json: None,
                 ack_json: None,
             };
@@ -248,22 +242,22 @@ impl RedisClient {
     pub async fn claim_pairing_code(
         &mut self,
         code: &str,
-        responder_device_id: &str,
-        responder_device_name: &str,
-        responder_public_key: &str,
+        android_device_id: &str,
+        android_device_name: &str,
+        android_public_key: &str,
     ) -> Result<PairingCodeEntry, PairingCodeError> {
         let mut entry = self
             .load_pairing_entry(code)
             .await?
             .ok_or(PairingCodeError::NotFound)?;
 
-        if entry.responder_device_id.is_some() {
+        if entry.android_device_id.is_some() {
             return Err(PairingCodeError::AlreadyClaimed);
         }
 
-        entry.responder_device_id = Some(responder_device_id.to_string());
-        entry.responder_device_name = Some(responder_device_name.to_string());
-        entry.responder_public_key = Some(responder_public_key.to_string());
+        entry.android_device_id = Some(android_device_id.to_string());
+        entry.android_device_name = Some(android_device_name.to_string());
+        entry.android_public_key = Some(android_public_key.to_string());
         self.save_pairing_entry(&entry).await?;
         Ok(entry)
     }
@@ -271,7 +265,7 @@ impl RedisClient {
     pub async fn store_pairing_challenge(
         &mut self,
         code: &str,
-        responder_device_id: &str,
+        android_device_id: &str,
         challenge_json: &str,
     ) -> Result<(), PairingCodeError> {
         let mut entry = self
@@ -279,8 +273,8 @@ impl RedisClient {
             .await?
             .ok_or(PairingCodeError::NotFound)?;
 
-        match entry.responder_device_id.as_deref() {
-            Some(id) if id == responder_device_id => {
+        match entry.android_device_id.as_deref() {
+            Some(id) if id == android_device_id => {
                 entry.challenge_json = Some(challenge_json.to_string());
                 self.save_pairing_entry(&entry).await?;
                 Ok(())
@@ -293,14 +287,14 @@ impl RedisClient {
     pub async fn consume_pairing_challenge(
         &mut self,
         code: &str,
-        initiator_device_id: &str,
+        mac_device_id: &str,
     ) -> Result<String, PairingCodeError> {
         let mut entry = self
             .load_pairing_entry(code)
             .await?
             .ok_or(PairingCodeError::NotFound)?;
 
-        if entry.initiator_device_id != initiator_device_id {
+        if entry.mac_device_id != mac_device_id {
             return Err(PairingCodeError::NotFound);
         }
 
@@ -315,7 +309,7 @@ impl RedisClient {
     pub async fn store_pairing_ack(
         &mut self,
         code: &str,
-        initiator_device_id: &str,
+        mac_device_id: &str,
         ack_json: &str,
     ) -> Result<(), PairingCodeError> {
         let mut entry = self
@@ -323,7 +317,7 @@ impl RedisClient {
             .await?
             .ok_or(PairingCodeError::NotFound)?;
 
-        if entry.initiator_device_id != initiator_device_id {
+        if entry.mac_device_id != mac_device_id {
             return Err(PairingCodeError::NotFound);
         }
 
@@ -335,15 +329,15 @@ impl RedisClient {
     pub async fn consume_pairing_ack(
         &mut self,
         code: &str,
-        responder_device_id: &str,
+        android_device_id: &str,
     ) -> Result<String, PairingCodeError> {
         let mut entry = self
             .load_pairing_entry(code)
             .await?
             .ok_or(PairingCodeError::NotFound)?;
 
-        match entry.responder_device_id.as_deref() {
-            Some(id) if id == responder_device_id => {
+        match entry.android_device_id.as_deref() {
+            Some(id) if id == android_device_id => {
                 let ack = entry
                     .ack_json
                     .take()

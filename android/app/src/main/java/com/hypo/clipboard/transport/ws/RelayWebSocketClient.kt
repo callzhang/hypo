@@ -10,6 +10,7 @@ import java.time.Clock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 
 class RelayWebSocketClient @Inject constructor(
@@ -18,7 +19,7 @@ class RelayWebSocketClient @Inject constructor(
     frameCodec: TransportFrameCodec = TransportFrameCodec(),
     metricsRecorder: TransportMetricsRecorder = NoopTransportMetricsRecorder,
     analytics: TransportAnalytics = NoopTransportAnalytics,
-    transportManager: com.hypo.clipboard.transport.TransportManager,
+    private val transportManager: com.hypo.clipboard.transport.TransportManager,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     clock: Clock = Clock.systemUTC()
 ) : SyncTransport {
@@ -49,6 +50,13 @@ class RelayWebSocketClient @Inject constructor(
     fun isConnected(): Boolean {
         return delegate.isConnected()
     }
+    
+    /**
+     * Cloud connection state flow for event-driven observation.
+     * Delegates to TransportManager's cloudConnectionState.
+     */
+    val connectionState: StateFlow<com.hypo.clipboard.transport.ConnectionState>
+        get() = transportManager.cloudConnectionState
     
     /**
      * Set handler for incoming clipboard messages from cloud relay.

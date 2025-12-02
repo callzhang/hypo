@@ -46,44 +46,6 @@ public struct SyncEnvelope: Codable {
         self.type = type
         self.payload = payload
     }
-    
-    // Custom decoder to handle Android's String UUID format
-    // Note: TransportFrameCodec uses .convertFromSnakeCase, so snake_case keys are automatically converted to camelCase
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        
-        // Decode id as String first (Android sends UUID as string), then convert to UUID
-        let idString = try container.decode(String.self, forKey: .id)
-        guard let uuid = UUID(uuidString: idString) else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .id,
-                in: container,
-                debugDescription: "Invalid UUID format: \(idString)"
-            )
-        }
-        self.id = uuid
-        
-        // Decode timestamp (Android sends ISO8601 string)
-        self.timestamp = try container.decode(Date.self, forKey: .timestamp)
-        
-        // Decode version
-        self.version = try container.decode(String.self, forKey: .version)
-        
-        // Decode type
-        self.type = try container.decode(MessageType.self, forKey: .type)
-        
-        // Decode payload
-        self.payload = try container.decode(Payload.self, forKey: .payload)
-    }
-    
-    // CodingKeys for custom decoder - use camelCase since decoder has .convertFromSnakeCase
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case timestamp
-        case version
-        case type
-        case payload
-    }
 
     public enum MessageType: String, Codable {
         case clipboard
@@ -93,8 +55,7 @@ public struct SyncEnvelope: Codable {
     public struct Payload: Codable {
         public let contentType: ClipboardPayload.ContentType
         public let ciphertext: Data
-        public let deviceId: String  // UUID string (pure UUID, no prefix)
-        public let devicePlatform: String?  // Platform: "macos", "android", etc.
+        public let deviceId: String
         public let deviceName: String?
         public let target: String?
         public let encryption: EncryptionMetadata
@@ -103,7 +64,6 @@ public struct SyncEnvelope: Codable {
             contentType: ClipboardPayload.ContentType,
             ciphertext: Data,
             deviceId: String,
-            devicePlatform: String? = nil,
             deviceName: String? = nil,
             target: String?,
             encryption: EncryptionMetadata
@@ -111,7 +71,6 @@ public struct SyncEnvelope: Codable {
             self.contentType = contentType
             self.ciphertext = ciphertext
             self.deviceId = deviceId
-            self.devicePlatform = devicePlatform
             self.deviceName = deviceName
             self.target = target
             self.encryption = encryption
@@ -126,20 +85,7 @@ public struct SyncEnvelope: Codable {
             let ciphertextString = try container.decode(String.self, forKey: .ciphertext)
             self.ciphertext = try decodeBase64Field(ciphertextString, forKey: .ciphertext, in: container)
             
-            // Decode deviceId - handle both old format (with prefix) and new format (pure UUID)
-            let rawDeviceId = try container.decode(String.self, forKey: .deviceId)
-            if rawDeviceId.hasPrefix("macos-") || rawDeviceId.hasPrefix("android-") {
-                // Old format: extract UUID from prefixed string
-                let prefix = rawDeviceId.hasPrefix("macos-") ? "macos-" : "android-"
-                self.deviceId = String(rawDeviceId.dropFirst(prefix.count))
-                // Infer platform from prefix if not provided
-                self.devicePlatform = rawDeviceId.hasPrefix("macos-") ? "macos" : "android"
-            } else {
-                // New format: pure UUID
-                self.deviceId = rawDeviceId
-                self.devicePlatform = try container.decodeIfPresent(String.self, forKey: .devicePlatform)
-            }
-            
+            deviceId = try container.decode(String.self, forKey: .deviceId)
             deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
             target = try container.decodeIfPresent(String.self, forKey: .target)
             encryption = try container.decode(EncryptionMetadata.self, forKey: .encryption)
@@ -247,12 +193,10 @@ public final actor SyncEngine {
         case failed(String)
     }
 
-    private let logger = HypoLogger(category: "SyncEngine")
     private let transport: SyncTransport
     private let cryptoService: CryptoService
     private let keyProvider: DeviceKeyProviding
-    private let localDeviceId: String  // UUID string (pure UUID, no prefix)
-    private let localPlatform: DevicePlatform
+    private let localDeviceId: String
     private let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -274,14 +218,12 @@ public final actor SyncEngine {
         cryptoService: CryptoService = CryptoService(),
         keyProvider: DeviceKeyProviding,
         localDeviceId: String,
-        localPlatform: DevicePlatform = .macOS,
         defaults: UserDefaults = .standard
     ) {
         self.transport = transport
         self.cryptoService = cryptoService
         self.keyProvider = keyProvider
         self.localDeviceId = localDeviceId
-        self.localPlatform = localPlatform
         self.defaults = defaults
     }
 
@@ -309,19 +251,10 @@ public final actor SyncEngine {
         }
 
         // Check if plain text mode is enabled
-        // Use the same UserDefaults domain as the app (com.hypo.clipboard)
-        let appDefaults = UserDefaults.standard
-        let plainTextMode = appDefaults.bool(forKey: "plain_text_mode_enabled")
-        
-        // Also check the defaults instance passed to SyncEngine for debugging
-        let engineDefaultsValue = defaults.bool(forKey: "plain_text_mode_enabled")
-        
-        logger.info("🔍 [SyncEngine] Plaintext mode check: appDefaults=\(plainTextMode), engineDefaults=\(engineDefaultsValue), using=\(plainTextMode)")
+        let plainTextMode = defaults.bool(forKey: "plain_text_mode_enabled")
         
         if plainTextMode {
-            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending without encryption")
-        } else {
-            logger.info("🔒 [SyncEngine] Encryption mode: Sending encrypted")
+            print("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending without encryption")
         }
 
         let plaintext = try encoder.encode(payload)
@@ -332,26 +265,19 @@ public final actor SyncEngine {
         
         if plainTextMode {
             // Plain text mode: use plaintext directly as "ciphertext", with empty nonce/tag
-            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending unencrypted payload")
-            logger.info("   Plaintext content: \(String(data: plaintext.prefix(100), encoding: .utf8) ?? "binary")")
+            print("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending unencrypted payload")
+            print("   Plaintext content: \(String(data: plaintext.prefix(100), encoding: .utf8) ?? "binary")")
             ciphertext = plaintext
             nonce = Data()
             tag = Data()
-            
-            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes")
         } else {
             // Normal encryption mode
             let key = try await keyProvider.key(for: targetDeviceId)
-            // Use entry.deviceId as AAD (sender's device ID) so it matches what Android expects
-            // Android decrypts using envelope.payload.deviceId as AAD, so they must match
-            // deviceId is already normalized to lowercase in ClipboardEntry.init
-            let aad = Data(entry.deviceId.utf8)
+            let aad = Data(localDeviceId.utf8)
             let sealed = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
             ciphertext = sealed.ciphertext
             nonce = sealed.nonce
             tag = sealed.tag
-            
-            logger.info("🔒 [SyncEngine] ENCRYPTED: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes, AAD=deviceId=\(entry.deviceId)")
         }
 
         let envelope = SyncEnvelope(
@@ -359,17 +285,12 @@ public final actor SyncEngine {
             payload: .init(
                 contentType: payload.contentType,
                 ciphertext: ciphertext,
-                deviceId: entry.deviceId,  // UUID string (pure UUID, already normalized to lowercase)
-                devicePlatform: entry.originPlatform?.rawValue ?? localPlatform.rawValue,  // Platform string (use local if not set)
+                deviceId: entry.originDeviceId,
                 deviceName: entry.originDeviceName,
                 target: targetDeviceId,
                 encryption: .init(nonce: nonce, tag: tag)
             )
         )
-        
-        // Log final envelope state before sending
-        logger.info("📦 [SyncEngine] Envelope before send: nonce=\(envelope.payload.encryption.nonce.count) bytes, tag=\(envelope.payload.encryption.tag.count) bytes, ciphertext=\(envelope.payload.ciphertext.count) bytes")
-        
         try await transport.send(envelope)
     }
 
@@ -384,49 +305,27 @@ public final actor SyncEngine {
         
         let plaintext: Data
         if isPlainText {
-            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: Receiving unencrypted payload")
+            print("⚠️ [SyncEngine] PLAIN TEXT MODE: Receiving unencrypted payload")
             // Use ciphertext directly as plaintext (it's not actually encrypted)
             plaintext = envelope.payload.ciphertext
         } else {
             let key = try await keyProvider.key(for: senderId)
-            let keyData = key.withUnsafeBytes { Data($0) }
-            logger.info("🔑 [SyncEngine] Loaded key for device \(senderId): \(keyData.count) bytes")
-            logger.info("   Key hex (first 16): \(keyData.prefix(16).map { String(format: "%02x", $0) }.joined())")
-            
             let aad = Data(senderId.utf8)
-            logger.info("🔑 [SyncEngine] AAD: \(senderId) (\(aad.count) bytes)")
-            logger.info("   AAD hex: \(aad.map { String(format: "%02x", $0) }.joined())")
-            
-            logger.info("🔑 [SyncEngine] Ciphertext: \(envelope.payload.ciphertext.count) bytes")
-            logger.info("   Ciphertext hex (first 16): \(envelope.payload.ciphertext.prefix(16).map { String(format: "%02x", $0) }.joined())")
-            
-            logger.info("🔑 [SyncEngine] Nonce: \(envelope.payload.encryption.nonce.count) bytes")
-            logger.info("   Nonce hex: \(envelope.payload.encryption.nonce.map { String(format: "%02x", $0) }.joined())")
-            
-            logger.info("🔑 [SyncEngine] Tag: \(envelope.payload.encryption.tag.count) bytes")
-            logger.info("   Tag hex: \(envelope.payload.encryption.tag.map { String(format: "%02x", $0) }.joined())")
-            
-            do {
-                plaintext = try await cryptoService.decrypt(
-                    ciphertext: envelope.payload.ciphertext,
-                    key: key,
-                    nonce: envelope.payload.encryption.nonce,
-                    tag: envelope.payload.encryption.tag,
-                    aad: aad
-                )
-                logger.info("✅ [SyncEngine] Decrypted plaintext: \(plaintext.count) bytes")
-                if let plaintextString = String(data: plaintext, encoding: .utf8) {
-                    logger.info("🔍 [SyncEngine] Decrypted plaintext JSON: \(plaintextString)")
-                }
-            } catch {
-                logger.info("❌ [SyncEngine] Decryption failed: \(error)")
-                logger.info("   Error type: \(String(describing: type(of: error)))")
-                throw error
+            plaintext = try await cryptoService.decrypt(
+                ciphertext: envelope.payload.ciphertext,
+                key: key,
+                nonce: envelope.payload.encryption.nonce,
+                tag: envelope.payload.encryption.tag,
+                aad: aad
+            )
+            print("🔍 [SyncEngine] Decrypted plaintext: \(plaintext.count) bytes")
+            if let plaintextString = String(data: plaintext, encoding: .utf8) {
+                print("🔍 [SyncEngine] Decrypted plaintext JSON: \(plaintextString)")
             }
         }
         
         let payload = try decoder.decode(ClipboardPayload.self, from: plaintext)
-        logger.info("✅ [SyncEngine] ClipboardPayload decoded successfully: type=\(payload.contentType.rawValue), data=\(payload.data.count) bytes")
+        print("✅ [SyncEngine] ClipboardPayload decoded successfully: type=\(payload.contentType.rawValue), data=\(payload.data.count) bytes")
         return payload
     }
 }

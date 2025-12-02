@@ -1,16 +1,16 @@
 # Hypo - Cross-Platform Clipboard Sync
 
-> Real-time, secure clipboard synchronization between any devices (Android, macOS, iOS, etc.)
+> Real-time, secure clipboard synchronization between Android/HyperOS and macOS
 
-[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Android%208%2B-blue)]()
+[![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20Android%208%2B-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Status](https://img.shields.io/badge/status-Production%20Beta-green)]()
+[![Status](https://img.shields.io/badge/status-Alpha%20Development-yellow)]()
 
 ---
 
 ## 🎯 Overview
 
-Hypo enables seamless clipboard synchronization between any devices. Copy on one device, paste on another—instantly. Supports Android↔Android, macOS↔macOS, Android↔macOS, and other cross-platform combinations.
+Hypo enables seamless clipboard synchronization between your Xiaomi/HyperOS device and macOS machine. Copy on one device, paste on another—instantly.
 
 ### Key Features
 
@@ -69,7 +69,6 @@ For now, see [Development Setup](#development-setup) to build from source.
 |----------|-------------|
 | [`docs/architecture.mermaid`](docs/architecture.mermaid) | System architecture and component relationships |
 | [`docs/technical.md`](docs/technical.md) | Technical specifications and implementation details |
-| [`docs/LOGGING.md`](docs/LOGGING.md) | **How to view and filter logs** (Console.app, `log` command) |
 | [`tasks/tasks.md`](tasks/tasks.md) | Development roadmap and task breakdown |
 | [`docs/status.md`](docs/status.md) | Current project status and progress tracking |
 | [`changelog.md`](changelog.md) | Version history and release notes |
@@ -101,6 +100,13 @@ hypo/
 
 # Build macOS only
 ./scripts/build-macos.sh
+
+# Watch for changes and auto-build (requires fswatch)
+./scripts/watch-and-build.sh
+# Options:
+#   --no-android    Skip Android builds
+#   --no-macos      Skip macOS builds
+#   --no-install    Don't auto-install on devices
 ```
 
 ### macOS Client
@@ -207,7 +213,7 @@ docker-compose up
 **Testing Server**:
 ```bash
 # Test all server functions
-./tests/test-server-all.sh
+./scripts/test-server-all.sh
 ```
 
 ### Build Verification
@@ -250,14 +256,7 @@ Hypo takes security seriously:
 - **No Data Storage**: Backend relay never stores clipboard content
 - **Key Rotation**: Automatic 30-day key rotation with backward compatibility
 
-**Threat Model**: See [`docs/technical.md#security-design`](docs/technical.md#security-design)
-
-**Security Status**: Production-ready implementation with:
-- ✅ End-to-end encryption (AES-256-GCM)
-- ✅ Certificate pinning (prevents MITM attacks)
-- ✅ Device pairing with signature verification
-- ✅ Key rotation (pairing-time forward secrecy)
-- ✅ No data storage on backend (privacy by design)
+**Threat Model**: See [`docs/technical.md#31-threat-model`](docs/technical.md#31-threat-model)
 
 ---
 
@@ -281,32 +280,29 @@ Hypo takes security seriously:
 
 ## 📊 Current Status
 
-**Phase**: Production Beta - Ready for Testing ✅  
-**Progress**: 95%  
-**Last Updated**: November 26, 2025
+**Phase**: Sprint 8 - Polish & Deployment ✅
+**Progress**: 95%
+**Last Updated**: December 19, 2025
 
 **Recent Milestones**:
-- ✅ **Production-Ready**: All critical bugs resolved, system fully operational
-- ✅ **Backend Server Deployed**: Production server at `https://hypo.fly.dev` (uptime: 36+ days)
+- ✅ **Backend Server Deployed**: Production server running at `https://hypo.fly.dev` (uptime: 36+ days)
 - ✅ **LAN Auto-Discovery Pairing**: Tap-to-pair flow with automatic key exchange fully functional
-- ✅ **Device-Agnostic Pairing**: Any device can pair with any other device (Android↔Android, macOS↔macOS, Android↔macOS)
-- ✅ **Clipboard Sync**: Bidirectional synchronization verified end-to-end (LAN + Cloud)
-- ✅ **Backend Routing Fixed**: Messages correctly routed to target devices only (Nov 24, 2025)
-- ✅ **Android LAN Server Fixed**: Binary frames now reliably delivered (Nov 24, 2025)
-- ✅ **Battery Optimization**: 60-80% battery drain reduction when screen off
-- ✅ **Documentation Updated**: All docs reflect current production state (Nov 26, 2025)
+- ✅ **Clipboard Sync Infrastructure**: Detection, processing, queuing, and target identification verified end-to-end
+- ✅ **WebSocket Transport Stabilized**: Connection management fixed, sync waits for handshake completion
+- ✅ **Android ↔ macOS Sync**: Bidirectional clipboard synchronization working
+- ✅ **Thread Safety**: macOS app crash fixes implemented and validated
+- ✅ **UI Improvements**: Origin indicators, version display, lastSeen updates, blurred background modal
 
 **Server Status**:
-- **Production**: `https://hypo.fly.dev` ✅ (operational, all endpoints tested)
-- **WebSocket**: `wss://hypo.fly.dev/ws` ✅ (ready for client connections)
-- **Health**: `/health` endpoint responding (~50ms)
+- **Production**: `https://hypo.fly.dev` (operational, all endpoints tested ✅)
+- **WebSocket**: `wss://hypo.fly.dev/ws` (ready for client connections)
+- **Health**: `/health` endpoint responding
 - **Metrics**: Prometheus metrics available at `/metrics`
-- **Infrastructure**: 2 machines in iad region, auto-scaling, zero-downtime deploys
 
 **Next Steps**:
-1. Rebuild Android APK with latest fixes and test on physical device
-2. Beta testing recruitment
-3. Production release preparation
+1. End-to-end testing of encrypted payload sync (decoding issue verification)
+2. Production deployment finalization
+3. Beta testing recruitment
 
 **Full Status**: See [`docs/status.md`](docs/status.md)
 
@@ -334,10 +330,10 @@ cargo test
 
 ```bash
 # Test all backend server endpoints and functions
-./tests/test-server-all.sh
+./scripts/test-server-all.sh
 
 # Test with local server (if running locally)
-USE_LOCAL=true ./tests/test-server-all.sh
+USE_LOCAL=true ./scripts/test-server-all.sh
 ```
 
 The server test script validates:
@@ -352,23 +348,18 @@ The server test script validates:
 
 ```bash
 # Comprehensive sync testing (macOS + Android)
-./tests/test-sync.sh
+./scripts/test-sync.sh
 
 # Automated clipboard sync test (emulator)
-./tests/test-clipboard-sync-emulator-auto.sh
+./scripts/test-clipboard-sync-emulator-auto.sh
 
 # Pairing and sync flow
-./tests/test-sync.sh
+./scripts/test-pairing-and-sync.sh
 ```
 
 **Test Coverage Target**: 80% for clients, 90% for backend
 
-**Test Status**:
-- ✅ Backend: All unit and integration tests passing
-- ✅ LAN sync: Verified end-to-end (Nov 24, 2025)
-- ✅ Cloud sync: Verified end-to-end (Nov 24, 2025)
-- ✅ Backend routing: Verified correct message delivery (Nov 24, 2025)
-- ✅ Android LAN server: Binary frame delivery verified (Nov 24, 2025)
+**Server Test Results**: All 7 endpoint tests passing ✅ (Dec 19, 2025)
 
 ---
 
@@ -413,13 +404,9 @@ MIT License - See [LICENSE](LICENSE) for details
 
 ---
 
-## ⚠️ Status
+## ⚠️ Disclaimer
 
-This project is in **production beta** phase. The system is fully functional and has been extensively tested. All critical bugs have been resolved. Ready for beta testing.
-
-**Current Version**: v0.2.3  
-**Stability**: Production-ready  
-**Next Milestone**: Public beta release
+This project is in **active development** and not yet ready for production use. APIs and features may change without notice.
 
 ---
 

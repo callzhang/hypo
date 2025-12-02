@@ -28,8 +28,7 @@ enum class MessageType {
 data class Payload(
     @SerialName("content_type") val contentType: ClipboardType,
     val ciphertext: String,
-    @SerialName("device_id") val deviceId: String,  // UUID string (pure UUID, no prefix)
-    @SerialName("device_platform") val devicePlatform: String? = null,  // Platform: "macos", "android", etc.
+    @SerialName("device_id") val deviceId: String,
     @SerialName("device_name") val deviceName: String? = null,
     val target: String? = null,
     val encryption: EncryptionMetadata

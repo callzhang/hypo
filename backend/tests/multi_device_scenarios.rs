@@ -6,9 +6,9 @@ use tokio::time::{timeout, Duration};
 async fn multi_device_direct_and_broadcast_flow() {
     let sessions = SessionManager::new();
 
-    let mut alice_rx = sessions.register("alice".into()).await.receiver;
-    let mut bob_rx = sessions.register("bob".into()).await.receiver;
-    let mut charlie_rx = sessions.register("charlie".into()).await.receiver;
+    let mut alice_rx = sessions.register("alice".into()).await;
+    let mut bob_rx = sessions.register("bob".into()).await;
+    let mut charlie_rx = sessions.register("charlie".into()).await;
 
     // Simulate a direct message from Alice to Bob via the handler payload contract.
     let direct_payload = json!({
@@ -32,8 +32,7 @@ async fn multi_device_direct_and_broadcast_flow() {
         .await
         .expect("bob should receive direct message")
         .expect("channel open");
-    let received_str = std::str::from_utf8(&received[4..]).expect("valid UTF-8");
-    assert_eq!(received_str, direct_payload);
+    assert_eq!(received, direct_payload);
 
     assert!(
         timeout(Duration::from_millis(50), alice_rx.recv())
@@ -68,13 +67,11 @@ async fn multi_device_direct_and_broadcast_flow() {
         .await
         .expect("alice should observe broadcast")
         .expect("channel open");
-    let alice_view_str = std::str::from_utf8(&alice_view[4..]).expect("valid UTF-8");
-    assert_eq!(alice_view_str, broadcast_payload);
+    assert_eq!(alice_view, broadcast_payload);
 
     let bob_view = timeout(Duration::from_millis(50), bob_rx.recv())
         .await
         .expect("bob should observe broadcast")
         .expect("channel open");
-    let bob_view_str = std::str::from_utf8(&bob_view[4..]).expect("valid UTF-8");
-    assert_eq!(bob_view_str, broadcast_payload);
+    assert_eq!(bob_view, broadcast_payload);
 }

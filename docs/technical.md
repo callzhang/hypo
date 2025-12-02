@@ -1,7 +1,7 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 0.2.6  
-Date: December 1, 2025  
+Version: 0.2.7  
+Date: December 2, 2025  
 Status: Production Beta
 
 ---
@@ -576,7 +576,7 @@ interface ClipboardDao {
   - Exponential backoff retry for failed connections (1s → 2s → 4s → 8s → 16s → 32s max for LAN)
   - Retry logic handled in `runConnectionLoop()` - callbacks update state, loop handles retries
   - Maintains long-lived connection once established
-- **Instrumentation**: `WebSocketTransportClient` records handshake and round-trip durations via the injected `TransportMetricsRecorder`; the shared `TransportMetricsAggregator` test harness exercises these metrics and produces anonymized samples in `tests/transport/lan_loopback_metrics.json`.
+- **Instrumentation**: `WebSocketTransportClient` records handshake and round-trip durations via the injected `TransportMetricsRecorder`. The `TransportMetricsAggregator` can be wired into DI via `BuildConfig.ENABLE_TRANSPORT_METRICS` flag for production metrics collection. The test harness exercises these metrics and produces anonymized samples in `tests/transport/lan_loopback_metrics.json`.
 - **Relay Client Abstraction**: `RelayWebSocketClient` reuses the LAN TLS implementation but sources its endpoint, fingerprint, and telemetry headers from Gradle-provided `BuildConfig` constants (`RELAY_WS_URL`, `RELAY_CERT_FINGERPRINT`, `RELAY_ENVIRONMENT`). Unit tests exercise pinning-failure analytics to confirm the cloud environment label is surfaced correctly.
 
 #### 4.2.6 Battery Optimization
@@ -608,6 +608,19 @@ class ScreenStateReceiver(
   - Restarts `TransportManager` with LAN registration config
   - Reconnects WebSocket connections automatically
   - Resumes LAN peer discovery
+
+#### 4.2.7 Connection Status Probing ✅ Event-Driven (December 2025)
+
+**Event-Driven Architecture**: `ConnectionStatusProber` now uses StateFlow observation instead of periodic polling:
+- **Peers Observation**: Observes `transportManager.peers` StateFlow with 500ms debounce to trigger probes when peers are discovered/lost
+- **Cloud State Observation**: Observes `cloudWebSocketClient.connectionState` StateFlow with 500ms debounce to trigger probes on connection state changes
+- **Safety Timer**: 5-minute fallback timer for debugging builds or as belt-and-suspenders
+- **Server Health Check**: Uses `checkServerHealth()` when WebSocket is disconnected but network is available, providing more accurate "cloud reachable" status than binary `isConnected()` check
+- **Benefits**: 
+  - Eliminates unnecessary 1-minute polling loop
+  - Reduces battery usage by only probing when state actually changes
+  - More responsive to network and connection changes
+  - Better accuracy with server health check for cloud reachability
 
 **Performance Impact**
 - Reduces background battery drain by **60-80%** during screen-off periods
@@ -818,6 +831,8 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 ### 5.1 Unit Tests
 - **macOS**: XCTest for services, models
 - **Android**: JUnit + MockK for repositories, services
+  - Test naming aligned with production code: `WebSocketTransportClientTest` (renamed from `LanWebSocketClientTest`)
+  - Connection state enums match runtime: `ConnectionState.Disconnected` (renamed from `Idle`)
 - **Backend**: Rust `#[cfg(test)]` modules
 
 ### 5.2 Integration Tests
@@ -956,7 +971,7 @@ docker run -p 8080:8080 hypo-relay
 
 ---
 
-**Document Version**: 0.2.6  
-**Last Updated**: December 1, 2025  
+**Document Version**: 0.2.7  
+**Last Updated**: December 2, 2025  
 **Status**: Production Beta  
 **Authors**: Principal Engineering Team

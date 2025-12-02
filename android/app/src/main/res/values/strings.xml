@@ -106,10 +106,4 @@
     <string name="accessibility_service_title">Hypo Clipboard Monitor</string>
     <string name="accessibility_enable_prompt">Enable accessibility service for background clipboard access</string>
     <string name="accessibility_enable_button">Open Accessibility Settings</string>
-    
-    <!-- File Size Warnings -->
-    <string name="warning_notification_channel_name">Warnings</string>
-    <string name="warning_notification_channel_description">Notifications for file size warnings and errors</string>
-    <string name="file_too_large_title">File Too Large</string>
-    <string name="file_too_large_warning">File \"%1$s\" (%2$s MB) exceeds the maximum size limit of %3$s MB. Please use a smaller file.</string>
 </resources>

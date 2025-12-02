@@ -30,43 +30,18 @@ class PairingRelayClient @Inject constructor(
         .let { url -> if (url.endsWith("/")) url else "$url/" }
         .toHttpUrl()
 
-    suspend fun createPairingCode(
-        initiatorDeviceId: String,
-        initiatorDeviceName: String,
-        initiatorPublicKey: String
-    ): PairingCode = withContext(Dispatchers.IO) {
-        val requestBody = json.encodeToString(
-            CreatePairingCodeRequest(
-                initiatorDeviceId = initiatorDeviceId,
-                initiatorDeviceName = initiatorDeviceName,
-                initiatorPublicKey = initiatorPublicKey
-            )
-        ).toRequestBody(JSON)
-        val request = Request.Builder()
-            .url(baseUrl.newBuilder().addPathSegments("pairing/code").build())
-            .post(requestBody)
-            .header("Accept", "application/json")
-            .build()
-        execute(request) { response ->
-            when (response.code) {
-                200 -> json.decodeFromString<CreatePairingCodeResponse>(response.body!!.string()).toPairingCode()
-                else -> throw relayError(response)
-            }
-        }
-    }
-
     suspend fun claimPairingCode(
         code: String,
-        responderDeviceId: String,
-        responderDeviceName: String,
-        responderPublicKey: String
+        androidDeviceId: String,
+        androidDeviceName: String,
+        androidPublicKey: String
     ): PairingClaim = withContext(Dispatchers.IO) {
         val requestBody = json.encodeToString(
             ClaimRequest(
                 code = code,
-                responderDeviceId = responderDeviceId,
-                responderDeviceName = responderDeviceName,
-                responderPublicKey = responderPublicKey
+                androidDeviceId = androidDeviceId,
+                androidDeviceName = androidDeviceName,
+                androidPublicKey = androidPublicKey
             )
         ).toRequestBody(JSON)
         val request = Request.Builder()
@@ -85,10 +60,10 @@ class PairingRelayClient @Inject constructor(
         }
     }
 
-    suspend fun submitChallenge(code: String, responderDeviceId: String, challengeJson: String) {
+    suspend fun submitChallenge(code: String, androidDeviceId: String, challengeJson: String) {
         withContext(Dispatchers.IO) {
             val requestBody = json.encodeToString(
-                ChallengeRequest(responderDeviceId = responderDeviceId, challenge = challengeJson)
+                ChallengeRequest(androidDeviceId = androidDeviceId, challenge = challengeJson)
             ).toRequestBody(JSON)
             val request = Request.Builder()
                 .url(baseUrl.newBuilder().addPathSegments("pairing/code/$code/challenge").build())
@@ -106,57 +81,10 @@ class PairingRelayClient @Inject constructor(
         }
     }
 
-    suspend fun pollChallenge(code: String, initiatorDeviceId: String): String = withContext(Dispatchers.IO) {
-        val url = baseUrl.newBuilder()
-            .addPathSegments("pairing/code/$code/challenge")
-            .addQueryParameter("initiator_device_id", initiatorDeviceId)
-            .build()
-        val request = Request.Builder()
-            .url(url)
-            .get()
-            .header("Accept", "application/json")
-            .build()
-        execute(request) { response ->
-            when (response.code) {
-                200 -> json.decodeFromString<ChallengeResponse>(response.body!!.string()).challenge
-                404 -> {
-                    val error = response.body?.string()
-                    if (error?.contains("challenge not available", ignoreCase = true) == true) {
-                        throw PairingRelayException.ChallengeNotReady
-                    }
-                    throw PairingRelayException.CodeNotFound
-                }
-                410 -> throw PairingRelayException.CodeExpired
-                else -> throw relayError(response)
-            }
-        }
-    }
-
-    suspend fun submitAck(code: String, initiatorDeviceId: String, ackJson: String) {
-        withContext(Dispatchers.IO) {
-            val requestBody = json.encodeToString(
-                SubmitAckRequest(initiatorDeviceId = initiatorDeviceId, ack = ackJson)
-            ).toRequestBody(JSON)
-            val request = Request.Builder()
-                .url(baseUrl.newBuilder().addPathSegments("pairing/code/$code/ack").build())
-                .post(requestBody)
-                .header("Accept", "application/json")
-                .build()
-            execute(request) { response ->
-                when (response.code) {
-                    in 200..299 -> Unit
-                    404 -> throw PairingRelayException.CodeNotFound
-                    410 -> throw PairingRelayException.CodeExpired
-                    else -> throw relayError(response)
-                }
-            }
-        }
-    }
-
-    suspend fun pollAck(code: String, responderDeviceId: String): String = withContext(Dispatchers.IO) {
+    suspend fun pollAck(code: String, androidDeviceId: String): String = withContext(Dispatchers.IO) {
         val url = baseUrl.newBuilder()
             .addPathSegments("pairing/code/$code/ack")
-            .addQueryParameter("responder_device_id", responderDeviceId)
+            .addQueryParameter("android_device_id", androidDeviceId)
             .build()
         val request = Request.Builder()
             .url(url)
@@ -205,61 +133,32 @@ class PairingRelayClient @Inject constructor(
 }
 
 @Serializable
-private data class CreatePairingCodeRequest(
-    @SerialName("initiator_device_id") val initiatorDeviceId: String,
-    @SerialName("initiator_device_name") val initiatorDeviceName: String,
-    @SerialName("initiator_public_key") val initiatorPublicKey: String
-)
-
-@Serializable
-private data class CreatePairingCodeResponse(
-    val code: String,
-    @SerialName("expires_at") val expiresAt: String
-) {
-    fun toPairingCode(): PairingCode = PairingCode(
-        code = code,
-        expiresAt = Instant.parse(expiresAt)
-    )
-}
-
-@Serializable
 private data class ClaimRequest(
     val code: String,
-    @SerialName("responder_device_id") val responderDeviceId: String,
-    @SerialName("responder_device_name") val responderDeviceName: String,
-    @SerialName("responder_public_key") val responderPublicKey: String
+    @SerialName("android_device_id") val androidDeviceId: String,
+    @SerialName("android_device_name") val androidDeviceName: String,
+    @SerialName("android_public_key") val androidPublicKey: String
 )
 
 @Serializable
 private data class ClaimResponse(
-    @SerialName("initiator_device_id") val initiatorDeviceId: String,
-    @SerialName("initiator_device_name") val initiatorDeviceName: String,
-    @SerialName("initiator_public_key") val initiatorPublicKey: String,
+    @SerialName("mac_device_id") val macDeviceId: String,
+    @SerialName("mac_device_name") val macDeviceName: String,
+    @SerialName("mac_public_key") val macPublicKey: String,
     @SerialName("expires_at") val expiresAt: String
 ) {
     fun toClaim(): PairingClaim = PairingClaim(
-        initiatorDeviceId = initiatorDeviceId,
-        initiatorDeviceName = initiatorDeviceName,
-        initiatorPublicKey = initiatorPublicKey,
+        macDeviceId = macDeviceId,
+        macDeviceName = macDeviceName,
+        macPublicKey = macPublicKey,
         expiresAt = Instant.parse(expiresAt)
     )
 }
 
 @Serializable
 private data class ChallengeRequest(
-    @SerialName("responder_device_id") val responderDeviceId: String,
+    @SerialName("android_device_id") val androidDeviceId: String,
     val challenge: String
-)
-
-@Serializable
-private data class ChallengeResponse(
-    val challenge: String
-)
-
-@Serializable
-private data class SubmitAckRequest(
-    @SerialName("initiator_device_id") val initiatorDeviceId: String,
-    val ack: String
 )
 
 @Serializable
@@ -268,15 +167,10 @@ private data class AckResponse(val ack: String)
 @Serializable
 private data class ErrorResponse(val error: String? = null)
 
-data class PairingCode(
-    val code: String,
-    val expiresAt: Instant
-)
-
 data class PairingClaim(
-    val initiatorDeviceId: String,
-    val initiatorDeviceName: String,
-    val initiatorPublicKey: String,
+    val macDeviceId: String,
+    val macDeviceName: String,
+    val macPublicKey: String,
     val expiresAt: Instant
 )
 
@@ -285,7 +179,6 @@ sealed class PairingRelayException(message: String? = null, cause: Throwable? = 
     data object CodeExpired : PairingRelayException("Pairing code expired")
     data object CodeAlreadyClaimed : PairingRelayException("Pairing code already claimed")
     data object AckNotReady : PairingRelayException("Acknowledgement not ready")
-    data object ChallengeNotReady : PairingRelayException("Challenge not ready")
     data class Server(val errorMessage: String) : PairingRelayException(errorMessage)
     data class Network(val ioException: IOException) : PairingRelayException(ioException.message, ioException)
 }

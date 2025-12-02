@@ -9,9 +9,6 @@ import javax.inject.Singleton
 
 private const val PREF_FILE = "hypo_device_identity"
 private const val KEY_DEVICE_ID = "device_id"
-private const val KEY_DEVICE_PLATFORM = "device_platform"
-private const val PLATFORM_ANDROID = "android"
-private const val PLATFORM_PREFIX = "android-"
 
 @Singleton
 class DeviceIdentity @Inject constructor(
@@ -20,36 +17,7 @@ class DeviceIdentity @Inject constructor(
     private val prefs = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
 
     val deviceId: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        val stored = prefs.getString(KEY_DEVICE_ID, null)
-        if (stored != null) {
-            // Migrate from old format if needed
-            if (stored.startsWith(PLATFORM_PREFIX)) {
-                // Old format: "android-{UUID}" - extract UUID
-                val uuidString = stored.removePrefix(PLATFORM_PREFIX)
-                // Migrate to new format: store UUID and platform separately
-                prefs.edit()
-                    .putString(KEY_DEVICE_ID, uuidString)
-                    .putString(KEY_DEVICE_PLATFORM, PLATFORM_ANDROID)
-                    .apply()
-                uuidString
-            } else {
-                // New format: pure UUID
-                // Ensure platform is set
-                if (prefs.getString(KEY_DEVICE_PLATFORM, null) == null) {
-                    prefs.edit().putString(KEY_DEVICE_PLATFORM, PLATFORM_ANDROID).apply()
-                }
-                stored
-            }
-        } else {
-            generateAndPersist()
-        }
-    }
-
-    val platform: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        prefs.getString(KEY_DEVICE_PLATFORM, null) ?: run {
-            prefs.edit().putString(KEY_DEVICE_PLATFORM, PLATFORM_ANDROID).apply()
-            PLATFORM_ANDROID
-        }
+        prefs.getString(KEY_DEVICE_ID, null) ?: generateAndPersist()
     }
 
     val deviceName: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
@@ -63,11 +31,8 @@ class DeviceIdentity @Inject constructor(
     }
 
     private fun generateAndPersist(): String {
-        val uuid = UUID.randomUUID().toString()
-        prefs.edit()
-            .putString(KEY_DEVICE_ID, uuid)
-            .putString(KEY_DEVICE_PLATFORM, PLATFORM_ANDROID)
-            .apply()
-        return uuid
+        val value = "android-${UUID.randomUUID()}"
+        prefs.edit().putString(KEY_DEVICE_ID, value).apply()
+        return value
     }
 }

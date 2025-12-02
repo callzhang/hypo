@@ -47,7 +47,7 @@ final class CloudRelayTransportTests: XCTestCase {
         )
 
         let mirror = Mirror(reflecting: transport.underlying)
-        let configuration = mirror.descendant("configuration") as? WebSocketConfiguration
+        let configuration = mirror.descendant("configuration") as? LanWebSocketConfiguration
         XCTAssertEqual(configuration?.environment, "cloud")
     }
 }

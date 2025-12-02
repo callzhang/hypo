@@ -98,8 +98,7 @@ android/lint/
 
 # Cargo
 backend/target/
-# Note: Cargo.lock should be committed for applications (not libraries)
-# backend/Cargo.lock
+backend/Cargo.lock
 
 # Build artifacts
 backend/**/*.rs.bk
@@ -211,7 +210,3 @@ TODO.txt
 
 .gradle/
 macos/HypoApp.app
-*.pyc
-__pycache__/
-
-.secrets

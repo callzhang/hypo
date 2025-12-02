@@ -1,82 +1,51 @@
 import Foundation
 
-public enum DevicePlatform: String, Codable {
-    case macOS = "macos"
-    case Android = "android"
-    case iOS = "ios"
-    case Windows = "windows"
-    case Linux = "linux"
-}
-
 public protocol DeviceIdentityProviding { 
     var deviceId: UUID { get }
-    var deviceIdString: String { get }  // UUID string for protocol compatibility
-    var platform: DevicePlatform { get }
+    var deviceIdString: String { get }
     var deviceName: String { get }
 }
 
 public final class DeviceIdentity: DeviceIdentityProviding {
     private enum DefaultsKey {
         static let deviceId = "com.hypo.clipboard.device_id"
-        static let devicePlatform = "com.hypo.clipboard.device_platform"
         static let deviceName = "com.hypo.clipboard.device_name"
     }
     
     private static let platformPrefix = "macos-"
-    private static let currentPlatform = DevicePlatform.macOS
 
     public let deviceId: UUID
-    public let platform: DevicePlatform
+    public let deviceIdString: String
     public let deviceName: String
-    
-    /// UUID string for protocol compatibility (backward compatibility during migration)
-    /// Normalized to lowercase for cross-platform compatibility (Android uses lowercase UUIDs)
-    public var deviceIdString: String {
-        deviceId.uuidString.lowercased()
-    }
 
     public init(userDefaults: UserDefaults = .standard, hostname: String = Host.current().localizedName ?? "Hypo Mac") {
-        // Load or generate device ID (migrate from prefixed format if needed)
+        // Load or generate device ID
         let uuid: UUID
         if let stored = userDefaults.string(forKey: DefaultsKey.deviceId) {
-            // Check if stored value has platform prefix (old format - migrate)
+            // Check if stored value has platform prefix (new format)
             if stored.hasPrefix(Self.platformPrefix) {
-                // Old format: "macos-{UUID}" - extract UUID
                 let uuidString = String(stored.dropFirst(Self.platformPrefix.count))
                 uuid = UUID(uuidString: uuidString) ?? UUID()
-                // Migrate to new format: store UUID and platform separately
-                userDefaults.set(uuid.uuidString, forKey: DefaultsKey.deviceId)
-                userDefaults.set(Self.currentPlatform.rawValue, forKey: DefaultsKey.devicePlatform)
             } else if let parsed = UUID(uuidString: stored) {
-                // New format: pure UUID
+                // Legacy format (just UUID), migrate to new format
                 uuid = parsed
-                // Ensure platform is set
-                if userDefaults.string(forKey: DefaultsKey.devicePlatform) == nil {
-                    userDefaults.set(Self.currentPlatform.rawValue, forKey: DefaultsKey.devicePlatform)
-                }
+                let newValue = "\(Self.platformPrefix)\(stored)"
+                userDefaults.set(newValue, forKey: DefaultsKey.deviceId)
             } else {
                 // Invalid format, generate new
                 uuid = UUID()
-                userDefaults.set(uuid.uuidString, forKey: DefaultsKey.deviceId)
-                userDefaults.set(Self.currentPlatform.rawValue, forKey: DefaultsKey.devicePlatform)
+                let newValue = "\(Self.platformPrefix)\(uuid.uuidString)"
+                userDefaults.set(newValue, forKey: DefaultsKey.deviceId)
             }
         } else {
-            // Generate new device ID (pure UUID)
+            // Generate new device ID with platform prefix
             uuid = UUID()
-            userDefaults.set(uuid.uuidString, forKey: DefaultsKey.deviceId)
-            userDefaults.set(Self.currentPlatform.rawValue, forKey: DefaultsKey.devicePlatform)
+            let newValue = "\(Self.platformPrefix)\(uuid.uuidString)"
+            userDefaults.set(newValue, forKey: DefaultsKey.deviceId)
         }
         
         deviceId = uuid
-        
-        // Load platform (default to macOS if not set)
-        if let platformString = userDefaults.string(forKey: DefaultsKey.devicePlatform),
-           let platform = DevicePlatform(rawValue: platformString) {
-            self.platform = platform
-        } else {
-            self.platform = Self.currentPlatform
-            userDefaults.set(Self.currentPlatform.rawValue, forKey: DefaultsKey.devicePlatform)
-        }
+        deviceIdString = "\(Self.platformPrefix)\(uuid.uuidString)"
         
         if let storedName = userDefaults.string(forKey: DefaultsKey.deviceName) {
             deviceName = storedName

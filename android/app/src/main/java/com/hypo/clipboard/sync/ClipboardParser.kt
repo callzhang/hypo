@@ -22,17 +22,11 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.webkit.MimeTypeMap
 
-// Maximum file size: 10MB
-private const val MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10MB
-// Transport limit: 10MB (increased from 256KB to support larger files)
-private const val MAX_TRANSPORT_PAYLOAD_BYTES = 10 * 1024 * 1024 // 10MB
-// For images, we still want to compress them reasonably, but allow up to transport limit
-private const val MAX_IMAGE_BYTES_FOR_TRANSPORT = MAX_TRANSPORT_PAYLOAD_BYTES
+private const val MAX_ATTACHMENT_BYTES = 1_048_576
 private val base64Encoder = Base64.getEncoder().withoutPadding()
 
 class ClipboardParser(
-    private val contentResolver: ContentResolver,
-    private val onFileTooLarge: ((String, Long) -> Unit)? = null // Callback for file size warnings
+    private val contentResolver: ContentResolver
 ) {
 
     fun parse(clipData: ClipData): ClipboardEvent? {
@@ -154,164 +148,79 @@ class ClipboardParser(
     }
 
     private fun parseImage(uri: Uri, mimeType: String?): ClipboardEvent? {
-        var bitmap: Bitmap? = null
         return try {
-            // First, get image dimensions without loading full image into memory
-            val options = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
-            }
             val bytes = readBytes(uri) ?: return null
-            
-            // Check if image is too large before decoding
-            if (bytes.size > MAX_ATTACHMENT_BYTES * 10) {
-                android.util.Log.w("ClipboardParser", "⚠️ Image too large: ${formatBytes(bytes.size.toLong())}, skipping")
-                return null
-            }
-            
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            val originalWidth = options.outWidth
-            val originalHeight = options.outHeight
-            
-            if (originalWidth <= 0 || originalHeight <= 0) {
-                android.util.Log.w("ClipboardParser", "⚠️ Invalid image dimensions: ${originalWidth}×${originalHeight}")
-                return null
-            }
-            
-            // Calculate sample size to avoid OOM
-            val sampleSize = calculateInSampleSize(options, 1920, 1920)
-            val decodeOptions = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
-                inPreferredConfig = Bitmap.Config.RGB_565 // Use less memory
-            }
-            
-            // Decode with sample size
-            bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
-                ?: run {
-                    android.util.Log.w("ClipboardParser", "⚠️ Failed to decode image")
-                    return null
-                }
-            
-            val width = bitmap.width
-            val height = bitmap.height
+            var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        val width = bitmap.width
+        val height = bitmap.height
 
-            val format = when {
-                mimeType.isNullOrEmpty() -> "jpeg"
-                mimeType.contains("png") -> "png"
-                mimeType.contains("webp") -> "webp"
-                mimeType.contains("gif") -> "gif"
-                else -> "jpeg"
-            }
+        val format = when {
+            mimeType.isNullOrEmpty() -> "jpeg"
+            mimeType.contains("png") -> "png"
+            mimeType.contains("webp") -> "webp"
+            mimeType.contains("gif") -> "gif"
+            else -> "jpeg"
+        }
 
-            var encodedBytes = encodeBitmap(bitmap, format)
-            
-            // Compress if larger than 10MB (accounting for base64 + JSON overhead)
-            // Base64 increases size by ~33%, so we target ~7.5MB raw to stay under 10MB after encoding
-            val maxRawSize = (MAX_ATTACHMENT_BYTES * 0.75).toInt() // ~7.5MB
-            if (encodedBytes.size > maxRawSize) {
-                android.util.Log.d("ClipboardParser", "📐 Image too large: ${formatBytes(encodedBytes.size.toLong())}, scaling down...")
-                val scaledBitmap = bitmap.scaleToMaxPixels(2560) // Scale to reasonable size
-                bitmap.recycle() // Free original bitmap
-                bitmap = scaledBitmap
-                encodedBytes = encodeBitmap(bitmap, "jpeg", quality = 85)
-            }
-            
-            // Further compression if still too large
-            if (encodedBytes.size > maxRawSize) {
-                encodedBytes = shrinkUntilSize(bitmap, maxRawSize)
-            }
+        var encodedBytes = encodeBitmap(bitmap, format)
+        if (encodedBytes.size > MAX_ATTACHMENT_BYTES) {
+            bitmap = bitmap.scaleToMaxPixels(1920)
+            encodedBytes = encodeBitmap(bitmap, "jpeg", quality = 85)
+        }
+        if (encodedBytes.size > MAX_ATTACHMENT_BYTES) {
+            encodedBytes = shrinkUntilSize(bitmap, MAX_ATTACHMENT_BYTES)
+        }
 
-            // Final check - if still too large, show warning and skip
-            if (encodedBytes.size > MAX_ATTACHMENT_BYTES) {
-                android.util.Log.w("ClipboardParser", "⚠️ Image exceeds 10MB limit: ${formatBytes(encodedBytes.size.toLong())}, skipping")
-                onFileTooLarge?.invoke("Image", encodedBytes.size.toLong())
-                return null
-            }
+        if (encodedBytes.size > MAX_ATTACHMENT_BYTES) return null
 
-            val thumbnail = bitmap.scaleToThumbnail(128)
-            val metadata = buildMap {
-                put("size", encodedBytes.size.toString())
-                put("hash", sha256Hex(encodedBytes))
-                put("width", width.toString())
-                put("height", height.toString())
-                put("mime_type", resolvedMimeForFormat(format))
-                thumbnail?.let {
-                    put("thumbnail_base64", base64Encoder.encodeToString(it))
-                }
+        val thumbnail = bitmap.scaleToThumbnail(128)
+        val metadata = buildMap {
+            put("size", encodedBytes.size.toString())
+            put("hash", sha256Hex(encodedBytes))
+            put("width", width.toString())
+            put("height", height.toString())
+            put("mime_type", resolvedMimeForFormat(format))
+            thumbnail?.let {
+                put("thumbnail_base64", base64Encoder.encodeToString(it))
             }
+        }
 
-            val base64 = base64Encoder.encodeToString(encodedBytes)
-            val preview = "Image ${width}×${height} (${formatBytes(encodedBytes.size.toLong())})"
-            ClipboardEvent(
-                id = newEventId(),
-                type = ClipboardType.IMAGE,
-                content = base64,
-                preview = preview,
-                metadata = metadata,
-                createdAt = Instant.now()
-            )
-        } catch (e: OutOfMemoryError) {
-            android.util.Log.e("ClipboardParser", "❌ OutOfMemoryError in parseImage: ${e.message}", e)
-            null
+        val base64 = base64Encoder.encodeToString(encodedBytes)
+        val preview = "Image ${width}×${height} (${formatBytes(encodedBytes.size)})"
+        return ClipboardEvent(
+            id = newEventId(),
+            type = ClipboardType.IMAGE,
+            content = base64,
+            preview = preview,
+            metadata = metadata,
+            createdAt = Instant.now()
+        )
         } catch (e: SecurityException) {
             android.util.Log.d("ClipboardParser", "🔒 parseImage: Clipboard access blocked: ${e.message}")
             null
         } catch (e: Exception) {
-            android.util.Log.e("ClipboardParser", "❌ Error in parseImage: ${e.message}", e)
+            android.util.Log.w("ClipboardParser", "⚠️ Error in parseImage: ${e.message}", e)
             null
-        } finally {
-            // Always recycle bitmap to free memory
-            bitmap?.recycle()
         }
-    }
-    
-    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
-        val height = options.outHeight
-        val width = options.outWidth
-        var inSampleSize = 1
-
-        if (height > reqHeight || width > reqWidth) {
-            val halfHeight = height / 2
-            val halfWidth = width / 2
-
-            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
-                inSampleSize *= 2
-            }
-        }
-        return inSampleSize
     }
 
     private fun parseFile(uri: Uri, mimeTypeOverride: String?): ClipboardEvent? {
         return try {
             val metadata = queryMetadata(uri)
             val size = metadata?.size ?: 0L
-            val filename = metadata?.displayName ?: uri.lastPathSegment ?: "file"
-            
-            // Check size before reading
-            if (size > MAX_ATTACHMENT_BYTES) {
-                android.util.Log.w("ClipboardParser", "⚠️ File too large: ${formatBytes(size)} (limit: ${formatBytes(MAX_ATTACHMENT_BYTES.toLong())})")
-                onFileTooLarge?.invoke(filename, size)
-                return null
-            }
-            
-            if (size <= 0L) return null
-            
+            if (size <= 0L || size > MAX_ATTACHMENT_BYTES) return null
             val bytes = readBytes(uri) ?: return null
-            
-            // Double-check after reading
-            if (bytes.size > MAX_ATTACHMENT_BYTES) {
-                android.util.Log.w("ClipboardParser", "⚠️ File too large after reading: ${formatBytes(bytes.size.toLong())} (limit: ${formatBytes(MAX_ATTACHMENT_BYTES.toLong())})")
-                onFileTooLarge?.invoke(filename, bytes.size.toLong())
-                return null
-            }
+            if (bytes.size > MAX_ATTACHMENT_BYTES) return null
             val base64 = base64Encoder.encodeToString(bytes)
             val mimeType = mimeTypeOverride ?: metadata?.mimeType ?: "application/octet-stream"
+            val filename = metadata?.displayName ?: uri.lastPathSegment ?: "file"
             val meta = mapOf(
                 "size" to bytes.size.toString(),
                 "hash" to sha256Hex(bytes),
                 "mime_type" to mimeType,
                 "filename" to filename
             )
-            val preview = "$filename (${formatBytes(bytes.size.toLong())})"
+            val preview = "$filename (${formatBytes(bytes.size)})"
             return ClipboardEvent(
                 id = newEventId(),
                 type = ClipboardType.FILE,
@@ -394,31 +303,18 @@ class ClipboardParser(
     }
 
     private fun Bitmap.scaleToThumbnail(maxSize: Int): ByteArray? {
-        return try {
-            val maxSide = max(width, height)
-            val thumbnailBitmap = if (maxSide <= maxSize) this else {
-                val ratio = maxSize.toFloat() / maxSide
-                val targetWidth = (width * ratio).roundToInt().coerceAtLeast(1)
-                val targetHeight = (height * ratio).roundToInt().coerceAtLeast(1)
-                Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
-            }
-            val output = ByteArrayOutputStream()
-            val success = thumbnailBitmap.compress(Bitmap.CompressFormat.PNG, 90, output)
-            // Recycle scaled bitmap if it's different from original
-            if (thumbnailBitmap !== this) {
-                thumbnailBitmap.recycle()
-            }
-            if (!success) {
-                return null
-            }
-            output.toByteArray()
-        } catch (e: OutOfMemoryError) {
-            android.util.Log.e("ClipboardParser", "❌ OutOfMemoryError in scaleToThumbnail: ${e.message}", e)
-            null
-        } catch (e: Exception) {
-            android.util.Log.w("ClipboardParser", "⚠️ Error in scaleToThumbnail: ${e.message}", e)
-            null
+        val maxSide = max(width, height)
+        val bitmap = if (maxSide <= maxSize) this else {
+            val ratio = maxSize.toFloat() / maxSide
+            val targetWidth = (width * ratio).roundToInt().coerceAtLeast(1)
+            val targetHeight = (height * ratio).roundToInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
         }
+        val output = ByteArrayOutputStream()
+        if (!bitmap.compress(Bitmap.CompressFormat.PNG, 90, output)) {
+            return null
+        }
+        return output.toByteArray()
     }
 
     private fun resolvedMimeForFormat(format: String): String {
@@ -464,7 +360,7 @@ class ClipboardParser(
         }
     }
 
-    private fun formatBytes(size: Long): String {
+    private fun formatBytes(size: Int): String {
         if (size < 1024) return "$size B"
         val units = arrayOf("KB", "MB")
         var value = size.toDouble()

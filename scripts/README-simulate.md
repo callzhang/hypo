@@ -41,11 +41,6 @@ python3 scripts/simulate-android-copy.py \
 - `--device-id`: Device ID to use (default: auto-generated android-UUID)
 - `--device-name`: Device name to use (default: "Test Android Device")
 - `--target`: Target device ID (optional)
-- `--target-platform`: Target platform (`macos` or `android`) - uses default device IDs if `--target-device-id` not specified
-- `--target-device-id`: Target device ID for the specified platform (required if `--target-platform` is specified and you want a custom device ID)
-- `--encrypted`: Encrypt the message (requires `--key` or `--key-file`)
-- `--key`: Encryption key as hex string (32 bytes = 64 hex chars)
-- `--key-file`: Path to file containing encryption key (32 bytes binary or hex string)
 
 ## Example
 

@@ -86,25 +86,6 @@ interface ClipboardDao {
     @Query("UPDATE clipboard_items SET is_pinned = :isPinned WHERE id = :id")
     suspend fun updatePinnedStatus(id: String, isPinned: Boolean)
     
-    // Get the latest (most recent) clipboard entry
-    @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC LIMIT 1")
-    suspend fun getLatestEntry(): ClipboardEntity?
-    
-    // Find matching entry by content and type (excluding the latest entry)
-    @Query("""
-        SELECT * FROM clipboard_items 
-        WHERE content = :content 
-        AND type = :type 
-        AND id != (SELECT id FROM clipboard_items ORDER BY created_at DESC LIMIT 1)
-        ORDER BY created_at DESC 
-        LIMIT 1
-    """)
-    suspend fun findMatchingEntryInHistory(content: String, type: String): ClipboardEntity?
-    
-    // Update timestamp to move entry to top
-    @Query("UPDATE clipboard_items SET created_at = :newTimestamp WHERE id = :id")
-    suspend fun updateTimestamp(id: String, newTimestamp: Instant)
-    
     // Check for duplicate clipboard items (same content, type, device within time window)
     @Query("""
         SELECT COUNT(*) FROM clipboard_items 

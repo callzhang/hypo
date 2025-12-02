@@ -22,7 +22,9 @@ public final class ConnectionStatusProber {
     private let monitorQueue = DispatchQueue(label: "ConnectionStatusProber.NetworkMonitor")
     private var hasNetworkConnectivity = true // Initial assumption
     
-    private let logger = HypoLogger(category: "ConnectionStatusProber")
+    #if canImport(os)
+    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "connection-prober")
+    #endif
     
     public init(historyViewModel: ClipboardHistoryViewModel, webSocketServer: LanWebSocketServer, transportManager: TransportManager, transportProvider: TransportProvider? = nil) {
         self.historyViewModel = historyViewModel
@@ -36,16 +38,14 @@ public final class ConnectionStatusProber {
                 let newStatus = path.status == .satisfied
                 let oldStatus = self?.hasNetworkConnectivity ?? true
                 if oldStatus != newStatus {
-                    self?.logger.info("🌐", "Network connectivity changed: \(oldStatus) -> \(newStatus) (path status: \(path.status))")
+                    let msg = "🌐 [ConnectionStatusProber] Network connectivity changed: \(oldStatus) -> \(newStatus) (path status: \(path.status))\n"
+                    print(msg)
+                    try? msg.appendToFile(path: "/tmp/hypo_debug.log")
                     self?.hasNetworkConnectivity = newStatus
-                    // Reconnect cloud WebSocket to use new IP address
-                    if newStatus, let transportProvider = self?.transportProvider as? DefaultTransportProvider {
-                        let cloudTransport = transportProvider.getCloudTransport()
-                        self?.logger.info("🔄", "Reconnecting cloud WebSocket due to network change")
-                        await cloudTransport.reconnect()
-                    }
                     // Trigger immediate probe on network change to update server and peer status
-                    self?.logger.info("🔍", "Triggering immediate probe due to network change")
+                    let probeMsg = "🔍 [ConnectionStatusProber] Triggering immediate probe due to network change\n"
+                    print(probeMsg)
+                    try? probeMsg.appendToFile(path: "/tmp/hypo_debug.log")
                     await self?.probeConnections()
                 }
             }
@@ -64,13 +64,19 @@ public final class ConnectionStatusProber {
     public func start() {
         stop() // Stop any existing task
         
-        logger.info("🔍", "Started - event-driven only (no periodic polling)")
+        let msg = "🔍 [ConnectionStatusProber] Started - event-driven only (no periodic polling)\n"
+        print(msg)
+        try? msg.appendToFile(path: "/tmp/hypo_debug.log")
         
         // Initial probe on launch (immediate, no delay)
         Task { @MainActor in
-            logger.info("🚀", "Starting initial probe task (immediate)")
+            let taskMsg = "🚀 [ConnectionStatusProber] Starting initial probe task (immediate)\n"
+            print(taskMsg)
+            try? taskMsg.appendToFile(path: "/tmp/hypo_debug.log")
             await probeConnections()
-            logger.info("✅", "Initial probe task completed")
+            let taskDoneMsg = "✅ [ConnectionStatusProber] Initial probe task completed\n"
+            print(taskDoneMsg)
+            try? taskDoneMsg.appendToFile(path: "/tmp/hypo_debug.log")
         }
         
         #if canImport(os)
@@ -108,7 +114,9 @@ public final class ConnectionStatusProber {
             }
             return false
         } catch {
-            logger.error("🌐", "Network connectivity check failed: \(error.localizedDescription)")
+            let errorMsg = "🌐 [ConnectionStatusProber] Network connectivity check failed: \(error.localizedDescription)\n"
+            print(errorMsg)
+            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
             return false
         }
     }
@@ -118,7 +126,9 @@ public final class ConnectionStatusProber {
         // First check if we have network connectivity
         let hasNetwork = await checkNetworkConnectivity()
         if !hasNetwork {
-            logger.warning("🌐", "No network connectivity - server unreachable")
+            let networkMsg = "🌐 [ConnectionStatusProber] No network connectivity - server unreachable\n"
+            print(networkMsg)
+            try? networkMsg.appendToFile(path: "/tmp/hypo_debug.log")
             return false
         }
         
@@ -135,7 +145,9 @@ public final class ConnectionStatusProber {
             }
             return false
         } catch {
-            logger.error("🏥", "Health check failed: \(error.localizedDescription)")
+            let errorMsg = "🏥 [ConnectionStatusProber] Health check failed: \(error.localizedDescription)\n"
+            print(errorMsg)
+            try? errorMsg.appendToFile(path: "/tmp/hypo_debug.log")
             return false
         }
     }
@@ -143,7 +155,7 @@ public final class ConnectionStatusProber {
     /// Probe connection status for all paired devices
     private func probeConnections() async {
         guard !isProbing else {
-            logger.debug("⏭️", "Probe already in progress, skipping")
+            print("⏭️ [ConnectionStatusProber] Probe already in progress, skipping")
             return
         }
         
@@ -153,11 +165,13 @@ public final class ConnectionStatusProber {
         #if canImport(os)
         logger.info("Probing connection status for paired devices")
         #endif
-        logger.debug("probe", "🔍 [ConnectionStatusProber] Probing connection status...\n")
+        let probeMsg = "🔍 [ConnectionStatusProber] Probing connection status...\n"
+        print(probeMsg)
+        try? probeMsg.appendToFile(path: "/tmp/hypo_debug.log")
         
         // Get all paired devices from ViewModel
         guard let historyViewModel = historyViewModel else {
-            logger.info("⚠️ [ConnectionStatusProber] HistoryViewModel is nil, cannot probe")
+            print("⚠️ [ConnectionStatusProber] HistoryViewModel is nil, cannot probe")
             return
         }
         
@@ -165,7 +179,9 @@ public final class ConnectionStatusProber {
         
         // Get active connections from WebSocket server
         let activeConnectionIds = webSocketServer.activeConnections()
-        logger.debug("found", "🔍 [ConnectionStatusProber] Found \(activeConnectionIds.count) active WebSocket connections\n")
+        let foundMsg = "🔍 [ConnectionStatusProber] Found \(activeConnectionIds.count) active WebSocket connections\n"
+        print(foundMsg)
+        try? foundMsg.appendToFile(path: "/tmp/hypo_debug.log")
         
         // Get device IDs from active connections
         var onlineDeviceIds = Set<String>()
@@ -180,45 +196,45 @@ public final class ConnectionStatusProber {
         var discoveredDeviceIds = Set<String>()
         if let transportManager = transportManager {
             let discoveredPeers = transportManager.lanDiscoveredPeers()
-            logger.debug("discovery", "🔍 [ConnectionStatusProber] Found \(discoveredPeers.count) discovered peers (all peers: \(discoveredPeers.map { "\($0.serviceName):\($0.endpoint.metadata["device_id"] ?? "none")" }.joined(separator: ", ")))\n")
+            let discoveryMsg = "🔍 [ConnectionStatusProber] Found \(discoveredPeers.count) discovered peers (all peers: \(discoveredPeers.map { "\($0.serviceName):\($0.endpoint.metadata["device_id"] ?? "none")" }.joined(separator: ", ")))\n"
+            print(discoveryMsg)
+            try? discoveryMsg.appendToFile(path: "/tmp/hypo_debug.log")
             for peer in discoveredPeers {
                 if let deviceId = peer.endpoint.metadata["device_id"] {
                     discoveredDeviceIds.insert(deviceId)
-                    logger.debug("peer", "   ✅ Peer: \(peer.serviceName), device_id=\(deviceId)\n")
-                    
-                    // Also check if this device ID matches any paired device (case-insensitive)
-                    for device in pairedDevices {
-                        if device.id.lowercased() == deviceId.lowercased() {
-                            logger.debug("match", "   ✅ Matched discovered peer to paired device: \(device.name) (\(device.id) == \(deviceId))\n")
-                            // Ensure we're using the paired device's ID (in case of case differences)
-                            discoveredDeviceIds.insert(device.id)
-                            break
-                        }
-                    }
+                    let peerMsg = "   ✅ Peer: \(peer.serviceName), device_id=\(deviceId)\n"
+                    print(peerMsg)
+                    try? peerMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 } else {
-                    logger.debug("peer", "   ⚠️ Peer: \(peer.serviceName), no device_id attribute\n")
+                    let peerMsg = "   ⚠️ Peer: \(peer.serviceName), no device_id attribute\n"
+                    print(peerMsg)
+                    try? peerMsg.appendToFile(path: "/tmp/hypo_debug.log")
                     // Fallback: match by service name
                     for device in pairedDevices {
                         if peer.serviceName.contains(device.id) || device.id.contains(peer.serviceName) {
                             discoveredDeviceIds.insert(device.id)
-                            logger.debug("match", "   ✅ Matched by service name: \(device.id)\n")
+                            let matchMsg = "   ✅ Matched by service name: \(device.id)\n"
+                            print(matchMsg)
+                            try? matchMsg.appendToFile(path: "/tmp/hypo_debug.log")
                             break
                         }
                     }
                 }
             }
-            logger.debug("discovered", "🔍 [ConnectionStatusProber] discoveredDeviceIds: \(discoveredDeviceIds)\n")
+            let discoveredMsg = "🔍 [ConnectionStatusProber] discoveredDeviceIds: \(discoveredDeviceIds)\n"
+            print(discoveredMsg)
+            try? discoveredMsg.appendToFile(path: "/tmp/hypo_debug.log")
         }
         
         // Check network connectivity - update status immediately if disconnected
         if !hasNetworkConnectivity {
-            transportManager?.updateConnectionState(.idle)
+            await transportManager?.updateConnectionState(.idle)
         } else {
             // Verify network with HTTP check
             let hasNetwork = await checkNetworkConnectivity()
             if !hasNetwork {
                 hasNetworkConnectivity = false
-                transportManager?.updateConnectionState(.idle)
+                await transportManager?.updateConnectionState(.idle)
             } else {
                 hasNetworkConnectivity = true
             }
@@ -232,71 +248,44 @@ public final class ConnectionStatusProber {
             }
             
             if cloudTransportConnected {
-                transportManager?.updateConnectionState(.connectedCloud)
+                await transportManager?.updateConnectionState(.connectedCloud)
             } else if !isConnecting {
                 // Try to connect to cloud if not already connecting
                 isConnecting = true
-                transportManager?.updateConnectionState(.connectingCloud)
+                await transportManager?.updateConnectionState(.connectingCloud)
                 
-                // Actually connect to cloud relay (not just check health)
-                if let transportProvider = transportProvider as? DefaultTransportProvider {
-                    let cloudTransport = transportProvider.getCloudTransport()
-                    do {
-                        try await cloudTransport.connect()
-                        transportManager?.updateConnectionState(.connectedCloud)
-                        logger.info("connect", "✅ [ConnectionStatusProber] Successfully connected to cloud relay\n")
-                    } catch {
-                        // Connection failed, check if we have LAN connections
-                        let hasLanConnection = !onlineDeviceIds.isEmpty || !discoveredDeviceIds.isEmpty
-                        transportManager?.updateConnectionState(hasLanConnection ? .connectedLan : .idle)
-                        logger.info("error", "❌ [ConnectionStatusProber] Cloud connection failed: \(error.localizedDescription)\n")
-                    }
+                // Check server health via HTTP (fast check)
+                let serverReachable = await checkServerHealth()
+                if serverReachable {
+                    await transportManager?.updateConnectionState(.connectedCloud)
                 } else {
-                    // No transport provider, check server health as fallback
-                    let serverReachable = await checkServerHealth()
-                    if serverReachable {
-                        transportManager?.updateConnectionState(.connectedCloud)
-                    } else {
-                        // No cloud, check if we have LAN connections
-                        let hasLanConnection = !onlineDeviceIds.isEmpty || !discoveredDeviceIds.isEmpty
-                        transportManager?.updateConnectionState(hasLanConnection ? .connectedLan : .idle)
-                    }
+                    // No cloud, check if we have LAN connections
+                    let hasLanConnection = !onlineDeviceIds.isEmpty || !discoveredDeviceIds.isEmpty
+                    await transportManager?.updateConnectionState(hasLanConnection ? .connectedLan : .idle)
                 }
                 isConnecting = false
             }
         }
         
         // Get current connection state to determine if server is available
-        let currentConnectionState = transportManager?.connectionState ?? .idle
+        let currentConnectionState = await transportManager?.connectionState ?? .idle
         
         // Update status for each paired device - MIRROR ANDROID LOGIC
-        logger.debug("checkDevices", "🔍 [ConnectionStatusProber] Checking \(pairedDevices.count) paired devices\n")
+        let checkDevicesMsg = "🔍 [ConnectionStatusProber] Checking \(pairedDevices.count) paired devices\n"
+        print(checkDevicesMsg)
+        try? checkDevicesMsg.appendToFile(path: "/tmp/hypo_debug.log")
         
         for device in pairedDevices {
-            // Check for active connection (case-insensitive matching)
-            let hasActiveConnection = onlineDeviceIds.contains(device.id) || 
-                onlineDeviceIds.contains { $0.lowercased() == device.id.lowercased() }
-            
-            // Check if discovered (case-insensitive matching)
-            let isDiscovered = discoveredDeviceIds.contains(device.id) || 
-                discoveredDeviceIds.contains { $0.lowercased() == device.id.lowercased() }
+            let hasActiveConnection = onlineDeviceIds.contains(device.id)
+            let isDiscovered = discoveredDeviceIds.contains(device.id)
             
             // Update device with discovery information if found
             if isDiscovered, let transportManager = transportManager {
                 let discoveredPeers = transportManager.lanDiscoveredPeers()
-                // Match by device ID (case-insensitive)
-                if let peer = discoveredPeers.first(where: { peer in
-                    if let peerDeviceId = peer.endpoint.metadata["device_id"] {
-                        return peerDeviceId.lowercased() == device.id.lowercased()
-                    }
-                    return false
-                }) {
-                    // Update device with discovery info - ensure we're on MainActor
+                if let peer = discoveredPeers.first(where: { $0.endpoint.metadata["device_id"] == device.id }) {
+                    // Update device with discovery info
                     let updatedDevice = device.updating(from: peer)
-                    await MainActor.run {
-                        historyViewModel.registerPairedDevice(updatedDevice)
-                    }
-                    logger.debug("update", "   🔄 Updated device \(device.name) with discovery info: \(peer.endpoint.host):\(peer.endpoint.port)\n")
+                    await historyViewModel.registerPairedDevice(updatedDevice)
                 }
             }
             
@@ -343,17 +332,25 @@ public final class ConnectionStatusProber {
                 isOnline = false
             }
             
-            logger.debug("deviceStatus", "🔍 [ConnectionStatusProber] Device \(device.name) (\(device.id.prefix(20))...): hasConnection=\(hasActiveConnection), isDiscovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState) → isOnline=\(isOnline)\n")
+            let deviceStatusMsg = "🔍 [ConnectionStatusProber] Device \(device.name) (\(device.id.prefix(20))...): hasConnection=\(hasActiveConnection), isDiscovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState) → isOnline=\(isOnline)\n"
+            print(deviceStatusMsg)
+            try? deviceStatusMsg.appendToFile(path: "/tmp/hypo_debug.log")
             
             // Only update if status changed
             if device.isOnline != isOnline {
-                logger.info("update", "🔄 [ConnectionStatusProber] Updating device \(device.name) status: \(device.isOnline) → \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n")
+                let updateMsg = "🔄 [ConnectionStatusProber] Updating device \(device.name) status: \(device.isOnline) → \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n"
+                print(updateMsg)
+                try? updateMsg.appendToFile(path: "/tmp/hypo_debug.log")
                 await historyViewModel.updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
             } else {
-                logger.debug("unchanged", "ℹ️ [ConnectionStatusProber] Device \(device.name) status unchanged: \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n")
+                let unchangedMsg = "ℹ️ [ConnectionStatusProber] Device \(device.name) status unchanged: \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n"
+                print(unchangedMsg)
+                try? unchangedMsg.appendToFile(path: "/tmp/hypo_debug.log")
             }
         }
         
-        logger.debug("complete", "✅ [ConnectionStatusProber] Probe complete - \(onlineDeviceIds.count) devices with active LAN connections, \(discoveredDeviceIds.count) devices discovered, connectionState: \(currentConnectionState)\n")
+        let completeMsg = "✅ [ConnectionStatusProber] Probe complete - \(onlineDeviceIds.count) devices with active LAN connections, \(discoveredDeviceIds.count) devices discovered, connectionState: \(currentConnectionState)\n"
+        print(completeMsg)
+        try? completeMsg.appendToFile(path: "/tmp/hypo_debug.log")
     }
 }

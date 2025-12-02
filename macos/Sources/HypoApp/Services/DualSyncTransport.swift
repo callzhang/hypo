@@ -11,7 +11,7 @@ public final class DualSyncTransport: SyncTransport {
     private let cloudTransport: SyncTransport
     
     #if canImport(os)
-    private let logger = HypoLogger(category: "dual-transport")
+    private let logger = Logger(subsystem: "com.hypo.clipboard", category: "dual-transport")
     #endif
     
     public init(lanTransport: SyncTransport, cloudTransport: SyncTransport) {
@@ -27,21 +27,21 @@ public final class DualSyncTransport: SyncTransport {
         // Wait for both, but don't fail if one fails
         do {
             try await lanConnect
-            logger.info("✅ [DualSyncTransport] LAN transport connected")
+            print("✅ [DualSyncTransport] LAN transport connected")
         } catch {
-            logger.info("⚠️ [DualSyncTransport] LAN transport connect failed: \(error.localizedDescription)")
+            print("⚠️ [DualSyncTransport] LAN transport connect failed: \(error.localizedDescription)")
         }
         
         do {
             try await cloudConnect
-            logger.info("✅ [DualSyncTransport] Cloud transport connected")
+            print("✅ [DualSyncTransport] Cloud transport connected")
         } catch {
-            logger.info("⚠️ [DualSyncTransport] Cloud transport connect failed: \(error.localizedDescription)")
+            print("⚠️ [DualSyncTransport] Cloud transport connect failed: \(error.localizedDescription)")
         }
     }
     
     public func send(_ envelope: SyncEnvelope) async throws {
-        logger.info("📡 [DualSyncTransport] Sending to both LAN and cloud simultaneously...")
+        print("📡 [DualSyncTransport] Sending to both LAN and cloud simultaneously...")
         
         // Send to both transports in parallel
         async let lanSend = sendViaLAN(envelope)
@@ -50,18 +50,17 @@ public final class DualSyncTransport: SyncTransport {
         // Wait for both to complete
         let (lanResult, cloudResult) = await (lanSend, cloudSend)
         
-        // Always send to both - no fallback logic, both are attempted simultaneously
-        // Log results but don't throw errors (best-effort dual send)
+        // At least one must succeed
         switch (lanResult, cloudResult) {
         case (.success, .success):
-            logger.info("✅ [DualSyncTransport] Both LAN and cloud transports succeeded")
+            print("✅ [DualSyncTransport] Both LAN and cloud transports succeeded")
         case (.success, .failure):
-            logger.info("✅ [DualSyncTransport] LAN transport succeeded (cloud failed, but both were attempted)")
+            print("✅ [DualSyncTransport] LAN transport succeeded (cloud failed)")
         case (.failure, .success):
-            logger.info("✅ [DualSyncTransport] Cloud transport succeeded (LAN failed, but both were attempted)")
+            print("✅ [DualSyncTransport] Cloud transport succeeded (LAN failed)")
         case (.failure(_), .failure(let cloudError)):
-            logger.info("❌ [DualSyncTransport] Both LAN and cloud transports failed (but both were attempted)")
-            // Throw the cloud error (usually more informative) - but both were attempted
+            print("❌ [DualSyncTransport] Both LAN and cloud transports failed")
+            // Throw the cloud error (usually more informative)
             throw cloudError
         }
     }
@@ -105,7 +104,7 @@ public final class DualSyncTransport: SyncTransport {
                 return result
             }
         } catch {
-            logger.info("⚠️ [DualSyncTransport] LAN transport failed: \(error.localizedDescription)")
+            print("⚠️ [DualSyncTransport] LAN transport failed: \(error.localizedDescription)")
             return Result<Void, Error>.failure(error)
         }
     }
@@ -115,7 +114,7 @@ public final class DualSyncTransport: SyncTransport {
             try await cloudTransport.send(envelope)
             return .success(())
         } catch {
-            logger.info("⚠️ [DualSyncTransport] Cloud transport failed: \(error.localizedDescription)")
+            print("⚠️ [DualSyncTransport] Cloud transport failed: \(error.localizedDescription)")
             return .failure(error)
         }
     }

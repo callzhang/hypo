@@ -36,7 +36,7 @@ echo "Monitoring for 30 seconds..."
 echo "Please copy text manually now..."
 
 # Monitor in background
-"$ADB" logcat | grep -v "MIUIInput" | grep --line-buffered -E "(FATAL|AndroidRuntime|Exception|Error|ClipboardListener|ClipboardParser|hypo)" &
+"$ADB" logcat | grep --line-buffered -E "(FATAL|AndroidRuntime|Exception|Error|ClipboardListener|ClipboardParser|hypo)" &
 MONITOR_PID=$!
 
 sleep 30
@@ -48,23 +48,23 @@ echo "=== Crash Analysis ==="
 echo ""
 
 # Check for crashes
-CRASHES=$("$ADB" logcat -d -t 60 | grep -v "MIUIInput" | grep -c "FATAL EXCEPTION" || echo "0")
-EXCEPTIONS=$("$ADB" logcat -d -t 60 | grep -v "MIUIInput" | grep -c "Exception" || echo "0")
+CRASHES=$("$ADB" logcat -d -t 60 | grep -c "FATAL EXCEPTION" || echo "0")
+EXCEPTIONS=$("$ADB" logcat -d -t 60 | grep -c "Exception" || echo "0")
 
 if [ "$CRASHES" -gt 0 ]; then
     echo "❌ CRASHES DETECTED: $CRASHES"
     echo ""
     echo "=== Crash Details ==="
-    "$ADB" logcat -d -t 60 | grep -v "MIUIInput" | grep -B 5 -A 50 "FATAL EXCEPTION" | head -100
+    "$ADB" logcat -d -t 60 | grep -B 5 -A 50 "FATAL EXCEPTION" | head -100
 else
     echo "✅ No crashes detected"
 fi
 
 echo ""
 echo "=== All Exceptions ==="
-"$ADB" logcat -d -t 60 | grep -v "MIUIInput" | grep "Exception" | grep -v "LanWebSocketClient" | tail -30
+"$ADB" logcat -d -t 60 | grep "Exception" | grep -v "LanWebSocketClient" | tail -30
 
 echo ""
 echo "=== ClipboardListener Activity ==="
-"$ADB" logcat -d -t 60 | grep -v "MIUIInput" | grep "ClipboardListener" | tail -30
+"$ADB" logcat -d -t 60 | grep "ClipboardListener" | tail -30
 

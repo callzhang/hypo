@@ -18,11 +18,13 @@ let package = Package(
         )
     ],
     dependencies: [
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0")
     ],
     targets: [
         .target(
             name: "HypoApp",
             dependencies: [
+                .product(name: "Crypto", package: "swift-crypto")
             ],
             path: "Sources/HypoApp"
         ),

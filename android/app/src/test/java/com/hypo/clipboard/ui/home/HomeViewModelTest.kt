@@ -25,7 +25,7 @@ import kotlinx.coroutines.test.setMain
 class HomeViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val historyRepository = FakeClipboardRepository()
-    private val connectionState = MutableStateFlow(ConnectionState.Idle)
+    private val connectionState = MutableStateFlow(ConnectionState.Disconnected)
     private val transportManager: TransportManager = mockk(relaxed = true) {
         every { this@mockk.connectionState } returns connectionState
     }
@@ -50,7 +50,7 @@ class HomeViewModelTest {
 
         runCurrent()
         assertEquals(newest, viewModel.uiState.value.latestItem)
-        assertEquals(ConnectionState.Idle, viewModel.uiState.value.connectionState)
+        assertEquals(ConnectionState.Disconnected, viewModel.uiState.value.connectionState)
 
         connectionState.value = ConnectionState.ConnectedCloud
         runCurrent()

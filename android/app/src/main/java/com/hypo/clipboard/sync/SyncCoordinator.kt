@@ -3,7 +3,6 @@ package com.hypo.clipboard.sync
 import android.util.Log
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
-import com.hypo.clipboard.domain.model.ClipboardType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,7 +14,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,8 +23,7 @@ class SyncCoordinator @Inject constructor(
     private val syncEngine: SyncEngine,
     private val identity: DeviceIdentity,
     private val transportManager: com.hypo.clipboard.transport.TransportManager,
-    private val deviceKeyStore: DeviceKeyStore,
-    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient
+    private val deviceKeyStore: DeviceKeyStore
 ) {
     private var eventChannel: Channel<ClipboardEvent>? = null
     private var job: Job? = null
@@ -43,7 +40,6 @@ class SyncCoordinator @Inject constructor(
             try {
                 val deviceIds = deviceKeyStore.getAllDeviceIds().toSet()
                 pairedDeviceIdsCache.value = deviceIds
-                recomputeTargets()
                 Log.d(TAG, "📋 Initial paired device IDs loaded: ${deviceIds.size} devices")
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ Failed to load initial paired device IDs: ${e.message}")
@@ -56,25 +52,7 @@ class SyncCoordinator @Inject constructor(
                 val deviceIds = peers.map { it.attributes["device_id"] ?: it.serviceName }.toSet()
                 autoTargets.value = deviceIds
                 recomputeTargets()
-                
-                // When paired peers are discovered, start maintaining a connection to receive messages
-                val allowed = pairedDeviceIdsCache.value
-                lanWebSocketClient.setAllowedDeviceIdsProvider { pairedDeviceIdsCache.value }
-                val pairedPeers = peers.filter { p ->
-                    val id = p.attributes["device_id"] ?: p.serviceName
-                    allowed.any { it.equals(id, ignoreCase = true) }
-                }
-                if (pairedPeers.isNotEmpty()) {
-                    android.util.Log.d(TAG, "🔌 Paired peers discovered (${pairedPeers.size}), starting receiving connection...")
-                    lanWebSocketClient.startReceiving()
-                } else if (allowed.isNotEmpty()) {
-                    // We have paired devices (even if not currently discovered), maintain connection
-                    // This ensures we can receive messages when peers come back online
-                    android.util.Log.d(TAG, "ℹ️ No paired peers currently discovered, but ${allowed.size} paired device(s) exist - maintaining LAN receive loop")
-                    lanWebSocketClient.startReceiving()
-                } else {
-                    android.util.Log.d(TAG, "ℹ️ No paired devices and no paired peers discovered; not starting LAN receive loop")
-                }
+                // Targets updated silently
             }
         }
     }
@@ -145,18 +123,24 @@ class SyncCoordinator @Inject constructor(
         eventChannel = channel
         job = scope.launch {
             for (event in channel) {
-                // Use device info if available (from remote sync), otherwise use local device info
-                // Normalize to lowercase for consistent matching
-                val deviceId = (event.deviceId ?: identity.deviceId).lowercase()
-                val deviceName = event.deviceName ?: identity.deviceName
+                // Use source device info if available (from remote sync), otherwise use local device info
+                val deviceId = event.sourceDeviceId ?: identity.deviceId
+                val deviceName = event.sourceDeviceName ?: identity.deviceName
                 
-                // Simplified duplicate detection (no time windows):
-                // 1. If new message matches the current clipboard (latest entry) → discard
-                // 2. If new message matches something in history → move that history item to the top
-                // 3. Otherwise → add new entry
+                // Check for duplicate based on content (prevent duplicates from ClipboardListener + AccessibilityService)
+                val signature = event.signature()
+                val isDuplicate = repository.hasRecentDuplicate(
+                    content = event.content,
+                    type = event.type,
+                    deviceId = deviceId,
+                    withinSeconds = 5
+                )
                 
-                // Create ClipboardItem from event for matching
-                val eventItem = ClipboardItem(
+                if (isDuplicate) {
+                    continue
+                }
+                
+                val item = ClipboardItem(
                     id = event.id,
                     type = event.type,
                     content = event.content,
@@ -165,54 +149,11 @@ class SyncCoordinator @Inject constructor(
                     deviceId = deviceId,
                     deviceName = deviceName,
                     createdAt = event.createdAt,
-                    isPinned = false,
-                    isEncrypted = event.isEncrypted,
-                    transportOrigin = event.transportOrigin
+                    isPinned = false
                 )
-                
-                val latestEntry = repository.getLatestEntry()
-                
-                // Check if matches current clipboard (latest entry)
-                val matchesCurrentClipboard = latestEntry?.let { latest ->
-                    eventItem.matchesContent(latest)
-                } ?: false
-                
-                if (matchesCurrentClipboard) {
-                    android.util.Log.d(TAG, "⏭️ New message matches current clipboard, discarding: ${event.preview.take(50)}")
-                    continue
-                }
-                
-                // Check if matches something in history (excluding the latest entry)
-                val matchingEntry = repository.findMatchingEntryInHistory(eventItem)
-                
-                val item: ClipboardItem
-                if (matchingEntry != null) {
-                    // Found matching entry in history - move it to the top by updating timestamp
-                    val newTimestamp = Instant.now()
-                    repository.updateTimestamp(matchingEntry.id, newTimestamp)
-                    android.util.Log.d(TAG, "🔄 New message matches history item, moved to top: ${matchingEntry.preview.take(50)}")
-                    // Use the existing item for broadcasting
-                    item = matchingEntry
-                } else {
-                    // Not a duplicate - add to history
-                    item = ClipboardItem(
-                        id = event.id,
-                        type = event.type,
-                        content = event.content,
-                        preview = event.preview,
-                        metadata = event.metadata.ifEmpty { emptyMap() },
-                        deviceId = deviceId,
-                        deviceName = deviceName,
-                        createdAt = event.createdAt,
-                        isPinned = false,
-                        isEncrypted = event.isEncrypted,
-                        transportOrigin = event.transportOrigin
-                    )
-                    repository.upsert(item)
-                }
+                repository.upsert(item)
 
                 // Only broadcast if not a received item (prevent loops)
-                // IMPORTANT: Broadcast even if item matched history - user may have re-copied it
                 if (!event.skipBroadcast) {
                     // Wait up to 10 seconds for targets to be available (handles race condition with peer discovery)
                     var pairedDevices = _targets.value
@@ -225,26 +166,23 @@ class SyncCoordinator @Inject constructor(
                         if (pairedDevices.isEmpty()) {
                             Log.w(TAG, "⏭️  No paired devices available after waiting (targets: ${_targets.value})")
                         } else {
-                            Log.d(TAG, "✅ Targets became available after ${System.currentTimeMillis() - startTime}ms: ${pairedDevices.size} devices")
+                            Log.i(TAG, "✅ Targets became available after ${System.currentTimeMillis() - startTime}ms: ${pairedDevices.size} devices")
                         }
                     }
                     
                     if (pairedDevices.isNotEmpty()) {
-                        val results = mutableListOf<String>()
+                        Log.i(TAG, "📤 Broadcasting to ${pairedDevices.size} paired devices: $pairedDevices")
                         pairedDevices.forEach { target ->
+                            Log.i(TAG, "📤 Syncing to device: $target")
                             try {
                                 val envelope = syncEngine.sendClipboard(item, target)
-                                results.add("✅ $target")
-                            } catch (error: TransportPayloadTooLargeException) {
-                                results.add("⚠️ $target (too large)")
-                                // Don't crash - just skip this sync
+                                Log.i(TAG, "✅ Successfully sent clipboard to $target, envelope type: ${envelope.type}")
                             } catch (error: Exception) {
-                                results.add("❌ $target (${error.message?.take(30)})")
+                                Log.e(TAG, "❌ Failed to sync to $target: ${error.message}", error)
                             }
                         }
-                        Log.d(TAG, "📤 Sync: ${pairedDevices.size} device(s) → ${results.joinToString(", ")}")
                     } else {
-                        Log.d(TAG, "⏭️ Sync: No paired devices (targets: ${_targets.value})")
+                        Log.i(TAG, "⏭️  No paired devices to broadcast to (targets: ${_targets.value})")
                     }
                 }
             }
@@ -282,7 +220,7 @@ class SyncCoordinator @Inject constructor(
                 recomputeTargets() // Still recompute with current cache
             }
         }
-        Log.d(TAG, "➕ Added manual sync target: $deviceId")
+        Log.i(TAG, "➕ Added manual sync target: $deviceId")
     }
 
     fun removeTargetDevice(deviceId: String) {
@@ -298,7 +236,7 @@ class SyncCoordinator @Inject constructor(
                 recomputeTargets() // Still recompute with current cache
             }
         }
-        Log.d(TAG, "➖ Removed manual sync target: $deviceId")
+        Log.i(TAG, "➖ Removed manual sync target: $deviceId")
     }
 
     companion object {

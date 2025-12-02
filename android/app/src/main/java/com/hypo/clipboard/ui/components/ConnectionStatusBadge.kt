@@ -49,9 +49,9 @@ fun ConnectionStatusBadge(connectionState: ConnectionState, modifier: Modifier =
             containerColor = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer
         )
-        ConnectionState.Disconnected -> StatusVisuals(
+        ConnectionState.Idle -> StatusVisuals(
             icon = Icons.Filled.CloudOff,
-            textRes = R.string.status_disconnected,
+            textRes = R.string.status_offline,
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
         )

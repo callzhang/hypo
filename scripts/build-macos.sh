@@ -64,19 +64,11 @@ if [ ! -d "$APP_BUNDLE" ]; then
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>1</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.3</string>
+    <string>1.0.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
 </dict>
 </plist>
 EOF
@@ -84,103 +76,38 @@ EOF
     fi
 fi
 
-# Ensure app icon exists
-ICON_ICNS="$APP_BUNDLE/Contents/Resources/AppIcon.icns"
-ICONSET_DIR="$APP_BUNDLE/Contents/Resources/AppIcon.iconset"
-if [ ! -f "$ICON_ICNS" ] && [ ! -d "$ICONSET_DIR" ]; then
-    log_warn "App icon not found. Generating icons..."
-    if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ]; then
-        python3 "$PROJECT_ROOT/scripts/generate-icons.py" || log_warn "Icon generation failed, continuing without icon"
-    else
-        log_warn "Icon generation script not found. App will run without icon."
-    fi
-fi
-
 # Build the app
 log_info "Building macOS app..."
 cd "$MACOS_DIR"
 
-# Check for corrupted package checkouts and fix them
-if [ -d ".build/checkouts" ]; then
-    # Check if any checkout directory is missing critical files
-    CORRUPTED=0
-    for checkout in .build/checkouts/*; do
-        if [ -d "$checkout" ] && [ ! -f "$checkout/Package.swift" ] && [ ! -d "$checkout/Sources" ]; then
-            CORRUPTED=1
-            break
-        fi
-    done
-    
-    if [ "$CORRUPTED" -eq 1 ]; then
-        log_warn "Detected corrupted package checkouts, resetting..."
-        swift package reset 2>/dev/null || rm -rf .build/checkouts
-        log_success "Package checkouts reset"
-    fi
-fi
-
-# Check if we need to force a rebuild
-# Swift Package Manager should detect changes, but we can help by checking timestamps
-FORCE_REBUILD=false
-if [ -d ".build" ] && [ -d "$APP_BUNDLE" ]; then
-    # Find any Swift source file newer than the built binary
-    BUILT_BINARY_CHECK=$(find .build -name "$BINARY_NAME" -type f 2>/dev/null | head -1)
-    if [ -n "$BUILT_BINARY_CHECK" ]; then
-        NEWER_FILES=$(find Sources -name "*.swift" -newer "$BUILT_BINARY_CHECK" 2>/dev/null | wc -l | tr -d ' ')
-        if [ "$NEWER_FILES" -gt 0 ]; then
-            log_info "Found $NEWER_FILES source file(s) newer than built binary - rebuild needed"
-            FORCE_REBUILD=true
-        fi
-    else
-        # No binary found, definitely need to build
-        FORCE_REBUILD=true
-    fi
-fi
-
-# Force rebuild if needed by touching a source file (triggers SPM to rebuild)
-if [ "$FORCE_REBUILD" = true ] && [ -d ".build" ]; then
-    log_info "Forcing rebuild by touching Package.swift..."
-    touch Package.swift
-fi
-
-# Build the app and capture exit status
-log_info "Running 'swift build'..."
-swift build 2>&1 | tee /tmp/hypo_build.log
-BUILD_EXIT_CODE=${PIPESTATUS[0]}
-
-# Check if build failed
-if [ $BUILD_EXIT_CODE -ne 0 ]; then
-    log_error "Build failed"
-    # Check if it's a dependency issue
-    if grep -q "error opening input file.*checkouts" /tmp/hypo_build.log; then
-        log_warn "Dependency checkout issue detected. Try: cd macos && swift package reset"
-    fi
-    # Show compilation errors
-    ERROR_COUNT=$(grep -c "error:" /tmp/hypo_build.log || echo "0")
-    if [ "$ERROR_COUNT" -gt 0 ]; then
-        log_error "Found $ERROR_COUNT compilation error(s). Last few errors:"
-        grep -E "error:" /tmp/hypo_build.log | tail -10 | sed 's/^/  /'
-    fi
-    log_error "Full build log: /tmp/hypo_build.log"
+if ! swift build 2>&1 | tee /tmp/hypo_build.log; then
+    log_error "Build failed. Check /tmp/hypo_build.log for details"
     exit 1
 fi
 
 # Find the built binary (prefer debug, fallback to release)
-BUILT_BINARY=$(find "$MACOS_DIR/.build" -name "$BINARY_NAME" -type f 2>/dev/null | head -1)
+BUILT_BINARY=$(find "$MACOS_DIR/.build" -name "$BINARY_NAME" -type f | head -1)
 
 if [ -z "$BUILT_BINARY" ]; then
     log_error "Built binary not found in .build directory"
-    log_error "Build may have succeeded but binary was not produced"
-    log_info "Searching for any binaries in .build:"
-    find "$MACOS_DIR/.build" -name "*MenuBar*" -type f 2>/dev/null | head -5 | sed 's/^/  /'
-    log_info "Build log location: /tmp/hypo_build.log"
     exit 1
 fi
 
 log_success "Build complete: $BUILT_BINARY"
 
-# Always copy binary to app bundle to ensure it's updated
+# Verify binary exists and is newer than app bundle (if it exists)
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$BINARY_NAME"
+if [ -f "$APP_BINARY" ]; then
+    BUILT_TIME=$(stat -f "%m" "$BUILT_BINARY" 2>/dev/null || echo "0")
+    APP_TIME=$(stat -f "%m" "$APP_BINARY" 2>/dev/null || echo "0")
+    
+    if [ "$BUILT_TIME" -le "$APP_TIME" ]; then
+        log_warn "Built binary is not newer than app bundle binary"
+        log_info "Forcing copy to ensure latest code is used..."
+    fi
+fi
 
+# Copy binary to app bundle (always copy to ensure latest)
 log_info "Copying binary to app bundle..."
 cp -f "$BUILT_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
@@ -203,18 +130,6 @@ else
     exit 1
 fi
 
-# Ensure icon is up to date (check if icon generation script is newer than icon)
-if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ] && [ -f "$ICON_ICNS" ]; then
-    if [ "$PROJECT_ROOT/scripts/generate-icons.py" -nt "$ICON_ICNS" ]; then
-        log_info "Icon generation script is newer than icon, regenerating..."
-        python3 "$PROJECT_ROOT/scripts/generate-icons.py" 2>/dev/null || log_warn "Icon regeneration failed, using existing icon"
-    fi
-fi
-
-# Touch the app bundle to update its modification time
-touch "$APP_BUNDLE"
-log_info "App bundle updated: $(date -r "$APP_BUNDLE" '+%Y-%m-%d %H:%M:%S')"
-
 # Kill existing instances
 log_info "Stopping existing app instances..."
 if killall -9 "$BINARY_NAME" 2>/dev/null; then
@@ -224,9 +139,12 @@ else
     log_info "No existing instances to stop"
 fi
 
-# macOS uses unified logging (os_log), not file-based logging
-# Logs are available via: log stream --predicate 'subsystem == "com.hypo.clipboard"'
-# Note: HistoryPopupPresenter may still write to /tmp/hypo_debug.log for legacy debug purposes
+# Clear debug log if requested
+if [ "$1" == "clean-log" ] || [ "$2" == "clean-log" ]; then
+    log_info "Clearing debug log..."
+    rm -f /tmp/hypo_debug.log
+    log_success "Debug log cleared"
+fi
 
 # Launch the app
 log_info "Launching app..."
@@ -239,10 +157,12 @@ sleep 2
 if pgrep -x "$BINARY_NAME" > /dev/null; then
     log_success "App is running (PID: $(pgrep -x "$BINARY_NAME"))"
     
-    # macOS uses unified logging - view logs with:
-    # log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug
-    echo ""
-    log_info "ℹ️  View logs with: log stream --predicate 'subsystem == \"com.hypo.clipboard\"' --level debug"
+    # Show recent logs if available
+    if [ -f "/tmp/hypo_debug.log" ]; then
+        echo ""
+        log_info "Recent debug logs:"
+        tail -20 /tmp/hypo_debug.log | sed 's/^/  /'
+    fi
 else
     log_warn "App may not have started. Check Console.app for errors"
 fi
@@ -250,5 +170,5 @@ fi
 echo ""
 log_success "Build and launch complete!"
 log_info "App bundle: $APP_BUNDLE"
-log_info "View logs: log stream --predicate 'subsystem == \"com.hypo.clipboard\"' --level debug"
+log_info "Debug log: /tmp/hypo_debug.log"
 

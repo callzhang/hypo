@@ -11,7 +11,7 @@ import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
 import com.hypo.clipboard.transport.lan.LanDiscoveryEvent
 import com.hypo.clipboard.transport.lan.LanDiscoverySource
-import com.hypo.clipboard.transport.ws.WebSocketTransportClient
+import com.hypo.clipboard.transport.ws.LanWebSocketClient
 import com.hypo.clipboard.transport.ws.TlsWebSocketConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CompletableDeferred
@@ -55,7 +55,7 @@ class LanPairingViewModel @Inject constructor(
     private val discoveredDevices = mutableMapOf<String, DiscoveredPeer>()
     private var discoveryJob: Job? = null
     private var pairingJob: Job? = null
-    private var wsClient: WebSocketTransportClient? = null
+    private var wsClient: LanWebSocketClient? = null
     
     private val json = Json {
         ignoreUnknownKeys = true
@@ -89,28 +89,13 @@ class LanPairingViewModel @Inject constructor(
                             Log.d(TAG, "   Device ID: ${if (deviceId.isEmpty()) "missing" else deviceId}")
                             Log.d(TAG, "   Public Key: ${peer.attributes["pub_key"]?.take(20) ?: "missing"}...")
                             
-                            // Exclude self device from pairing list
-                            val isSelfDevice = deviceId == identity.deviceId || 
-                                             peer.serviceName.startsWith(identity.deviceId) ||
-                                             (deviceId.isEmpty() && peer.serviceName.contains(identity.deviceId))
-                            if (isSelfDevice) {
-                                Log.d(TAG, "⏭️ Skipping self device: deviceId=$deviceId, serviceName=${peer.serviceName}")
+                            // Filter out Android devices (only show macOS/iOS devices)
+                            // Check both device_id and serviceName since Android devices may not have device_id attribute
+                            val isAndroidDevice = deviceId.startsWith("android-") || 
+                                                  peer.serviceName.startsWith("android-")
+                            if (isAndroidDevice) {
+                                Log.d(TAG, "⏭️ Skipping Android device: deviceId=$deviceId, serviceName=${peer.serviceName}")
                                 return@collect
-                            }
-                            
-                            // Exclude already-paired devices from pairing list
-                            if (deviceId.isNotEmpty()) {
-                                val isPaired = try {
-                                    withContext(Dispatchers.IO) {
-                                        deviceKeyStore.loadKey(deviceId) != null
-                                    }
-                                } catch (e: Exception) {
-                                    false
-                                }
-                                if (isPaired) {
-                                    Log.d(TAG, "⏭️ Skipping already-paired device: deviceId=$deviceId, serviceName=${peer.serviceName}")
-                                    return@collect
-                                }
                             }
                             
                             // Use device_id as key if available, otherwise fallback to serviceName
@@ -184,20 +169,8 @@ class LanPairingViewModel @Inject constructor(
                         val sessionState = initiationResult.state
                         
                         // Step 3: Connect WebSocket
-                        // Handle emulator IP addresses: 10.0.2.x is the emulator's internal network
-                        // When connecting to an emulator from a physical device, we need to use the host machine's IP
-                        // For now, detect emulator IPs and log a warning - this is a known limitation
-                        val hostIp = if (device.host.startsWith("10.0.2.")) {
-                            Log.w(TAG, "⚠️ Detected emulator IP (${device.host}). Emulator-to-physical-device pairing via LAN is not supported.")
-                            Log.w(TAG, "   The emulator advertises its internal IP which is not reachable from physical devices.")
-                            Log.w(TAG, "   Consider using cloud pairing or testing with two physical devices.")
-                            // Still try to connect, but it will likely fail
-                            device.host
-                        } else {
-                            device.host
-                        }
-                        val wsUrl = "ws://$hostIp:${device.port}"
-                        Log.d(TAG, "Connecting to device at: $wsUrl")
+                        val wsUrl = "ws://${device.host}:${device.port}"
+                        Log.d(TAG, "Connecting to macOS at: $wsUrl")
                         
                         // For ws:// (non-TLS) connections, don't use fingerprint
                         // Only use fingerprint for wss:// (TLS) connections
@@ -223,7 +196,7 @@ class LanPairingViewModel @Inject constructor(
                         val connector = com.hypo.clipboard.transport.ws.OkHttpWebSocketConnector(config)
                         val frameCodec = com.hypo.clipboard.transport.ws.TransportFrameCodec()
                         
-                        wsClient = WebSocketTransportClient(
+                        wsClient = LanWebSocketClient(
                             config = config,
                             connector = connector,
                             frameCodec = frameCodec,
@@ -234,7 +207,7 @@ class LanPairingViewModel @Inject constructor(
                         // Set up pairing ACK handler
                         val ackReceived = CompletableDeferred<String>()
                         wsClient?.setPairingAckHandler { ackJson ->
-                            Log.d(TAG, "Received pairing ACK from peer device")
+                            Log.d(TAG, "Received pairing ACK from macOS")
                             Log.d(TAG, "ACK JSON: $ackJson")
                             if (!ackReceived.isCompleted) {
                                 ackReceived.complete(ackJson)
@@ -242,6 +215,7 @@ class LanPairingViewModel @Inject constructor(
                         }
                         
                         // Step 4: Ensure connection is established before sending challenge
+                        Log.d(TAG, "Ensuring WebSocket connection is established...")
                         wsClient?.let { client ->
                             withContext(Dispatchers.IO) {
                                 delay(100)
@@ -249,14 +223,20 @@ class LanPairingViewModel @Inject constructor(
                         }
                         
                         // Step 5: Send pairing challenge as raw JSON (not wrapped in SyncEnvelope)
+                        // macOS expects raw JSON with challenge_id at top level for pairing detection
                         val challengeJson = json.encodeToString(sessionState.challenge)
+                        Log.d(TAG, "Sending pairing challenge to macOS as raw JSON")
+                        Log.d(TAG, "Challenge JSON: $challengeJson")
+                        Log.d(TAG, "Challenge ID: ${sessionState.challenge.challengeId}")
                         val challengeData = challengeJson.toByteArray(Charsets.UTF_8)
                         
                         try {
-                            Log.d(TAG, "📤 Pairing: Sending challenge (ID: ${sessionState.challenge.challengeId.take(8)}...)")
+                            Log.d(TAG, "Calling sendRawJson...")
                             wsClient?.sendRawJson(challengeData)
+                            Log.d(TAG, "sendRawJson completed, waiting for ACK (timeout: 30s)")
                         } catch (e: Exception) {
-                            Log.e(TAG, "❌ Pairing: Failed to send challenge - ${e.message}", e)
+                            // Transport failures (socket closed, handshake failure) shouldn't crash the pairing job; surface a friendly error.
+                            Log.e(TAG, "❌ Failed to send challenge: ${e.message}", e)
                             _state.value = LanPairingUiState.Error("Failed to send pairing challenge: ${e.message ?: "Unknown error"}")
                             return@launch
                         }
@@ -269,16 +249,15 @@ class LanPairingViewModel @Inject constructor(
                                 }
                             }
                         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                            Log.e(TAG, "❌ Pairing: Timeout waiting for ACK (30s)")
-                            _state.value = LanPairingUiState.Error("Pairing timeout: Peer device did not respond. Please ensure the other device is running Hypo and try again.")
+                            Log.e(TAG, "❌ Pairing timeout: No ACK received within 30 seconds")
+                            _state.value = LanPairingUiState.Error("Pairing timeout: macOS did not respond. Please ensure the macOS app is running and try again.")
                             return@launch
                         } catch (e: Exception) {
-                            Log.e(TAG, "❌ Pairing: Error waiting for ACK - ${e.message}", e)
+                            // JSON decode or network errors while awaiting ACK must be propagated to UI.
+                            Log.e(TAG, "❌ Error waiting for ACK: ${e.message}", e)
                             _state.value = LanPairingUiState.Error("Failed to receive pairing response: ${e.message ?: "Unknown error"}")
                             return@launch
                         }
-                        
-                        Log.d(TAG, "✅ Pairing: ACK received (${ackJson.length} chars)")
                         
                         // Step 7: Complete pairing handshake to save encryption key
                         Log.d(TAG, "Processing pairing ACK and completing handshake...")
@@ -287,28 +266,28 @@ class LanPairingViewModel @Inject constructor(
                         when (completionResult) {
                             is PairingCompletionResult.Success -> {
                                 // Use the device ID from the pairing result (this is what the key was saved with)
-                                // Migrate from old format (with prefix) to new format (pure UUID)
-                                val rawDeviceId = completionResult.peerDeviceId ?: device.attributes["device_id"] ?: device.serviceName
-                                val deviceId = when {
-                                    rawDeviceId.startsWith("macos-") -> rawDeviceId.removePrefix("macos-")
-                                    rawDeviceId.startsWith("android-") -> rawDeviceId.removePrefix("android-")
-                                    else -> rawDeviceId
-                                }
-                                val deviceName = completionResult.peerDeviceName ?: device.serviceName
+                                val deviceId = completionResult.macDeviceId ?: device.attributes["device_id"] ?: device.serviceName
+                                val deviceName = completionResult.macDeviceName ?: device.serviceName
                                 
-                                Log.d(TAG, "✅ Pairing handshake completed! Key saved for device: $deviceId (migrated from: $rawDeviceId)")
-                                Log.d(TAG, "📋 Device ID from pairing result: ${completionResult.peerDeviceId}")
+                                Log.d(TAG, "✅ Pairing handshake completed! Key saved for device: $deviceId")
+                                Log.d(TAG, "📋 Device ID from pairing result: ${completionResult.macDeviceId}")
                                 Log.d(TAG, "📋 Device ID from peer attributes: ${device.attributes["device_id"]}")
                                 Log.d(TAG, "📋 Device service name: ${device.serviceName}")
                                 
                                 // Step 1: Verify key was saved (Issue 2b checklist)
-                                // Key store handles normalization internally - no need to normalize deviceId here
                                 Log.d(TAG, "🔑 Verifying key was saved for device: $deviceId")
                                 val savedKey = deviceKeyStore.loadKey(deviceId)
                                 if (savedKey != null) {
                                     Log.d(TAG, "✅ Key exists in store: ${savedKey.size} bytes")
                                 } else {
                                     Log.e(TAG, "❌ Key missing from store! Available keys: ${deviceKeyStore.getAllDeviceIds()}")
+                                    // Try to find the key with case-insensitive matching
+                                    val allKeys = deviceKeyStore.getAllDeviceIds()
+                                    val matchingKey = allKeys.find { it.equals(deviceId, ignoreCase = true) }
+                                    if (matchingKey != null) {
+                                        Log.w(TAG, "⚠️ Found key with case-insensitive match: $matchingKey (requested: $deviceId)")
+                                        Log.w(TAG, "💡 This suggests a device ID format mismatch - key was saved with different case/format")
+                                    }
                                 }
                                 
                                 // Add to transport manager
@@ -348,7 +327,7 @@ class LanPairingViewModel @Inject constructor(
                 // Top-level guard: any unexpected runtime exception during pairing should trigger a user-friendly error instead of crashing the ViewModel scope.
                 Log.e(TAG, "❌ Pairing failed with exception: ${e.message}", e)
                 val errorMessage = when (e) {
-                    is java.net.ConnectException -> "Cannot connect to peer device. Please ensure the other device is running Hypo."
+                    is java.net.ConnectException -> "Cannot connect to macOS. Please ensure the macOS app is running."
                     is java.net.SocketTimeoutException -> "Connection timeout. Please check your network connection."
                     is java.io.IOException -> "Network error: ${e.message ?: "Unknown error"}"
                     else -> "Pairing failed: ${e.message ?: e.javaClass.simpleName}"
@@ -361,21 +340,11 @@ class LanPairingViewModel @Inject constructor(
     private fun createQrPayloadFromDevice(device: DiscoveredPeer): String {
         // Create a pairing payload from Bonjour-discovered device
         // Use the persistent public key advertised via Bonjour
-        // Include both new and old field names for compatibility
-        val deviceId = device.attributes["device_id"] ?: "unknown"
-        val pubKey = device.attributes["pub_key"] ?: ""
-        val signingPubKey = device.attributes["signing_pub_key"] ?: ""
-        
-        // Validate that required keys are present
-        if (pubKey.isEmpty()) {
-            throw IllegalStateException("Discovered device ${device.serviceName} does not advertise a public key. Cannot create pairing payload.")
-        }
-        
         val jsonObject = org.json.JSONObject()
         jsonObject.put("ver", "1")
-        jsonObject.put("peer_device_id", deviceId)
-        jsonObject.put("peer_pub_key", pubKey)
-        jsonObject.put("peer_signing_pub_key", signingPubKey)
+        jsonObject.put("mac_device_id", device.attributes["device_id"] ?: "unknown")
+        jsonObject.put("mac_pub_key", device.attributes["pub_key"] ?: "")
+        jsonObject.put("mac_signing_pub_key", device.attributes["signing_pub_key"] ?: "")
         jsonObject.put("service", device.serviceName)
         jsonObject.put("port", device.port)
         

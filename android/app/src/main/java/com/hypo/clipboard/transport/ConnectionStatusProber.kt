@@ -6,6 +6,8 @@ import com.hypo.clipboard.sync.DeviceKeyStore
 import com.hypo.clipboard.transport.ws.WebSocketTransportClient
 import com.hypo.clipboard.transport.ws.RelayWebSocketClient
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -15,9 +17,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import java.time.Duration
 import java.net.HttpURLConnection
 import java.net.URL
-import java.time.Duration
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -36,45 +38,78 @@ class ConnectionStatusProber @Inject constructor(
     @Named("cloud_ws_config") private val cloudConfig: com.hypo.clipboard.transport.ws.TlsWebSocketConfig
 ) {
     private val scope = CoroutineScope(SupervisorJob())
-    private var periodicJob: Job? = null
+    private var peersObserverJob: Job? = null
+    private var cloudStateObserverJob: Job? = null
+    private var safetyTimerJob: Job? = null
     private var isProbing = false
     
     companion object {
         private const val TAG = "ConnectionStatusProber"
-        // Increased interval since connection state is now updated event-driven from WebSocket callbacks
-        // This probe now only updates device online status, not connection state
-        private val PROBE_INTERVAL_MS = Duration.ofMinutes(1).toMillis() // 1 minute - less frequent since connection state is event-driven
+        // Safety timer interval for belt-and-suspenders (debugging builds) or as fallback
+        // Only used if event-driven observation fails
+        private val SAFETY_TIMER_INTERVAL_MS = Duration.ofMinutes(5).toMillis() // 5 minutes - safety net
+        // Debounce delay to avoid spamming probeConnections() on rapid state changes
+        private val DEBOUNCE_DELAY_MS = 500L // 500ms debounce
     }
     
     /**
-     * Start periodic connection status probing
+     * Start event-driven connection status probing.
+     * Observes StateFlows for peers and cloud connection state changes,
+     * with a safety timer as fallback.
      */
     fun start() {
-        stop() // Stop any existing job
+        stop() // Stop any existing jobs
         
         // Initial probe on launch
         scope.launch {
             probeConnections()
         }
         
-        // Periodic probe every 1 minute
-        periodicJob = scope.launch {
+        // Event-driven: observe peers changes
+        // StateFlow already deduplicates, so we only need debounce to avoid rapid-fire probes
+        peersObserverJob = scope.launch {
+            transportManager.peers
+                .debounce(DEBOUNCE_DELAY_MS)
+                .collect {
+                    Log.d(TAG, "📡 Peers changed (${it.size} peers), triggering probe")
+                    probeConnections()
+                }
+        }
+        
+        // Event-driven: observe cloud connection state changes
+        // StateFlow already deduplicates, so we only need debounce to avoid rapid-fire probes
+        cloudStateObserverJob = scope.launch {
+            cloudWebSocketClient.connectionState
+                .debounce(DEBOUNCE_DELAY_MS)
+                .collect { state ->
+                    Log.d(TAG, "☁️ Cloud connection state changed: $state, triggering probe")
+                    probeConnections()
+                }
+        }
+        
+        // Safety timer: belt-and-suspenders for debugging builds or as fallback
+        // Only runs if event-driven observation fails
+        safetyTimerJob = scope.launch {
             while (isActive) {
-                delay(PROBE_INTERVAL_MS)
+                delay(SAFETY_TIMER_INTERVAL_MS)
                 if (isActive) {
+                    Log.d(TAG, "⏰ Safety timer triggered probe (fallback)")
                     probeConnections()
                 }
             }
         }
-        
     }
     
     /**
-     * Stop periodic probing
+     * Stop event-driven probing
      */
     fun stop() {
-        periodicJob?.cancel()
-        periodicJob = null
+        peersObserverJob?.cancel()
+        peersObserverJob = null
+        cloudStateObserverJob?.cancel()
+        cloudStateObserverJob = null
+        safetyTimerJob?.cancel()
+        safetyTimerJob = null
     }
     
     /**
@@ -174,6 +209,11 @@ class ConnectionStatusProber @Inject constructor(
                 // Just continue to update device status
             }
             
+            // Compute cloud reachability once per probe (reuse in device loop)
+            // Use checkServerHealth() when WebSocket is disconnected but network is available
+            val cloudConnected = cloudWebSocketClient.isConnected()
+            val cloudReachable = cloudConnected || (hasNetwork && checkServerHealth())
+            
             // Get current peers (discovered devices)
             val peers = transportManager.currentPeers()
             
@@ -187,7 +227,7 @@ class ConnectionStatusProber @Inject constructor(
             
             // Check connection status for each paired device
             // Note: If network is offline (hasNetwork = false), all peers are offline
-            // SettingsViewModel will mark them as Disconnected based on connectionState being Idle
+            // SettingsViewModel will mark them as Disconnected based on connectionState being Disconnected
             for (deviceId in pairedDeviceIds) {
                 // If no network, skip peer status updates (SettingsViewModel handles it via connectionState)
                 if (!hasNetwork) {
@@ -209,15 +249,14 @@ class ConnectionStatusProber @Inject constructor(
                         it.key.replace("-", "").equals(deviceId.replace("-", ""), ignoreCase = true)
                     }?.value
                 
-                // Get current cloud connection state for accurate status
-                val cloudConnected = cloudWebSocketClient.isConnected()
+                // Use cloudReachable (computed once above) instead of just cloudConnected
                 
                 val isOnline = when {
                     // Device is discovered on LAN → online (LAN connection will be established on-demand during sync)
                     isDiscovered -> true
-                    // Device has CLOUD transport AND cloud server is connected → online via cloud
-                    transport == ActiveTransport.CLOUD && cloudConnected -> true
-                    // Device has CLOUD transport but cloud server not connected → offline
+                    // Device has CLOUD transport AND cloud server is reachable → online via cloud
+                    transport == ActiveTransport.CLOUD && cloudReachable -> true
+                    // Device has CLOUD transport but cloud server not reachable → offline
                     transport == ActiveTransport.CLOUD -> false
                     // Device not discovered and no transport → offline
                     else -> false
@@ -231,8 +270,8 @@ class ConnectionStatusProber @Inject constructor(
                     } else if (transport != null) {
                         transportManager.markDeviceConnected(deviceId, transport)
                     }
-                } else if (!isDiscovered && transport == null && cloudConnected) {
-                    // Device is not discovered on LAN, has no transport, but cloud is connected
+                } else if (!isDiscovered && transport == null && cloudReachable) {
+                    // Device is not discovered on LAN, has no transport, but cloud is reachable
                     // Mark it with CLOUD transport so it shows as online via cloud
                     transportManager.markDeviceConnected(deviceId, ActiveTransport.CLOUD)
                 }

@@ -83,15 +83,7 @@ class LanRegistrationManager(
         if (connectivityReceiver != null) return
         connectivityReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                android.util.Log.d("LanRegistrationManager", "🌐 Network state changed - re-registering service to update IP address")
-                currentConfig?.let { config ->
-                    // Unregister first to ensure clean restart with new IP
-                    registrationListener?.let { listener ->
-                        runCatching { nsdManager.unregisterService(listener) }
-                    }
-                    // Then re-register with new network configuration
-                    scheduleRetry(config, immediate = true)
-                }
+                currentConfig?.let { scheduleRetry(it, immediate = true) }
             }
         }
         applicationContext.registerReceiver(
@@ -109,25 +101,16 @@ class LanRegistrationManager(
             setAttribute("fingerprint_sha256", config.fingerprint)
             setAttribute("version", config.version)
             setAttribute("protocols", config.protocols.joinToString(","))
-            // Add device_id attribute so devices can match discovered peers
+            // Add device_id attribute so macOS can match discovered devices
             config.deviceId?.let { deviceId ->
                 setAttribute("device_id", deviceId)
                 android.util.Log.d("LanRegistrationManager", "📝 Added device_id attribute: $deviceId")
-            }
-            // Add public keys for device-agnostic pairing
-            config.publicKey?.let { pubKey ->
-                setAttribute("pub_key", pubKey)
-                android.util.Log.d("LanRegistrationManager", "📝 Added pub_key attribute (${pubKey.length} chars)")
-            }
-            config.signingPublicKey?.let { signingKey ->
-                setAttribute("signing_pub_key", signingKey)
-                android.util.Log.d("LanRegistrationManager", "📝 Added signing_pub_key attribute (${signingKey.length} chars)")
             }
         }
         android.util.Log.d("LanRegistrationManager", "📝 Service info created: name=${info.serviceName}, type=${info.serviceType}, port=${info.port}")
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
-                android.util.Log.d("LanRegistrationManager", "✅ Service registered successfully: ${serviceInfo.serviceName}")
+                android.util.Log.i("LanRegistrationManager", "✅ Service registered successfully: ${serviceInfo.serviceName}")
                 attempts = 0
             }
 
@@ -197,9 +180,7 @@ data class LanRegistrationConfig(
     val version: String,
     val protocols: List<String>,
     val serviceType: String = SERVICE_TYPE,
-    val deviceId: String? = null,
-    val publicKey: String? = null, // Base64-encoded Curve25519 public key for pairing
-    val signingPublicKey: String? = null // Base64-encoded Ed25519 public key for signature verification
+    val deviceId: String? = null
 )
 
 interface LanRegistrationController {

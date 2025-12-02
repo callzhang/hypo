@@ -110,11 +110,9 @@ androidComponents {
     }
 }
 
-    dependencies {
-        // WebSocket server for LAN (handles framing correctly)
-        implementation("org.java-websocket:Java-WebSocket:1.5.4")
-        // AndroidX Core
-        implementation("androidx.core:core-ktx:1.12.0")
+dependencies {
+    // AndroidX Core
+    implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")

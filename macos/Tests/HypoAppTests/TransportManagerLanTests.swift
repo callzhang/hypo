@@ -10,6 +10,7 @@ final class TransportManagerLanTests: XCTestCase {
         let cache = InMemoryLanDiscoveryCache()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
             browser: browser,
             publisher: publisher,
             discoveryCache: cache,
@@ -61,6 +62,7 @@ final class TransportManagerLanTests: XCTestCase {
         let cache = InMemoryLanDiscoveryCache()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
             browser: browser,
             publisher: publisher,
             discoveryCache: cache,
@@ -103,6 +105,7 @@ final class TransportManagerLanTests: XCTestCase {
     func testConnectPrefersLan() async {
         let manager = await TransportManager(
             provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
             analytics: InMemoryTransportAnalytics()
         )
 
@@ -123,6 +126,7 @@ final class TransportManagerLanTests: XCTestCase {
         let analytics = InMemoryTransportAnalytics()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
             analytics: analytics
         )
 
@@ -154,6 +158,7 @@ final class TransportManagerLanTests: XCTestCase {
         let analytics = InMemoryTransportAnalytics()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
             analytics: analytics
         )
 
@@ -180,6 +185,7 @@ final class TransportManagerLanTests: XCTestCase {
         let analytics = InMemoryTransportAnalytics()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
             analytics: analytics
         )
 
@@ -221,6 +227,7 @@ final class TransportManagerLanTests: XCTestCase {
     func testManualRetrySkipsBackoffDelay() async {
         let manager = await TransportManager(
             provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
             analytics: InMemoryTransportAnalytics()
         )
 
@@ -261,6 +268,7 @@ final class TransportManagerLanTests: XCTestCase {
     func testShutdownTransportFlushesCallback() async {
         let manager = await TransportManager(
             provider: MockTransportProvider(),
+            preferenceStorage: MockPreferenceStorage(),
             analytics: InMemoryTransportAnalytics()
         )
 
@@ -341,7 +349,7 @@ private final class InMemoryLanDiscoveryCache: LanDiscoveryCache {
 }
 
 private final class MockTransportProvider: TransportProvider {
-    func preferredTransport() -> SyncTransport {
+    func preferredTransport(for preference: TransportPreference) -> SyncTransport {
         MockSyncTransport()
     }
 }
@@ -350,6 +358,16 @@ private struct MockSyncTransport: SyncTransport {
     func connect() async throws {}
     func send(_ envelope: SyncEnvelope) async throws {}
     func disconnect() async {}
+}
+
+private final class MockPreferenceStorage: PreferenceStorage {
+    var stored: TransportPreference?
+
+    func loadPreference() -> TransportPreference? { stored }
+
+    func savePreference(_ preference: TransportPreference) {
+        stored = preference
+    }
 }
 
 private final class MockBonjourDriver: BonjourBrowsingDriver {

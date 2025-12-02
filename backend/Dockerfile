@@ -34,11 +34,8 @@ COPY --from=builder /app/target/release/hypo-relay .
 
 # Create startup script
 RUN echo '#!/bin/sh' > /app/start.sh && \
-    echo 'set -e' >> /app/start.sh && \
-    echo 'echo "Starting Redis..."' >> /app/start.sh && \
-    echo 'redis-server --bind 127.0.0.1 --port 6379 --dir /data --daemonize yes' >> /app/start.sh && \
+    echo 'redis-server --bind 127.0.0.1 --port 6379 --dir /data &' >> /app/start.sh && \
     echo 'sleep 2' >> /app/start.sh && \
-    echo 'echo "Starting Hypo Relay Server on 0.0.0.0:8080..."' >> /app/start.sh && \
     echo 'exec ./hypo-relay' >> /app/start.sh && \
     chmod +x /app/start.sh
 

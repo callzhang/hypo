@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -77,7 +81,7 @@ public final class PairingSession: @unchecked Sendable {
     }
 
     private let identity: UUID
-    private let signingKeyStore: FileBasedPairingSigningKeyStore
+    private let signingKeyStore: PairingSigningKeyStore
     private let cryptoService: CryptoService
     private let storeSharedKeyHandler: @Sendable (SymmetricKey, String) throws -> Void
     private let jsonEncoder: JSONEncoder
@@ -91,7 +95,7 @@ public final class PairingSession: @unchecked Sendable {
 
     public init(
         identity: UUID,
-        signingKeyStore: FileBasedPairingSigningKeyStore = FileBasedPairingSigningKeyStore(),
+        signingKeyStore: PairingSigningKeyStore = PairingSigningKeyStore(),
         cryptoService: CryptoService = CryptoService(),
         deviceKeyProvider: KeychainDeviceKeyProvider = KeychainDeviceKeyProvider(),
         storeSharedKey: (@Sendable (SymmetricKey, String) throws -> Void)? = nil,
@@ -126,9 +130,9 @@ public final class PairingSession: @unchecked Sendable {
         let issuedAt = clock()
         let expiresAt = issuedAt.addingTimeInterval(configuration.qrValidity)
         let payload = PairingPayload(
-            peerDeviceId: identity,
-            peerPublicKey: agreementKey.publicKey.rawRepresentation,
-            peerSigningPublicKey: signingKey.publicKey.rawRepresentation,
+            macDeviceId: identity,
+            macPublicKey: agreementKey.publicKey.rawRepresentation,
+            macSigningPublicKey: signingKey.publicKey.rawRepresentation,
             service: configuration.service,
             port: configuration.port,
             relayHint: configuration.relayHint,
@@ -140,9 +144,9 @@ public final class PairingSession: @unchecked Sendable {
         let signature = try signPayload(payload, signingKey: signingKey)
         let signedPayload = PairingPayload(
             version: payload.version,
-            peerDeviceId: payload.peerDeviceId,
-            peerPublicKey: payload.peerPublicKey,
-            peerSigningPublicKey: payload.peerSigningPublicKey,
+            macDeviceId: payload.macDeviceId,
+            macPublicKey: payload.macPublicKey,
+            macSigningPublicKey: payload.macSigningPublicKey,
             service: payload.service,
             port: payload.port,
             relayHint: payload.relayHint,
@@ -195,21 +199,20 @@ public final class PairingSession: @unchecked Sendable {
                 throw PairingSessionError.payloadExpired
             }
             try verifyChallenge(message)
-            let sharedKey = try await deriveSharedKey(initiatorPublicKey: message.initiatorPublicKey)
+            let sharedKey = try await deriveSharedKey(androidPublicKey: message.androidPublicKey)
             let decrypted = try await decryptChallenge(message, sharedKey: sharedKey)
-            try storeSharedKey(sharedKey, initiatorDeviceId: message.initiatorDeviceId)
+            try storeSharedKey(sharedKey, androidDeviceId: message.androidDeviceId)
             let ack = try await createAck(
                 for: decrypted,
                 challengeId: message.challengeId,
                 sharedKey: sharedKey,
-                responderDeviceName: configuration.deviceName
+                macDeviceName: configuration.deviceName
             )
-            // Detect platform from device ID or default to "Unknown"
-            let detectedPlatform = detectPlatform(from: message.initiatorDeviceId)
+            // Use Android device ID as-is (can be "android-<UUID>" format)
             let device = PairedDevice(
-                id: message.initiatorDeviceId,
-                name: message.initiatorDeviceName,
-                platform: detectedPlatform,
+                id: message.androidDeviceId,
+                name: message.androidDeviceName,
+                platform: "Android",
                 lastSeen: clock(),
                 isOnline: true
             )
@@ -266,11 +269,11 @@ public final class PairingSession: @unchecked Sendable {
         }
     }
 
-    private func deriveSharedKey(initiatorPublicKey: Data) async throws -> SymmetricKey {
+    private func deriveSharedKey(androidPublicKey: Data) async throws -> SymmetricKey {
         guard let ephemeralKey else {
             throw PairingSessionError.cryptoFailure
         }
-        let publicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: initiatorPublicKey)
+        let publicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: androidPublicKey)
         return try await cryptoService.deriveKey(privateKey: ephemeralKey, publicKey: publicKey)
     }
 
@@ -283,7 +286,7 @@ public final class PairingSession: @unchecked Sendable {
                 key: sharedKey,
                 nonce: encrypted.nonce,
                 tag: encrypted.tag,
-                aad: Data(message.initiatorDeviceId.utf8)
+                aad: Data(message.androidDeviceId.utf8)
             )
         } catch {
             throw PairingSessionError.cryptoFailure
@@ -303,7 +306,7 @@ public final class PairingSession: @unchecked Sendable {
         for challenge: PairingChallengePayload,
         challengeId: UUID,
         sharedKey: SymmetricKey,
-        responderDeviceName: String
+        macDeviceName: String
     ) async throws -> PairingAckMessage {
         let hash = SHA256.hash(data: challenge.challenge)
         let payload = PairingAckPayload(
@@ -311,43 +314,27 @@ public final class PairingSession: @unchecked Sendable {
             issuedAt: clock()
         )
         let data = try jsonEncoder.encode(payload)
-        // Use pure UUID string (no prefix) for AAD
-        let responderDeviceIdString = identity.uuidString.lowercased()
+        // Use device ID string with platform prefix for AAD (additional authenticated data)
+        // This matches the format used in PairingAckMessage encoding (macos-{UUID})
+        let deviceIdentity = DeviceIdentity()
+        let macDeviceIdString = deviceIdentity.deviceIdString.lowercased()
         let encrypted = try await cryptoService.encrypt(
             plaintext: data,
             key: sharedKey,
-            aad: Data(responderDeviceIdString.utf8)
+            aad: Data(macDeviceIdString.utf8)
         )
         return PairingAckMessage(
             challengeId: challengeId,
-            responderDeviceId: identity,
-            responderDeviceName: responderDeviceName,
+            macDeviceId: identity,
+            macDeviceName: macDeviceName,
             nonce: encrypted.nonce,
             ciphertext: encrypted.ciphertext,
             tag: encrypted.tag
         )
     }
 
-    private func storeSharedKey(_ key: SymmetricKey, initiatorDeviceId: String) throws {
-        try storeSharedKeyHandler(key, initiatorDeviceId)
-    }
-    
-    /// Detect platform from device ID by checking for platform prefixes
-    private func detectPlatform(from deviceId: String) -> String {
-        if deviceId.hasPrefix("android-") {
-            return "Android"
-        } else if deviceId.hasPrefix("macos-") {
-            return "macOS"
-        } else if deviceId.hasPrefix("ios-") {
-            return "iOS"
-        } else if deviceId.hasPrefix("windows-") {
-            return "Windows"
-        } else if deviceId.hasPrefix("linux-") {
-            return "Linux"
-        } else {
-            // Default to "Unknown" for pure UUIDs - could be enhanced with Bonjour metadata
-            return "Unknown"
-        }
+    private func storeSharedKey(_ key: SymmetricKey, androidDeviceId: String) throws {
+        try storeSharedKeyHandler(key, androidDeviceId)
     }
 
     private func persistAck(_ ack: PairingAckMessage) throws {

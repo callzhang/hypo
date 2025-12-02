@@ -1,6 +1,6 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 0.2.5  
+Version: 0.2.6  
 Date: December 1, 2025  
 Status: Production Beta
 
@@ -37,7 +37,9 @@ See `docs/architecture.mermaid` for visual representation.
 #### macOS Client ✅ Implemented
 - **Language**: Swift 6 (strict concurrency, actor isolation)
 - **UI Framework**: SwiftUI for menu bar UI, AppKit for NSPasteboard monitoring
-- **Storage**: In-memory optimized history store with Room-based persistence, Keychain (encryption keys)
+- **Storage**: In-memory optimized history store with UserDefaults persistence, encrypted file storage (encryption keys)
+  - Keys stored in `~/Library/Application Support/Hypo/` with AES-GCM encryption
+  - No Keychain dependency - improves Notarization compatibility
 - **Networking**: Network.framework for WebSocket server, URLSession for client connections
 - **Crypto**: CryptoKit (AES-256-GCM, Curve25519, Ed25519)
 - **Discovery**: Bonjour (NetService) for LAN device discovery and advertising
@@ -172,7 +174,7 @@ To prevent clipboard ping-pong loops:
 **Mitigations**:
 - E2E encryption (relay cannot read)
 - Certificate pinning for cloud relay
-- Keychain/EncryptedSharedPreferences for key storage
+- Encrypted file storage (macOS) / EncryptedSharedPreferences (Android) for key storage
 - ECDH for pairing, AES-256-GCM for messages
 - Timestamp validation (reject messages >5min old)
 
@@ -466,7 +468,10 @@ android/
 │   │   │   │   │   ├── LanRegistrationManager.kt
 │   │   │   │   │   └── LanModels.kt
 │   │   │   │   └── ws/
-│   │   │   │       ├── LanWebSocketClient.kt
+│   │   │   │       ├── WebSocketTransportClient.kt
+│   │   │   │       ├── RelayWebSocketClient.kt
+│   │   │   │       ├── FallbackSyncTransport.kt
+│   │   │   │       ├── LanWebSocketServer.kt
 │   │   │   │       ├── TransportFrameCodec.kt
 │   │   │   │       └── TlsWebSocketConfig.kt
 │   │   ├── res/
@@ -564,15 +569,14 @@ interface ClipboardDao {
 **Implementation Details**:
 - **OkHttp Integration**: `OkHttpClient` configured with `CertificatePinner` keyed to the relay fingerprint and LAN fingerprint when available. Coroutine-based `Channel` ensures backpressure while sending messages.
 - **URL Resolution**: 
-  - LAN connections: `lastKnownUrl` is updated when peer is discovered via NSD
-  - Cloud connections: Always uses `config.url` (static cloud relay URL)
-  - Fallback: `lastKnownUrl ?: config.url` (for cloud connections or initialization)
+  - LAN connections: `lastKnownUrl` is updated when a peer is discovered via NSD and connections only proceed when this URL is set (no fallback to `config.url`)
+  - Cloud connections: Always uses `config.url` (static cloud relay URL for the relay server)
 - **Connection Loop**: 
   - Exits immediately if no peer URL available (waits for discovery event)
   - Exponential backoff retry for failed connections (1s → 2s → 4s → 8s → 16s → 32s max for LAN)
   - Retry logic handled in `runConnectionLoop()` - callbacks update state, loop handles retries
   - Maintains long-lived connection once established
-- **Instrumentation**: `MetricsReporter` logs handshake and first payload durations (`transport_handshake_ms`, `transport_first_payload_ms`) with transport label `lan` or `cloud` for downstream analytics.
+- **Instrumentation**: `WebSocketTransportClient` records handshake and round-trip durations via the injected `TransportMetricsRecorder`; the shared `TransportMetricsAggregator` test harness exercises these metrics and produces anonymized samples in `tests/transport/lan_loopback_metrics.json`.
 - **Relay Client Abstraction**: `RelayWebSocketClient` reuses the LAN TLS implementation but sources its endpoint, fingerprint, and telemetry headers from Gradle-provided `BuildConfig` constants (`RELAY_WS_URL`, `RELAY_CERT_FINGERPRINT`, `RELAY_ENVIRONMENT`). Unit tests exercise pinning-failure analytics to confirm the cloud environment label is surfaced correctly.
 
 #### 4.2.6 Battery Optimization
@@ -598,7 +602,7 @@ class ScreenStateReceiver(
 - `ClipboardSyncService` registers `ScreenStateReceiver` during `onCreate()`
 - On `ACTION_SCREEN_OFF`: 
   - Stops `TransportManager.connectionSupervisor()` to idle WebSocket connections
-  - Halts LAN discovery (`NsdManager`) to reduce network activity
+  - Relies on idle timeouts and the WebSocket watchdog to close unused connections while keeping LAN discovery/advertising active for reachability
   - Clipboard monitoring continues (zero-cost, event-driven)
 - On `ACTION_SCREEN_ON`:
   - Restarts `TransportManager` with LAN registration config
@@ -803,7 +807,7 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 
 - **Production Deployment**: Relay deployed to Fly.io production. `backend/fly.toml` defines auto-scaling (min=1, max=3) and embedded Redis in container. Secrets (`RELAY_HMAC_KEY`, `CERT_FINGERPRINT`) managed through Fly secrets and rotated monthly. The production relay is available at `https://hypo.fly.dev` with WebSocket endpoint `wss://hypo.fly.dev/ws`.
 - **Pairing Support**: Adds `/pairing/code` and `/pairing/claim` endpoints secured with HMAC header `X-Hypo-Signature`. Pairing codes stored in Redis with 60 s TTL and replay protection counters. Protocol is device-agnostic: any device can act as initiator (code creator) or responder (code claimer).
-- **Client Fallback Orchestration**: Android and macOS `TransportManager` instances race LAN dial attempts against a 3 s timeout before instantiating the relay transport. Fallback reason codes (`lan_timeout`, `lan_rejected`, `lan_not_supported`) are emitted through the shared `TransportAnalytics` stream for telemetry dashboards.
+- **Client Fallback Orchestration**: Android uses `FallbackSyncTransport` and macOS uses `DualSyncTransport` to always attempt both LAN and cloud sends in parallel, with LAN attempts bounded by a 3 s timeout. Fallback reason codes (`lan_timeout`, `lan_rejected`, `lan_not_supported`) are still surfaced via the shared `TransportAnalytics` stream for telemetry dashboards.
 - **Certificate Pinning**: `backend/scripts/cert_fingerprint.sh` extracts SHA-256 fingerprints from the Fly-issued certificate chain. Clients load the pinned hash and record a `transport_pinning_failure` analytics event when TLS verification fails (environment + host metadata captured).
 - **Observability**: Structured logs via `tracing` include connection IDs, transport path (`lan`, `relay`), latency histograms exported to Prometheus, and fallback reason counts. Alerts trigger when relay error rate exceeds 1% over 5 min or when pinning failures exceed 10/min.
 
@@ -821,7 +825,7 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 - **Transport Fallback**: Simulate LAN unavailable, verify cloud fallback
 - **Cloud Telemetry**: Assert fallback reason codes propagate to the analytics sinks and that cloud handshake/first-payload metrics are written to `tests/transport/cloud_metrics.json`.
 - **LAN Discovery Harness**: Simulate multicast announcements and ensure discovery emits add/remove events and prunes stale entries after 10 s.
-- **Latency Instrumentation**: Assert the `TransportMetricsRecorder` hooks on macOS (`LanWebSocketTransport`) and Android (`LanWebSocketClient`) emit `transport_handshake_ms` and `transport_first_payload_ms` samples, and persist the aggregation to `tests/transport/lan_loopback_metrics.json`.
+- **Latency Instrumentation**: Assert the `TransportMetricsRecorder` hooks on macOS (`LanWebSocketTransport`) and Android (`WebSocketTransportClient` via `TransportMetricsAggregator`) emit handshake and round-trip samples and persist the aggregation to `tests/transport/lan_loopback_metrics.json`.
 - **De-duplication**: Send same content twice, verify single sync
 
 ### 5.3 Manual Test Cases
@@ -952,8 +956,7 @@ docker run -p 8080:8080 hypo-relay
 
 ---
 
-**Document Version**: 0.2.5  
+**Document Version**: 0.2.6  
 **Last Updated**: December 1, 2025  
 **Status**: Production Beta  
 **Authors**: Principal Engineering Team
-

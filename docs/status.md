@@ -1,9 +1,9 @@
 # Hypo Project Status
 
-**Last Updated**: December 30, 2025
+**Last Updated**: December 1, 2025
 **Current Sprint**: Sprint 9 - Final Polish & Testing (Complete)  
 **Project Phase**: Production Beta - Ready for Release
-**Overall Progress**: 98%
+**Overall Progress**: 99%
 
 ---
 
@@ -66,6 +66,8 @@
 - [x] Fix macOS history pinning logic ✅ *(Nov 30, 2025)*
 - [x] Consolidate documentation (TESTING.md, LOGGING.md → TROUBLESHOOTING.md) ✅ *(Dec 30, 2025)*
 - [x] Reduce logging verbosity (info → debug) ✅ *(Nov 30, 2025)*
+- [x] Replace Keychain with file-based storage ✅ *(Dec 1, 2025)*
+- [x] Improve macOS logging clarity ✅ *(Dec 1, 2025)*
 - [ ] Beta testing recruitment
 - [ ] Production release preparation
 
@@ -269,6 +271,22 @@
 - **Android**: Added `RelayWebSocketClient` plus BuildConfig-powered staging endpoint/fingerprint wiring with unit coverage for pinning analytics.
 - **macOS**: Introduced `CloudRelayTransport` and configuration defaults to wrap LAN transport logic while emitting cloud-labelled telemetry.
 - **Configuration**: Synced staging relay fingerprint/constants across platforms for consistent TLS pinning and analytics headers.
+
+### December 1, 2025
+- **macOS Key Storage Migration** ✅: Replaced Keychain with encrypted file-based storage
+  - Created `FileBasedKeyStore` and `FileBasedPairingSigningKeyStore` for app-internal storage
+  - Keys stored in `~/Library/Application Support/Hypo/` with AES-GCM encryption
+  - Removes dependency on Keychain Sharing entitlement
+  - Improves Notarization compatibility for distribution
+  - Maintains same security level with encrypted file storage (0o600 permissions)
+  - All Keychain references updated to use file-based storage
+
+- **macOS Logging Improvements** ✅: Reduced verbosity and improved debugging clarity
+  - Removed redundant logs from `versionString` computed property
+  - Changed routine operation logs from `info` to `debug` level
+  - Removed legacy `appendDebug` file-based logging in favor of unified `os_log`
+  - Improved error messages with clearer descriptions
+  - Consolidated notification observer logs
 
 ### December 30, 2025
 - **Documentation Consolidation** ✅: Merged and streamlined documentation

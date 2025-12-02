@@ -2,7 +2,7 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
-## [Unreleased] - Device-Agnostic Pairing
+## [Unreleased] - Device-Agnostic Pairing & Storage Improvements
 
 ### Added
 - **Device-Agnostic Pairing**: Pairing system now supports pairing between any devices (Android↔Android, macOS↔macOS, Android↔macOS, etc.), not just Android↔macOS. Any device can act as initiator (QR code creator) or responder (QR code scanner) in LAN pairing, and any device can create or claim pairing codes in remote pairing.
@@ -12,12 +12,26 @@ All notable changes to the Hypo project will be documented in this file.
 - **Platform Detection**: Platform is now automatically detected from device ID prefixes or metadata during pairing, rather than being hard-coded. Supports detection of Android, macOS, iOS, Windows, and Linux platforms.
 - **Discovery Filtering**: Removed platform-specific filtering in Android discovery - all discovered devices are now shown regardless of platform.
 - **Device ID Migration**: Enhanced device ID migration to handle any platform prefix (macos-, android-, ios-, windows-, linux-), not just macos-/android-.
+- **macOS Key Storage**: Replaced Keychain storage with encrypted file-based storage for better Notarization compatibility
+  - Created `FileBasedKeyStore` and `FileBasedPairingSigningKeyStore` for app-internal storage
+  - Keys stored in `~/Library/Application Support/Hypo/` with AES-GCM encryption
+  - Maintains same security level with encrypted file storage
+  - Removes dependency on Keychain Sharing entitlement
+  - Files protected with 0o600 permissions (user-only access)
+- **macOS Logging Improvements**: Reduced log verbosity and improved debugging clarity
+  - Removed redundant logs from `versionString` computed property
+  - Changed routine operation logs from `info` to `debug` level
+  - Removed legacy `appendDebug` file-based logging in favor of unified `os_log`
+  - Improved error messages with clearer descriptions
+  - Consolidated notification observer logs
 
 ### Technical Details
 - Updated `PairingPayload`, `PairingChallengeMessage`, and `PairingAckMessage` models across Swift and Kotlin
 - Backend Redis client and handlers updated to use `initiator_*` and `responder_*` field names
 - Relay clients updated to support device-agnostic pairing flows
 - Platform detection logic added to `PairingSession.swift` with `detectPlatform()` helper function
+- `FileBasedKeyStore` uses AES-GCM encryption with service-derived keys for secure storage
+- All Keychain references replaced with file-based storage while maintaining backward compatibility
 
 ## [0.2.3] - 2025-01-21 - Transport Origin & Icon Display Fixes
 

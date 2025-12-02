@@ -16,6 +16,7 @@ import com.hypo.clipboard.crypto.SecureRandomNonceGenerator
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.data.ClipboardRepositoryImpl
 import com.hypo.clipboard.data.local.ClipboardDao
+import com.hypo.clipboard.data.local.DatabaseMigrations
 import com.hypo.clipboard.data.local.HypoDatabase
 import com.hypo.clipboard.data.settings.SettingsRepository
 import com.hypo.clipboard.data.settings.SettingsRepositoryImpl
@@ -58,7 +59,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): HypoDatabase =
         Room.databaseBuilder(context, HypoDatabase::class.java, "hypo.db")
-            .fallbackToDestructiveMigration()
+            .addMigrations(DatabaseMigrations.MIGRATION_2_3)
             .build()
 
     @Provides

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Hypo Android Build Script
 # Builds the Android APK with proper environment configuration
+# Always builds the app to ensure latest code changes are included
 
 set -e  # Exit on error
 
@@ -84,6 +85,27 @@ echo "   ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
 echo "   GRADLE_USER_HOME: $GRADLE_USER_HOME"
 echo ""
 
+# Ensure app icons exist
+echo -e "${YELLOW}Checking app icons...${NC}"
+ICON_SCRIPT="$PROJECT_ROOT/scripts/generate-icons.py"
+ANDROID_RES="$PROJECT_ROOT/android/app/src/main/res"
+ICON_CHECK="$ANDROID_RES/mipmap-xxxhdpi/ic_launcher.png"
+
+if [ ! -f "$ICON_CHECK" ]; then
+    if [ -f "$ICON_SCRIPT" ]; then
+        echo "   Icons not found. Generating..."
+        python3 "$ICON_SCRIPT" || echo -e "${YELLOW}⚠️  Icon generation failed, continuing without icons${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Icon generation script not found. App will build without icons.${NC}"
+    fi
+elif [ -f "$ICON_SCRIPT" ] && [ "$ICON_SCRIPT" -nt "$ICON_CHECK" ]; then
+    echo "   Icon generation script is newer than icons, regenerating..."
+    python3 "$ICON_SCRIPT" 2>/dev/null || echo -e "${YELLOW}⚠️  Icon regeneration failed, using existing icons${NC}"
+else
+    echo "   Icons are up to date"
+fi
+echo ""
+
 # Build
 # Load .env file if it exists
 if [ -f "$PROJECT_ROOT/.env" ]; then
@@ -102,6 +124,8 @@ if [ "$1" == "clean" ]; then
     ./gradlew clean
 fi
 
+# Always build - ensure latest code is compiled
+# Gradle will handle incremental builds automatically
 ./gradlew assembleDebug --stacktrace
 
 # Check output
@@ -154,11 +178,11 @@ if [ -f "$APK_PATH" ]; then
                         echo -e "${GREEN}✅ App opened on $DEVICE_ID${NC}"
                     else
                         echo -e "${YELLOW}⚠️  Could not auto-open app on $DEVICE_ID. Please open manually.${NC}"
-                    fi
-                else
+                fi
+            else
                     echo -e "${RED}❌ Installation failed on $DEVICE_ID${NC}"
                     echo "   Try manually: $ADB -s $DEVICE_ID install -r android/$APK_PATH"
-                fi
+            fi
             done
         else
             echo "No devices connected. To install manually:"

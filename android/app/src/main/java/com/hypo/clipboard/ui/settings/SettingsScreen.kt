@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Accessibility
+import androidx.compose.material.icons.filled.Message
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -46,23 +47,25 @@ import com.hypo.clipboard.transport.ConnectionState
 import com.hypo.clipboard.ui.components.DeviceConnectionStatus
 import com.hypo.clipboard.ui.components.DeviceStatusBadge
 import com.hypo.clipboard.ui.components.ConnectionStatusBadge
+import com.hypo.clipboard.util.MiuiAdapter
 
 @Composable
 fun SettingsRoute(
     onOpenBatterySettings: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
+    onRequestSmsPermission: () -> Unit,
     onStartPairing: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
     SettingsScreen(
         state = state,
-        onCloudSyncChanged = viewModel::onCloudSyncChanged,
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
         onAutoDeleteDaysChanged = viewModel::onAutoDeleteDaysChanged,
         onPlainTextModeChanged = viewModel::onPlainTextModeChanged,
         onOpenBatterySettings = onOpenBatterySettings,
         onOpenAccessibilitySettings = onOpenAccessibilitySettings,
+        onRequestSmsPermission = onRequestSmsPermission,
         onStartPairing = onStartPairing,
         onRemoveDevice = viewModel::removeDevice
     )
@@ -72,12 +75,12 @@ fun SettingsRoute(
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
-    onCloudSyncChanged: (Boolean) -> Unit,
     onHistoryLimitChanged: (Int) -> Unit,
     onAutoDeleteDaysChanged: (Int) -> Unit,
     onPlainTextModeChanged: (Boolean) -> Unit,
     onOpenBatterySettings: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
+    onRequestSmsPermission: () -> Unit,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit,
     modifier: Modifier = Modifier
@@ -100,9 +103,7 @@ fun SettingsScreen(
             
             item {
                 SyncSection(
-                    cloudEnabled = state.cloudSyncEnabled,
                     plainTextMode = state.plainTextModeEnabled,
-                    onCloudSyncChanged = onCloudSyncChanged,
                     onPlainTextModeChanged = onPlainTextModeChanged
                 )
             }
@@ -124,6 +125,13 @@ fun SettingsScreen(
                 AccessibilitySection(
                     isEnabled = state.isAccessibilityServiceEnabled,
                     onOpenAccessibilitySettings = onOpenAccessibilitySettings
+                )
+            }
+
+            item {
+                SmsPermissionSection(
+                    isGranted = state.isSmsPermissionGranted,
+                    onRequestSmsPermission = onRequestSmsPermission
                 )
             }
 
@@ -212,9 +220,7 @@ private fun ConnectionStatusSection(connectionState: ConnectionState) {
 
 @Composable
 private fun SyncSection(
-    cloudEnabled: Boolean,
     plainTextMode: Boolean,
-    onCloudSyncChanged: (Boolean) -> Unit,
     onPlainTextModeChanged: (Boolean) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -223,14 +229,6 @@ private fun SyncSection(
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold
         )
-        ListItem(
-            headlineContent = { Text(text = stringResource(id = R.string.settings_cloud_sync)) },
-            supportingContent = { Text(text = stringResource(id = R.string.settings_cloud_sync_description)) },
-            trailingContent = {
-                Switch(checked = cloudEnabled, onCheckedChange = onCloudSyncChanged)
-            }
-        )
-        Divider()
         ListItem(
             headlineContent = { Text(text = "Plain Text Mode (Debug)") },
             supportingContent = { Text(text = "⚠️ Send clipboard without encryption. Less secure, for debugging only.") },
@@ -328,6 +326,13 @@ private fun BatterySection(onOpenBatterySettings: () -> Unit) {
                 text = stringResource(id = R.string.settings_battery_description),
                 style = MaterialTheme.typography.bodyMedium
             )
+            if (MiuiAdapter.isMiuiOrHyperOS()) {
+                Text(
+                    text = stringResource(id = R.string.settings_miui_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             Button(onClick = onOpenBatterySettings, modifier = Modifier.align(Alignment.End)) {
                 Text(text = stringResource(id = R.string.settings_battery_optimize_button))
             }
@@ -383,6 +388,68 @@ private fun AccessibilitySection(
                 Button(onClick = onOpenAccessibilitySettings) {
                     Text(text = stringResource(id = R.string.settings_accessibility_open_button))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmsPermissionSection(
+    isGranted: Boolean,
+    onRequestSmsPermission: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(imageVector = Icons.Filled.Message, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(id = R.string.settings_sms_permission),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                text = stringResource(id = R.string.settings_sms_permission_description),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isGranted) {
+                        stringResource(id = R.string.settings_sms_permission_status_granted)
+                    } else {
+                        stringResource(id = R.string.settings_sms_permission_status_denied)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isGranted) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+                if (!isGranted) {
+                    Button(onClick = onRequestSmsPermission) {
+                        Text(text = stringResource(id = R.string.settings_sms_permission_request_button))
+                    }
+                }
+            }
+            if (!isGranted) {
+                Text(
+                    text = stringResource(id = R.string.settings_sms_permission_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

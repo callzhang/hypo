@@ -1,11 +1,15 @@
 package com.hypo.clipboard
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
@@ -32,8 +36,29 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    
+    // SMS permission request launcher
+    private val smsPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            android.util.Log.d("MainActivity", "✅ SMS permission granted")
+        } else {
+            android.util.Log.w("MainActivity", "⚠️ SMS permission denied")
+        }
+    }
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Request SMS permission if not granted (Android 6.0+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) 
+                != PackageManager.PERMISSION_GRANTED) {
+                // Request permission
+                smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
+            }
+        }
         
         // Configure status bar for white background: use dark icons and text
         // This makes status bar icons dark (visible on white background)
@@ -90,6 +115,7 @@ class MainActivity : ComponentActivity() {
                             SettingsRoute(
                                 onOpenBatterySettings = ::openBatterySettings,
                                 onOpenAccessibilitySettings = ::openAccessibilitySettings,
+                                onRequestSmsPermission = ::requestSmsPermission,
                                 onStartPairing = { navController.navigate("pairing") }
                             )
                         }
@@ -116,6 +142,15 @@ class MainActivity : ComponentActivity() {
                 Intent(Settings.ACTION_SETTINGS)
             }
             startActivity(intent)
+        }
+    }
+    
+    private fun requestSmsPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) 
+                != PackageManager.PERMISSION_GRANTED) {
+                smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 0.2.7  
+Version: 0.3.4  
 Date: December 2, 2025  
 Status: Production Beta
 
@@ -54,6 +54,8 @@ See `docs/architecture.mermaid` for visual representation.
 - **Discovery**: NSD (Network Service Discovery) for LAN device discovery and registration
 - **Background**: Foreground Service with FOREGROUND_SERVICE_DATA_SYNC permission
 - **Battery Optimization**: Screen-state aware connection management (60-80% battery saving)
+- **MIUI/HyperOS Adaptation** ✅ Implemented (December 2025): Automatic detection and workarounds for MIUI/HyperOS-specific restrictions
+- **SMS Auto-Sync** ✅ Implemented (December 2025): Automatically copies incoming SMS to clipboard for sync to macOS
 
 #### Backend Relay ✅ Deployed
 - **Language**: Rust 1.83+
@@ -116,29 +118,67 @@ Client → Server: Auth message (signed with device key)
 Server → Client: ACK + session token
 ```
 
-#### Heartbeat
-- Client sends `PING` every 30s
-- Server responds with `PONG`
-- Timeout after 3 missed pings
+#### Heartbeat (Keepalive Pings)
+
+**Current Implementation**:
+- **Cloud WebSocket**: Sends `PING` every **20 seconds** to prevent Fly.io idle timeout (Fly.io disconnects idle connections after ~60 seconds)
+- **LAN WebSocket**: Sends `PING` every **30 minutes** (event-driven reconnection available if disconnected)
+- Server responds with `PONG` to each ping
+- Connection closed after ping failures (triggers reconnection)
+
+**Battery Impact Analysis**:
+- **Cloud (20s interval)**: 
+  - **Necessary**: Required to prevent Fly.io from disconnecting idle connections
+  - **Impact**: Moderate - prevents device from entering deep sleep, but necessary for connection reliability
+  - **Optimization**: Cannot be increased significantly without risking disconnections (Fly.io timeout ~60s)
+  - **Estimated battery drain**: ~2-3% per hour when active (based on W3C research: 20s interval causes ~2% drop in 10 minutes)
+  
+- **LAN (30 minutes interval)**:
+  - **Battery-friendly**: Very low impact - only 2 pings per hour
+  - **Rationale**: LAN connections are more stable and can rely on event-driven reconnection
+  - **Estimated battery drain**: <0.1% per hour (negligible)
+  - **Alternative**: Could potentially be removed entirely and rely on connection health checks, but 30-minute ping provides safety net
+
+**Optimization Recommendations**:
+1. **Cloud ping (20s)**: Keep as-is - necessary for Fly.io compatibility
+2. **LAN ping (30m)**: Consider increasing to 60 minutes or removing entirely if connection health checks are sufficient
+3. **Screen-off optimization**: Both ping intervals could be increased when screen is off (already implemented via screen-state monitoring)
+4. **Adaptive intervals**: Could implement longer intervals during low activity periods
 
 #### Disconnection
 - Graceful: Client sends `DISCONNECT` message
 - Ungraceful: Server detects timeout, cleans up Redis state
 
-#### Reconnection & Retry Logic ✅ Implemented (December 2025)
-- **Exponential Backoff**: Automatic retry with exponential backoff for failed connections
-  - **Cloud Connections**: 1s → 2s → 4s → 8s → 16s → 32s → 64s → 128s (max delay)
-  - **LAN Connections**: 1s → 2s → 4s → 8s → 16s → 32s (max delay)
+#### Reconnection & Retry Logic ✅ Unified Event-Driven (December 2025)
+- **Unified Reconnection Logic**: Same event-driven reconnection for both cloud and LAN connections (Android and macOS)
+  - `onClosed`/`onFailure` callbacks immediately trigger reconnection for both cloud and LAN
+  - No separate code paths - unified implementation across all connection types
+  - No polling or periodic retries - everything is event-driven
+  - State set to `ConnectingCloud`/`ConnectingLan` immediately on disconnection (not after delay)
+- **Exponential Backoff**: Applied before connection attempt (not in retry loop) - unified for both cloud and LAN
+  - **All Connections**: 1s → 2s → 4s → 8s → 16s → 32s → 64s → 128s (max delay)
+  - Backoff calculated based on consecutive failures: `baseDelay * (2^(failures-1))`
+  - After 8 consecutive failures, backoff stays at 128s indefinitely (keeps retrying every 128s)
+  - Backoff applied before starting connection attempt
+  - Failure count tracked at class level, persists across attempts
 - **Connection State**: Clear state management with `Disconnected` (renamed from `Idle` for clarity)
   - `Disconnected`: Not connected, ready to connect
-  - `ConnectingCloud` / `ConnectingLan`: Connection attempt in progress
+  - `ConnectingCloud` / `ConnectingLan`: Connection attempt in progress (shown during backoff)
   - `ConnectedCloud` / `ConnectedLan`: Successfully connected
   - `Error`: Connection error state
-- **Event-Driven Retries**: Retry logic handled in `runConnectionLoop()`, not in callbacks
-  - Callbacks (`onFailure`, `onClosed`) update state and complete signals
-  - Connection loop automatically retries when `closedSignal` is completed
-  - No immediate reconnection calls from callbacks - prevents bypassing exponential backoff
-- **Retry Reset**: Retry count resets to 0 on successful connection
+- **Connection Loop Architecture**: 
+  - Connection loop tries to connect once and exits on failure/disconnect
+  - No retry loop in connection loop - reconnection handled by event-driven callbacks
+  - Connection maintained as long-lived connection until disconnection event
+- **Failure Tracking**: 
+  - `consecutiveFailures` counter at class level (persists across attempts)
+  - Tracks failures for both cloud and LAN connections (unified tracking)
+  - Increments on connection failures (handshake timeout, connection refused, etc.)
+  - Resets to 0 on successful connection (in both `onOpen` and after successful handshake)
+- **Platform Implementation**:
+  - **Android**: `WebSocketTransportClient.onClosed()` triggers `ensureConnection()` for both cloud and LAN
+  - **macOS**: `WebSocketTransport.receiveNext()` reconnects for both cloud and LAN with same exponential backoff
+  - **No Separate Logic**: Both platforms use unified reconnection code paths
 - **Status**: Production-ready and tested
 
 ### 2.4 De-duplication Strategy
@@ -435,7 +475,11 @@ func showNotification(for item: ClipboardItem) {
 - **Transport Pipeline**: `LanWebSocketTransport` wraps `URLSessionWebSocketTask` behind the shared `SyncTransport` protocol. The client pins the SHA-256 fingerprint advertised in the Bonjour TXT record, frames JSON envelopes with a 4-byte length prefix via `TransportFrameCodec`, and maintains a long-lived connection for receiving messages.
 - **Event-Driven Connection**: Connections are established when peers are discovered via Bonjour. The client maintains a long-lived connection and only reconnects when:
   - Peer IP changes (detected via Bonjour discovery)
-  - Connection disconnects (connection lifecycle callbacks)
+  - Connection disconnects (connection lifecycle callbacks trigger immediate reconnection)
+- **Unified Reconnection**: Uses same event-driven reconnection logic as cloud connections:
+  - Immediate reconnection on disconnect (no polling)
+  - Same exponential backoff: 1s → 2s → 4s → ... → 128s (capped)
+  - Unified failure tracking and retry logic
 - **Timeouts**: Dial attempts cancel after 3 s; once connected the configurable idle watchdog (30 s default) tears down sockets when no LAN traffic is observed.
 - **Metrics**: Every connection records handshake duration, first-message latency, idle timeout events, and disconnect reasons which feed into `TelemetryClient` and status reporting.
 
@@ -471,6 +515,7 @@ android/
 │   │   │   │       ├── WebSocketTransportClient.kt
 │   │   │   │       ├── RelayWebSocketClient.kt
 │   │   │   │       ├── FallbackSyncTransport.kt
+│   │   │   │       ├── LanPeerConnectionManager.kt
 │   │   │   │       ├── LanWebSocketServer.kt
 │   │   │   │       ├── TransportFrameCodec.kt
 │   │   │   │       └── TlsWebSocketConfig.kt
@@ -535,29 +580,68 @@ interface ClipboardDao {
 - **LanRegistrationManager** (`transport/lan/LanRegistrationManager.kt`): Publishes `_hypo._tcp` with TXT payload `{ fingerprint_sha256, version, protocols }`, listens for Wi-Fi connectivity changes, and re-registers using exponential backoff (1 s, 2 s, 4 s… capped at 5 minutes). Backoff attempts reset after successful registration. On network changes, unregisters and re-registers service to update IP address in NSD records.
 - **TransportManager** (`transport/TransportManager.kt`): Starts registration/discovery from the foreground service, exposes a `StateFlow` of discovered peers sorted by recency, and supports advertisement updates for port/fingerprint/version changes. **Event-driven discovery**: Collects from `discoverySource.discover().collect { event -> handleEvent(event) }` - reacts to NSD callbacks (`onServiceFound`, `onServiceLost`) immediately, no periodic polling. When peers are discovered, updates `_peers` StateFlow which triggers connection establishment in `SyncCoordinator`. Helpers surface last-seen timestamps and prune stale peers, with a coroutine-driven maintenance loop pruning entries unseen for 5 minutes (default) to keep telemetry/UI aligned with active LAN peers. Provides `restartForNetworkChange()` method to restart both NSD registration and WebSocket server when network changes.
 - **Network Change Handling** (`service/ClipboardSyncService.kt`): Registers `ConnectivityManager.NetworkCallback` to detect network availability and capability changes. On network changes, calls `TransportManager.restartForNetworkChange()` to update services with new IP addresses. Health check task (30s interval) monitors service state and restarts if services stop unexpectedly.
-- **OEM Notes**: HyperOS throttles multicast after ~15 minutes of screen-off time. The repository exposes lock lifecycle hooks so the service can prompt users to re-open the app, and the registration manager schedules immediate retries when connectivity resumes to mitigate OEM suppression.
+
+**Multicast and LAN Discovery**:
+
+**What is Multicast?**
+Multicast is a network communication method that allows one sender to transmit data to multiple receivers simultaneously on a local network. In Hypo, multicast is used for **LAN device discovery** via mDNS (multicast DNS) protocols:
+- **macOS**: Uses Bonjour (Apple's implementation of mDNS) to discover and advertise devices
+- **Android**: Uses NSD (Network Service Discovery, Android's mDNS implementation) to discover and register services
+
+**How Multicast Works in Hypo**:
+1. **Service Advertising**: Each device publishes its presence on the local network using multicast packets
+   - macOS: `NetService` publishes `_hypo._tcp` service via Bonjour
+   - Android: `NsdManager` registers `_hypo._tcp` service via NSD
+2. **Service Discovery**: Devices listen for multicast packets to discover peers
+   - macOS: `NetServiceBrowser` searches for `_hypo._tcp` services
+   - Android: `NsdManager.discoverServices()` listens for service announcements
+3. **Multicast Lock (Android)**: Android requires apps to acquire a `WifiManager.MulticastLock` to keep Wi-Fi multicast functionality active
+   - Prevents Android from disabling multicast to save battery
+   - Must be held while discovery/advertising is active
+   - Released when discovery stops
+
+**MIUI/HyperOS Multicast Throttling**:
+- **Issue**: HyperOS (and some MIUI versions) aggressively throttle multicast traffic after ~15 minutes of screen-off time to save battery
+- **Impact**: LAN device discovery stops working after the device screen has been off for 15+ minutes
+- **Mitigation** (✅ Implemented December 2025):
+  1. **Automatic Multicast Lock Refresh**: On MIUI/HyperOS devices, the app automatically refreshes the multicast lock every 10 minutes (before the 15-minute throttle window)
+     - `LanRegistrationManager.scheduleMulticastLockRefresh()` releases and re-acquires the lock periodically
+  2. **Periodic NSD Restart**: NSD discovery is restarted every 5 minutes on MIUI/HyperOS devices
+     - `LanDiscoveryRepository` schedules periodic restarts to recover from throttling
+  3. **Device Detection**: `MiuiAdapter` automatically detects MIUI/HyperOS devices and enables these workarounds
+- **User Guidance**: Settings screen shows MIUI/HyperOS-specific instructions for battery optimization and autostart settings
 
 #### 4.2.5 Android WebSocket Client
 
-**Event-Driven Connection Architecture** ✅ Implemented (November 2025):
-- **Fully event-driven**: Connections are triggered by peer discovery events, not periodic polling
-- **No continuous retry loops**: Connection loop exits if no peer URL is available, waits for discovery events
-- **URL Management**: Uses only `lastKnownUrl` (removed `currentUrl`) - updated when peers are discovered via NSD
+**Multi-Peer Connection Architecture** ✅ Implemented (December 2025):
+- **Separate Connections Per Peer**: Maintains persistent `WebSocketTransportClient` connection for each discovered peer (deviceId), mirroring macOS architecture
+- **LanPeerConnectionManager**: Manages peer connection lifecycle - creates connections when peers are discovered, removes connections when peers are no longer available
+- **Event-Driven Connection Management**: Connections are created/removed based on peer discovery events, not periodic polling
 - **Connection Lifecycle**:
   1. NSD discovery event → `LanDiscoveryEvent.Added(peer)` emitted
-  2. `TransportManager` updates `peers` StateFlow
-  3. `SyncCoordinator` observes peers StateFlow → calls `lanWebSocketClient.startReceiving()`
-  4. `startReceiving()` updates `lastKnownUrl` with peer's IP address
-  5. Connection established and maintained as long-lived connection
-  6. Reconnection only occurs when:
-     - Peer IP changes (detected via discovery event)
-     - Connection disconnects (`onClosed`/`onFailure` callbacks)
-- **Exponential Backoff Retry** ✅ Implemented (December 2025):
-  - **Cloud Connections**: Automatic retry with exponential backoff (1s → 2s → 4s → 8s → 16s → 32s → 64s → 128s max)
-  - **LAN Connections**: Automatic retry with exponential backoff (1s → 2s → 4s → 8s → 16s → 32s max)
-  - Retry logic handled in `runConnectionLoop()` - callbacks update state, loop handles retries
-  - No immediate reconnection calls from callbacks - prevents bypassing exponential backoff
-  - Retry count resets to 0 on successful connection
+  2. `TransportManager` updates `peers` StateFlow and calls `lanPeerConnectionManager.syncPeerConnections()`
+  3. `LanPeerConnectionManager` creates new `WebSocketTransportClient` for newly discovered peer
+  4. Connection maintenance task starts for each peer, maintaining persistent connection with automatic reconnection
+  5. Reconnection only occurs when:
+     - Peer IP changes (detected via discovery event, connection recreated)
+     - Connection disconnects (automatic reconnection with exponential backoff)
+     - Peer is no longer discovered (connection removed)
+- **Unified Event-Driven Reconnection with Exponential Backoff** ✅ Implemented (December 2025):
+  - **Unified Reconnection**: Same reconnection logic for both cloud and LAN connections (no separate code paths)
+  - **Immediate Reconnection**: `onClosed`/`onFailure` callbacks immediately trigger `ensureConnection()` for both cloud and LAN
+  - **Exponential Backoff**: Applied before connection attempt (not in retry loop) - unified for both connection types
+    - **All Connections**: 1s → 2s → 4s → 8s → 16s → 32s → 64s → 128s (capped at 128s)
+    - Backoff calculated based on consecutive failures: `baseDelay * (2^(failures-1))` for failures 1-8
+    - After 8 consecutive failures, backoff stays at 128s indefinitely (keeps retrying every 128s)
+    - Backoff applied in `ensureConnection()` before starting connection attempt
+  - **Unified Failure Tracking**: `consecutiveFailures` counter tracks failures for both cloud and LAN
+    - Increments on connection failures (handshake timeout, connection refused, etc.)
+    - Resets to 0 on successful connection (in both `onOpen` and after successful handshake)
+  - **Connection Loop**: `runConnectionLoop()` tries to connect once and exits on failure/disconnect
+    - No retry loop in `runConnectionLoop()` - reconnection handled by `ensureConnection()` called from callbacks
+    - Connection maintained as long-lived connection until disconnection event
+  - **State Management**: State set to `ConnectingCloud`/`ConnectingLan` immediately on disconnection (not after delay)
+    - UI shows "Connecting" during backoff, not "Disconnected"
 - **Connection State Management** ✅ Updated (December 2025):
   - `Disconnected` (renamed from `Idle` for clarity): Not connected, ready to connect
   - `ConnectingCloud` / `ConnectingLan`: Connection attempt in progress
@@ -567,15 +651,24 @@ interface ClipboardDao {
 - **StateFlow Observation**: `SyncCoordinator` observes `transportManager.peers.collect { peers -> ... }` to react to discovery events
 
 **Implementation Details**:
-- **OkHttp Integration**: `OkHttpClient` configured with `CertificatePinner` keyed to the relay fingerprint and LAN fingerprint when available. Coroutine-based `Channel` ensures backpressure while sending messages.
+- **LanPeerConnectionManager** (`transport/ws/LanPeerConnectionManager.kt`):
+  - Maintains `Map<deviceId, WebSocketTransportClient>` - one connection per peer
+  - `syncPeerConnections()`: Creates connections for newly discovered peers, removes connections for peers no longer discovered
+  - `maintainPeerConnection()`: Simplified - just calls `startReceiving()` once, all reconnection handled by unified `WebSocketTransportClient` logic
+  - Reconnection: Uses unified event-driven reconnection with exponential backoff (same as cloud connections)
+  - Event-driven: Called from `TransportManager.addPeer()` and `TransportManager.removePeer()` when peers are discovered/removed
+- **OkHttp Integration**: Each peer connection uses `OkHttpClient` configured with `CertificatePinner` keyed to the relay fingerprint and LAN fingerprint when available. Coroutine-based `Channel` ensures backpressure while sending messages.
 - **URL Resolution**: 
-  - LAN connections: `lastKnownUrl` is updated when a peer is discovered via NSD and connections only proceed when this URL is set (no fallback to `config.url`)
+  - LAN connections: Each peer connection uses the peer's discovered IP address (from NSD discovery)
   - Cloud connections: Always uses `config.url` (static cloud relay URL for the relay server)
-- **Connection Loop**: 
-  - Exits immediately if no peer URL available (waits for discovery event)
-  - Exponential backoff retry for failed connections (1s → 2s → 4s → 8s → 16s → 32s max for LAN)
-  - Retry logic handled in `runConnectionLoop()` - callbacks update state, loop handles retries
-  - Maintains long-lived connection once established
+- **Connection Maintenance**: 
+  - Each peer connection maintained independently using unified reconnection logic
+  - Same exponential backoff as cloud connections (1s → 2s → 4s → 8s → 16s → 32s → 64s → 128s capped)
+  - Event-driven reconnection - immediate retry on disconnect (no polling)
+  - Connections removed when peers are no longer discovered
+- **FallbackSyncTransport**: Updated to use `LanPeerConnectionManager` instead of single `lanTransport`
+  - Sends to specific peer if `targetDeviceId` is set, otherwise broadcasts to all connected peers
+  - Still sends to cloud in parallel for maximum reliability
 - **Instrumentation**: `WebSocketTransportClient` records handshake and round-trip durations via the injected `TransportMetricsRecorder`. The `TransportMetricsAggregator` can be wired into DI via `BuildConfig.ENABLE_TRANSPORT_METRICS` flag for production metrics collection. The test harness exercises these metrics and produces anonymized samples in `tests/transport/lan_loopback_metrics.json`.
 - **Relay Client Abstraction**: `RelayWebSocketClient` reuses the LAN TLS implementation but sources its endpoint, fingerprint, and telemetry headers from Gradle-provided `BuildConfig` constants (`RELAY_WS_URL`, `RELAY_CERT_FINGERPRINT`, `RELAY_ENVIRONMENT`). Unit tests exercise pinning-failure analytics to confirm the cloud environment label is surfaced correctly.
 
@@ -634,6 +727,118 @@ class ScreenStateReceiver(
 - Requires battery optimization exemption for best performance
 - Documentation includes setup instructions for aggressive OEMs
 
+#### 4.2.8 MIUI/HyperOS Adaptation ✅ Implemented (December 2025)
+
+**Overview**:
+MIUI (Xiaomi's Android skin) and HyperOS (Xiaomi's newer OS) implement aggressive battery optimization policies that can interfere with background services and multicast networking. Hypo includes automatic detection and workarounds to ensure reliable operation on these devices.
+
+**Device Detection** (`util/MiuiAdapter.kt`):
+- **Detection Methods**:
+  1. Manufacturer check: `Build.MANUFACTURER == "Xiaomi"`
+  2. System properties: Checks `ro.miui.ui.version.name` and `ro.product.mod_device` via reflection
+  3. HyperOS detection: Identifies HyperOS via `ro.product.mod_device` containing "hyper"
+- **Version Information**: Retrieves MIUI/HyperOS version string for logging and debugging
+- **Battery Optimization Check**: Verifies if battery optimization is disabled for the app
+
+**Multicast Throttling Workarounds**:
+
+**Problem**: HyperOS throttles multicast traffic after ~15 minutes of screen-off time to save battery, causing LAN device discovery to stop working.
+
+**Solutions**:
+1. **Automatic Multicast Lock Refresh** (`LanRegistrationManager.kt`):
+   - On MIUI/HyperOS devices, automatically refreshes the multicast lock every 10 minutes
+   - Refreshes before the 15-minute throttle window to prevent throttling
+   - Implementation: `scheduleMulticastLockRefresh()` releases and re-acquires `WifiManager.MulticastLock`
+   - Logs refresh events for debugging
+
+2. **Periodic NSD Restart** (`LanDiscoveryRepository.kt`):
+   - Restarts NSD discovery every 5 minutes on MIUI/HyperOS devices
+   - Helps recover from multicast throttling if it occurs
+   - Implementation: Schedules periodic `restartDiscovery()` calls when device is detected as MIUI/HyperOS
+   - Only active while discovery is running
+
+**User Guidance**:
+- **Settings Screen**: Shows MIUI/HyperOS-specific instructions when device is detected
+  - Reminds users to enable "Autostart" in Settings → Apps → Hypo
+  - Provides link to battery optimization settings
+- **Documentation**: `android/README.md` includes detailed setup instructions for Xiaomi/HyperOS devices
+
+**Implementation Details**:
+- **Automatic Activation**: Workarounds are automatically enabled when `MiuiAdapter.isMiuiOrHyperOS()` returns `true`
+- **No User Configuration Required**: Detection and workarounds are transparent to users
+- **Battery Impact**: Minimal - refresh intervals are conservative (10 minutes for lock, 5 minutes for NSD)
+- **Logging**: Device information is logged at service startup for debugging:
+  ```
+  📱 MIUI/HyperOS Device Detected:
+     Manufacturer: Xiaomi
+     Model: 2410DPN6CC
+     Version: HyperOS 1.0
+     Android SDK: 34
+     Is HyperOS: true
+  ```
+
+**Recommended User Settings** (documented in `android/README.md`):
+1. **Battery Optimization**: Settings → Apps → Hypo → Battery saver → No restrictions
+2. **Autostart**: Settings → Apps → Manage apps → Hypo → Autostart → Enable
+3. **Background Activity**: Settings → Apps → Hypo → Battery usage → Allow background activity
+4. **Install via USB** (for development): Settings → Additional Settings → Developer Options → Install via USB
+
+**Testing**:
+- Tested on Xiaomi 15 Pro (HyperOS)
+- Verified multicast lock refresh prevents throttling
+- Confirmed NSD restart recovers from throttling
+- Validated device detection accuracy across MIUI and HyperOS versions
+
+#### 4.2.9 SMS Auto-Sync ✅ Implemented (December 2025)
+
+**Overview**:
+The SMS auto-sync feature automatically copies incoming SMS messages to the clipboard, which then gets synced to macOS via the existing clipboard sync mechanism. This allows users to receive SMS notifications on macOS without manually copying SMS content.
+
+**Implementation**:
+- **SmsReceiver** (`service/SmsReceiver.kt`): BroadcastReceiver that listens for `SMS_RECEIVED` broadcasts
+  - Extracts SMS content and sender number from broadcast intent
+  - Formats SMS as: `From: <sender>\n<message>`
+  - Automatically copies formatted SMS to clipboard using `ClipboardManager.setPrimaryClip()`
+  - Existing `ClipboardListener` automatically detects clipboard change and syncs to macOS
+- **Permission Management**:
+  - **Runtime Permission Request**: On Android 6.0+ (API 23+), `RECEIVE_SMS` permission must be granted at runtime
+  - **Automatic Request**: `MainActivity` automatically requests permission on app launch if not granted
+  - **UI Integration**: Settings screen shows SMS permission status and provides button to grant permission
+  - **Status Monitoring**: `SettingsViewModel` periodically checks permission status (every 2 seconds) and updates UI
+
+**Android Version Limitations**:
+- **Android 9 and Below (API 28-)**: ✅ Fully supported - SMS receiver works without restrictions
+- **Android 10+ (API 29+)**: ⚠️ Restricted - SMS access may be limited
+  - May require app to be set as default SMS app (not recommended - breaks SMS functionality)
+  - If auto-copy fails, users can manually copy SMS and sync will work normally
+  - SecurityException is caught and logged, app continues to function
+
+**User Experience**:
+1. User grants SMS permission (automatic on first launch, or via Settings screen)
+2. When SMS is received, content is automatically copied to clipboard
+3. Clipboard sync service detects change within ~100ms
+4. SMS content is synced to macOS within ~1 second
+5. User can see SMS in macOS clipboard history
+
+**Privacy & Security**:
+- SMS content is handled the same way as any clipboard content
+- Encrypted end-to-end when syncing to macOS (AES-256-GCM)
+- No SMS content is stored permanently (only in clipboard history)
+- Users can clear clipboard history to remove SMS content
+- Permission can be revoked at any time via Android Settings
+
+**Settings UI**:
+- Shows SMS permission status (Granted/Not Granted)
+- Provides "Grant Permission" button if permission not granted
+- Displays note about Android 10+ restrictions
+- Status updates automatically when permission is granted/revoked
+
+**Testing**:
+- Tested on Android 9 and below: SMS auto-copy works reliably
+- Tested on Android 10+: Gracefully handles restrictions, manual copy still works
+- Verified clipboard sync works for SMS content
+- Confirmed permission request flow works correctly
+
 #### 4.2.6 macOS Cloud Relay Transport ✅ Implemented
 
 - **Production Configuration**: `CloudRelayDefaults.production()` provides a `CloudRelayConfiguration` with the Fly.io production endpoint (`wss://hypo.fly.dev/ws`), the current bundle version header, and the production SHA-256 certificate fingerprint.
@@ -661,42 +866,64 @@ This section compares the implementation details between Android and macOS clien
 - **Error Handling**: Logs errors but continues with other targets
 
 **macOS** (`HistoryStore.swift`):
-- **Target Selection**: Syncs to ALL paired devices (best-effort practice)
+- **Target Selection**: Syncs to ALL paired devices with encryption keys (best-effort practice)
+  - Checks for encryption keys before queuing messages (`KeychainDeviceKeyProvider.hasKey()`)
+  - Skips devices without keys to avoid unnecessary retries
   - No `isOnline` check - attempts sync regardless of device status
   - Transport layer handles routing (LAN/cloud) correctly
 - **Message Queue**: Implements queue with 1-minute expiration window
-  - Messages queued when targets are not available
+  - Messages queued for each device with a valid encryption key
+  - Each device gets its own `QueuedSyncMessage` with specific `targetDeviceId`
+  - Messages processed independently - failures for one device don't block others
   - Retries every 5 seconds until sent or expired
   - Prevents message loss during app startup and network transitions
-- **Broadcasting**: Iterates through all `pairedDevices` and queues messages for each
+- **Queue Processing**: Event-driven queue processor with proper lifecycle management
+  - `defer` block ensures `queueProcessingTask` is reset to `nil` when processor exits
+  - Prevents race condition where finished tasks prevent new processors from starting
+  - Continuation-based waiting for connection state changes or new messages
+  - Summary logging tracks success/failure counts across all devices
+- **Broadcasting**: Iterates through all `pairedDevices`, filters by key availability, and queues messages for each
 - **Error Handling**: Logs errors but continues with other devices
+  - Devices without keys are skipped with warning logs
+  - Failed sends are kept in queue for retry
+  - Processing continues for all devices regardless of individual failures
 
 **Key Differences**:
 | Feature | Android | macOS |
 |---------|---------|-------|
-| Target Selection | All paired devices ✅ | All paired devices ✅ |
+| Target Selection | All paired devices ✅ | All paired devices with keys ✅ |
+| Key Validation | Not checked before send | Checked before queuing (skips devices without keys) |
 | Wait/Queue Strategy | 10-second wait | 1-minute queue with retries |
 | Offline Device Handling | Attempts sync anyway ✅ | Attempts sync anyway ✅ |
 | Message Persistence | In-memory wait | Persistent queue with expiration |
+| Independent Processing | Yes ✅ | Yes ✅ (each device processed separately) |
 
-**Impact**: Both platforms now follow best-effort practice, attempting sync to all paired devices regardless of online status. macOS uses a more robust queue-based approach, while Android uses a simpler wait strategy.
+**Impact**: Both platforms now follow best-effort practice, attempting sync to all paired devices regardless of online status. macOS uses a more robust queue-based approach with key validation, while Android uses a simpler wait strategy. Both platforms process devices independently, ensuring failures for one device don't block others.
 
 #### 4.4.2 Transport Strategy
 
-**Current Status**: ✅ **Aligned** - Both platforms always dual-send (LAN + cloud simultaneously).
+**Current Status**: ✅ **Aligned** - Both platforms always dual-send (LAN + cloud simultaneously) with separate connections per peer.
 
-**Android** (`FallbackSyncTransport.kt`):
-- **Always Dual-Send**: Always sends to both LAN and cloud simultaneously
+**Android** (`FallbackSyncTransport.kt` + `LanPeerConnectionManager.kt`):
+- **Always Dual-Send**: Always sends to both LAN (all peers) and cloud simultaneously
   - No conditional check - always attempts both transports
   - Best-effort practice for maximum reliability
+- **Multi-Peer Support**: Maintains separate `WebSocketTransportClient` connection for each discovered peer
+  - `LanPeerConnectionManager` manages peer connection lifecycle
+  - Sends to specific peer if `targetDeviceId` is set, otherwise broadcasts to all connected peers
+  - Can communicate with all peers simultaneously (no connection switching)
 - **LAN Timeout**: 3-second timeout for LAN transport
 - **Transport Marking**: Marks device as connected via LAN or cloud after successful send
 - **Error Handling**: Requires at least one transport to succeed (throws if both fail)
 
-**macOS** (`DualSyncTransport.swift`):
-- **Always Dual-Send**: Always sends to both LAN and cloud simultaneously
+**macOS** (`DualSyncTransport.swift` + `LanSyncTransport.swift`):
+- **Always Dual-Send**: Always sends to both LAN (all peers) and cloud simultaneously
   - No conditional check - always attempts both transports
   - Best-effort practice for maximum reliability
+- **Multi-Peer Support**: Maintains separate `WebSocketTransport` connection for each discovered peer
+  - `LanSyncTransport` manages peer connection lifecycle via `clientTransports[deviceId]`
+  - Sends to all discovered peers simultaneously
+  - Can communicate with all peers simultaneously (no connection switching)
 - **LAN Timeout**: 3-second timeout for LAN transport (same as Android)
 - **Error Handling**: Requires at least one transport to succeed (throws if both fail)
 
@@ -706,8 +933,10 @@ This section compares the implementation details between Android and macOS clien
 | Dual-Send Strategy | Always ✅ | Always ✅ |
 | LAN Timeout | 3 seconds | 3 seconds |
 | Transport Selection | Always dual | Always dual |
+| Peer Connection Architecture | Separate connection per peer ✅ | Separate connection per peer ✅ |
+| Connection Manager | `LanPeerConnectionManager` | `LanSyncTransport` |
 
-**Impact**: Both platforms now implement identical dual-send strategy, ensuring maximum reliability by attempting both LAN and cloud transports simultaneously.
+**Impact**: Both platforms now implement identical dual-send strategy with separate connections per peer, ensuring maximum reliability and simultaneous communication with all peers.
 
 #### 4.4.3 Device Pairing Logic
 
@@ -967,11 +1196,19 @@ docker run -p 8080:8080 hypo-relay
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.RECEIVE_SMS" />
 ```
+
+**Permission Handling**:
+- **Runtime Permissions** (Android 6.0+): `RECEIVE_SMS` is requested at runtime
+  - Automatically requested on app launch if not granted
+  - Can be granted via Settings screen
+  - Status is monitored and displayed in UI
+- **System Permissions**: `BROADCAST_SMS` is a system permission (automatically granted)
 
 ---
 
-**Document Version**: 0.2.7  
+**Document Version**: 0.3.4  
 **Last Updated**: December 2, 2025  
 **Status**: Production Beta  
 **Authors**: Principal Engineering Team

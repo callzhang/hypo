@@ -8,9 +8,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class PairingPayload(
     @SerialName("ver") val version: String,
-    @SerialName("mac_device_id") val macDeviceId: String,
-    @SerialName("mac_pub_key") val macPublicKey: String,
-    @SerialName("mac_signing_pub_key") val macSigningPublicKey: String,
+    @SerialName("peer_device_id") val peerDeviceId: String,
+    @SerialName("peer_pub_key") val peerPublicKey: String,
+    @SerialName("peer_signing_pub_key") val peerSigningPublicKey: String,
     val service: String,
     val port: Int,
     @SerialName("relay_hint") val relayHint: String? = null,
@@ -25,9 +25,9 @@ data class PairingPayload(
 @Serializable
 data class PairingChallengeMessage(
     @SerialName("challenge_id") val challengeId: String = UUID.randomUUID().toString(),
-    @SerialName("android_device_id") val androidDeviceId: String,
-    @SerialName("android_device_name") val androidDeviceName: String,
-    @SerialName("android_pub_key") val androidPublicKey: String,
+    @SerialName("initiator_device_id") val initiatorDeviceId: String,
+    @SerialName("initiator_device_name") val initiatorDeviceName: String,
+    @SerialName("initiator_pub_key") val initiatorPublicKey: String,
     val nonce: String,
     val ciphertext: String,
     val tag: String
@@ -36,8 +36,8 @@ data class PairingChallengeMessage(
 @Serializable
 data class PairingAckMessage(
     @SerialName("challenge_id") val challengeId: String,
-    @SerialName("mac_device_id") val macDeviceId: String,
-    @SerialName("mac_device_name") val macDeviceName: String,
+    @SerialName("responder_device_id") val responderDeviceId: String,
+    @SerialName("responder_device_name") val responderDeviceName: String,
     val nonce: String,
     val ciphertext: String,
     val tag: String

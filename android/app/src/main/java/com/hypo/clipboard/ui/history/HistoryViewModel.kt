@@ -106,5 +106,5 @@ data class HistoryUiState(
     val query: String = "",
     val totalItems: Int = 0,
     val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT,
-    val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Idle
+    val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Disconnected
 )

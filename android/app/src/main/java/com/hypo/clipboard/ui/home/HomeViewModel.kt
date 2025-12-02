@@ -51,5 +51,5 @@ class HomeViewModel @Inject constructor(
 
 data class HomeUiState(
     val latestItem: ClipboardItem? = null,
-    val connectionState: ConnectionState = ConnectionState.Idle
+    val connectionState: ConnectionState = ConnectionState.Disconnected
 )

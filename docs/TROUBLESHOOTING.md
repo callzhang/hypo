@@ -90,20 +90,20 @@ log stream --predicate 'processID == <PID>' --level debug
 **⚠️ Always filter MIUIInput** - Add `| grep -v "MIUIInput"` to all `adb logcat` commands:
 
 ```bash
-# Filter by PID (excludes MIUIInput)
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep "pattern"
+# Filter by PID (excludes MIUIInput, SKIA, VRI, RenderThread)
+adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -vE "MIUIInput|SKIA|VRI|RenderThread"
 
 # Simple usage (shows app logs only, no MIUIInput)
 adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep -v "MIUIInput"
 
-# With custom grep filters
-adb -s $device_id logcat | grep -v "MIUIInput" | grep -E "SyncEngine|transport"
+# With custom grep filters (excludes multiple patterns)
+adb -s $device_id logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep -E "SyncEngine|transport"
 
-# View recent logs (filters MIUIInput)
-adb -s $device_id logcat -d -t 300 | grep -v "MIUIInput"
+# View recent logs (filters MIUIInput, SKIA, VRI, RenderThread)
+adb -s $device_id logcat -d -t 300 | grep -vE "MIUIInput|SKIA|VRI|RenderThread"
 
-# Find message by content (filters MIUIInput)
-adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -F "content: Case 1:"
+# Find message by content (filters MIUIInput, SKIA, VRI, RenderThread)
+adb -s $device_id logcat -d | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep -F "content: Case 1:"
 ```
 
 **Query database (most reliable, no filtering needed)**:
@@ -589,6 +589,25 @@ adb shell pm clear com.hypo.clipboard
 - Key not found on receiver
 
 **Solution**:
+
+### NSD/Bonjour IP Resolution Issues
+
+**Symptom**: Android discovers macOS at wrong IP address (e.g., discovers `10.0.0.137` when macOS actually has `10.0.0.146`)
+
+**Root Cause**: Android's NSD (Network Service Discovery) may return stale/cached IP addresses from mDNS cache, especially after network changes or when multiple network interfaces are present.
+
+**Verification**:
+1. On macOS, check actual IP: `ifconfig | grep "inet "` (should show `10.0.0.146`)
+2. On macOS, check Bonjour advertisement: `dns-sd -G v4 dereks-macbook-air-13.local` (should show `10.0.0.146`)
+3. Check Android logs: `adb logcat | grep "Service resolved"` (may show wrong IP like `10.0.0.137`)
+
+**Solution**:
+- NSD cache will eventually expire and refresh (usually within a few minutes)
+- Restart Android's NSD discovery by toggling WiFi or restarting the app
+- The connection will fail with the wrong IP, but retry logic should eventually reconnect with correct IP
+- This is a known Android NSD limitation - the app handles it gracefully with retry logic
+
+**Prevention**: The app logs detailed NSD resolution info (hostname, canonical name, address bytes) to help diagnose these issues.
 1. Re-pair devices to get new key
 2. Update test script key from keychain (prioritizes keychain over .env)
 3. Verify key format matches (64 hex chars)

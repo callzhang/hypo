@@ -65,7 +65,11 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                 )
                 
                 // Note: Can't use logger here as it's a C callback, use NSLog instead
-                NSLog("🔔 [HypoAppDelegate] Event handler callback invoked: err=\(err), id=\(hotKeyID.id), signature=\(hotKeyID.signature)")
+                // Only log errors or unexpected conditions to reduce noise
+                if err != noErr {
+                    NSLog("⚠️ [HypoAppDelegate] Hotkey event error: err=\(err), id=\(hotKeyID.id)")
+                    return err
+                }
                 
                 if err == noErr {
                     if hotKeyID.id == 1 {
@@ -79,6 +83,12 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                             if let viewModel = AppContext.shared.historyViewModel {
                                 HistoryPopupPresenter.shared.show(with: viewModel)
                             }
+                        }
+                    } else if hotKeyID.id == 999 {
+                        // ESC key - Close history popup
+                        NSLog("🎯 [HypoAppDelegate] HOTKEY TRIGGERED: ESC pressed")
+                        DispatchQueue.main.async {
+                            HistoryPopupPresenter.shared.hide()
                         }
                     } else if hotKeyID.id >= 10 && hotKeyID.id <= 18 {
                         // Alt+1 through Alt+9 (id 10-18)
@@ -97,8 +107,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                                     let item = filteredItems[itemIndex]
                                     
                                     // Note: Can't use logger here as this is called from C callback context
-                                    // Use NSLog for critical debugging, but minimize
-                                    NSLog("🎯 [HypoAppDelegate] Alt+\(num) pressed, item: \(item.content.title)")
+                                    // Minimize logging - only log if needed for debugging
                                     
                                     // Highlight the item before copying (post notification for view to update)
                                     NotificationCenter.default.post(
@@ -378,20 +387,34 @@ private func pasteToCursorAtCurrentPosition(entry: ClipboardEntry? = nil) {
         return
     }
     
-    // CRITICAL: Window must be fully hidden before sending keyboard events
-    // Even with canBecomeKey=false, a visible window can intercept events
-    // The hideAndRestoreFocus already waits for window to be hidden, so we add a small delay
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+    // CRITICAL: Window must be fully hidden and focus restored before sending keyboard events
+    // The hideAndRestoreFocus already waits 0.2s for window to be hidden and focus restored
+    // Add additional delay to ensure everything is ready
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
         // Verify window is not visible before sending events
-        // Access window through a helper to check visibility
         let windowVisible = HistoryPopupPresenter.shared.isWindowVisible()
         if windowVisible {
-            logger.warning("⚠️ Window still visible, delaying paste")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            logger.warning("⚠️ Window still visible, delaying paste further")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 performPasteAction()
             }
         } else {
-            performPasteAction()
+            // Verify focus is on the correct app before pasting
+            let frontmostApp = NSWorkspace.shared.frontmostApplication
+            let expectedApp = HistoryPopupPresenter.shared.getPreviousAppPid()
+            if let expected = expectedApp, let current = frontmostApp {
+                if current.processIdentifier == expected {
+                    logger.debug("✅ Focus verified on: \(current.localizedName ?? "unknown")")
+                    performPasteAction()
+                } else {
+                    logger.warning("⚠️ Focus not on expected app. Expected PID: \(expected), Current: \(current.processIdentifier) (\(current.localizedName ?? "unknown"))")
+                    // Still try to paste, but log the issue
+                    performPasteAction()
+                }
+            } else {
+                logger.debug("ℹ️ Cannot verify focus, proceeding with paste")
+                performPasteAction()
+            }
         }
     }
 }
@@ -429,7 +452,7 @@ private func performPasteWithSessionTap() -> Bool {
     
     // Post to session event tap (sends to current user session, more reliable)
     keyDownEvent.post(tap: .cgSessionEventTap)
-    logger.info("📋 KeyDown posted via session tap (Cmd+V)")
+    logger.debug("📋 KeyDown posted via session tap (Cmd+V)")
     
     // Small delay between key down and key up
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -439,7 +462,7 @@ private func performPasteWithSessionTap() -> Bool {
         }
         keyUpEvent.flags = .maskCommand
         keyUpEvent.post(tap: .cgSessionEventTap)
-        logger.info("✅ KeyUp posted via session tap - paste should be complete")
+        logger.debug("✅ KeyUp posted via session tap")
     }
     
     return true
@@ -463,7 +486,7 @@ private func performPasteWithHIDTap() {
     
     // Post to HID event tap (fallback method)
     keyDownEvent.post(tap: .cghidEventTap)
-    logger.info("📋 KeyDown posted via HID tap (Cmd+V)")
+    logger.debug("📋 KeyDown posted via HID tap (Cmd+V)")
     
     // Small delay between key down and key up
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -473,7 +496,7 @@ private func performPasteWithHIDTap() {
         }
         keyUpEvent.flags = .maskCommand
         keyUpEvent.post(tap: .cghidEventTap)
-        logger.info("✅ KeyUp posted via HID tap - paste should be complete")
+        logger.debug("✅ KeyUp posted via HID tap")
     }
 }
 
@@ -508,11 +531,7 @@ public struct HypoMenuBarApp: App {
             transportManager: transportManager
         )
         
-        logger.info("🚀 [HypoMenuBarApp] About to call setHistoryViewModel")
-        
         transportManager.setHistoryViewModel(viewModel)
-        
-        logger.info("🚀 [HypoMenuBarApp] setHistoryViewModel completed")
         
         _viewModel = StateObject(wrappedValue: viewModel)
         AppContext.shared.historyViewModel = viewModel
@@ -566,7 +585,7 @@ public struct HypoMenuBarApp: App {
                 .task {
                     // Also call it from .task as backup
                     if let transportManager = viewModel.transportManager {
-                        logger.info("🚀 [HypoMenuBarApp] .task: Ensuring setHistoryViewModel is called")
+                        logger.debug("🚀 [HypoMenuBarApp] Ensuring viewModel is set")
                         transportManager.setHistoryViewModel(viewModel)
                     }
                     await viewModel.start()
@@ -966,7 +985,7 @@ struct MenuBarContentView: View {
         
         // Post to session event tap (sends to current user session, more reliable)
         keyDownEvent.post(tap: .cgSessionEventTap)
-        self.logger.info("📋 KeyDown posted via session tap (Cmd+V)")
+        self.logger.debug("📋 KeyDown posted via session tap (Cmd+V)")
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             guard let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
@@ -975,7 +994,7 @@ struct MenuBarContentView: View {
             }
             keyUpEvent.flags = .maskCommand
             keyUpEvent.post(tap: .cgSessionEventTap)
-            self.logger.info("✅ KeyUp posted via session tap - paste should be complete")
+            self.logger.debug("✅ KeyUp posted via session tap")
         }
         
         return true
@@ -994,7 +1013,7 @@ struct MenuBarContentView: View {
         }
         keyDownEvent.flags = .maskCommand
         keyDownEvent.post(tap: .cghidEventTap)
-        self.logger.info("📋 KeyDown posted via HID tap (Cmd+V)")
+        self.logger.debug("📋 KeyDown posted via HID tap (Cmd+V)")
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             guard let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
@@ -1003,7 +1022,7 @@ struct MenuBarContentView: View {
             }
             keyUpEvent.flags = .maskCommand
             keyUpEvent.post(tap: .cghidEventTap)
-            self.logger.info("✅ KeyUp posted via HID tap - paste should be complete")
+            self.logger.debug("✅ KeyUp posted via HID tap")
         }
     }
     
@@ -1026,8 +1045,6 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { [self] _ in
-            logger.debug("📨 [MenuBarContentView] Received ShowHistorySection notification")
-            // Switch to history section when shortcut is pressed
             selectedSection = .history
         }
         
@@ -1038,7 +1055,6 @@ struct MenuBarContentView: View {
             queue: .main
         ) { [self] _ in
             guard !isHandlingPopup else { return }
-            logger.debug("📨 [MenuBarContentView] Received ShowHistoryPopup notification")
             
             isHandlingPopup = true
             // Reset flag after handling
@@ -1053,12 +1069,10 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { [self] _ in
-            logger.debug("📨 [MenuBarContentView] Received ShowSettingsSection notification")
-            // Switch to settings section
             selectedSection = .settings
         }
         
-        logger.info("✅ [MenuBarContentView] Notification observers set up")
+        logger.debug("✅ [MenuBarContentView] Notification observers set up")
     }
     
     private func setupHighlightObserver() {
@@ -1069,7 +1083,7 @@ struct MenuBarContentView: View {
             queue: .main
         ) { notification in
             if let itemId = notification.userInfo?["itemId"] as? UUID {
-                self.logger.info("✨ [MenuBarContentView] Highlighting item: \(itemId)")
+                self.logger.debug("✨ [MenuBarContentView] Highlighting item: \(itemId)")
                 self.highlightedItemId = itemId
             }
         }
@@ -1174,6 +1188,19 @@ private struct HistorySectionView: View {
             }
         }
     }
+    
+    // Helper function to find TextField in view hierarchy
+    private func findTextField(in view: NSView) -> NSTextField? {
+        if let textField = view as? NSTextField {
+            return textField
+        }
+        for subview in view.subviews {
+            if let textField = findTextField(in: subview) {
+                return textField
+            }
+        }
+        return nil
+    }
 
     @ViewBuilder
     private var itemList: some View {
@@ -1261,7 +1288,7 @@ private struct ClipboardCard: View {
                 try? FileManager.default.removeItem(at: tempURL)
             }
         } catch {
-            logger.info("Failed to create temp file for Finder: \(error)")
+            logger.error("❌ Failed to create temp file for Finder: \(error.localizedDescription)")
         }
     }
     
@@ -1464,7 +1491,7 @@ private struct ClipboardRow: View {
                 try? FileManager.default.removeItem(at: tempURL)
             }
         } catch {
-            logger.info("Failed to create temp file for Finder: \(error)")
+            logger.error("❌ Failed to create temp file for Finder: \(error.localizedDescription)")
         }
     }
     
@@ -1855,27 +1882,18 @@ private struct SettingsSectionView: View {
     }
     
     private var versionString: String {
-        // Get the app bundle - when running as .app, Bundle.main should be the app bundle
         let bundle = Bundle.main
-        
-        // Debug: log bundle info
-        logger.info("📦 [SettingsSectionView] Bundle path: \(bundle.bundlePath)")
-        logger.info("📦 [SettingsSectionView] Bundle identifier: \(bundle.bundleIdentifier ?? "nil")")
-        logger.info("📦 [SettingsSectionView] Info dictionary keys: \(bundle.infoDictionary?.keys.sorted() ?? [])")
         
         if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String,
            let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
-            logger.info("📦 [SettingsSectionView] Found version: \(version), build: \(build)")
             return "Version \(version) (Build \(build))"
         } else if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String {
-            logger.info("📦 [SettingsSectionView] Found version only: \(version)")
             return "Version \(version)"
         } else if let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
-            logger.info("📦 [SettingsSectionView] Found build only: \(build)")
             return "Build \(build)"
         } else {
-            // Fallback: use Info.plist values directly
-            logger.info("📦 [SettingsSectionView] No version found in bundle, using fallback")
+            // Fallback: log warning only if version info is missing (unexpected)
+            logger.warning("⚠️ [SettingsSectionView] Version info missing from bundle: path=\(bundle.bundlePath), identifier=\(bundle.bundleIdentifier ?? "nil")")
             return "Version 1.0.0"
         }
     }

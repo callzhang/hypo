@@ -77,29 +77,45 @@ class SecureKeyStore @Inject constructor(
         }
         
         // Fallback: Try with platform prefix (for backward compatibility)
-        if (!deviceId.startsWith("macos-") && !deviceId.startsWith("android-")) {
-            // Try with "macos-" prefix
-            encoded = prefs.getString("macos-$deviceId", null)
-            if (encoded != null) {
-                android.util.Log.d("SecureKeyStore", "🔄 Found key using old format: macos-$deviceId")
-                // Migrate to normalized ID
-                prefs.edit()
-                    .putString(normalizedId, encoded)
-                    .remove("macos-$deviceId")
-                    .commit()
-                return@withContext Base64.decode(encoded, Base64.DEFAULT)
+        // Use case-insensitive check to handle uppercase prefixes like "MACOS-" or "ANDROID-"
+        val lowerDeviceId = deviceId.lowercase()
+        if (!lowerDeviceId.startsWith("macos-") && !lowerDeviceId.startsWith("android-")) {
+            // Try with "macos-" prefix (case-insensitive lookup)
+            // Check all stored keys for case-insensitive match
+            val allKeys = prefs.all.keys
+            val macosKey = allKeys.find { key ->
+                val lowerKey = key.lowercase()
+                lowerKey.startsWith("macos-") && lowerKey.removePrefix("macos-") == normalizedId
+            }
+            if (macosKey != null) {
+                encoded = prefs.getString(macosKey, null)
+                if (encoded != null) {
+                    android.util.Log.d("SecureKeyStore", "🔄 Found key using old format (case-insensitive): $macosKey")
+                    // Migrate to normalized ID
+                    prefs.edit()
+                        .putString(normalizedId, encoded)
+                        .remove(macosKey)
+                        .commit()
+                    return@withContext Base64.decode(encoded, Base64.DEFAULT)
+                }
             }
             
-            // Try with "android-" prefix
-            encoded = prefs.getString("android-$deviceId", null)
-            if (encoded != null) {
-                android.util.Log.d("SecureKeyStore", "🔄 Found key using old format: android-$deviceId")
-                // Migrate to normalized ID
-                prefs.edit()
-                    .putString(normalizedId, encoded)
-                    .remove("android-$deviceId")
-                    .commit()
-                return@withContext Base64.decode(encoded, Base64.DEFAULT)
+            // Try with "android-" prefix (case-insensitive lookup)
+            val androidKey = allKeys.find { key ->
+                val lowerKey = key.lowercase()
+                lowerKey.startsWith("android-") && lowerKey.removePrefix("android-") == normalizedId
+            }
+            if (androidKey != null) {
+                encoded = prefs.getString(androidKey, null)
+                if (encoded != null) {
+                    android.util.Log.d("SecureKeyStore", "🔄 Found key using old format (case-insensitive): $androidKey")
+                    // Migrate to normalized ID
+                    prefs.edit()
+                        .putString(normalizedId, encoded)
+                        .remove(androidKey)
+                        .commit()
+                    return@withContext Base64.decode(encoded, Base64.DEFAULT)
+                }
             }
         }
         
@@ -145,13 +161,22 @@ class SecureKeyStore @Inject constructor(
     
     /**
      * Migrates device ID from old format (with prefix) to new format (pure UUID).
-     * Old format: "macos-{UUID}" or "android-{UUID}"
+     * Old format: "macos-{UUID}" or "android-{UUID}" (case-insensitive)
      * New format: "{UUID}" (pure UUID)
+     * 
+     * Uses case-insensitive prefix detection to handle uppercase prefixes like "MACOS-" or "ANDROID-"
      */
     private fun migrateDeviceId(deviceId: String): String {
+        val lowerDeviceId = deviceId.lowercase()
         return when {
-            deviceId.startsWith("macos-") -> deviceId.removePrefix("macos-")
-            deviceId.startsWith("android-") -> deviceId.removePrefix("android-")
+            lowerDeviceId.startsWith("macos-") -> {
+                // Remove prefix case-insensitively - find the actual prefix length
+                deviceId.substring("macos-".length)
+            }
+            lowerDeviceId.startsWith("android-") -> {
+                // Remove prefix case-insensitively - find the actual prefix length
+                deviceId.substring("android-".length)
+            }
             else -> deviceId  // Already in new format or unknown format
         }
     }

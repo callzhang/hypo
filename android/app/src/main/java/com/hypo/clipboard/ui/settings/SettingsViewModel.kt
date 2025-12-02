@@ -257,7 +257,7 @@ data class SettingsUiState(
         val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap(),
         val deviceTransports: Map<String, ActiveTransport?> = emptyMap(),
         val isAccessibilityServiceEnabled: Boolean = false,
-        val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Idle,
+        val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Disconnected,
         val peerDiscoveryStatus: Map<String, Boolean> = emptyMap(), // Maps serviceName to isDiscovered
         val peerDeviceNames: Map<String, String?> = emptyMap() // Maps serviceName to device name
     )

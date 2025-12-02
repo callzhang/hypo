@@ -2,37 +2,37 @@
 import AppKit
 import SwiftUI
 import os.log
+#if canImport(Carbon)
+import Carbon
+#endif
 
-/// Custom NSPanel that doesn't steal focus from other applications
+/// Custom NSPanel that allows keyboard input but doesn't actively steal focus
 private class NonFocusStealingPanel: NSPanel {
     override var canBecomeKey: Bool {
-        return false  // Window cannot become key window, won't steal focus
+        return true  // Allow window to become key window so search field can receive input
     }
     
     override var canBecomeMain: Bool {
         return false  // Window cannot become main window
     }
     
-    // Override keyDown to handle ESC key and ignore other keyboard events
-    // This prevents system alert sounds when keys are pressed while window is visible
+    // Override keyDown to handle ESC key and pass other events to super
+    // ESC key is handled via Carbon event listener, but we also handle it here as fallback
     override func keyDown(with event: NSEvent) {
-        // Handle ESC key (keyCode 53) to close window, regardless of pin status
+        // Handle ESC key (keyCode 53) to close window
         if event.keyCode == 53 {
             HistoryPopupPresenter.shared.hide()
             return
         }
-        // Silently ignore all other keyboard events - don't call super
-        // This prevents the system alert sound
+        // Pass other keyboard events to super so TextField can receive input
+        super.keyDown(with: event)
     }
-    
-    // Also ignore keyUp events
-    override func keyUp(with event: NSEvent) {
-        // Silently ignore all keyboard events - don't call super
-    }
-    
-    // Ignore flagsChanged events (modifier keys)
-    override func flagsChanged(with event: NSEvent) {
-        // Silently ignore modifier key changes - don't call super
+}
+
+/// Custom NSView that cannot become first responder
+private class NonFocusStealingView: NSView {
+    override var acceptsFirstResponder: Bool {
+        return false
     }
 }
 
@@ -45,6 +45,7 @@ final class HistoryPopupPresenter {
     private var window: NSPanel?
     private var isPinned: Bool = false  // Start unpinned - window can be dismissed by clicking outside
     private var globalClickMonitor: Any?
+    private var escHotKeyRef: EventHotKeyRef?
     private var previousFrontmostApp: NSRunningApplication?  // Save the app that was frontmost before showing window
 
     func show(with viewModel: ClipboardHistoryViewModel) {
@@ -76,6 +77,7 @@ final class HistoryPopupPresenter {
                 window.orderOut(nil)
                 window.alphaValue = 1.0  // Reset for next show
                 self.removeClickMonitor()
+                self.removeEscHotkey()  // Unregister ESC key handler
             })
         }
     }
@@ -104,10 +106,13 @@ final class HistoryPopupPresenter {
             
             self.logger.debug("🔄 hideAndRestoreFocus called")
             
+            // Remove monitors first
+            self.removeClickMonitor()
+            self.removeEscHotkey()  // Unregister ESC key handler
+            
             // Hide window immediately (no animation) for faster paste
             window.orderOut(nil)
             window.alphaValue = 1.0  // Reset for next show
-            self.removeClickMonitor()
             
             // CRITICAL: Restore focus to the previous frontmost app before pasting
             // This ensures the paste goes to the correct window
@@ -115,8 +120,8 @@ final class HistoryPopupPresenter {
             
             // CRITICAL: Even though window doesn't steal focus, a visible window can still intercept
             // keyboard events. We must ensure the window is fully hidden before sending events.
-            // Use a small delay to ensure window system has processed the orderOut and focus restoration
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // Use a longer delay to ensure window system has processed the orderOut and focus restoration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 // Verify window is actually hidden before proceeding
                 if window.isVisible {
                     self.logger.warning("⚠️ Window still visible after orderOut, forcing hide")
@@ -153,8 +158,8 @@ final class HistoryPopupPresenter {
     
     
     func getPreviousAppPid() -> pid_t? {
-        // Return current frontmost app since focus never changed
-        return NSWorkspace.shared.frontmostApplication?.processIdentifier
+        // Return the saved frontmost app PID (for focus verification)
+        return previousFrontmostApp?.processIdentifier
     }
     
     func isWindowVisible() -> Bool {
@@ -185,6 +190,7 @@ final class HistoryPopupPresenter {
             // Keyboard events are handled by overriding keyDown/keyUp in NonFocusStealingPanel
             window.orderFrontRegardless()
             updateClickMonitor()
+            setupEscHotkey()  // Register ESC key handler
             return
         }
 
@@ -241,6 +247,12 @@ final class HistoryPopupPresenter {
         // Don't make window key - just show it without stealing focus
         panel.orderFrontRegardless()
         updateClickMonitor()
+        setupEscHotkey()  // Register ESC key handler
+        
+        // Focus search field after a short delay to allow window to appear
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.focusSearchField()
+        }
     }
 
     private func applyWindowPresentation(for panel: NSPanel) {
@@ -264,11 +276,78 @@ final class HistoryPopupPresenter {
         }
     }
 
+    private func setupEscHotkey() {
+        removeEscHotkey()
+        guard window != nil, window?.isVisible == true else { return }
+        
+        // Use Carbon API to register ESC key (doesn't require accessibility permissions)
+        // Similar to how Alt+N is handled in HypoAppDelegate
+        var hotKeyID = EventHotKeyID()
+        hotKeyID.signature = OSType(0x4859504F) // "HYPO" signature (same as Alt+V)
+        hotKeyID.id = 999  // Unique ID for ESC key
+        
+        // The event handler is already installed in HypoAppDelegate, we just need to register the hotkey
+        
+        // Register ESC key (keyCode 53)
+        var hotKeyRef: EventHotKeyRef?
+        let err = RegisterEventHotKey(
+            UInt32(53),  // ESC key code
+            0,  // No modifiers
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKeyRef
+        )
+        
+        if err == noErr {
+            escHotKeyRef = hotKeyRef
+            logger.debug("✅ ESC hotkey registered")
+        } else {
+            logger.warning("⚠️ Failed to register ESC hotkey: \(err)")
+        }
+    }
+    
+    private func removeEscHotkey() {
+        if let hotKey = escHotKeyRef {
+            UnregisterEventHotKey(hotKey)
+            escHotKeyRef = nil
+        }
+    }
+    
+    private static var eventHandlerInstalled = false
+    
     private func removeClickMonitor() {
         if let monitor = globalClickMonitor {
             NSEvent.removeMonitor(monitor)
             globalClickMonitor = nil
         }
+    }
+    
+    private func focusSearchField() {
+        guard let window = window, window.isVisible else { return }
+        
+        // Find the TextField in the view hierarchy
+        guard let contentView = window.contentView else { return }
+        
+        // Search for NSTextField in the view hierarchy
+        if let textField = findTextField(in: contentView) {
+            window.makeFirstResponder(textField)
+            logger.debug("✅ Search field focused")
+        } else {
+            logger.debug("⚠️ Search field not found")
+        }
+    }
+    
+    private func findTextField(in view: NSView) -> NSTextField? {
+        if let textField = view as? NSTextField {
+            return textField
+        }
+        for subview in view.subviews {
+            if let textField = findTextField(in: subview) {
+                return textField
+            }
+        }
+        return nil
     }
 
     private func center(_ window: NSWindow) {

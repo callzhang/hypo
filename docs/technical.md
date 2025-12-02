@@ -1,7 +1,7 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 0.2.4  
-Date: November 27, 2025  
+Version: 0.2.5  
+Date: December 1, 2025  
 Status: Production Beta
 
 ---
@@ -122,6 +122,22 @@ Server → Client: ACK + session token
 #### Disconnection
 - Graceful: Client sends `DISCONNECT` message
 - Ungraceful: Server detects timeout, cleans up Redis state
+
+#### Reconnection & Retry Logic ✅ Implemented (December 2025)
+- **Exponential Backoff**: Automatic retry with exponential backoff for failed connections
+  - **Cloud Connections**: 1s → 2s → 4s → 8s → 16s → 32s → 64s → 128s (max delay)
+  - **LAN Connections**: 1s → 2s → 4s → 8s → 16s → 32s (max delay)
+- **Connection State**: Clear state management with `Disconnected` (renamed from `Idle` for clarity)
+  - `Disconnected`: Not connected, ready to connect
+  - `ConnectingCloud` / `ConnectingLan`: Connection attempt in progress
+  - `ConnectedCloud` / `ConnectedLan`: Successfully connected
+  - `Error`: Connection error state
+- **Event-Driven Retries**: Retry logic handled in `runConnectionLoop()`, not in callbacks
+  - Callbacks (`onFailure`, `onClosed`) update state and complete signals
+  - Connection loop automatically retries when `closedSignal` is completed
+  - No immediate reconnection calls from callbacks - prevents bypassing exponential backoff
+- **Retry Reset**: Retry count resets to 0 on successful connection
+- **Status**: Production-ready and tested
 
 ### 2.4 De-duplication Strategy
 
@@ -531,6 +547,17 @@ interface ClipboardDao {
   6. Reconnection only occurs when:
      - Peer IP changes (detected via discovery event)
      - Connection disconnects (`onClosed`/`onFailure` callbacks)
+- **Exponential Backoff Retry** ✅ Implemented (December 2025):
+  - **Cloud Connections**: Automatic retry with exponential backoff (1s → 2s → 4s → 8s → 16s → 32s → 64s → 128s max)
+  - **LAN Connections**: Automatic retry with exponential backoff (1s → 2s → 4s → 8s → 16s → 32s max)
+  - Retry logic handled in `runConnectionLoop()` - callbacks update state, loop handles retries
+  - No immediate reconnection calls from callbacks - prevents bypassing exponential backoff
+  - Retry count resets to 0 on successful connection
+- **Connection State Management** ✅ Updated (December 2025):
+  - `Disconnected` (renamed from `Idle` for clarity): Not connected, ready to connect
+  - `ConnectingCloud` / `ConnectingLan`: Connection attempt in progress
+  - `ConnectedCloud` / `ConnectedLan`: Successfully connected
+  - `Error`: Connection error state
 - **Discovery Integration**: `LanDiscoveryRepository` uses NSD callbacks (`onServiceFound`, `onServiceLost`) - fully event-driven, no periodic polling
 - **StateFlow Observation**: `SyncCoordinator` observes `transportManager.peers.collect { peers -> ... }` to react to discovery events
 
@@ -542,7 +569,8 @@ interface ClipboardDao {
   - Fallback: `lastKnownUrl ?: config.url` (for cloud connections or initialization)
 - **Connection Loop**: 
   - Exits immediately if no peer URL available (waits for discovery event)
-  - No exponential backoff retry - relies on discovery events to trigger reconnection
+  - Exponential backoff retry for failed connections (1s → 2s → 4s → 8s → 16s → 32s max for LAN)
+  - Retry logic handled in `runConnectionLoop()` - callbacks update state, loop handles retries
   - Maintains long-lived connection once established
 - **Instrumentation**: `MetricsReporter` logs handshake and first payload durations (`transport_handshake_ms`, `transport_first_payload_ms`) with transport label `lan` or `cloud` for downstream analytics.
 - **Relay Client Abstraction**: `RelayWebSocketClient` reuses the LAN TLS implementation but sources its endpoint, fingerprint, and telemetry headers from Gradle-provided `BuildConfig` constants (`RELAY_WS_URL`, `RELAY_CERT_FINGERPRINT`, `RELAY_ENVIRONMENT`). Unit tests exercise pinning-failure analytics to confirm the cloud environment label is surfaced correctly.
@@ -924,8 +952,8 @@ docker run -p 8080:8080 hypo-relay
 
 ---
 
-**Document Version**: 0.2.4  
-**Last Updated**: December 30, 2025  
+**Document Version**: 0.2.5  
+**Last Updated**: December 1, 2025  
 **Status**: Production Beta  
 **Authors**: Principal Engineering Team
 

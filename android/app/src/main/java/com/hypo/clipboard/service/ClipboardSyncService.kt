@@ -608,6 +608,10 @@ class ClipboardSyncService : Service() {
         Log.d(TAG, "Screen ON - resuming WebSocket connections")
         // Restart transport will reconnect when needed
         transportManager.start(buildLanRegistrationConfig())
+        // Restart cloud connection to ensure it reconnects after screen was off
+        // The connection loop should handle reconnection automatically, but calling startReceiving()
+        // ensures the connection job is active if it was stopped
+        relayWebSocketClient.startReceiving()
     }
     
     private fun checkAppForegroundState() {

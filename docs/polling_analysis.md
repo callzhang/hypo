@@ -151,3 +151,4 @@ The architecture correctly separates:
 - **Event-driven** for user-facing functionality (discovery, connections, UI updates)
 - **Periodic** for maintenance and platform limitations only
 
+

@@ -112,7 +112,7 @@ public final class LanSyncTransport: SyncTransport {
                             "X-Device-Id": deviceIdentity.deviceId.uuidString,
                             "X-Device-Platform": "macos"
                         ],
-                        idleTimeout: 30,
+                        idleTimeout: 3600, // 1 hour (for compatibility, but LAN uses ping/pong now)
                         environment: "lan",
                         roundTripTimeout: 60
                     )

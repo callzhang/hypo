@@ -19,7 +19,7 @@ public struct LanWebSocketConfiguration: Sendable, Equatable {
         url: URL,
         pinnedFingerprint: String?,
         headers: [String: String] = [:],
-        idleTimeout: TimeInterval = 30,
+        idleTimeout: TimeInterval = 3600, // 1 hour (for compatibility, but LAN uses ping/pong now)
         environment: String = "lan",
         roundTripTimeout: TimeInterval = 60
     ) {
@@ -449,17 +449,61 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             }
             return
         }
-        // For LAN connections, use idle timeout
+        // For LAN connections, use ping/pong keepalive (event-driven, can reconnect when disconnected)
+        // Send ping every 30 minutes to keep connection alive
+        logger.info("⏰ [LanWebSocketTransport] Starting ping/pong keepalive for LAN connection")
+        logger.info("   Sending ping every 30 minutes (event-driven, will reconnect on disconnect)")
         watchdogTask = Task.detached { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(self.configuration.idleTimeout * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: 1_800_000_000_000) // 30 minutes (30 * 60 * 1_000_000_000)
                 if Task.isCancelled { return }
-                let elapsed = Date().timeIntervalSince(self.lastActivity)
-                if elapsed >= self.configuration.idleTimeout {
-                    await self.closeDueToIdle(task: task)
+                guard case .connected(let currentTask) = await self.state, currentTask === task else {
                     return
                 }
+                // Send ping to keep connection alive
+                currentTask.sendPing(pongReceiveHandler: { [weak self] error in
+                    guard let self = self else { return }
+                    if let error {
+                        self.logger.info("❌ [LanWebSocketTransport] Ping failed: \(error.localizedDescription)")
+                        // If ping fails, the connection is likely dead - disconnect and reconnect
+                        // Use exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
+                        Task { @MainActor [weak self] in
+                            guard let self = self else { return }
+                            await self.disconnect()
+                            
+                            // Calculate backoff based on ping retry count
+                            let initialBackoff: TimeInterval = 1.0
+                            let maxBackoff: TimeInterval = 128.0
+                            let backoff: TimeInterval
+                            if self.receiveRetryCount < 8 {
+                                backoff = initialBackoff * pow(2.0, Double(self.receiveRetryCount))
+                            } else {
+                                backoff = maxBackoff // Keep retrying every 128s indefinitely
+                            }
+                            
+                            self.receiveRetryCount += 1
+                            self.logger.info("🔄 [LanWebSocketTransport] Ping failed, reconnecting after \(Int(backoff))s backoff (attempt \(self.receiveRetryCount))...")
+                            
+                            try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+                            do {
+                                try await self.connect()
+                                // Reset retry count on successful connection
+                                self.receiveRetryCount = 0
+                            } catch {
+                                self.logger.info("❌ [LanWebSocketTransport] Reconnect after ping failure failed: \(error.localizedDescription)")
+                                // Will retry again on next ping failure
+                            }
+                        }
+                    } else {
+                        self.logger.info("🏓 [LanWebSocketTransport] Ping sent successfully")
+                        self.touch()
+                        // Reset retry count on successful ping
+                        Task { @MainActor [weak self] in
+                            self?.receiveRetryCount = 0
+                        }
+                    }
+                })
             }
         }
     }

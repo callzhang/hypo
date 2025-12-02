@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.InetAddress
+import java.net.NetworkInterface
 import java.time.Clock
 
 class LanDiscoveryRepository(
@@ -48,7 +49,28 @@ class LanDiscoveryRepository(
                     }
 
                     override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                        android.util.Log.d("LanDiscoveryRepository", "✅ Service resolved: ${serviceInfo.serviceName} at ${serviceInfo.host?.hostAddress}:${serviceInfo.port}")
+                        val resolvedIP = serviceInfo.host?.hostAddress
+                        val resolvedHostname = serviceInfo.host?.hostName
+                        android.util.Log.d("LanDiscoveryRepository", "✅ Service resolved: ${serviceInfo.serviceName} at $resolvedIP:$serviceInfo.port (hostname: $resolvedHostname)")
+                        
+                        // Log additional details for debugging IP resolution issues
+                        if (serviceInfo.host != null) {
+                            val addresses = serviceInfo.host.address
+                            android.util.Log.d("LanDiscoveryRepository", "   Host address bytes: ${addresses?.contentToString()}")
+                            android.util.Log.d("LanDiscoveryRepository", "   Host canonical name: ${serviceInfo.host.canonicalHostName}")
+                        }
+                        
+                        // Validate that resolved IP is not our own IP address
+                        // Android NSD sometimes incorrectly resolves services to the device's own IP
+                        if (resolvedIP != null) {
+                            val ownIPs = getLocalIPAddresses()
+                            if (resolvedIP in ownIPs) {
+                                android.util.Log.w("LanDiscoveryRepository", "⚠️ Rejecting service ${serviceInfo.serviceName}: resolved IP $resolvedIP matches own IP (${ownIPs.joinToString()})")
+                                android.util.Log.w("LanDiscoveryRepository", "   This is likely an NSD resolution bug - will wait for correct resolution")
+                                return // Don't process this peer - wait for correct resolution
+                            }
+                        }
+                        
                         toPeer(serviceInfo)?.let { peer ->
                             trySend(LanDiscoveryEvent.Added(peer))
                         } ?: run {
@@ -156,6 +178,33 @@ class LanDiscoveryRepository(
     }
 
     private fun InetAddress.asString(): String = hostAddress ?: hostName
+
+    /**
+     * Get all local IP addresses for this device to filter out self-resolved services
+     */
+    private fun getLocalIPAddresses(): Set<String> {
+        val ips = mutableSetOf<String>()
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val networkInterface = interfaces.nextElement()
+                val addresses = networkInterface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement()
+                    if (!address.isLoopbackAddress && address is java.net.Inet4Address) {
+                        val ip = address.hostAddress
+                        if (ip != null) {
+                            ips.add(ip)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("LanDiscoveryRepository", "⚠️ Failed to get local IP addresses: ${e.message}")
+        }
+        android.util.Log.d("LanDiscoveryRepository", "   Local IP addresses: ${ips.joinToString()}")
+        return ips
+    }
 
     private fun defaultNetworkEvents(): Flow<Unit> = callbackFlow {
         val receiver = object : android.content.BroadcastReceiver() {

@@ -48,13 +48,16 @@ class TransportManager(
     private val stateLock = Any()
     private val peersByService = mutableMapOf<String, DiscoveredPeer>()
     private val lastSeenByService = mutableMapOf<String, Instant>()
+    // Track cloud and LAN connection states separately to prevent one from overwriting the other
+    private val _cloudConnectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+    private val _lanConnectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     // Keep track of pending removals for cancellation (but we don't actually remove peers anymore)
     private val pendingPeerRemovalJobs = mutableMapOf<String, Job>()
 
     private val _peers = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
     private val _lastSeen = MutableStateFlow<Map<String, Instant>>(emptyMap())
     private val _isAdvertising = MutableStateFlow(false)
-    private val _connectionState = MutableStateFlow(ConnectionState.Idle)
+    private val _connectionState = MutableStateFlow(ConnectionState.Disconnected)
     private val prefs: SharedPreferences? = context?.getSharedPreferences("transport_status", Context.MODE_PRIVATE)
     private val _lastSuccessfulTransport = MutableStateFlow<Map<String, ActiveTransport>>(loadPersistedTransportStatus())
     
@@ -147,46 +150,61 @@ class TransportManager(
     val peers: StateFlow<List<DiscoveredPeer>> = _peers.asStateFlow()
     val isAdvertising: StateFlow<Boolean> = _isAdvertising.asStateFlow()
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
-    // Cloud-only connection state for UI - filters out LAN states, only shows cloud server status
-    val cloudConnectionState: StateFlow<ConnectionState> = _connectionState
-        .map { state ->
-            val mapped = when (state) {
-                ConnectionState.ConnectedCloud -> ConnectionState.ConnectedCloud
-                ConnectionState.ConnectingCloud -> ConnectionState.ConnectingCloud
-                ConnectionState.ConnectedLan, ConnectionState.ConnectingLan -> {
-                    // If LAN is connected, check if cloud is also connected
-                    // For UI purposes, we only care about cloud server status
-                    // If cloud is not explicitly connected, show as Idle
-                    ConnectionState.Idle
-                }
-                else -> state
-            }
-            android.util.Log.d("TransportManager", "🌐 cloudConnectionState mapping: $state -> $mapped")
-            mapped
-        }
-        .stateIn(
-            scope = scope,
-            started = SharingStarted.Eagerly,  // Start immediately to ensure UI gets updates
-            initialValue = ConnectionState.Idle
-        )
+    // Cloud-only connection state for UI - tracks cloud state separately from LAN
+    val cloudConnectionState: StateFlow<ConnectionState> = _cloudConnectionState.asStateFlow()
     val lastSuccessfulTransport: StateFlow<Map<String, ActiveTransport>> =
         _lastSuccessfulTransport.asStateFlow()
     
     /**
      * Update the connection state (used by ConnectionStatusProber)
+     * Now tracks cloud and LAN states separately to prevent one from overwriting the other
      */
     fun updateConnectionState(newState: ConnectionState) {
         val oldState = _connectionState.value
         android.util.Log.d("TransportManager", "🔄 Updating connection state: $oldState -> $newState")
-        _connectionState.value = newState
-        // Log the mapped cloudConnectionState for debugging
-        val mapped = when (newState) {
-            ConnectionState.ConnectedCloud -> ConnectionState.ConnectedCloud
-            ConnectionState.ConnectingCloud -> ConnectionState.ConnectingCloud
-            ConnectionState.ConnectedLan, ConnectionState.ConnectingLan -> ConnectionState.Idle
+        
+        // Update the appropriate state based on connection type
+        when (newState) {
+            ConnectionState.ConnectedCloud, ConnectionState.ConnectingCloud, ConnectionState.Disconnected -> {
+                // Cloud connection state change - update cloud state
+                val oldCloudState = _cloudConnectionState.value
+                _cloudConnectionState.value = newState
+                android.util.Log.d("TransportManager", "☁️ Cloud connection state: $oldCloudState -> $newState")
+            }
+            ConnectionState.ConnectedLan, ConnectionState.ConnectingLan -> {
+                // LAN connection state change - update LAN state only, don't affect cloud
+                val oldLanState = _lanConnectionState.value
+                _lanConnectionState.value = newState
+                android.util.Log.d("TransportManager", "📡 LAN connection state: $oldLanState -> $newState")
+                // Don't update _connectionState for LAN - keep cloud state if cloud is connected
+                if (_cloudConnectionState.value == ConnectionState.ConnectedCloud || 
+                    _cloudConnectionState.value == ConnectionState.ConnectingCloud) {
+                    android.util.Log.d("TransportManager", "   Cloud is connected, keeping cloud state as primary")
+                    return // Don't overwrite cloud state
+                }
+            }
+            else -> {
+                // Other states (Error, etc.) - update both if needed
+            }
+        }
+        
+        // Update primary connection state (prioritize cloud over LAN)
+        _connectionState.value = when {
+            _cloudConnectionState.value == ConnectionState.ConnectedCloud -> ConnectionState.ConnectedCloud
+            _cloudConnectionState.value == ConnectionState.ConnectingCloud -> ConnectionState.ConnectingCloud
+            _lanConnectionState.value == ConnectionState.ConnectedLan -> ConnectionState.ConnectedLan
+            _lanConnectionState.value == ConnectionState.ConnectingLan -> ConnectionState.ConnectingLan
             else -> newState
         }
-        android.util.Log.d("TransportManager", "🌐 cloudConnectionState will be: $mapped (from $newState)")
+        
+        // Log the mapped cloudConnectionState for debugging
+        val mapped = when (_connectionState.value) {
+            ConnectionState.ConnectedCloud -> ConnectionState.ConnectedCloud
+            ConnectionState.ConnectingCloud -> ConnectionState.ConnectingCloud
+            ConnectionState.ConnectedLan, ConnectionState.ConnectingLan -> ConnectionState.Disconnected
+            else -> _connectionState.value
+        }
+        android.util.Log.d("TransportManager", "🌐 cloudConnectionState will be: $mapped (from ${_connectionState.value})")
     }
 
     fun start(config: LanRegistrationConfig) {
@@ -505,7 +523,7 @@ class TransportManager(
         networkSignalJob = null
         manualRetryRequested.set(false)
         networkChangeDetected.set(false)
-        _connectionState.value = ConnectionState.Idle
+        _connectionState.value = ConnectionState.Disconnected
     }
 
     suspend fun shutdown(gracefulShutdown: suspend () -> Unit) {
@@ -621,7 +639,7 @@ class TransportManager(
                         config = config
                     )) {
                         MonitorResult.GracefulStop -> {
-                            _connectionState.value = ConnectionState.Idle
+                            _connectionState.value = ConnectionState.Disconnected
                             return
                         }
                         MonitorResult.ManualRetry,
@@ -777,7 +795,7 @@ sealed interface LanDialResult {
 }
 
 enum class ConnectionState {
-    Idle,
+    Disconnected,  // Renamed from Idle for clarity - means not connected
     ConnectingLan,
     ConnectedLan,
     ConnectingCloud,

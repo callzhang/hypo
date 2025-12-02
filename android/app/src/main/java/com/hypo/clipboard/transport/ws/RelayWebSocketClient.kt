@@ -94,11 +94,11 @@ class RelayWebSocketClient @Inject constructor(
         // Check if connection is already established (not just in progress)
         val isConnected = delegate.isConnected()
         if (isConnected) {
-            android.util.Log.d("RelayWebSocketClient", "   Connection is established, closing and reconnecting")
-            // Close the connection - this will cancel the connection job and close the socket
-            // close() now checks if handshake is in progress and handles it safely
-            delegate.close()
-            // Wait for connection job to fully complete cleanup (close() uses cancelAndJoin())
+            android.util.Log.d("RelayWebSocketClient", "   Connection is established, disconnecting and reconnecting")
+            // Use disconnect() instead of close() - this closes the socket but keeps sendQueue open
+            // so we can reconnect properly
+            delegate.disconnect()
+            // Wait for connection job to fully complete cleanup
             // Additional delay to ensure socket is fully closed at OS level
             kotlinx.coroutines.delay(1500)
             // Start receiving will trigger ensureConnection which will start a new connection
@@ -106,9 +106,7 @@ class RelayWebSocketClient @Inject constructor(
         } else {
             android.util.Log.d("RelayWebSocketClient", "   Connection not yet established or in progress")
             // Connection is in progress or not started
-            // Don't call close() here as it might interrupt an in-progress connection attempt
-            // The close() method now checks for handshake in progress, but we still avoid calling it
-            // during connection attempts to prevent "Socket closed" errors
+            // Don't call disconnect() here as it might interrupt an in-progress connection attempt
             // Instead, cancel the connection job and let it clean up naturally, then reconnect
             android.util.Log.d("RelayWebSocketClient", "   Cancelling in-progress connection and will reconnect")
             delegate.cancelConnectionJob()

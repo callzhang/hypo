@@ -46,8 +46,11 @@ class LanWebSocketServer(
         server = object : WebSocketServer(InetSocketAddress(port)) {
             override fun onStart() {
                 Log.d(TAG, "✅ WebSocket server started on port ${address.port}")
-                // Align with previous timeout behaviour (~30s)
-                connectionLostTimeout = 30
+                // Set timeout to 1 hour (3600 seconds) for LAN connections
+                // Since we're event-driven, we can reconnect when disconnected, so a long timeout
+                // prevents unnecessary disconnections. Ping interval is 30 minutes, so 1 hour timeout
+                // provides 2x margin for network delays.
+                connectionLostTimeout = 3600
             }
 
             override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {

@@ -24,37 +24,22 @@ public final class KeychainDeviceKeyProvider: DeviceKeyProviding {
     }
 
     public func key(for deviceId: String) async throws -> SymmetricKey {
-        // Try exact deviceId first (should be pure UUID now after system upgrade)
+        // KeychainKeyStore handles normalization internally - no need to normalize here
+        // It will try normalized ID first, then fallback to original format for backward compatibility
         if let key = try keychain.load(for: deviceId) {
             return key
-        }
-        
-        // Fallback: Try removing any platform prefix (for backward compatibility during migration)
-        // This handles old keys that might still have "android-" prefix
-        if deviceId.hasPrefix("android-") {
-            let unprefixedId = String(deviceId.dropFirst("android-".count))
-            if let key = try keychain.load(for: unprefixedId) {
-                return key
-            }
-        }
-        
-        // Fallback: If deviceId is pure UUID, try with "android-" prefix (for old keys)
-        // This handles the case where keys were stored with the prefix before upgrade
-        if deviceId.count == 36 && !deviceId.hasPrefix("android-") && !deviceId.hasPrefix("macos-") {
-            let prefixedId = "android-\(deviceId)"
-            if let key = try keychain.load(for: prefixedId) {
-                return key
-            }
         }
         
         throw DeviceKeyProviderError.missingKey(deviceId)
     }
 
     public func store(key: SymmetricKey, for deviceId: String) throws {
+        // KeychainKeyStore handles normalization internally
         try keychain.save(key: key, for: deviceId)
     }
 
     public func delete(deviceId: String) throws {
+        // KeychainKeyStore handles normalization internally
         try keychain.delete(for: deviceId)
     }
 }
@@ -65,15 +50,32 @@ public actor InMemoryDeviceKeyProvider: DeviceKeyProviding {
     public init(storage: [String: SymmetricKey] = [:]) {
         self.storage = storage
     }
+    
+    /// Normalizes device ID for consistent storage and lookup (matches KeychainKeyStore behavior)
+    private func normalizeDeviceId(_ deviceId: String) -> String {
+        // Remove platform prefix if present
+        let withoutPrefix: String
+        if deviceId.hasPrefix("macos-") {
+            withoutPrefix = String(deviceId.dropFirst("macos-".count))
+        } else if deviceId.hasPrefix("android-") {
+            withoutPrefix = String(deviceId.dropFirst("android-".count))
+        } else {
+            withoutPrefix = deviceId
+        }
+        // Normalize to lowercase for consistent storage
+        return withoutPrefix.lowercased()
+    }
 
     public func key(for deviceId: String) async throws -> SymmetricKey {
-        guard let key = storage[deviceId] else {
+        let normalizedId = normalizeDeviceId(deviceId)
+        guard let key = storage[normalizedId] else {
             throw DeviceKeyProviderError.missingKey(deviceId)
         }
         return key
     }
 
     public func setKey(_ key: SymmetricKey, for deviceId: String) async {
-        storage[deviceId] = key
+        let normalizedId = normalizeDeviceId(deviceId)
+        storage[normalizedId] = key
     }
 }

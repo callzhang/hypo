@@ -9,7 +9,7 @@ public enum TransportOrigin: String, Codable {
 public struct ClipboardEntry: Identifiable, Equatable, Codable {
     public let id: UUID
     public var timestamp: Date
-    public let originDeviceId: String  // UUID string (pure UUID, no prefix)
+    public let deviceId: String  // UUID string (pure UUID, no prefix) - normalized to lowercase
     public let originPlatform: DevicePlatform?  // Platform: macOS, Android, etc.
     public let originDeviceName: String?
     public let content: ClipboardContent
@@ -20,7 +20,7 @@ public struct ClipboardEntry: Identifiable, Equatable, Codable {
     public init(
         id: UUID = UUID(),
         timestamp: Date = Date(),
-        originDeviceId: String,
+        deviceId: String,
         originPlatform: DevicePlatform? = nil,
         originDeviceName: String? = nil,
         content: ClipboardContent,
@@ -30,7 +30,8 @@ public struct ClipboardEntry: Identifiable, Equatable, Codable {
     ) {
         self.id = id
         self.timestamp = timestamp
-        self.originDeviceId = originDeviceId
+        // Normalize device ID to lowercase for consistent matching
+        self.deviceId = deviceId.lowercased()
         self.originPlatform = originPlatform
         self.originDeviceName = originDeviceName
         self.content = content
@@ -41,7 +42,7 @@ public struct ClipboardEntry: Identifiable, Equatable, Codable {
 
     public func matches(query: String) -> Bool {
         let lowered = query.lowercased()
-        if originDeviceId.lowercased().contains(lowered) {
+        if deviceId.contains(lowered) {
             return true
         }
         switch content {
@@ -160,31 +161,31 @@ public extension ClipboardEntry {
     }
     
     /// Returns the display name for the origin device
-    /// - Parameter localDeviceId: The current device's ID to compare against
+    /// - Parameter localDeviceId: The current device's ID to compare against (will be normalized to lowercase)
     /// - Returns: "Local" if from this device, otherwise the device name or a fallback
     func originDisplayName(localDeviceId: String) -> String {
-        if originDeviceId == localDeviceId {
+        if deviceId == localDeviceId.lowercased() {
             return "Local"
         }
         return originDeviceName ?? "Unknown Device"
     }
     
     /// Returns true if this entry is from the local device
-    /// - Parameter localDeviceId: The current device's ID to compare against
+    /// - Parameter localDeviceId: The current device's ID to compare against (will be normalized to lowercase)
     func isLocal(localDeviceId: String) -> Bool {
-        originDeviceId == localDeviceId
+        deviceId == localDeviceId.lowercased()
     }
 
     func accessibilityDescription() -> String {
         switch content {
         case .text(let text):
-            return "Text from \(originDeviceId): \(text)"
+            return "Text from \(deviceId): \(text)"
         case .link(let url):
-            return "Link from \(originDeviceId): \(url.absoluteString)"
+            return "Link from \(deviceId): \(url.absoluteString)"
         case .image(let metadata):
-            return "Image from \(originDeviceId), format \(metadata.format), size \(metadata.pixelSize.width) by \(metadata.pixelSize.height)"
+            return "Image from \(deviceId), format \(metadata.format), size \(metadata.pixelSize.width) by \(metadata.pixelSize.height)"
         case .file(let metadata):
-            return "File from \(originDeviceId): \(metadata.fileName)"
+            return "File from \(deviceId): \(metadata.fileName)"
         }
     }
 

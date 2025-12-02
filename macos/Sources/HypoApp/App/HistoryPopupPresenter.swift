@@ -3,6 +3,39 @@ import AppKit
 import SwiftUI
 import os.log
 
+/// Custom NSPanel that doesn't steal focus from other applications
+private class NonFocusStealingPanel: NSPanel {
+    override var canBecomeKey: Bool {
+        return false  // Window cannot become key window, won't steal focus
+    }
+    
+    override var canBecomeMain: Bool {
+        return false  // Window cannot become main window
+    }
+    
+    // Override keyDown to handle ESC key and ignore other keyboard events
+    // This prevents system alert sounds when keys are pressed while window is visible
+    override func keyDown(with event: NSEvent) {
+        // Handle ESC key (keyCode 53) to close window, regardless of pin status
+        if event.keyCode == 53 {
+            HistoryPopupPresenter.shared.hide()
+            return
+        }
+        // Silently ignore all other keyboard events - don't call super
+        // This prevents the system alert sound
+    }
+    
+    // Also ignore keyUp events
+    override func keyUp(with event: NSEvent) {
+        // Silently ignore all keyboard events - don't call super
+    }
+    
+    // Ignore flagsChanged events (modifier keys)
+    override func flagsChanged(with event: NSEvent) {
+        // Silently ignore modifier key changes - don't call super
+    }
+}
+
 /// Presents the history view in a floating, centered window when the global hotkey fires.
 final class HistoryPopupPresenter {
     static let shared = HistoryPopupPresenter()
@@ -10,13 +43,15 @@ final class HistoryPopupPresenter {
     private init() {}
 
     private var window: NSPanel?
-    private var previousActiveApp: NSRunningApplication?
     private var isPinned: Bool = false  // Start unpinned - window can be dismissed by clicking outside
     private var globalClickMonitor: Any?
+    private var previousFrontmostApp: NSRunningApplication?  // Save the app that was frontmost before showing window
 
     func show(with viewModel: ClipboardHistoryViewModel) {
-        logger.debug("📢 [HistoryPopupPresenter] show() called")
-        previousActiveApp = NSWorkspace.shared.frontmostApplication
+        // Save the frontmost app before showing window (for focus restoration)
+        previousFrontmostApp = NSWorkspace.shared.frontmostApplication
+        logger.debug("💾 Saved frontmost app: \(previousFrontmostApp?.localizedName ?? "unknown")")
+        
         DispatchQueue.main.async {
             Task { @MainActor in
                 await viewModel.start()
@@ -29,7 +64,7 @@ final class HistoryPopupPresenter {
         DispatchQueue.main.async {
             guard let window = self.window, window.isVisible else { return }
             
-            // Restore focus immediately (before hiding) to ensure it's ready for paste
+            // Restore focus to previous app when hiding (works for ESC key and click-outside)
             self.restorePreviousFocus()
             
             // Animate fade out
@@ -62,7 +97,6 @@ final class HistoryPopupPresenter {
         DispatchQueue.main.async {
             guard let window = self.window, window.isVisible else {
                 // If window not visible, just restore focus and call completion
-                self.logger.warning("⚠️ Window not visible, restoring focus anyway")
                 self.restorePreviousFocus()
                 completion()
                 return
@@ -70,53 +104,61 @@ final class HistoryPopupPresenter {
             
             self.logger.debug("🔄 hideAndRestoreFocus called")
             
-            // Restore focus immediately (before hiding) to ensure it's ready for paste
-            self.restorePreviousFocus()
-            
             // Hide window immediately (no animation) for faster paste
             window.orderOut(nil)
             window.alphaValue = 1.0  // Reset for next show
             self.removeClickMonitor()
             
-            self.logger.debug("🔄 Window hidden, waiting for focus restore...")
+            // CRITICAL: Restore focus to the previous frontmost app before pasting
+            // This ensures the paste goes to the correct window
+            self.restorePreviousFocus()
             
-            // Wait longer for focus to fully restore, then call completion
-            // macOS needs time to actually switch focus between applications
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self.logger.debug("✅ Focus restore delay complete, calling completion")
+            // CRITICAL: Even though window doesn't steal focus, a visible window can still intercept
+            // keyboard events. We must ensure the window is fully hidden before sending events.
+            // Use a small delay to ensure window system has processed the orderOut and focus restoration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                // Verify window is actually hidden before proceeding
+                if window.isVisible {
+                    self.logger.warning("⚠️ Window still visible after orderOut, forcing hide")
+                    window.orderOut(nil)
+                }
+                
+                // Verify focus was restored
+                let currentFrontmost = NSWorkspace.shared.frontmostApplication
+                let expectedApp = self.previousFrontmostApp
+                if let expected = expectedApp, let current = currentFrontmost {
+                    if current.processIdentifier == expected.processIdentifier {
+                        self.logger.debug("✅ Focus restored to: \(current.localizedName ?? "unknown")")
+                    } else {
+                        self.logger.warning("⚠️ Focus may not be restored correctly. Expected: \(expected.localizedName ?? "unknown"), Current: \(current.localizedName ?? "unknown")")
+                    }
+                }
+                
+                self.logger.debug("✅ Window hidden, calling completion")
                 completion()
             }
         }
     }
     
-    func restorePreviousFocus() {
-        // Restore focus to the application that was active before we showed the popup
-        if let previousApp = previousActiveApp, previousApp != NSRunningApplication.current {
-            previousApp.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
-            self.logger.debug("🔄 [HistoryPopupPresenter] Restored focus to: \(previousApp.localizedName ?? "unknown") (PID: \(previousApp.processIdentifier))")
-        } else {
-            // Fallback: try to find the frontmost application that's not us
-            let runningApps = NSWorkspace.shared.runningApplications.filter { app in
-                app.activationPolicy == .regular && app != NSRunningApplication.current
-            }
-            if let frontmost = runningApps.first {
-                frontmost.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
-                self.logger.debug("🔄 [HistoryPopupPresenter] Fallback: Restored focus to: \(frontmost.localizedName ?? "unknown") (PID: \(frontmost.processIdentifier))")
-            } else {
-                self.logger.warning("⚠️ [HistoryPopupPresenter] No previous app found, cannot restore focus")
-            }
+    private func restorePreviousFocus() {
+        guard let previousApp = previousFrontmostApp else {
+            logger.debug("ℹ️ No previous app to restore focus to")
+            return
         }
+        
+        // Activate the previous app to restore focus
+        previousApp.activate(options: [.activateIgnoringOtherApps])
+        logger.debug("🔄 Restoring focus to: \(previousApp.localizedName ?? "unknown")")
     }
     
+    
     func getPreviousAppPid() -> pid_t? {
-        if let previousApp = previousActiveApp, previousApp != NSRunningApplication.current {
-            return previousApp.processIdentifier
-        }
-        // Fallback: find frontmost app
-        let runningApps = NSWorkspace.shared.runningApplications.filter { app in
-            app.activationPolicy == .regular && app != NSRunningApplication.current
-        }
-        return runningApps.first?.processIdentifier
+        // Return current frontmost app since focus never changed
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
+    
+    func isWindowVisible() -> Bool {
+        return window?.isVisible ?? false
     }
 
     // MARK: - Present helpers (must stay in-file to access privates)
@@ -124,7 +166,6 @@ final class HistoryPopupPresenter {
     private func present(with viewModel: ClipboardHistoryViewModel) {
         // Reuse existing window if possible
         if let window = self.window {
-            self.logger.debug("🪟 [HistoryPopupPresenter] Reusing existing window")
             let target = self.targetScreen()
             let expected = self.centeredFrame(for: window.frame.size, on: target)
             let needsMove = window.screen != target || window.frame.origin != expected.origin
@@ -137,18 +178,15 @@ final class HistoryPopupPresenter {
             let frameStr = NSStringFromRect(window.frame)
             let expectedStr = NSStringFromRect(expected)
             self.logger.debug("📍 Reuse frame: \(frameStr) expected: \(expectedStr) screen: \(target.localizedName) moved=\(needsMove)")
-            self.appendDebug("[HistoryPopupPresenter] reuse frame=\(frameStr) expected=\(expectedStr) screen=\(target.localizedName) moved=\(needsMove)\n")
             
             window.alphaValue = 1.0
             applyWindowPresentation(for: window)
-            window.makeKeyAndOrderFront(nil)
+            // Don't make window key - this prevents it from stealing focus
+            // Keyboard events are handled by overriding keyDown/keyUp in NonFocusStealingPanel
             window.orderFrontRegardless()
-            NSApp.activate(ignoringOtherApps: true)
             updateClickMonitor()
             return
         }
-
-        self.logger.debug("🆕 [HistoryPopupPresenter] Creating new window")
 
         let contentSize = NSSize(width: 360, height: 480)
         let content = MenuBarContentView(viewModel: viewModel, historyOnly: true, applySwiftUIBackground: true)
@@ -164,7 +202,8 @@ final class HistoryPopupPresenter {
         let centeredFrame = self.centeredFrame(for: desiredFrame.size, on: target)
 
         // Start with a neutral rect, then apply the final frame (avoids zero-size logs).
-        let panel = NSPanel(
+        // Use NonFocusStealingPanel to prevent window from stealing focus
+        let panel = NonFocusStealingPanel(
             contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: style,
             backing: .buffered,
@@ -175,6 +214,7 @@ final class HistoryPopupPresenter {
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.isReleasedWhenClosed = false
+        
         applyWindowPresentation(for: panel)
         panel.isMovableByWindowBackground = true
         panel.animationBehavior = .none
@@ -191,33 +231,16 @@ final class HistoryPopupPresenter {
         panel.layoutIfNeeded()
         panel.contentView?.layoutSubtreeIfNeeded()
 
-        let finalSize = panel.frame.size
-        let postLayoutScreen = self.targetScreen(for: panel)
-        let visiblePost = postLayoutScreen.visibleFrame
-        let finalFrame = panel.frame
-
-        let visibleStr = NSStringFromRect(visiblePost)
-        let sizeStr = NSStringFromSize(finalSize)
-        let frameStr = NSStringFromRect(finalFrame)
-        // Window creation details removed for cleaner logs
-        // self.logger.debug("📍 New window target screen: \(postLayoutScreen.localizedName), visible=\(visibleStr), finalSize=\(sizeStr), setFrame=\(frameStr)")
-        // self.appendDebug("[HistoryPopupPresenter] new window screen=\(postLayoutScreen.localizedName) visible=\(visibleStr) size=\(sizeStr) frame=\(frameStr)\n")
-        // Make window accept keyboard events
+        // Window can accept mouse events but won't steal keyboard focus
         panel.acceptsMouseMovedEvents = true
-        panel.makeFirstResponder(hosting.view)
 
         self.window = panel
 
-        self.logger.debug("🪟 [HistoryPopupPresenter] Displaying window at center")
-
         panel.alphaValue = 1.0
-        NSApp.activate(ignoringOtherApps: true)
         applyWindowPresentation(for: panel)
-        panel.makeKeyAndOrderFront(nil)
+        // Don't make window key - just show it without stealing focus
         panel.orderFrontRegardless()
         updateClickMonitor()
-
-        self.logger.debug("✅ [HistoryPopupPresenter] Window displayed")
     }
 
     private func applyWindowPresentation(for panel: NSPanel) {

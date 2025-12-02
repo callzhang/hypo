@@ -6,6 +6,15 @@ import UniformTypeIdentifiers
 import Carbon
 import ApplicationServices
 #endif
+#endif
+
+#if canImport(AppKit)
+// Check if accessibility permissions are granted (required for CGEvent to work)
+private func checkAccessibilityPermissions() -> Bool {
+    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+    return AXIsProcessTrustedWithOptions(options as CFDictionary)
+}
+#endif
 
 // AppDelegate to ensure hotkey setup runs at app launch (not waiting for UI)
 @MainActor
@@ -98,15 +107,16 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                                         userInfo: ["itemId": item.id]
                                     )
                                     
-                                    // Copy to clipboard first
+                                    // Copy to clipboard first (for all content types)
+                                    // This ensures clipboard is ready before focus restore
                                     viewModel.copyToPasteboard(item)
                                     
                                     // Wait a moment for clipboard to be ready, then hide and paste
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                                         // Hide popup and restore focus, then paste
                                         HistoryPopupPresenter.shared.hideAndRestoreFocus {
-                                            // Paste to cursor position after focus is restored
-                                            pasteToCursorAtCurrentPosition()
+                                            // Use Cmd+V for all content types (most reliable method)
+                                            pasteToCursorAtCurrentPosition(entry: item)
                                         }
                                     }
                                     
@@ -293,36 +303,177 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
 // Global reference to prevent AppDelegate deallocation
 private var globalAppDelegate: HypoAppDelegate?
 
-// Standalone function to paste at cursor (can be called from C callbacks)
-private func pasteToCursorAtCurrentPosition() {
-    let logger = HypoLogger(category: "pasteToCursor")
+/// Directly type text at cursor position (similar to pynput) - more reliable than Cmd+V
+/// This method directly inputs text characters without relying on clipboard
+/// Uses CGEvent to inject text character by character for maximum reliability
+private func typeTextAtCursor(_ text: String) {
+    let logger = HypoLogger(category: "typeTextAtCursor")
     
-    // Additional delay to ensure focus is fully restored and clipboard is ready
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-        logger.debug("📋 Attempting to paste...")
+    // Longer delay to ensure focus is fully restored and window is ready
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        logger.debug("⌨️ Typing text directly at cursor (\(text.count) chars)")
         
-        // Use global event tap - more reliable than postToPid
-        // Create key down event for 'V' with Cmd modifier
-        guard let keyDownEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true) else {
-            logger.error("❌ Failed to create keyDown event")
+        // Verify focus is restored
+        let frontmostApp = NSWorkspace.shared.frontmostApplication
+        let isHypoApp = frontmostApp?.bundleIdentifier?.contains("hypo") ?? false
+        if isHypoApp {
+            logger.warning("⚠️ Hypo app is still frontmost, focus may not be restored")
+        } else {
+            logger.debug("✅ Focus restored to: \(frontmostApp?.localizedName ?? "unknown")")
+        }
+        
+        // Create keyboard event source
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            logger.error("❌ Failed to create event source")
             return
         }
-        keyDownEvent.flags = .maskCommand
         
-        // Post to HID event tap (this sends to the frontmost app)
-        keyDownEvent.post(tap: .cghidEventTap)
-        logger.debug("📋 KeyDown posted")
-        
-        // Small delay between key down and key up
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-            guard let keyUpEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
-                logger.error("❌ Failed to create keyUp event")
-                return
+            // Type character by character for maximum reliability (similar to pynput)
+            // This ensures each character is properly input even if some fail
+            for (index, char) in text.enumerated() {
+                // Convert character to UTF-16 code units (UniChar is UInt16)
+                let utf16Chars = Array(char.utf16)
+                
+                // Create key down event with Unicode character
+                guard let keyDownEvent = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true) else {
+                    logger.error("❌ Failed to create keyDown event for char at index \(index)")
+                    continue
+                }
+                
+                // Set Unicode string (single character as UTF-16)
+                var utf16Value = utf16Chars[0]
+                keyDownEvent.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: &utf16Value)
+                
+                // Post key down
+                keyDownEvent.post(tap: .cghidEventTap)
+                
+                // Small delay between characters for reliability (5ms)
+                if index < text.count - 1 {
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
+                
+                // Create and post key up event
+                if let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) {
+                    var utf16ValueUp = utf16Value
+                    keyUpEvent.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: &utf16ValueUp)
+                    keyUpEvent.post(tap: .cghidEventTap)
+                }
             }
-            keyUpEvent.flags = .maskCommand
-            keyUpEvent.post(tap: .cghidEventTap)
-            logger.debug("✅ KeyUp posted")
+        
+        logger.debug("✅ Text typed successfully (\(text.count) chars)")
+    }
+}
+
+// Standalone function to paste at cursor (can be called from C callbacks)
+// Uses Cmd+V for all content types (most reliable method on macOS)
+// CRITICAL: Window must be fully hidden before sending keyboard events
+// Even with canBecomeKey=false, a visible window can intercept events
+private func pasteToCursorAtCurrentPosition(entry: ClipboardEntry? = nil) {
+    let logger = HypoLogger(category: "pasteToCursor")
+    
+    // Check accessibility permissions (required for CGEvent to work)
+    if !checkAccessibilityPermissions() {
+        logger.error("❌ Accessibility permissions not granted - CGEvent will not work")
+        logger.error("   Please grant accessibility permissions in System Settings > Privacy & Security > Accessibility")
+        return
+    }
+    
+    // CRITICAL: Window must be fully hidden before sending keyboard events
+    // Even with canBecomeKey=false, a visible window can intercept events
+    // The hideAndRestoreFocus already waits for window to be hidden, so we add a small delay
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // Verify window is not visible before sending events
+        // Access window through a helper to check visibility
+        let windowVisible = HistoryPopupPresenter.shared.isWindowVisible()
+        if windowVisible {
+            logger.warning("⚠️ Window still visible, delaying paste")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                performPasteAction()
+            }
+        } else {
+            performPasteAction()
         }
+    }
+}
+
+private func performPasteAction() {
+    let logger = HypoLogger(category: "pasteToCursor")
+    logger.debug("📋 Attempting to paste via Cmd+V...")
+    
+    // Method 1: Try using cgSessionEventTap first (more reliable for user session events)
+    // This posts events to the current user's session, which is more reliable than cghidEventTap
+    let success = performPasteWithSessionTap()
+    
+    if !success {
+        // Fallback: Try cghidEventTap if session tap fails
+        logger.debug("⚠️ Session tap failed, trying HID tap...")
+        performPasteWithHIDTap()
+    }
+}
+
+private func performPasteWithSessionTap() -> Bool {
+    let logger = HypoLogger(category: "pasteToCursor")
+    
+    // Create event source with user activity state (more reliable for paste)
+    guard let source = CGEventSource(stateID: .hidSystemState) else {
+        logger.error("❌ Failed to create event source")
+        return false
+    }
+    
+    // Create key down event for 'V' (virtual key 0x09) with Cmd modifier
+    guard let keyDownEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true) else {
+        logger.error("❌ Failed to create keyDown event")
+        return false
+    }
+    keyDownEvent.flags = .maskCommand
+    
+    // Post to session event tap (sends to current user session, more reliable)
+    keyDownEvent.post(tap: .cgSessionEventTap)
+    logger.info("📋 KeyDown posted via session tap (Cmd+V)")
+    
+    // Small delay between key down and key up
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        guard let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+            logger.error("❌ Failed to create keyUp event")
+            return
+        }
+        keyUpEvent.flags = .maskCommand
+        keyUpEvent.post(tap: .cgSessionEventTap)
+        logger.info("✅ KeyUp posted via session tap - paste should be complete")
+    }
+    
+    return true
+}
+
+private func performPasteWithHIDTap() {
+    let logger = HypoLogger(category: "pasteToCursor")
+    
+    // Create event source
+    guard let source = CGEventSource(stateID: .hidSystemState) else {
+        logger.error("❌ Failed to create event source")
+        return
+    }
+    
+    // Create key down event for 'V' (virtual key 0x09) with Cmd modifier
+    guard let keyDownEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true) else {
+        logger.error("❌ Failed to create keyDown event")
+        return
+    }
+    keyDownEvent.flags = .maskCommand
+    
+    // Post to HID event tap (fallback method)
+    keyDownEvent.post(tap: .cghidEventTap)
+    logger.info("📋 KeyDown posted via HID tap (Cmd+V)")
+    
+    // Small delay between key down and key up
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        guard let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+            logger.error("❌ Failed to create keyUp event")
+            return
+        }
+        keyUpEvent.flags = .maskCommand
+        keyUpEvent.post(tap: .cghidEventTap)
+        logger.info("✅ KeyUp posted via HID tap - paste should be complete")
     }
 }
 
@@ -693,152 +844,166 @@ struct MenuBarContentView: View {
             eventMonitor = nil
         }
         
-        // Add global event monitor for Alt+1 through Alt+9
-        // These map to items 2-10 (skip first item which is already in clipboard)
-        // Use both local and global monitors to ensure events are captured
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
-            // Only handle when history section is selected
-            guard self.selectedSection == .history else { return event }
+        // NOTE: We don't set up keyboard monitors here because:
+        // 1. The window has canBecomeKey=false, so it cannot receive keyboard events
+        // 2. Setting up local/global monitors would cause system alert sounds
+        // 3. Carbon hotkeys in HypoAppDelegate already handle Alt+1 through Alt+9 globally
+        //    without requiring window focus, so these monitors are redundant
+        
+        self.logger.debug("ℹ️ [MenuBarContentView] Keyboard shortcuts handled by Carbon hotkeys (no local monitors needed)")
+    }
+    
+    /// Directly type text at cursor position (similar to pynput) - more reliable than Cmd+V
+    /// Uses CGEvent to inject text character by character for maximum reliability
+    private func typeTextAtCursor(_ text: String) {
+        // Longer delay to ensure focus is fully restored and window is ready
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.logger.debug("⌨️ Typing text directly at cursor (\(text.count) chars)")
             
-            // Check for Alt+number (1-9)
-            if event.modifierFlags.contains(.option) {
-                let keyCode = event.keyCode
-                // Key codes: 18=1, 19=2, 20=3, 21=4, 23=5, 22=6, 26=7, 28=8, 25=9
-                let numberKeyCodes: [UInt16: Int] = [
-                    18: 1, 19: 2, 20: 3, 21: 4, 23: 5,
-                    22: 6, 26: 7, 28: 8, 25: 9
-                ]
+            // Verify focus is restored
+            let frontmostApp = NSWorkspace.shared.frontmostApplication
+            let isHypoApp = frontmostApp?.bundleIdentifier?.contains("hypo") ?? false
+            if isHypoApp {
+                self.logger.warning("⚠️ Hypo app is still frontmost, focus may not be restored")
+            } else {
+                self.logger.debug("✅ Focus restored to: \(frontmostApp?.localizedName ?? "unknown")")
+            }
+            
+            // Create keyboard event source
+            guard let source = CGEventSource(stateID: .hidSystemState) else {
+                self.logger.error("❌ Failed to create event source")
+                return
+            }
+            
+            // Type character by character for maximum reliability (similar to pynput)
+            // This ensures each character is properly input even if some fail
+            for (index, char) in text.enumerated() {
+                // Convert character to UTF-16 code units (UniChar is UInt16)
+                let utf16Chars = Array(char.utf16)
                 
-                if let num = numberKeyCodes[keyCode] {
-                    self.logger.debug("🎯 [MenuBarContentView] Alt+\(num) pressed")
-                    
-                    // Get filtered items (same logic as HistorySectionView)
-                    let filteredItems: [ClipboardEntry] = {
-                        if self.search.trimmingCharacters(in: .whitespaces).isEmpty {
-                            return self.viewModel.items
-                        }
-                        return self.viewModel.items.filter { $0.matches(query: self.search) }
-                    }()
-                    
-                    // Alt+1 maps to item 2 (index 1), Alt+2 maps to item 3 (index 2), etc.
-                    // Skip first item (index 0) as it's already in clipboard
-                    let itemIndex = num  // num is 1-9, maps to array index 1-9 (items 2-10)
-                    if itemIndex < filteredItems.count {
-                        let item = filteredItems[itemIndex]
-                        
-                        // Highlight the item before copying
-                        self.highlightedItemId = item.id
-                        
-                        // Copy to clipboard first
-                        self.viewModel.copyToPasteboard(item)
-                        
-                        // Wait a moment for clipboard to be ready, then hide and paste
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            // Hide popup and restore focus, then paste
-                            HistoryPopupPresenter.shared.hideAndRestoreFocus {
-                                // Paste to cursor position after focus is restored
-                                self.pasteToCursor()
-                            }
-                        }
-                        
-                        // Clear highlight after brief delay
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                            if self.highlightedItemId == item.id {
-                                self.highlightedItemId = nil
-                            }
-                        }
-                        
-                        return nil  // Consume the event
-                    } else {
-                        self.logger.info("⚠️ [MenuBarContentView] Item index \(itemIndex) out of range (count: \(filteredItems.count))")
-                    }
+                // Create key down event with Unicode character
+                guard let keyDownEvent = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true) else {
+                    self.logger.error("❌ Failed to create keyDown event for char at index \(index)")
+                    continue
+                }
+                
+                // Set Unicode string (single character as UTF-16)
+                var utf16Value = utf16Chars[0]
+                keyDownEvent.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: &utf16Value)
+                
+                // Post key down
+                keyDownEvent.post(tap: .cghidEventTap)
+                
+                // Small delay between characters for reliability (5ms)
+                if index < text.count - 1 {
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
+                
+                // Create and post key up event
+                if let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) {
+                    var utf16ValueUp = utf16Value
+                    keyUpEvent.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: &utf16ValueUp)
+                    keyUpEvent.post(tap: .cghidEventTap)
                 }
             }
-            return event
+            
+            self.logger.debug("✅ Text typed successfully (\(text.count) chars)")
+        }
+    }
+    
+    private func pasteToCursor(entry: ClipboardEntry? = nil) {
+        // Use Cmd+V for all content types (most reliable method on macOS)
+        // CRITICAL: Window must be fully hidden before sending keyboard events
+        
+        // Check accessibility permissions (required for CGEvent to work)
+        if !checkAccessibilityPermissions() {
+            self.logger.error("❌ Accessibility permissions not granted - CGEvent will not work")
+            self.logger.error("   Please grant accessibility permissions in System Settings > Privacy & Security > Accessibility")
+            return
         }
         
-        // Also add a global monitor as fallback (requires accessibility permissions)
-        _ = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
-            // Only handle when history section is selected and popup is visible
-            guard self.selectedSection == .history else { return }
-            
-            // Check for Alt+number (1-9)
-            if event.modifierFlags.contains(.option) {
-                let keyCode = event.keyCode
-                let numberKeyCodes: [UInt16: Int] = [
-                    18: 1, 19: 2, 20: 3, 21: 4, 23: 5,
-                    22: 6, 26: 7, 28: 8, 25: 9
-                ]
-                
-                if let num = numberKeyCodes[keyCode] {
-                    DispatchQueue.main.async {
-                        self.logger.debug("🎯 [MenuBarContentView] Alt+\(num) pressed (global monitor)")
-                        
-                        let filteredItems: [ClipboardEntry] = {
-                            if self.search.trimmingCharacters(in: .whitespaces).isEmpty {
-                                return self.viewModel.items
-                            }
-                            return self.viewModel.items.filter { $0.matches(query: self.search) }
-                        }()
-                        
-                        let itemIndex = num
-                        if itemIndex < filteredItems.count {
-                            let item = filteredItems[itemIndex]
-                            
-                            // Highlight the item before copying
-                            self.highlightedItemId = item.id
-                            
-                            // Copy to clipboard first
-                            self.viewModel.copyToPasteboard(item)
-                            
-                            // Wait a moment for clipboard to be ready, then hide and paste
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                // Hide popup and restore focus, then paste
-                                HistoryPopupPresenter.shared.hideAndRestoreFocus {
-                                    // Paste to cursor position after focus is restored
-                                    self.pasteToCursor()
-                                }
-                            }
-                            
-                            // Clear highlight after brief delay
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                if self.highlightedItemId == item.id {
-                                    self.highlightedItemId = nil
-                                }
-                            }
-                        }
-                    }
+        // CRITICAL: Window must be fully hidden before sending keyboard events
+        // The hideAndRestoreFocus already waits for window to be hidden, so we add a small delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // Verify window is not visible before sending events
+            let windowVisible = HistoryPopupPresenter.shared.isWindowVisible()
+            if windowVisible {
+                self.logger.warning("⚠️ Window still visible, delaying paste")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.performPasteActionForView()
                 }
+            } else {
+                self.performPasteActionForView()
             }
         }
     }
     
-    private func pasteToCursor() {
-        // Use a delay to ensure clipboard is updated and focus is restored
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            self.logger.debug("📋 Attempting to paste...")
-            
-            // Use global event tap - more reliable than postToPid
-            guard let keyDownEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true) else {
-                self.logger.error("❌ Failed to create keyDown event")
+    private func performPasteActionForView() {
+        self.logger.debug("📋 Attempting to paste via Cmd+V...")
+        
+        // Method 1: Try using cgSessionEventTap first (more reliable for user session events)
+        let success = self.performPasteWithSessionTapForView()
+        
+        if !success {
+            // Fallback: Try cghidEventTap if session tap fails
+            self.logger.debug("⚠️ Session tap failed, trying HID tap...")
+            self.performPasteWithHIDTapForView()
+        }
+    }
+    
+    private func performPasteWithSessionTapForView() -> Bool {
+        // Create event source with user activity state (more reliable for paste)
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            self.logger.error("❌ Failed to create event source")
+            return false
+        }
+        
+        guard let keyDownEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true) else {
+            self.logger.error("❌ Failed to create keyDown event")
+            return false
+        }
+        keyDownEvent.flags = .maskCommand
+        
+        // Post to session event tap (sends to current user session, more reliable)
+        keyDownEvent.post(tap: .cgSessionEventTap)
+        self.logger.info("📋 KeyDown posted via session tap (Cmd+V)")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            guard let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+                self.logger.error("❌ Failed to create keyUp event")
                 return
             }
-            keyDownEvent.flags = .maskCommand
-            
-            // Post to HID event tap (this sends to the frontmost app)
-            keyDownEvent.post(tap: .cghidEventTap)
-            self.logger.info("📋 KeyDown posted")
-            
-            // Small delay between key down and key up
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-                guard let keyUpEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
-                    self.logger.error("❌ Failed to create keyUp event")
-                    return
-                }
-                keyUpEvent.flags = .maskCommand
-                keyUpEvent.post(tap: .cghidEventTap)
-                self.logger.info("✅ KeyUp posted")
+            keyUpEvent.flags = .maskCommand
+            keyUpEvent.post(tap: .cgSessionEventTap)
+            self.logger.info("✅ KeyUp posted via session tap - paste should be complete")
+        }
+        
+        return true
+    }
+    
+    private func performPasteWithHIDTapForView() {
+        // Create event source
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            self.logger.error("❌ Failed to create event source")
+            return
+        }
+        
+        guard let keyDownEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true) else {
+            self.logger.error("❌ Failed to create keyDown event")
+            return
+        }
+        keyDownEvent.flags = .maskCommand
+        keyDownEvent.post(tap: .cghidEventTap)
+        self.logger.info("📋 KeyDown posted via HID tap (Cmd+V)")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            guard let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+                self.logger.error("❌ Failed to create keyUp event")
+                return
             }
+            keyUpEvent.flags = .maskCommand
+            keyUpEvent.post(tap: .cghidEventTap)
+            self.logger.info("✅ KeyUp posted via HID tap - paste should be complete")
         }
     }
     
@@ -1032,24 +1197,24 @@ private struct HistorySectionView: View {
                     // Item 1 (index 0) doesn't need shortcut as it's already in clipboard
                     let shortcutIndex = index > 0 && index <= 9 ? index : nil
                     rowView(item: item, shortcutIndex: shortcutIndex)
-                        .id(index == 0 ? AnyHashable("top") : AnyHashable(item.id))
+                        .id(item.id) // Use consistent ID - item.id for all items
                 }
             }
         }
     }
     
     private func scrollToTopIfNeeded(proxy: ScrollViewProxy, hasItems: Bool) {
-        if hasItems {
+        if hasItems, let firstItem = filteredItems.first {
             withAnimation {
-                proxy.scrollTo(AnyHashable("top"), anchor: UnitPoint.top)
+                proxy.scrollTo(firstItem.id, anchor: UnitPoint.top)
             }
         }
     }
     
     private func scrollToTop(proxy: ScrollViewProxy, hasItems: Bool) {
-        if hasItems {
+        if hasItems, let firstItem = filteredItems.first {
             withAnimation {
-                proxy.scrollTo("top", anchor: UnitPoint.top)
+                proxy.scrollTo(firstItem.id, anchor: UnitPoint.top)
             }
         }
     }
@@ -2332,6 +2497,3 @@ private extension Character {
         return self.isASCII && (32...126).contains(self.asciiValue ?? 0)
     }
 }
-
-
-#endif

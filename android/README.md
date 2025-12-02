@@ -666,7 +666,55 @@ adb -s <device_id> logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.c
 
 # Clear logs before testing
 adb -s <device_id> logcat -c
+
+# Monitor SMS-to-clipboard events
+adb -s <device_id> logcat | grep -v "MIUIInput" | grep -E "SmsReceiver|ClipboardListener|📱|✅.*SMS"
 ```
+
+### Testing SMS Auto-Sync
+
+#### Quick Test (Emulator)
+
+```bash
+# Get device ID
+adb devices -l
+
+# Send test SMS via emulator
+adb -s <device_id> emu sms send +1234567890 "Test SMS message"
+
+# Monitor logs
+./scripts/test-sms-clipboard.sh <device_id>
+```
+
+#### Comprehensive Test
+
+```bash
+# Run full SMS test suite
+./scripts/test-sms-clipboard.sh <device_id>
+```
+
+This will:
+- Check SMS permission status
+- Verify SMS receiver registration
+- Monitor logs for SMS reception and clipboard copy
+- Provide instructions for testing
+
+#### Physical Device Testing
+
+For physical devices, send a real SMS from another phone, then monitor:
+
+```bash
+# Monitor SMS events
+adb -s <device_id> logcat | grep -E "SmsReceiver|ClipboardListener"
+```
+
+**Expected behavior**:
+1. SMS received → `SmsReceiver: 📱 Received SMS from ...`
+2. Copied to clipboard → `SmsReceiver: ✅ SMS content copied to clipboard`
+3. Clipboard change detected → `ClipboardListener: 📋 Clipboard changed`
+4. Synced to macOS (if paired) → Check macOS clipboard history
+
+**Note**: Android 10+ may have SMS access restrictions. See `docs/features/sms_sync.md` for details.
 
 ### Development Tips
 

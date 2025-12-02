@@ -2,6 +2,74 @@
 
 The `simulate-android-copy.py` script simulates an Android device sending clipboard data to the macOS WebSocket server. This is useful for testing the sync functionality without manually copying text on Android.
 
+## SMS-to-Clipboard Testing
+
+### Quick Test Script
+
+Use `test-sms-clipboard.sh` for comprehensive SMS testing:
+
+```bash
+# Get device ID first
+adb devices -l
+
+# Run test script
+./scripts/test-sms-clipboard.sh <device_id>
+```
+
+This script will:
+- Check SMS permission status
+- Verify SMS receiver registration
+- Monitor logs for SMS reception and clipboard copy
+- Provide instructions for emulator vs physical device testing
+
+### Simulate SMS (Emulator Only)
+
+For Android emulators, use `simulate-sms.sh`:
+
+```bash
+# Send test SMS via emulator
+./scripts/simulate-sms.sh <device_id> "+1234567890" "Test SMS message"
+```
+
+**Note**: This only works on emulators. For physical devices, send a real SMS from another phone.
+
+### Manual Testing Steps
+
+1. **Grant SMS Permission**:
+   - Open Hypo app → Settings
+   - Find "SMS Auto-Sync" section
+   - Click "Grant Permission" if not granted
+
+2. **Send Test SMS**:
+   - **Emulator**: `adb -s <device_id> emu sms send +1234567890 "Test message"`
+   - **Physical Device**: Send SMS from another phone
+
+3. **Monitor Logs**:
+   ```bash
+   adb -s <device_id> logcat | grep -E "SmsReceiver|ClipboardListener"
+   ```
+
+4. **Verify Clipboard**:
+   - Check Android clipboard history in Hypo app
+   - Verify SMS appears with format: "From: <number>\n<message>"
+   - Check if SMS syncs to macOS (if devices are paired)
+
+### Expected Log Output
+
+When SMS is received, you should see:
+```
+SmsReceiver: 📱 Received SMS from +1234567890: Test message...
+SmsReceiver: ✅ SMS content copied to clipboard (XX chars)
+ClipboardListener: 📋 Clipboard changed, processing...
+```
+
+### Troubleshooting
+
+- **SMS not received**: Check Android version (Android 10+ has restrictions)
+- **Permission denied**: Grant RECEIVE_SMS permission in Settings
+- **Not copying to clipboard**: Check logs for SecurityException warnings
+- **Not syncing**: Verify clipboard sync service is running and devices are paired
+
 ## Installation
 
 Install the required Python library:

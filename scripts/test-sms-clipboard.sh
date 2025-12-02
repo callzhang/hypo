@@ -1,0 +1,88 @@
+#!/bin/bash
+# Comprehensive SMS-to-clipboard testing script
+# Tests SMS reception, clipboard copy, and sync functionality
+
+set -e
+
+DEVICE_ID="${1:-}"
+
+if [ -z "$DEVICE_ID" ]; then
+    echo "Usage: $0 <device_id>"
+    echo ""
+    echo "Available devices:"
+    adb devices -l | grep -v "List" | awk '{print $1 " - " $NF}'
+    exit 1
+fi
+
+ADB="adb -s $DEVICE_ID"
+PACKAGE_NAME="com.hypo.clipboard.debug"
+
+echo "=== SMS-to-Clipboard Test Suite ==="
+echo "Device: $DEVICE_ID"
+echo ""
+
+# Check app installation
+if ! "$ADB" shell pm list packages | grep -q "$PACKAGE_NAME"; then
+    echo "❌ App not installed"
+    exit 1
+fi
+
+# Check permissions
+echo "📋 Checking permissions..."
+RECEIVE_SMS=$("$ADB" shell dumpsys package "$PACKAGE_NAME" | grep -A 1 "android.permission.RECEIVE_SMS" | grep "granted=true" || echo "")
+if [ -z "$RECEIVE_SMS" ]; then
+    echo "⚠️  RECEIVE_SMS permission not granted"
+    echo "   Grant in: Settings → Apps → Hypo → Permissions → SMS"
+else
+    echo "✅ RECEIVE_SMS permission granted"
+fi
+
+# Check if receiver is registered
+echo ""
+echo "📱 Checking SMS receiver registration..."
+RECEIVER=$("$ADB" shell dumpsys package "$PACKAGE_NAME" | grep -A 5 "SmsReceiver" | grep "android.provider.Telephony.SMS_RECEIVED" || echo "")
+if [ -z "$RECEIVER" ]; then
+    echo "⚠️  SMS receiver may not be registered"
+else
+    echo "✅ SMS receiver registered"
+fi
+
+# Get app PID for log filtering
+APP_PID=$("$ADB" shell pidof -s "$PACKAGE_NAME" 2>/dev/null || echo "")
+if [ -z "$APP_PID" ]; then
+    echo "⚠️  App is not running. Starting app..."
+    "$ADB" shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" >/dev/null 2>&1
+    sleep 2
+    APP_PID=$("$ADB" shell pidof -s "$PACKAGE_NAME" 2>/dev/null || echo "")
+fi
+
+if [ -n "$APP_PID" ]; then
+    echo "✅ App is running (PID: $APP_PID)"
+else
+    echo "⚠️  Could not get app PID"
+fi
+
+echo ""
+echo "=== Test Instructions ==="
+echo ""
+echo "For Emulator:"
+echo "  1. Run: adb -s $DEVICE_ID emu sms send +1234567890 'Test message'"
+echo "  2. Monitor logs below"
+echo ""
+echo "For Physical Device:"
+echo "  1. Send a real SMS from another phone to this device"
+echo "  2. Monitor logs below"
+echo ""
+echo "Expected behavior:"
+echo "  - SmsReceiver should log: '📱 Received SMS from ...'"
+echo "  - SmsReceiver should log: '✅ SMS content copied to clipboard'"
+echo "  - ClipboardListener should detect change and sync to macOS"
+echo ""
+echo "=== Monitoring Logs (Press Ctrl+C to stop) ==="
+echo ""
+
+# Monitor logs for SMS and clipboard events
+"$ADB" logcat -c  # Clear logs first
+"$ADB" logcat --pid=$APP_PID 2>/dev/null | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|clipboard" || \
+"$ADB" logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|clipboard"
+

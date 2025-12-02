@@ -64,7 +64,7 @@ fun HomeScreen(
                 actions = {
                     ConnectionStatusBadge(connectionState = state.connectionState)
                     IconButton(onClick = onOpenSettings) {
-                        Icon(imageVector = Icons.Default.Settings, contentDescription = null)
+                        Icon(imageVector = Icons.Filled.Settings, contentDescription = null)
                     }
                 }
             )

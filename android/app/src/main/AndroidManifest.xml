@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
     <!-- Features -->
-    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Camera not needed - removed QR code scanning -->
 
     <application
         android:name=".HypoApplication"

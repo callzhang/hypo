@@ -38,3 +38,7 @@
 -keep class androidx.compose.** { *; }
 -keep class kotlin.Metadata { *; }
 
+# Allow R8 to remove unused Material Icons (they're accessed via static fields)
+# R8 will tree-shake unused icons in release builds
+-dontwarn androidx.compose.material.icons.**
+

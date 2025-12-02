@@ -41,11 +41,18 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("debug") // TODO: Replace with release signing
+            // Limit native libraries to arm64-v8a only (saves ~15MB)
+            // arm64-v8a covers all modern Android devices (Android 5.0+, API 21+)
+            // x86/x86_64 are mainly for emulators and can be excluded from release builds
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
         }
         debug {
             isDebuggable = true
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // Keep all ABIs for debug builds to support emulator testing
         }
     }
 
@@ -128,6 +135,7 @@ androidComponents {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // Note: R8/ProGuard will remove unused icons in release builds
     implementation("com.google.android.material:material:1.11.0")
 
     // Navigation
@@ -169,17 +177,11 @@ androidComponents {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.google.crypto.tink:tink-android:1.13.0")
 
-    // QR Code Scanning
-    implementation("com.google.mlkit:barcode-scanning:17.2.0")
-    implementation("androidx.camera:camera-camera2:1.3.1")
-    implementation("androidx.camera:camera-lifecycle:1.3.1")
-    implementation("androidx.camera:camera-view:1.3.1")
+    // QR Code Scanning - REMOVED: No longer using barcode scanning
+    // Pairing now uses LAN auto-discovery and manual code entry
 
-    // Accompanist (Permissions)
-    implementation("com.google.accompanist:accompanist-permissions:0.34.0")
-
-    // Coil (Image Loading)
-    implementation("io.coil-kt:coil-compose:2.5.0")
+    // Accompanist (Permissions) - REMOVED: Not used
+    // Coil (Image Loading) - REMOVED: Not used
 
     // Sentry (Crash Reporting)
     implementation("io.sentry:sentry-android:7.5.0")

@@ -18,6 +18,13 @@ All notable changes to the Hypo project will be documented in this file.
   - Periodic permission status monitoring (every 2 seconds)
   - User-friendly permission request button in Settings
   - Android 10+ limitation warnings displayed to users
+- **Notification Permission Request (Android 13+)**: Runtime permission handling for notifications
+  - Automatic permission request on app launch (Android 13+)
+  - Required for persistent foreground service notification showing latest clipboard item
+  - Settings screen displays notification permission status
+  - Periodic permission status monitoring (every 2 seconds)
+  - User-friendly permission request button in Settings
+  - Backward compatible: Android 12 and below don't require runtime permission
 
 ### Changed
 - **Build System**: Improved build scripts and dependencies
@@ -44,9 +51,13 @@ All notable changes to the Hypo project will be documented in this file.
   - LAN device status now correctly determined by discovery status and active transport
   - Previously, LAN-connected devices were incorrectly shown as disconnected when cloud server was offline
   - Cloud device status correctly shows disconnected when cloud server is offline
-- **Android Notification Visibility**: Changed notification channel importance from `IMPORTANCE_LOW` to `IMPORTANCE_DEFAULT`
+- **Android Notification Visibility**: Improved notification visibility and permission handling
+  - Changed notification channel importance from `IMPORTANCE_LOW` to `IMPORTANCE_DEFAULT`
   - Ensures persistent notification showing latest clipboard item is visible in notification list
   - Previously, `IMPORTANCE_LOW` notifications were hidden on Android 8.0+ by default
+  - Changed notification priority from `PRIORITY_LOW` to `PRIORITY_DEFAULT` to match channel importance
+  - Added notification permission request for Android 13+ (required for foreground service notifications)
+  - Added comprehensive diagnostic logging for notification channel creation and status
   - Notification updates automatically when latest clipboard item changes
   - Sound disabled for persistent notification to avoid intrusive alerts
 - **Cross-Platform History Sync**: Enhanced duplicate handling to move existing items to top

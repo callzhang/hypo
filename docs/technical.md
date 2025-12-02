@@ -1261,15 +1261,23 @@ docker run -p 8080:8080 hypo-relay
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+<!-- POST_NOTIFICATIONS requires runtime permission request on Android 13+ (API 33+) -->
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 <uses-permission android:name="android.permission.RECEIVE_SMS" />
 ```
 
 **Permission Handling**:
-- **Runtime Permissions** (Android 6.0+): `RECEIVE_SMS` is requested at runtime
-  - Automatically requested on app launch if not granted
-  - Can be granted via Settings screen
-  - Status is monitored and displayed in UI
+- **Runtime Permissions**:
+  - **`RECEIVE_SMS`** (Android 6.0+): Requested at runtime for SMS auto-sync
+    - Automatically requested on app launch if not granted
+    - Can be granted via Settings screen
+    - Status is monitored and displayed in UI
+  - **`POST_NOTIFICATIONS`** (Android 13+): Requested at runtime for foreground service notifications
+    - Automatically requested on app launch if not granted (Android 13+)
+    - Required for persistent notification showing latest clipboard item
+    - Can be granted via Settings screen
+    - Status is monitored and displayed in UI
+    - Backward compatible: Android 12 and below don't require runtime permission
 - **System Permissions**: `BROADCAST_SMS` is a system permission (automatically granted)
 
 ---

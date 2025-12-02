@@ -108,3 +108,4 @@ If auto-copy fails (Android 10+ restrictions):
 - **Check pairing**: Verify devices are paired
 - **Check logs**: Look for `ClipboardListener` and `SyncCoordinator` logs
 
+

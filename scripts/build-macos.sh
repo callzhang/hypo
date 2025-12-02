@@ -224,12 +224,9 @@ else
     log_info "No existing instances to stop"
 fi
 
-# Clear debug log if requested
-if [ "$1" == "clean-log" ] || [ "$2" == "clean-log" ]; then
-    log_info "Clearing debug log..."
-    rm -f /tmp/hypo_debug.log
-    log_success "Debug log cleared"
-fi
+# macOS uses unified logging (os_log), not file-based logging
+# Logs are available via: log stream --predicate 'subsystem == "com.hypo.clipboard"'
+# Note: HistoryPopupPresenter may still write to /tmp/hypo_debug.log for legacy debug purposes
 
 # Launch the app
 log_info "Launching app..."
@@ -242,12 +239,10 @@ sleep 2
 if pgrep -x "$BINARY_NAME" > /dev/null; then
     log_success "App is running (PID: $(pgrep -x "$BINARY_NAME"))"
     
-    # Show recent logs if available
-    if [ -f "/tmp/hypo_debug.log" ]; then
-        echo ""
-        log_info "Recent debug logs:"
-        tail -20 /tmp/hypo_debug.log | sed 's/^/  /'
-    fi
+    # macOS uses unified logging - view logs with:
+    # log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug
+    echo ""
+    log_info "ℹ️  View logs with: log stream --predicate 'subsystem == \"com.hypo.clipboard\"' --level debug"
 else
     log_warn "App may not have started. Check Console.app for errors"
 fi
@@ -255,5 +250,5 @@ fi
 echo ""
 log_success "Build and launch complete!"
 log_info "App bundle: $APP_BUNDLE"
-log_info "Debug log: /tmp/hypo_debug.log"
+log_info "View logs: log stream --predicate 'subsystem == \"com.hypo.clipboard\"' --level debug"
 

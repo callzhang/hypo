@@ -141,7 +141,8 @@ The following scripts have been consolidated or removed:
 ## Notes
 
 - Most scripts automatically detect Android SDK location
-- Logs are typically saved to `/tmp/hypo_*` directories
+- macOS logs use unified logging: `log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug`
+- Build logs may be saved to `/tmp/hypo_build.log` temporarily
 - Scripts use colored output for better readability
 - All scripts are bash-compatible and tested on macOS
 - See `docs/UUID_FORMAT_ANALYSIS.md` for discussion on device ID format

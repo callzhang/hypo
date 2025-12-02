@@ -17,16 +17,16 @@ public enum DeviceKeyProviderError: LocalizedError {
 }
 
 public final class KeychainDeviceKeyProvider: DeviceKeyProviding {
-    private let keychain: KeychainKeyStore
+    private let keyStore: FileBasedKeyStore
 
-    public init(keychain: KeychainKeyStore = KeychainKeyStore()) {
-        self.keychain = keychain
+    public init(keyStore: FileBasedKeyStore = FileBasedKeyStore()) {
+        self.keyStore = keyStore
     }
 
     public func key(for deviceId: String) async throws -> SymmetricKey {
-        // KeychainKeyStore handles normalization internally - no need to normalize here
+        // FileBasedKeyStore handles normalization internally - no need to normalize here
         // It will try normalized ID first, then fallback to original format for backward compatibility
-        if let key = try keychain.load(for: deviceId) {
+        if let key = try keyStore.load(for: deviceId) {
             return key
         }
         
@@ -34,13 +34,13 @@ public final class KeychainDeviceKeyProvider: DeviceKeyProviding {
     }
 
     public func store(key: SymmetricKey, for deviceId: String) throws {
-        // KeychainKeyStore handles normalization internally
-        try keychain.save(key: key, for: deviceId)
+        // FileBasedKeyStore handles normalization internally
+        try keyStore.save(key: key, for: deviceId)
     }
 
     public func delete(deviceId: String) throws {
-        // KeychainKeyStore handles normalization internally
-        try keychain.delete(for: deviceId)
+        // FileBasedKeyStore handles normalization internally
+        try keyStore.delete(for: deviceId)
     }
 }
 

@@ -77,7 +77,7 @@ public final class PairingSession: @unchecked Sendable {
     }
 
     private let identity: UUID
-    private let signingKeyStore: PairingSigningKeyStore
+    private let signingKeyStore: FileBasedPairingSigningKeyStore
     private let cryptoService: CryptoService
     private let storeSharedKeyHandler: @Sendable (SymmetricKey, String) throws -> Void
     private let jsonEncoder: JSONEncoder
@@ -91,7 +91,7 @@ public final class PairingSession: @unchecked Sendable {
 
     public init(
         identity: UUID,
-        signingKeyStore: PairingSigningKeyStore = PairingSigningKeyStore(),
+        signingKeyStore: FileBasedPairingSigningKeyStore = FileBasedPairingSigningKeyStore(),
         cryptoService: CryptoService = CryptoService(),
         deviceKeyProvider: KeychainDeviceKeyProvider = KeychainDeviceKeyProvider(),
         storeSharedKey: (@Sendable (SymmetricKey, String) throws -> Void)? = nil,

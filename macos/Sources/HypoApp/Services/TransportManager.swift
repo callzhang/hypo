@@ -950,7 +950,7 @@ public func updateConnectionState(_ newState: ConnectionState) {
         let deviceId = deviceIdentity.deviceIdString
         
         // Load or generate persistent keys for auto-discovery pairing
-        let signingKeyStore = PairingSigningKeyStore()
+        let signingKeyStore = FileBasedPairingSigningKeyStore()
         let _ = KeychainDeviceKeyProvider() // Unused but kept for potential future use
         
         var signingPublicKeyBase64: String?
@@ -1001,26 +1001,26 @@ public func updateConnectionState(_ newState: ConnectionState) {
     }
     private static func loadOrCreateLanPairingKey() throws -> Curve25519.KeyAgreement.PrivateKey {
         let logger = HypoLogger(category: "TransportManager")
-        let keychain = KeychainKeyStore()
-        if let stored = try keychain.load(for: lanPairingKeyIdentifier) {
+        let keyStore = FileBasedKeyStore()
+        if let stored = try keyStore.load(for: lanPairingKeyIdentifier) {
             let data = stored.withUnsafeBytes { Data($0) }
-            logger.info("🔑 [TransportManager] Loading existing LAN pairing key from keychain (size: \(data.count) bytes)")
+            logger.info("🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: \(data.count) bytes)")
             do {
                 let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data)
                 logger.info("🔑 [TransportManager] Successfully loaded existing key, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
                 return key
             } catch {
-                logger.error("❌ [TransportManager] Failed to reconstruct key from keychain data: \(error)")
+                logger.error("❌ [TransportManager] Failed to reconstruct key from file storage data: \(error)")
                 // If key reconstruction fails, delete the corrupted entry and create a new one
-                try? keychain.delete(for: lanPairingKeyIdentifier)
+                try? keyStore.delete(for: lanPairingKeyIdentifier)
                 throw error
             }
         }
 
         logger.info("🔑 [TransportManager] Creating new LAN pairing key")
         let key = Curve25519.KeyAgreement.PrivateKey()
-        try keychain.save(key: SymmetricKey(data: key.rawRepresentation), for: lanPairingKeyIdentifier)
-        logger.info("🔑 [TransportManager] Saved new key to keychain, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
+        try keyStore.save(key: SymmetricKey(data: key.rawRepresentation), for: lanPairingKeyIdentifier)
+        logger.info("🔑 [TransportManager] Saved new key to file storage, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
         return key
     }
 }

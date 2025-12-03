@@ -55,7 +55,7 @@ jobs:
         working-directory: android
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN || '' }}
-        run: ./gradlew assembleRelease --stacktrace -x uploadSentryProguardMappingsRelease || echo "Release build failed, continuing with debug APK only"
+        run: ./gradlew assembleRelease --stacktrace -x uploadSentryProguardMappingsRelease -x uploadSentryNativeSymbolsForRelease -x sentryBundleSourcesRelease || echo "Release build failed, continuing with debug APK only"
         continue-on-error: true
       
       - name: Upload Debug APK
@@ -294,7 +294,7 @@ jobs:
         continue-on-error: true
       
       - name: Delete existing tag if present
-        if: github.event_name == 'workflow_dispatch' && ! startsWith(github.ref, 'refs/heads/test/')
+        if: github.event_name == 'workflow_dispatch' && !contains(github.ref, 'refs/heads/test/')
         run: |
           TAG_NAME="${{ steps.version.outputs.tag }}"
           if git rev-parse "$TAG_NAME" &>/dev/null; then
@@ -305,7 +305,7 @@ jobs:
         continue-on-error: true
       
       - name: Create Git Tag (if workflow_dispatch and not test branch)
-        if: github.event_name == 'workflow_dispatch' && ! startsWith(github.ref, 'refs/heads/test/')
+        if: github.event_name == 'workflow_dispatch' && !contains(github.ref, 'refs/heads/test/')
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG_NAME="${{ steps.version.outputs.tag }}"
@@ -315,7 +315,7 @@ jobs:
           git push origin "$TAG_NAME"
       
       - name: Create Release
-        if: ! startsWith(github.ref, 'refs/heads/test/')
+        if: github.event_name != 'push' || !contains(github.ref, 'refs/heads/test/')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.tag }}

@@ -123,11 +123,41 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
   - Notification permission handling (Android 13+)
   - Permission status monitoring and UI updates
 - **SMS Auto-Sync** ✅ Implemented (December 2025):
-  - Automatically copies incoming SMS messages to clipboard
-  - Formats SMS as "From: <sender>\n<message>"
-  - Syncs to macOS via existing clipboard sync mechanism
-  - Runtime permission management with user-friendly UI
-  - Android 10+ limitation handling with graceful fallback
+  - **Overview**: Automatically copies incoming SMS messages to clipboard and syncs to macOS via existing clipboard sync mechanism
+  - **How It Works**:
+    1. `SmsReceiver` BroadcastReceiver listens for incoming SMS broadcasts
+    2. SMS content is automatically copied to clipboard with format: `From: <sender>\n<message>`
+    3. Existing `ClipboardListener` detects the clipboard change and syncs to macOS
+  - **Implementation**:
+    - `SmsReceiver` (`service/SmsReceiver.kt`): BroadcastReceiver that listens for `SMS_RECEIVED` broadcasts
+    - Registered in `AndroidManifest.xml` with `RECEIVE_SMS` permission
+  - **Android Version Limitations**:
+    - **Android 9 and Below (API 28-)**: ✅ Fully supported - SMS receiver works without restrictions
+    - **Android 10+ (API 29+)**: ⚠️ Restricted - SMS access may be limited
+      - May require app to be set as default SMS app (not recommended - breaks SMS functionality)
+      - If auto-copy fails, users can manually copy SMS and sync will work normally
+      - SecurityException is caught and logged, app continues to function
+  - **Permissions**:
+    - `RECEIVE_SMS`: Required to receive SMS broadcast intents (dangerous permission on Android 6.0+)
+    - `BROADCAST_SMS`: System permission (automatically granted)
+    - Runtime permission request on Android 6.0+ with UI status display
+    - Settings screen shows permission status and provides grant button
+    - Periodic permission status monitoring (every 2 seconds)
+  - **User Experience**:
+    1. User grants SMS permission (automatic on first launch, or via Settings screen)
+    2. When SMS is received, content is automatically copied to clipboard
+    3. Clipboard sync service detects change within ~100ms
+    4. SMS content is synced to macOS within ~1 second
+    5. User can see SMS in macOS clipboard history
+  - **Privacy & Security**:
+    - SMS content is handled the same way as any clipboard content
+    - Encrypted end-to-end when syncing to macOS (AES-256-GCM)
+    - No SMS content is stored permanently (only in clipboard history)
+    - Users can clear clipboard history to remove SMS content
+    - Permission can be revoked at any time via Android Settings
+  - **Troubleshooting**:
+    - **SMS Not Auto-Copying**: Check Android version (Android 10+ has restrictions), check logs for SecurityException warnings, verify permission is granted
+    - **SMS Copied But Not Syncing**: Check clipboard sync service is running, verify network connection, check device pairing, review logs
 - **MIUI/HyperOS Adaptation** ✅ Implemented (December 2025):
   - Automatic device detection (Xiaomi/HyperOS)
   - Multicast lock refresh every 10 minutes (prevents throttling)

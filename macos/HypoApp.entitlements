@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened Runtime (required for notarization) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <false/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <false/>
+    
+    <!-- Network access (required for WebSocket connections) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+    
+    <!-- Bonjour/mDNS (required for LAN discovery) -->
+    <key>com.apple.security.network.multicast</key>
+    <true/>
+    
+    <!-- User notifications (required for clipboard sync notifications) -->
+    <key>com.apple.security.automation.apple-events</key>
+    <false/>
+    
+    <!-- Accessibility (optional, for hotkeys - but we use Carbon API which doesn't require this) -->
+    <!-- <key>com.apple.security.device.accessibility</key> -->
+    <!-- <true/> -->
+    
+    <!-- App Sandbox (disabled for direct distribution, required for App Store) -->
+    <!-- <key>com.apple.security.app-sandbox</key> -->
+    <!-- <true/> -->
+</dict>
+</plist>
+

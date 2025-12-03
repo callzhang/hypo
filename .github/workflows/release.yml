@@ -147,8 +147,17 @@ jobs:
       - name: Create macOS ZIP
         working-directory: macos
         run: |
-          # Sanitize version string for filename (replace slashes with dashes)
-          VERSION="${{ github.ref_name }}"
+          # Extract version from tag or input (not branch name for test branches)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            # For test branches, use a test version
+            VERSION="v1.0.0-test"
+          fi
+          # Remove 'v' prefix if present and sanitize (replace slashes with dashes)
+          VERSION="${VERSION#v}"
           SAFE_VERSION="${VERSION//\//-}"
           zip -r ../Hypo-macOS-${SAFE_VERSION}.zip HypoApp.app
       
@@ -214,7 +223,11 @@ jobs:
             echo "❌ Release APK not found!"
             exit 1
           fi
-          # macOS zip already has version in name
+          # Rename macOS zip to use tag name (not branch name)
+          if [ -f "Hypo-macOS-"*.zip ]; then
+            OLD_ZIP=$(ls Hypo-macOS-*.zip | head -1)
+            mv "$OLD_ZIP" "Hypo-macOS-${TAG_NAME}.zip"
+          fi
           ls -lh
       
       - name: Generate release notes

@@ -190,7 +190,7 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
     }
 }
 
-extension UNUserNotificationCenter: @retroactive @unchecked Sendable {}
+extension UNUserNotificationCenter: @unchecked Sendable {}
 
 // No-op implementation for when notifications aren't available (debug builds)
 final class NoOpNotificationController: NSObject, ClipboardNotificationScheduling {

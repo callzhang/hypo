@@ -55,7 +55,7 @@ jobs:
         working-directory: android
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN || '' }}
-        run: ./gradlew assembleRelease --stacktrace -x uploadSentryProguardMappingsRelease -x uploadSentryNativeSymbolsForRelease -x sentryBundleSourcesRelease || echo "Release build failed, continuing with debug APK only"
+        run: ./gradlew assembleRelease --stacktrace || echo "Release build failed, continuing with debug APK only"
         continue-on-error: true
       
       - name: Upload Debug APK

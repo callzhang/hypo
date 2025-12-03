@@ -103,12 +103,14 @@ sentry {
     org = "stardust-dm"
     projectName = "clipboard"
     // Try environment variable first, then .env file, then empty string
-    authToken = System.getenv("SENTRY_AUTH_TOKEN") 
+    val sentryAuthToken = System.getenv("SENTRY_AUTH_TOKEN") 
         ?: envProperties.getProperty("SENTRY_AUTH_TOKEN", "")
+    authToken = sentryAuthToken
     
-    // Automatically upload ProGuard/R8 mapping files
-    uploadNativeSymbols = true
-    includeNativeSources = true
+    // Only enable uploads if auth token is provided (disable in CI without token)
+    uploadNativeSymbols = sentryAuthToken.isNotEmpty()
+    includeNativeSources = sentryAuthToken.isNotEmpty()
+    autoUploadProguardMapping = sentryAuthToken.isNotEmpty()
 }
 
 androidComponents {

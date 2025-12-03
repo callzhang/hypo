@@ -140,8 +140,9 @@ public final class LanWebSocketServer {
         }
         
         listener?.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in
-                self?.handleListenerState(state)
+            guard let self = self else { return }
+            Task { @MainActor [self] in
+                self.handleListenerState(state)
             }
         }
         
@@ -282,8 +283,8 @@ public final class LanWebSocketServer {
         }
         
         connection.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in
-                guard let self = self else { return }
+            guard let self = self else { return }
+            Task { @MainActor [self] in
                 switch state {
                 case .ready:
                     self.logger.info("🔗 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) state: ready")
@@ -323,8 +324,8 @@ public final class LanWebSocketServer {
 
     private func receiveHandshakeChunk(for connectionId: UUID, context: ConnectionContext) {
         context.connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, isComplete, error in
-            Task { @MainActor in
-                guard let self else { return }
+            guard let self = self else { return }
+            Task { @MainActor [self] in
                 guard let context = self.connections[connectionId] else { return }
                 if let error = error {
                     #if canImport(os)
@@ -469,8 +470,8 @@ public final class LanWebSocketServer {
         logger.info("✅ [LanWebSocketServer] Marking connection as upgraded before sending 101 response")
         
         context.connection.send(content: response, completion: .contentProcessed { [weak self] error in
-            Task { @MainActor in
-                guard let self else { return }
+            guard let self = self else { return }
+            Task { @MainActor [self] in
                 guard let context = self.connections[connectionId] else {
                     self.logger.warning("⚠️ [LanWebSocketServer] Connection context not found after handshake send")
                     return
@@ -514,11 +515,11 @@ public final class LanWebSocketServer {
         #endif
         logger.info("📡  CLIPBOARD RECEIVE: Setting up receive callback for \(connectionId.uuidString.prefix(8))")
         context.connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
-            Task { @MainActor in
-                guard let self = self else {
-                    NSLog("⚠️  Self is nil in receive callback")
-                    return
-                }
+            guard let self = self else {
+                NSLog("⚠️  Self is nil in receive callback")
+                return
+            }
+            Task { @MainActor [self] in
                 guard let context = self.connections[connectionId] else {
                     self.logger.info("⚠️  Connection context not found for \(connectionId.uuidString.prefix(8))")
                     return
@@ -782,8 +783,9 @@ public final class LanWebSocketServer {
     private func sendHTTPError(status: String, connectionId: UUID, context: ConnectionContext) {
         let response = "HTTP/1.1 \(status)\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
         context.connection.send(content: Data(response.utf8), completion: .contentProcessed { [weak self] _ in
-            Task { @MainActor in
-                self?.closeConnection(connectionId)
+            guard let self = self else { return }
+            Task { @MainActor [self] in
+                self.closeConnection(connectionId)
             }
         })
     }

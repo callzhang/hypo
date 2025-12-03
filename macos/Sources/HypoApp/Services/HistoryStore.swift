@@ -356,8 +356,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                   let deviceId = userInfo["deviceId"] as? String else {
                 return
             }
-            Task { @MainActor in
-                await self?.updateDeviceLastSeen(deviceId: deviceId)
+            guard let self = self else { return }
+            Task { @MainActor [self] in
+                await self.updateDeviceLastSeen(deviceId: deviceId)
             }
         }
     }

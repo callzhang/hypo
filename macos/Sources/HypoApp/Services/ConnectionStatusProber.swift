@@ -32,21 +32,22 @@ public final class ConnectionStatusProber {
         
         // Start network path monitor - listens for network changes and triggers immediate probe
         pathMonitor.pathUpdateHandler = { [weak self] path in
-            Task { @MainActor in
+            guard let self = self else { return }
+            Task { @MainActor [self] in
                 let newStatus = path.status == .satisfied
-                let oldStatus = self?.hasNetworkConnectivity ?? true
+                let oldStatus = self.hasNetworkConnectivity
                 if oldStatus != newStatus {
-                    self?.logger.info("🌐", "Network connectivity changed: \(oldStatus) -> \(newStatus) (path status: \(path.status))")
-                    self?.hasNetworkConnectivity = newStatus
+                    self.logger.info("🌐", "Network connectivity changed: \(oldStatus) -> \(newStatus) (path status: \(path.status))")
+                    self.hasNetworkConnectivity = newStatus
                     // Reconnect cloud WebSocket to use new IP address
-                    if newStatus, let transportProvider = self?.transportProvider as? DefaultTransportProvider {
+                    if newStatus, let transportProvider = self.transportProvider as? DefaultTransportProvider {
                         let cloudTransport = transportProvider.getCloudTransport()
-                        self?.logger.info("🔄", "Reconnecting cloud WebSocket due to network change")
+                        self.logger.info("🔄", "Reconnecting cloud WebSocket due to network change")
                         await cloudTransport.reconnect()
                     }
                     // Trigger immediate probe on network change to update server and peer status
-                    self?.logger.info("🔍", "Triggering immediate probe due to network change")
-                    await self?.probeConnections()
+                    self.logger.info("🔍", "Triggering immediate probe due to network change")
+                    await self.probeConnections()
                 }
             }
         }

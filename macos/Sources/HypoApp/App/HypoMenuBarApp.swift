@@ -849,6 +849,7 @@ struct MenuBarContentView: View {
     @State private var historyPopupObserver: NSObjectProtocol?
     @State private var settingsSectionObserver: NSObjectProtocol?
     @State private var highlightedItemId: UUID?
+    @State private var currentColorScheme: ColorScheme? = nil
 
     var body: some View {
         VStack(spacing: 12) {
@@ -898,10 +899,13 @@ struct MenuBarContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .opacity(isVisible ? 1.0 : 0.0)
         .animation(.easeInOut(duration: 0.2), value: isVisible)
+        .preferredColorScheme(currentColorScheme)
         .onAppear {
             isVisible = true
             windowPinned = HistoryPopupPresenter.shared.pinned
             if historyOnly { selectedSection = .history }
+            // Initialize color scheme from viewModel
+            currentColorScheme = viewModel.appearancePreference.colorScheme
             // Trigger connection status probe when window appears to refresh peer status
             // Defer to avoid blocking paste operations - run after a short delay
             if let transportManager = viewModel.transportManager {
@@ -919,6 +923,12 @@ struct MenuBarContentView: View {
         .task {
             setupHistorySectionListener()
             setupHighlightObserver()
+            // Initialize color scheme from viewModel
+            currentColorScheme = viewModel.appearancePreference.colorScheme
+        }
+        .onChange(of: viewModel.appearancePreference) { newPreference in
+            // Update color scheme when preference changes
+            currentColorScheme = newPreference.colorScheme
         }
         .onDisappear {
             isVisible = false
@@ -1871,6 +1881,12 @@ private struct SettingsSectionView: View {
                     }
                     .pickerStyle(.segmented)
                 }
+                
+                #if canImport(UserNotifications)
+                Section("Notifications") {
+                    NotificationPermissionSection()
+                }
+                #endif
 
                 Section("Paired devices") {
                     if viewModel.pairedDevices.isEmpty {
@@ -2133,6 +2149,78 @@ private struct SettingsSectionView: View {
         return "Connected"
     }
 }
+
+#if canImport(UserNotifications)
+import UserNotifications
+
+private struct NotificationPermissionSection: View {
+    @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
+    @State private var isChecking = true
+    
+    var body: some View {
+        Group {
+            HStack {
+                Text("Permission")
+                Spacer()
+                if isChecking {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                } else {
+                    statusText
+                }
+            }
+            
+            if authorizationStatus == .denied {
+                Button("Open System Settings") {
+                    openSystemSettings()
+                }
+                .buttonStyle(.bordered)
+            } else if authorizationStatus == .notDetermined {
+                Text("Notifications will be requested when needed")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .onAppear {
+            checkAuthorizationStatus()
+        }
+    }
+    
+    private var statusText: some View {
+        Group {
+            switch authorizationStatus {
+            case .authorized, .provisional:
+                Label("Enabled", systemImage: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+            case .denied:
+                Label("Disabled", systemImage: "xmark.circle.fill")
+                    .foregroundColor(.red)
+            case .notDetermined:
+                Label("Not Set", systemImage: "questionmark.circle")
+                    .foregroundColor(.orange)
+            @unknown default:
+                Label("Unknown", systemImage: "questionmark.circle")
+                    .foregroundColor(.gray)
+            }
+        }
+    }
+    
+    private func openSystemSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+    
+    private func checkAuthorizationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                authorizationStatus = settings.authorizationStatus
+                isChecking = false
+            }
+        }
+    }
+}
+#endif
 
 private struct PairDeviceSheet: View {
     @ObservedObject var viewModel: ClipboardHistoryViewModel

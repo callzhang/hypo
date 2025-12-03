@@ -1,8 +1,8 @@
 # Hypo Project Status
 
-**Last Updated**: December 2, 2025
+**Last Updated**: December 3, 2025
 **Current Sprint**: Sprint 11 - Production Release  
-**Project Phase**: Production Release (v1.0.1)
+**Project Phase**: Production Release (v1.0.2)
 **Overall Progress**: 100%
 
 ---
@@ -324,6 +324,33 @@
   - Updated `build-android.sh` to always build (Gradle handles incremental)
   - Ensures latest code changes are always included in builds
   - Added comments explaining always-build behavior
+
+### December 3, 2025
+- **Documentation Consolidation** ✅: Merged INSTALLATION.md into USER_GUIDE.md
+  - Consolidated all installation instructions into comprehensive user guide
+  - Removed redundant INSTALLATION.md file
+  - Updated all cross-references in documentation
+  - Single source of truth for user documentation
+
+- **MIUI Clipboard History Feature Removal** ✅: Removed non-functional feature from UI
+  - Removed "Import MIUI History" button and related UI code
+  - Confirmed programmatic access to MIUI clipboard history is not possible
+  - Feature code remains in codebase for potential future use
+  - Updated all documentation to remove references
+
+- **macOS Notification Improvements** ✅: Enhanced notification system
+  - Only show notifications for remote clipboard items (exclude local copies)
+  - Notification title: Device name (originDeviceName)
+  - Notification subtitle: [Content Type] readable timestamp
+  - Notification body: Message content (previewText)
+  - Added notification permission section in Settings view
+  - Shows current permission status with button to open System Settings
+  - Removed popup alert (replaced with Settings section)
+
+- **Build Warnings Fixed** ✅: Resolved Swift compiler warnings
+  - Added `@retroactive` to UNUserNotificationCenter Sendable extension
+  - Added `@retroactive` to UserDefaults Sendable extension
+  - All build warnings resolved
 
 ### December 30, 2025
 - **Documentation Consolidation** ✅: Merged and streamlined documentation

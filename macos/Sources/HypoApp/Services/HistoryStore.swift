@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 #endif
 
 // UserDefaults is thread-safe for reading/writing, safe to mark as Sendable
-extension UserDefaults: @unchecked Sendable {}
+extension UserDefaults: @retroactive @unchecked Sendable {}
 
 public actor HistoryStore {
     private let logger = HypoLogger(category: "HistoryStore")
@@ -267,7 +267,12 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
 #if canImport(UserNotifications)
         self.notificationController = ClipboardNotificationController()
-        self.notificationController?.configure(handler: self)
+        if let controller = self.notificationController {
+            controller.configure(handler: self)
+            logger.info("✅ Notification controller initialized successfully")
+        } else {
+            logger.warning("⚠️ Notification controller failed to initialize (may be running from .build directory, not .app bundle)")
+        }
 #endif
         
         // Listen for pairing completion notifications from TransportManager
@@ -570,9 +575,18 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         
         logger.debug("✅ [ClipboardHistoryViewModel] items array updated: \(updated.count) entries")
+        
+        // Only show notifications for remote clipboard items (not local copies)
+        let localId = deviceIdentity.deviceId.uuidString.lowercased()
+        let isRemote = entry.deviceId.lowercased() != localId
+        if isRemote {
+            logger.debug("📢 [ClipboardHistoryViewModel] Remote clipboard item detected, showing notification")
 #if canImport(UserNotifications)
-        notificationController?.deliverNotification(for: entry)
+            notificationController?.deliverNotification(for: entry)
 #endif
+        } else {
+            logger.debug("📢 [ClipboardHistoryViewModel] Local clipboard item, skipping notification")
+        }
         
         // ✅ Auto-sync to paired devices
         await syncToPairedDevices(entry)

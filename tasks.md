@@ -1,6 +1,6 @@
 # Hypo Development Tasks
 
-Version: 1.0.1
+Version: 1.0.2
 Last Updated: December 3, 2025
 
 ---
@@ -375,11 +375,11 @@ Last Updated: December 3, 2025
 
 ## Notes
 
-### Current Status (Sprint 11 - Release v1.0.1)
-- **Overall Progress**: 100% complete (v1.0.1 released)
+### Current Status (Sprint 11 - Release v1.0.2)
+- **Overall Progress**: 100% complete (v1.0.2 released)
 - **Current Phase**: Sprint 11 - Production Release & Distribution (Week 18+)
 - **Last Updated**: December 3, 2025
-- **Latest Release**: v1.0.1 (Dec 3, 2025)
+- **Latest Release**: v1.0.2 (Dec 3, 2025)
 
 ### Blockers & Critical Issues - MAJOR PROGRESS ✅
 - ✅ **Android Compilation RESOLVED**: All P0 build issues fixed, APK successfully generated *(Oct 12, 2025)*
@@ -404,6 +404,15 @@ Last Updated: December 3, 2025
 - ✅ **v1.0.0 Release Preparation** (Dec 3): Fixed protobuf vulnerability, updated version to 1.0.0, removed debug UI, generated new icons
 - ✅ **CI/CD Pipeline** (Dec 3): Complete GitHub Actions workflow for automated builds and releases
 - ✅ **v1.0.1 Release** (Dec 3): Tagged and released v1.0.1 with all fixes and improvements
+- ✅ **v1.0.2 Release** (Dec 3): Build & Release Improvements
+  - macOS app signing for free distribution (ad-hoc signing)
+  - Automatic release notes generation
+  - Android build optimizations (faster CI/CD builds)
+  - Improved backend deployment workflow
+  - Documentation consolidation (INSTALLATION.md → USER_GUIDE.md)
+  - macOS notification improvements (remote-only, better formatting)
+  - Notification permission management in Settings
+  - Build warnings fixed (@retroactive Sendable extensions)
 
 ### Risks & Mitigation
 - ✅ **Android Complexity RESOLVED**: All Room/Gradle/DI issues successfully resolved

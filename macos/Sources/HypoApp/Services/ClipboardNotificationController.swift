@@ -4,6 +4,9 @@ import UserNotifications
 #if canImport(AppKit)
 import AppKit
 #endif
+#if canImport(os)
+import os
+#endif
 
 @MainActor
 public protocol ClipboardNotificationHandling: AnyObject {
@@ -71,10 +74,35 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
     public func requestAuthorizationIfNeeded() {
         center.getNotificationSettings { [weak self] settings in
             guard let self else { return }
-            if settings.authorizationStatus == .notDetermined || !self.defaults.bool(forKey: Constants.authorizationRequestedKey) {
-                self.center.requestAuthorization(options: [.alert, .sound]) { _, _ in
+            let status = settings.authorizationStatus
+            let hasRequested = self.defaults.bool(forKey: Constants.authorizationRequestedKey)
+            
+            #if canImport(os)
+            let logger = HypoLogger(category: "ClipboardNotificationController")
+            logger.info("📢 Notification authorization status: \(String(describing: status)), hasRequested: \(hasRequested)")
+            #endif
+            
+            if status == .notDetermined || !hasRequested {
+                #if canImport(os)
+                logger.info("📢 Requesting notification authorization...")
+                #endif
+                self.center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+                    #if canImport(os)
+                    let logger = HypoLogger(category: "ClipboardNotificationController")
+                    if let error = error {
+                        logger.error("❌ Notification authorization error: \(error.localizedDescription)")
+                    } else {
+                        logger.info("✅ Notification authorization granted: \(granted)")
+                    }
+                    #endif
                     self.defaults.set(true, forKey: Constants.authorizationRequestedKey)
                 }
+            } else if status == .denied {
+                #if canImport(os)
+                let logger = HypoLogger(category: "ClipboardNotificationController")
+                logger.warning("⚠️ Notification permission denied. User must enable in System Settings → Notifications → Hypo")
+                #endif
+                // Don't show popup alert - user can check status in Settings view
             }
         }
     }
@@ -82,7 +110,14 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
     public func deliverNotification(for entry: ClipboardEntry) {
         center.getNotificationSettings { [weak self] settings in
             guard let self else { return }
-            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+            let status = settings.authorizationStatus
+            guard status == .authorized || status == .provisional else {
+                #if canImport(os)
+                let logger = HypoLogger(category: "ClipboardNotificationController")
+                logger.debug("⚠️ Cannot deliver notification: authorization status is \(String(describing: status))")
+                #endif
+                return
+            }
 #if canImport(AppKit)
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -126,8 +161,12 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
 
     private func buildContent(for entry: ClipboardEntry) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
-        content.title = entry.content.title
-        content.subtitle = "From \(entry.deviceId)"
+        // Title: device name (or fallback if not available)
+        content.title = entry.originDeviceName ?? "Unknown Device"
+        // Subtitle: [content type] readable timestamp
+        let timestampString = formatTimestamp(entry.timestamp)
+        content.subtitle = "[\(entry.content.title)] \(timestampString)"
+        // Body: message content
         content.body = entry.previewText
         content.sound = .default
         content.categoryIdentifier = Constants.categoryIdentifier
@@ -138,6 +177,35 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
         }
 
         return content
+    }
+    
+    private func formatTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Check if it's today
+        if calendar.isDateInToday(date) {
+            formatter.dateFormat = "HH:mm"
+            return formatter.string(from: date)
+        }
+        
+        // Check if it's yesterday
+        if calendar.isDateInYesterday(date) {
+            formatter.dateFormat = "HH:mm"
+            return "Yesterday \(formatter.string(from: date))"
+        }
+        
+        // Check if it's within the last week
+        if let daysAgo = calendar.dateComponents([.day], from: date, to: now).day, daysAgo < 7 {
+            formatter.dateFormat = "EEEE HH:mm"
+            return formatter.string(from: date)
+        }
+        
+        // Otherwise, show full date
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     private func attachment(for entry: ClipboardEntry) -> UNNotificationAttachment? {
@@ -190,7 +258,28 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
     }
 }
 
-extension UNUserNotificationCenter: @unchecked Sendable {}
+extension UNUserNotificationCenter: @retroactive @unchecked Sendable {}
+
+#if canImport(AppKit)
+extension ClipboardNotificationController {
+    private func showNotificationPermissionAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Notification Permission Required"
+        alert.informativeText = "Hypo needs notification permission to show you when clipboard items are synced from other devices.\n\nPlease enable notifications in System Settings → Notifications → Hypo"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Later")
+        
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            // Open System Settings to Notifications
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+}
+#endif
 
 // No-op implementation for when notifications aren't available (debug builds)
 final class NoOpNotificationController: NSObject, ClipboardNotificationScheduling {

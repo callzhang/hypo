@@ -53,7 +53,7 @@ Hypo enables seamless clipboard synchronization between any devices. Copy on one
 
 ### Prerequisites
 
-- **macOS**: macOS 26+ with Xcode 15+
+- **macOS**: macOS 13+ with Xcode 15+
 - **Android**: HyperOS 3+ (or Android 8+) device
 - **Backend** (optional for cloud sync): Docker or Rust 1.75+
 
@@ -75,10 +75,10 @@ For development setup, see [Development Setup](#development-setup) below.
 |----------|-------------|
 | [`docs/architecture.mermaid`](docs/architecture.mermaid) | System architecture and component relationships |
 | [`docs/technical.md`](docs/technical.md) | Technical specifications and implementation details |
-| [`docs/LOGGING.md`](docs/LOGGING.md) | **How to view and filter logs** (Console.app, `log` command) |
-| [`tasks/tasks.md`](tasks/tasks.md) | Development roadmap and task breakdown |
+| [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | Complete user guide including installation |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Common issues and solutions |
+| [`tasks.md`](tasks.md) | Development roadmap and task breakdown |
 | [`changelog.md`](changelog.md) | Version history and project status summary |
-| [`changelog.md`](changelog.md) | Version history and release notes |
 
 ---
 
@@ -123,7 +123,7 @@ xed HypoApp.xcworkspace  # or: open HypoApp.xcworkspace
 ```
 
 **Requirements**:
-- macOS 26+ (Sequoia or later)
+- macOS 13+ (Ventura or later)
 - Xcode 15+
 - Swift 6
 
@@ -278,41 +278,43 @@ Hypo takes security seriously:
 | **Sprint 5** | Weeks 9-10 | User Interface Polish ✅ |
 | **Sprint 6** | Weeks 11-12 | Device Pairing (QR + Remote) ✅ |
 | **Sprint 7** | Weeks 13-14 | Testing & Optimization ✅ |
-| **Sprint 8** | Weeks 15-16 | Polish & Deployment ← *Current* |
-| **Sprint 9** | Weeks 17-18 | Beta Release |
+| **Sprint 8** | Weeks 15-16 | Polish & Deployment ✅ |
+| **Sprint 9+** | Weeks 17+ | Production Release & Future Features |
 
-**Detailed Tasks**: See [`tasks/tasks.md`](tasks/tasks.md)
+**Detailed Tasks**: See [`tasks.md`](tasks.md)
 
 ---
 
 ## 📊 Current Status
 
-**Phase**: Production Beta - Ready for Testing ✅  
-**Progress**: 95%  
-**Last Updated**: November 26, 2025
+**Phase**: Production Release ✅  
+**Version**: v1.0.2  
+**Progress**: 100%  
+**Last Updated**: December 3, 2025
 
 **Recent Milestones**:
+- ✅ **v1.0.2 Released** (Dec 3, 2025): Build & Release Improvements
+  - macOS app signing for free distribution (ad-hoc signing)
+  - Automatic release notes generation
+  - Android build optimizations (faster CI/CD builds)
+  - Improved backend deployment workflow
+  - macOS notification improvements (remote-only, better formatting)
+  - Notification permission management in Settings
 - ✅ **Production-Ready**: All critical bugs resolved, system fully operational
-- ✅ **Backend Server Deployed**: Production server at `https://hypo.fly.dev` (uptime: 36+ days)
+- ✅ **Backend Server Deployed**: Production server at `https://hypo.fly.dev`
 - ✅ **LAN Auto-Discovery Pairing**: Tap-to-pair flow with automatic key exchange fully functional
 - ✅ **Device-Agnostic Pairing**: Any device can pair with any other device (Android↔Android, macOS↔macOS, Android↔macOS)
 - ✅ **Clipboard Sync**: Bidirectional synchronization verified end-to-end (LAN + Cloud)
-- ✅ **Backend Routing Fixed**: Messages correctly routed to target devices only (Nov 24, 2025)
-- ✅ **Android LAN Server Fixed**: Binary frames now reliably delivered (Nov 24, 2025)
 - ✅ **Battery Optimization**: 60-80% battery drain reduction when screen off
-- ✅ **Documentation Updated**: All docs reflect current production state (Nov 26, 2025)
+- ✅ **Automated CI/CD**: Complete GitHub Actions workflow for builds and releases
+- ✅ **Comprehensive Documentation**: All docs consolidated and up-to-date
 
 **Server Status**:
 - **Production**: `https://hypo.fly.dev` ✅ (operational, all endpoints tested)
 - **WebSocket**: `wss://hypo.fly.dev/ws` ✅ (ready for client connections)
 - **Health**: `/health` endpoint responding (~50ms)
 - **Metrics**: Prometheus metrics available at `/metrics`
-- **Infrastructure**: 2 machines in iad region, auto-scaling, zero-downtime deploys
-
-**Next Steps**:
-1. Rebuild Android APK with latest fixes and test on physical device
-2. Beta testing recruitment
-3. Production release preparation
+- **Infrastructure**: Auto-scaling, zero-downtime deploys
 
 **Full Status**: See [`changelog.md`](changelog.md) for version history and project status
 
@@ -370,11 +372,11 @@ The server test script validates:
 **Test Coverage Target**: 80% for clients, 90% for backend
 
 **Test Status**:
-- ✅ Backend: All unit and integration tests passing
-- ✅ LAN sync: Verified end-to-end (Nov 24, 2025)
-- ✅ Cloud sync: Verified end-to-end (Nov 24, 2025)
-- ✅ Backend routing: Verified correct message delivery (Nov 24, 2025)
-- ✅ Android LAN server: Binary frame delivery verified (Nov 24, 2025)
+- ✅ Backend: All unit and integration tests passing (32/32 tests)
+- ✅ LAN sync: Verified end-to-end
+- ✅ Cloud sync: Verified end-to-end
+- ✅ Backend routing: Verified correct message delivery
+- ✅ Android LAN server: Binary frame delivery verified
 
 ---
 
@@ -421,11 +423,11 @@ MIT License - See [LICENSE](LICENSE) for details
 
 ## ⚠️ Status
 
-This project is in **production beta** phase. The system is fully functional and has been extensively tested. All critical bugs have been resolved. Ready for beta testing.
+This project is in **production release** phase. The system is fully functional and has been extensively tested. All critical bugs have been resolved. Ready for distribution.
 
 **Current Version**: v1.0.2  
 **Stability**: Production-ready  
-**Next Milestone**: Public beta release
+**Next Milestone**: Public beta testing and future feature development
 
 ---
 

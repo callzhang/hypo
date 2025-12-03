@@ -284,7 +284,7 @@ jobs:
           echo "notes_path=release-notes.md" >> $GITHUB_OUTPUT
       
       - name: Delete existing release if present
-        if: github.event_name == 'workflow_dispatch' && ! startsWith(github.ref, 'refs/heads/test/')
+        if: github.event_name == 'workflow_dispatch' && !contains(github.ref, 'refs/heads/test/')
         run: |
           TAG_NAME="${{ steps.version.outputs.tag }}"
           if gh release view "$TAG_NAME" &>/dev/null; then

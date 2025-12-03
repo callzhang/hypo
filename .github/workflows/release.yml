@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'  # Triggers on tags like v0.2.2, v1.0.0, etc.
+    branches:
+      - 'test/**'  # Also trigger on test branches for debugging
   workflow_dispatch:
     inputs:
       version:
@@ -210,6 +212,11 @@ EOF
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
+          elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/heads/test/* ]]; then
+            # For test branches, use a test version
+            VERSION="v1.0.0-test"
           else
             VERSION="${{ github.ref_name }}"
           fi

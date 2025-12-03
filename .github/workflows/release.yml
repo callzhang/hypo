@@ -159,13 +159,13 @@ jobs:
           # Remove 'v' prefix if present and sanitize (replace slashes with dashes)
           VERSION="${VERSION#v}"
           SAFE_VERSION="${VERSION//\//-}"
-          zip -r ../Hypo-macOS-release-${SAFE_VERSION}.zip HypoApp.app
+          zip -r ../Hypo-${SAFE_VERSION}.zip HypoApp.app
       
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
         with:
           name: macos-app
-          path: Hypo-macOS-release-*.zip
+          path: Hypo-*.zip
           retention-days: 30
 
   create-release:
@@ -222,17 +222,17 @@ jobs:
         run: |
           cd artifacts
           TAG_NAME="${{ steps.version.outputs.tag }}"
-          # Rename release APK
+          # Rename release APK (use dot separator: Hypo.1.0.1.apk)
           if [ -f "app-release.apk" ]; then
-            mv app-release.apk hypo-android-release-${TAG_NAME}.apk
+            mv app-release.apk Hypo.${TAG_NAME}.apk
           else
             echo "❌ Release APK not found!"
             exit 1
           fi
           # Rename macOS zip to use tag name (not branch name) if needed
-          if [ -f "Hypo-macOS-"*.zip ]; then
-            OLD_ZIP=$(ls Hypo-macOS-*.zip | head -1)
-            EXPECTED_NAME="Hypo-macOS-release-${TAG_NAME}.zip"
+          if [ -f "Hypo-"*.zip ]; then
+            OLD_ZIP=$(ls Hypo-*.zip | head -1)
+            EXPECTED_NAME="Hypo-${TAG_NAME}.zip"
             if [ "$OLD_ZIP" != "$EXPECTED_NAME" ]; then
               mv "$OLD_ZIP" "$EXPECTED_NAME"
             else
@@ -259,8 +259,8 @@ jobs:
           
           ## Downloads
           
-          - **Android**: \`hypo-android-release-${TAG_NAME}.apk\` (~15-20MB, optimized for production)
-          - **macOS**: \`Hypo-macOS-release-${TAG_NAME}.zip\` (extract and move to Applications)
+          - **Android**: \`Hypo.${TAG_NAME}.apk\` (~15-20MB, optimized for production)
+          - **macOS**: \`Hypo-${TAG_NAME}.zip\` (extract and move to Applications)
           
           ## Installation
           
@@ -328,8 +328,8 @@ jobs:
           name: Release ${{ steps.version.outputs.version }}
           body_path: ${{ steps.release-notes.outputs.notes_path }}
           files: |
-            artifacts/hypo-android-release-*.apk
-            artifacts/Hypo-macOS-release-*.zip
+            artifacts/Hypo.*.apk
+            artifacts/Hypo-*.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
           generate_release_notes: true

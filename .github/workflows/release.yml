@@ -30,6 +30,18 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
+      - name: Accept Android SDK Licenses
+        run: |
+          # Accept all Android SDK licenses
+          mkdir -p "$ANDROID_HOME/licenses"
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo "601085b94cd77f0b54ff86406957099ebe79c4d6" > "$ANDROID_HOME/licenses/android-googletv-license"
+          echo "33b6a2b64607a11ce79713110d54f32d" > "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
+          echo "d975f751698a77b662f1254ddbeed3901e976f5a" > "$ANDROID_HOME/licenses/intel-android-extra-license"
+          echo "8403addf88ab4874007e1c1e80a0025de956b318" > "$ANDROID_HOME/licenses/google-gdk-license"
+          echo "601085b94cd77f0b54ff86406957099ebe79c4d6" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
+      
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
       
@@ -76,61 +88,97 @@ jobs:
       - name: Build macOS App
         working-directory: macos
         run: |
+          set -e
           # Build the Swift package
+          echo "Building Swift package..."
           swift build -c release
           
           # Create app bundle structure if it doesn't exist
           if [ ! -d "HypoApp.app" ]; then
+            echo "Creating app bundle structure..."
             mkdir -p HypoApp.app/Contents/MacOS
             mkdir -p HypoApp.app/Contents/Resources
           fi
           
           # Copy binary to app bundle (check actual build output)
+          echo "Looking for built binary..."
+          # The product name is HypoMenuBar, but the target is HypoMenuBarApp
+          # SwiftPM builds executables with the product name
+          BINARY_FOUND=false
           if [ -f ".build/release/HypoMenuBar" ]; then
+            echo "Found: .build/release/HypoMenuBar"
             cp .build/release/HypoMenuBar HypoApp.app/Contents/MacOS/HypoMenuBar
+            BINARY_FOUND=true
           elif [ -f ".build/release/HypoMenuBarApp" ]; then
+            echo "Found: .build/release/HypoMenuBarApp"
             cp .build/release/HypoMenuBarApp HypoApp.app/Contents/MacOS/HypoMenuBar
+            BINARY_FOUND=true
           else
-            echo "Error: Binary not found. Available files:"
-            find .build/release -type f || true
+            echo "Error: Binary not found. Searching for executables..."
+            echo "Available files in .build/release:"
+            find .build/release -type f 2>/dev/null || echo "No .build/release directory found"
+            echo "Available executables in .build:"
+            find .build -type f -executable -name "*MenuBar*" 2>/dev/null || echo "No MenuBar executables found"
+            # Try to find any executable
+            EXECUTABLE=$(find .build/release -type f -executable 2>/dev/null | head -1)
+            if [ -n "$EXECUTABLE" ]; then
+              echo "Found executable: $EXECUTABLE, using it"
+              cp "$EXECUTABLE" HypoApp.app/Contents/MacOS/HypoMenuBar
+              BINARY_FOUND=true
+            fi
+          fi
+          
+          if [ "$BINARY_FOUND" = false ]; then
             exit 1
           fi
+          
           chmod +x HypoApp.app/Contents/MacOS/HypoMenuBar
+          echo "Binary copied successfully"
           
           # Create or update Info.plist
+          echo "Creating Info.plist..."
+          # Extract version from tag (remove 'v' prefix if present)
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          VERSION="${VERSION#v}"  # Remove 'v' prefix if present
+          # Use a simpler approach with sed to insert version
           cat > HypoApp.app/Contents/Info.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>HypoMenuBar</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.hypo.clipboard</string>
-              <key>CFBundleName</key>
-              <string>Hypo</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleVersion</key>
-              <string>1</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${{ github.ref_name }}</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>13.0</string>
-              <key>LSUIElement</key>
-              <true/>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>NSPrincipalClass</key>
-              <string>NSApplication</string>
-          </dict>
-          </plist>
-          EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>HypoMenuBar</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.hypo.clipboard</string>
+    <key>CFBundleName</key>
+    <string>Hypo</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>5</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${VERSION}</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>
+EOF
           
           # Generate icons if script exists
           if [ -f "../scripts/generate-icons.py" ]; then
+            echo "Generating icons..."
             python3 ../scripts/generate-icons.py || echo "Icon generation failed, continuing without icon"
+          else
+            echo "Icon generation script not found, skipping"
           fi
+          
+          echo "macOS app build complete"
       
       - name: Create macOS ZIP
         working-directory: macos

@@ -94,6 +94,10 @@ if (envFile.exists()) {
     envFile.inputStream().use { envProperties.load(it) }
 }
 
+// Configure Sentry - only enable uploads if auth token is provided
+val sentryAuthToken = System.getenv("SENTRY_AUTH_TOKEN") 
+    ?: envProperties.getProperty("SENTRY_AUTH_TOKEN", "")
+
 sentry {
     // Generates a source bundle and uploads your source code to Sentry
     // This enables source context, allowing you to see your source
@@ -102,15 +106,22 @@ sentry {
     
     org = "stardust-dm"
     projectName = "clipboard"
-    // Try environment variable first, then .env file, then empty string
-    val sentryAuthToken = System.getenv("SENTRY_AUTH_TOKEN") 
-        ?: envProperties.getProperty("SENTRY_AUTH_TOKEN", "")
-    authToken = sentryAuthToken
     
-    // Only enable uploads if auth token is provided (disable in CI without token)
-    uploadNativeSymbols = sentryAuthToken.isNotEmpty()
-    includeNativeSources = sentryAuthToken.isNotEmpty()
-    autoUploadProguardMapping = sentryAuthToken.isNotEmpty()
+    // Only configure uploads if auth token is provided (disable in CI without token)
+    if (sentryAuthToken.isNotEmpty()) {
+        authToken = sentryAuthToken
+        // Automatically upload ProGuard/R8 mapping files
+        uploadNativeSymbols = true
+        includeNativeSources = true
+        autoUploadProguardMapping = true
+    } else {
+        // Disable all uploads when no token is available
+        uploadNativeSymbols = false
+        includeNativeSources = false
+        autoUploadProguardMapping = false
+        // Set empty token to prevent plugin from trying to upload
+        authToken = ""
+    }
 }
 
 androidComponents {

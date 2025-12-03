@@ -85,6 +85,8 @@ log_info "Using entitlements: $ENTITLEMENTS"
 log_info "Step 0: Cleaning app bundle..."
 # Remove any existing signature first
 codesign --remove-signature "$APP_BUNDLE" 2>/dev/null || true
+# Remove quarantine attribute (set by macOS when downloading from internet)
+xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
 # Remove extended attributes and resource forks
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true
 # Remove Finder metadata files

@@ -251,6 +251,6 @@ gh release create v1.0.2 \
 
 ---
 
-**Last Updated**: December 2, 2025  
+**Last Updated**: December 2, 2025
 **Current Version**: 1.0.2
 

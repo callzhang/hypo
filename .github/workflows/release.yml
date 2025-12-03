@@ -29,6 +29,15 @@ jobs:
           java-version: '17'
           cache: 'gradle'
       
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android
+          key: ${{ runner.os }}-android-sdk-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-
+      
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
@@ -48,17 +57,37 @@ jobs:
         run: chmod +x android/gradlew
       
       - name: Build Release APK
+        id: build-apk
         working-directory: android
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: ./gradlew assembleRelease --stacktrace
+          # Increase Gradle JVM memory for faster builds
+          GRADLE_OPTS: -Xmx4096m -Dfile.encoding=UTF-8
+        run: |
+          echo "🚀 Starting Android build at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          START_TIME=$(date +%s)
+          ./gradlew assembleRelease --stacktrace --build-cache
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          echo "✅ Build completed in ${DURATION} seconds"
+          echo "duration=${DURATION}" >> $GITHUB_OUTPUT
+      
+      - name: Build time summary
+        if: always()
+        run: |
+          if [ -n "${{ steps.build-apk.outputs.duration }}" ]; then
+            echo "### ⏱️ Android Build Time" >> $GITHUB_STEP_SUMMARY
+            echo "Build completed in **${{ steps.build-apk.outputs.duration }} seconds**" >> $GITHUB_STEP_SUMMARY
+          fi
       
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: android-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 30
+          # Optimize retention: shorter for test branches, longer for releases
+          retention-days: ${{ contains(github.ref, 'refs/heads/test/') && '7' || '30' }}
+          compression-level: 6
 
   build-macos:
     name: Build macOS App
@@ -261,22 +290,169 @@ jobs:
             CHANGELOG_SECTION=$(awk "/## \[?$VERSION\]?/,/## \[?v[0-9]/" changelog.md | head -n -1 || echo "")
           fi
           
+          # Auto-generate commit summary if no changelog section
+          if [ -z "$CHANGELOG_SECTION" ]; then
+            echo "📝 Generating commit summary..."
+            
+            # Find the previous tag (if any)
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            
+            if [ -n "$PREV_TAG" ]; then
+              # Get commits since last tag
+              COMMIT_RANGE="${PREV_TAG}..HEAD"
+            else
+              # Get last 20 commits if no previous tag
+              COMMIT_RANGE="HEAD~20..HEAD"
+            fi
+            
+            # Generate categorized commit summary
+            COMMIT_SUMMARY=$(git log $COMMIT_RANGE --pretty=format:"%s" --no-merges | \
+              awk '
+              BEGIN {
+                feat_count = 0
+                fix_count = 0
+                docs_count = 0
+                ci_count = 0
+                refactor_count = 0
+                perf_count = 0
+                security_count = 0
+                other_count = 0
+                
+                feat_items = ""
+                fix_items = ""
+                docs_items = ""
+                ci_items = ""
+                refactor_items = ""
+                perf_items = ""
+                security_items = ""
+                other_items = ""
+              }
+              {
+                # Parse conventional commit format: type(scope): message
+                if (match($0, /^([a-z]+)(\([^)]+\))?:/, arr)) {
+                  type = arr[1]
+                  # Extract message (everything after ": ")
+                  if (match($0, /^[^:]+: (.+)$/, msg_arr)) {
+                    message = msg_arr[1]
+                  } else {
+                    message = $0
+                  }
+                  
+                  # Clean up message (remove common prefixes, capitalize first letter)
+                  gsub(/^[a-z]/, toupper(substr(message, 1, 1)), message)
+                  
+                  if (type == "feat") {
+                    feat_count++
+                    feat_items = feat_items "- " message "\n"
+                  } else if (type == "fix") {
+                    fix_count++
+                    fix_items = fix_items "- " message "\n"
+                  } else if (type == "docs") {
+                    docs_count++
+                    docs_items = docs_items "- " message "\n"
+                  } else if (type == "ci") {
+                    ci_count++
+                    ci_items = ci_items "- " message "\n"
+                  } else if (type == "refactor") {
+                    refactor_count++
+                    refactor_items = refactor_items "- " message "\n"
+                  } else if (type == "perf") {
+                    perf_count++
+                    perf_items = perf_items "- " message "\n"
+                  } else if (type == "security") {
+                    security_count++
+                    security_items = security_items "- " message "\n"
+                  } else {
+                    other_count++
+                    other_items = other_items "- " message "\n"
+                  }
+                } else {
+                  # Non-conventional commit
+                  other_count++
+                  other_items = other_items "- " $0 "\n"
+                }
+              }
+              END {
+                if (feat_count > 0) {
+                  print "### ✨ Features\n"
+                  print feat_items
+                }
+                if (fix_count > 0) {
+                  print "### 🐛 Bug Fixes\n"
+                  print fix_items
+                }
+                if (security_count > 0) {
+                  print "### 🔒 Security\n"
+                  print security_items
+                }
+                if (perf_count > 0) {
+                  print "### ⚡ Performance\n"
+                  print perf_items
+                }
+                if (refactor_count > 0) {
+                  print "### ♻️ Refactoring\n"
+                  print refactor_items
+                }
+                if (docs_count > 0) {
+                  print "### 📚 Documentation\n"
+                  print docs_items
+                }
+                if (ci_count > 0) {
+                  print "### 🔧 CI/CD\n"
+                  print ci_items
+                }
+                if (other_count > 0) {
+                  print "### 📦 Other Changes\n"
+                  print other_items
+                }
+              }')
+            
+            if [ -n "$COMMIT_SUMMARY" ]; then
+              CHANGELOG_SECTION="$COMMIT_SUMMARY"
+            else
+              CHANGELOG_SECTION="No significant changes detected."
+            fi
+          fi
+          
           # Create release notes
           cat > release-notes.md << EOF
           # Release $VERSION
           
           ## Downloads
           
-          - **Android**: \`Hypo-${TAG_NAME}.apk\` (~15-20MB, optimized for production)
-          - **macOS**: \`Hypo-${TAG_NAME}.zip\` (extract and move to Applications)
+          - **Android**: \`Hypo-${TAG_NAME}.apk\`
+          - **macOS**: \`Hypo-${TAG_NAME}.zip\`
           
           ## Installation
           
           See [INSTALLATION.md](docs/INSTALLATION.md) for detailed installation instructions.
           
+          ### macOS First Launch
+          
+          **Important**: After downloading and extracting the macOS app, you may see a "damaged" error. This is due to macOS quarantine (see explanation below).
+          
+          **Quick Fix:**
+          \`\`\`bash
+          # Remove quarantine attribute
+          xattr -d com.apple.quarantine HypoApp.app
+          
+          # Then launch by right-clicking → Open → Open
+          \`\`\`
+          
+          You'll see a "cannot be verified" warning - this is normal for ad-hoc signed apps. Click **Open** to proceed.
+          
+          **Why this happens**: macOS automatically adds a quarantine attribute to files downloaded from the internet (via Safari, Chrome, curl, etc.). This is a security feature called Gatekeeper. The attribute is stored as an extended attribute (`com.apple.quarantine`) and contains metadata about where the file came from.
+          
+          **Important distinction**: Our app IS signed (ad-hoc signature), but macOS treats ad-hoc signatures differently:
+          - **Ad-hoc signed + quarantined** → Shows "damaged" error (ad-hoc is not a trusted developer signature)
+          - **Developer ID signed + quarantined + not notarized** → Shows "cannot be verified" warning
+          - **Developer ID signed + notarized** → Opens normally
+          
+          **Why other projects don't show "damaged"**: They use Developer ID signatures (\$99/year Apple Developer Program) and notarize their apps. This makes macOS trust them automatically. Since we use free ad-hoc signing (no \$99/year Apple Developer account), macOS considers it "untrusted" when quarantined. Removing the quarantine attribute allows the app to run, but you'll still need to bypass the "cannot be verified" warning by right-clicking → Open.
+          
           ## Changes
           
-          ${CHANGELOG_SECTION:-"See git log for changes."}
+          ${CHANGELOG_SECTION}
           
           ## Checksums
           

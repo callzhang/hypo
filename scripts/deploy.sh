@@ -192,20 +192,20 @@ deploy() {
         log_info "Starting deployment (remote build on Fly.io)..."
         echo ""
         
-        if $FLYCTL_CMD deploy \
-            --remote-only \
-            --config "$FLY_CONFIG" \
-            --app "$APP_NAME" \
-            2>&1 | tee /tmp/hypo_backend_deploy.log; then
-            log_success "Deployment completed successfully"
-            
-            # Scale to 1 machine after deployment
-            scale_to_one
-            
-            return 0
-        else
-            log_error "Deployment failed. Check /tmp/hypo_backend_deploy.log"
-            exit 1
+    if $FLYCTL_CMD deploy \
+        --remote-only \
+        --config "$FLY_CONFIG" \
+        --app "$APP_NAME" \
+        2>&1 | tee /tmp/hypo_backend_deploy.log; then
+        log_success "Deployment completed successfully"
+        
+        # Scale to 1 machine after deployment
+        scale_to_one
+        
+        return 0
+    else
+        log_error "Deployment failed. Check /tmp/hypo_backend_deploy.log"
+        exit 1
         fi
     fi
 }

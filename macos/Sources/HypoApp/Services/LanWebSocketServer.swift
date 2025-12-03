@@ -283,7 +283,7 @@ public final class LanWebSocketServer {
         }
         
         connection.stateUpdateHandler = { [weak self] state in
-            guard let self = self else { return }
+                guard let self = self else { return }
             Task { @MainActor [self] in
                 switch state {
                 case .ready:
@@ -515,10 +515,10 @@ public final class LanWebSocketServer {
         #endif
         logger.info("📡  CLIPBOARD RECEIVE: Setting up receive callback for \(connectionId.uuidString.prefix(8))")
         context.connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
-            guard let self = self else {
-                NSLog("⚠️  Self is nil in receive callback")
-                return
-            }
+                guard let self = self else {
+                    NSLog("⚠️  Self is nil in receive callback")
+                    return
+                }
             Task { @MainActor [self] in
                 guard let context = self.connections[connectionId] else {
                     self.logger.info("⚠️  Connection context not found for \(connectionId.uuidString.prefix(8))")

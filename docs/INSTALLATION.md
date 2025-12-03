@@ -38,16 +38,23 @@
    unzip Hypo.app.zip
    ```
 
-2. **Install to Applications**
+2. **Remove Quarantine Attribute** (Required for downloaded apps)
    ```bash
-   # Move to Applications folder
-   sudo mv Hypo.app /Applications/
-   
-   # Make executable
-   chmod +x /Applications/Hypo.app/Contents/MacOS/Hypo
+   # macOS adds quarantine attribute when downloading from internet
+   # This causes "app is damaged" error - remove it:
+   xattr -d com.apple.quarantine HypoApp.app
    ```
 
-3. **First Launch & Permissions**
+3. **Install to Applications**
+   ```bash
+   # Move to Applications folder
+   sudo mv HypoApp.app /Applications/
+   
+   # Make executable (if needed)
+   chmod +x /Applications/HypoApp.app/Contents/MacOS/HypoMenuBar
+   ```
+
+4. **First Launch & Permissions**
    ```bash
    # Launch from command line first time
    open /Applications/Hypo.app
@@ -58,7 +65,7 @@
    - **Network**: Allow when prompted
    - **Notifications**: System Settings → Notifications → Hypo → Allow
 
-4. **Verify Installation**
+5. **Verify Installation**
    - Hypo icon appears in menu bar
    - Click icon → "Settings" → Check version number
    - Status should show "Ready to pair"

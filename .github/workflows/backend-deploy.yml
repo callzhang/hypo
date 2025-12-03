@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'backend/**'
+      - 'backend/**/*.rs'
+      - 'backend/Cargo.toml'
+      - 'backend/Cargo.lock'
       - '.github/workflows/backend-deploy.yml'
   workflow_dispatch:
 

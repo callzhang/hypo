@@ -70,73 +70,14 @@ jobs:
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - START_TIME))
           echo "✅ Build completed in ${DURATION} seconds"
-          
-          # Capture build information
-          APK_PATH="app/build/outputs/apk/release/app-release.apk"
-          if [ -f "$APK_PATH" ]; then
-            APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
-            APK_SIZE_BYTES=$(stat -f%z "$APK_PATH" 2>/dev/null || stat -c%s "$APK_PATH" 2>/dev/null || echo "0")
-            echo "apk_size=$APK_SIZE" >> $GITHUB_OUTPUT
-            echo "apk_size_bytes=$APK_SIZE_BYTES" >> $GITHUB_OUTPUT
-            echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
-          fi
-          
-          # Get version info
-          VERSION_NAME=$(grep -E "versionName\s+" app/build.gradle.kts | head -1 | sed -E "s/.*versionName\s*=\s*[\"']([^\"']+)[\"'].*/\1/" || echo "unknown")
-          VERSION_CODE=$(grep -E "versionCode\s+" app/build.gradle.kts | head -1 | sed -E "s/.*versionCode\s*=\s*([0-9]+).*/\1/" || echo "unknown")
-          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
-          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
-          
-          # Get Java and Gradle versions
-          JAVA_VERSION=$(java -version 2>&1 | head -1 | sed 's/.*version "\([^"]*\)".*/\1/')
-          GRADLE_VERSION=$(./gradlew --version | grep "Gradle" | head -1 | awk '{print $2}' || echo "unknown")
-          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
-          echo "gradle_version=$GRADLE_VERSION" >> $GITHUB_OUTPUT
-          
           echo "duration=${DURATION}" >> $GITHUB_OUTPUT
       
-      - name: Android Build Summary
+      - name: Build time summary
         if: always()
         run: |
-          echo "## 📱 Android Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
           if [ -n "${{ steps.build-apk.outputs.duration }}" ]; then
-            DURATION="${{ steps.build-apk.outputs.duration }}"
-            MINUTES=$(echo "scale=1; $DURATION / 60" | bc)
-            echo "### ⏱️ Build Time" >> $GITHUB_STEP_SUMMARY
-            echo "- **Duration**: ${DURATION} seconds (${MINUTES} minutes)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -n "${{ steps.build-apk.outputs.apk_size }}" ]; then
-            echo "### 📦 Artifact Size" >> $GITHUB_STEP_SUMMARY
-            echo "- **APK Size**: ${{ steps.build-apk.outputs.apk_size }}" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -n "${{ steps.build-apk.outputs.version_name }}" ]; then
-            echo "### 📋 Version Information" >> $GITHUB_STEP_SUMMARY
-            echo "- **Version Name**: ${{ steps.build-apk.outputs.version_name }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Version Code**: ${{ steps.build-apk.outputs.version_code }}" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -n "${{ steps.build-apk.outputs.java_version }}" ]; then
-            echo "### 🔧 Build Environment" >> $GITHUB_STEP_SUMMARY
-            echo "- **Java Version**: ${{ steps.build-apk.outputs.java_version }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Gradle Version**: ${{ steps.build-apk.outputs.gradle_version }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Build Type**: Release (optimized)" >> $GITHUB_STEP_SUMMARY
-            echo "- **JVM Memory**: 4096MB" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "### ✅ Build Status" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
-            echo "- **APK Location**: \`android/app/build/outputs/apk/release/app-release.apk\`" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **Status**: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+            echo "### ⏱️ Android Build Time" >> $GITHUB_STEP_SUMMARY
+            echo "Build completed in **${{ steps.build-apk.outputs.duration }} seconds**" >> $GITHUB_STEP_SUMMARY
           fi
       
       - name: Upload Release APK
@@ -165,22 +106,12 @@ jobs:
         run: pip install Pillow
       
       - name: Build macOS App
-        id: build-macos
         working-directory: macos
         run: |
           set -e
           # Build the Swift package
           echo "Building Swift package..."
-          START_TIME=$(date +%s)
           swift build -c release
-          END_TIME=$(date +%s)
-          BUILD_DURATION=$((END_TIME - START_TIME))
-          echo "✅ Swift build completed in ${BUILD_DURATION} seconds"
-          echo "build_duration=${BUILD_DURATION}" >> $GITHUB_OUTPUT
-          
-          # Get Swift version
-          SWIFT_VERSION=$(swift --version | head -1)
-          echo "swift_version=$SWIFT_VERSION" >> $GITHUB_OUTPUT
           
           # Create app bundle structure if it doesn't exist
           if [ ! -d "HypoApp.app" ]; then
@@ -241,43 +172,16 @@ jobs:
           fi
           
           echo "macOS app build complete"
-          
-          # Capture app bundle size
-          if [ -d "HypoApp.app" ]; then
-            APP_SIZE=$(du -sh HypoApp.app | cut -f1)
-            APP_SIZE_BYTES=$(du -sk HypoApp.app | cut -f1)
-            BINARY_SIZE=$(stat -f%z HypoApp.app/Contents/MacOS/HypoMenuBar 2>/dev/null || stat -c%s HypoApp.app/Contents/MacOS/HypoMenuBar 2>/dev/null || echo "0")
-            BINARY_SIZE_MB=$(echo "scale=2; $BINARY_SIZE / 1024 / 1024" | bc)
-            echo "app_size=$APP_SIZE" >> $GITHUB_OUTPUT
-            echo "app_size_bytes=$APP_SIZE_BYTES" >> $GITHUB_OUTPUT
-            echo "binary_size=$BINARY_SIZE" >> $GITHUB_OUTPUT
-            echo "binary_size_mb=$BINARY_SIZE_MB" >> $GITHUB_OUTPUT
-          fi
       
       - name: Sign macOS App
-        id: sign-macos
         working-directory: macos
         run: |
           echo "Signing macOS app with ad-hoc signature..."
-          START_TIME=$(date +%s)
           chmod +x ../scripts/sign-macos.sh
           ../scripts/sign-macos.sh HypoApp.app
-          END_TIME=$(date +%s)
-          SIGN_DURATION=$((END_TIME - START_TIME))
-          echo "✅ App signed successfully in ${SIGN_DURATION} seconds"
-          echo "sign_duration=${SIGN_DURATION}" >> $GITHUB_OUTPUT
-          
-          # Verify signature
-          if codesign --verify --verbose HypoApp.app 2>&1 | grep -q "valid on disk"; then
-            SIGNATURE_TYPE=$(codesign -dvv HypoApp.app 2>&1 | grep "Signature=" | cut -d= -f2 || echo "unknown")
-            echo "signature_type=$SIGNATURE_TYPE" >> $GITHUB_OUTPUT
-            echo "signature_valid=true" >> $GITHUB_OUTPUT
-          else
-            echo "signature_valid=false" >> $GITHUB_OUTPUT
-          fi
+          echo "✅ App signed successfully"
       
       - name: Create macOS ZIP
-        id: create-zip
         working-directory: macos
         run: |
           # Extract version from tag or input (not branch name for test branches)
@@ -292,87 +196,7 @@ jobs:
           # Remove 'v' prefix if present and sanitize (replace slashes with dashes)
           VERSION="${VERSION#v}"
           SAFE_VERSION="${VERSION//\//-}"
-          ZIP_NAME="Hypo-${SAFE_VERSION}.zip"
-          zip -r ../${ZIP_NAME} HypoApp.app
-          
-          # Capture ZIP size
-          if [ -f "../${ZIP_NAME}" ]; then
-            ZIP_SIZE=$(du -h "../${ZIP_NAME}" | cut -f1)
-            ZIP_SIZE_BYTES=$(stat -f%z "../${ZIP_NAME}" 2>/dev/null || stat -c%s "../${ZIP_NAME}" 2>/dev/null || echo "0")
-            ZIP_SIZE_MB=$(echo "scale=2; $ZIP_SIZE_BYTES / 1024 / 1024" | bc)
-            echo "zip_size=$ZIP_SIZE" >> $GITHUB_OUTPUT
-            echo "zip_size_bytes=$ZIP_SIZE_BYTES" >> $GITHUB_OUTPUT
-            echo "zip_size_mb=$ZIP_SIZE_MB" >> $GITHUB_OUTPUT
-            echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: macOS Build Summary
-        if: always()
-        run: |
-          echo "## 🍎 macOS Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          BUILD_DUR="${{ steps.build-macos.outputs.build_duration }}"
-          SIGN_DUR="${{ steps.sign-macos.outputs.sign_duration }}"
-          
-          if [ -n "$BUILD_DUR" ] || [ -n "$SIGN_DUR" ]; then
-            echo "### ⏱️ Build Time" >> $GITHUB_STEP_SUMMARY
-            if [ -n "$BUILD_DUR" ]; then
-              BUILD_MIN=$(echo "scale=1; $BUILD_DUR / 60" | bc 2>/dev/null || echo "0")
-              echo "- **Swift Build**: ${BUILD_DUR} seconds (${BUILD_MIN} minutes)" >> $GITHUB_STEP_SUMMARY
-            fi
-            if [ -n "$SIGN_DUR" ]; then
-              echo "- **Signing**: ${SIGN_DUR} seconds" >> $GITHUB_STEP_SUMMARY
-            fi
-            if [ -n "$BUILD_DUR" ] && [ -n "$SIGN_DUR" ]; then
-              TOTAL_DUR=$((BUILD_DUR + SIGN_DUR))
-              TOTAL_MIN=$(echo "scale=1; $TOTAL_DUR / 60" | bc 2>/dev/null || echo "0")
-              echo "- **Total**: ${TOTAL_DUR} seconds (${TOTAL_MIN} minutes)" >> $GITHUB_STEP_SUMMARY
-            fi
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -n "${{ steps.build-macos.outputs.app_size }}" ]; then
-            echo "### 📦 Artifact Sizes" >> $GITHUB_STEP_SUMMARY
-            echo "- **App Bundle**: ${{ steps.build-macos.outputs.app_size }}" >> $GITHUB_STEP_SUMMARY
-            if [ -n "${{ steps.build-macos.outputs.binary_size_mb }}" ]; then
-              echo "- **Binary Size**: ${{ steps.build-macos.outputs.binary_size_mb }} MB" >> $GITHUB_STEP_SUMMARY
-            fi
-            if [ -n "${{ steps.create-zip.outputs.zip_size }}" ]; then
-              echo "- **ZIP Archive**: ${{ steps.create-zip.outputs.zip_size }}" >> $GITHUB_STEP_SUMMARY
-            fi
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -n "${{ steps.build-macos.outputs.swift_version }}" ]; then
-            echo "### 🔧 Build Environment" >> $GITHUB_STEP_SUMMARY
-            echo "- **Swift Version**: ${{ steps.build-macos.outputs.swift_version }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **macOS Runner**: macos-14" >> $GITHUB_STEP_SUMMARY
-            echo "- **Build Type**: Release (optimized)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -n "${{ steps.sign-macos.outputs.signature_type }}" ]; then
-            echo "### 🔐 Code Signing" >> $GITHUB_STEP_SUMMARY
-            echo "- **Signature Type**: ${{ steps.sign-macos.outputs.signature_type }}" >> $GITHUB_STEP_SUMMARY
-            if [ "${{ steps.sign-macos.outputs.signature_valid }}" = "true" ]; then
-              echo "- **Status**: ✅ Valid" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "- **Status**: ❌ Invalid" >> $GITHUB_STEP_SUMMARY
-            fi
-            echo "- **Method**: Ad-hoc (free, not notarized)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "### ✅ Build Status" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
-            if [ -n "${{ steps.create-zip.outputs.zip_name }}" ]; then
-              echo "- **ZIP Location**: \`macos/${{ steps.create-zip.outputs.zip_name }}\`" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "- **Status**: ❌ Failed" >> $GITHUB_STEP_SUMMARY
-          fi
+          zip -r ../Hypo-${SAFE_VERSION}.zip HypoApp.app
       
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
@@ -393,30 +217,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Fetch all history for changelog
-      
-      - name: Overall Build Summary
-        if: always()
-        run: |
-          echo "# 🚀 Release Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📊 Build Overview" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Platform Builds" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ **Android**: Release APK built" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ **macOS**: App bundle built and signed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "All artifacts are available in the release artifacts section." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔍 Detailed Build Information" >> $GITHUB_STEP_SUMMARY
-          echo "See individual build job summaries above for:" >> $GITHUB_STEP_SUMMARY
-          echo "- Build times and performance metrics" >> $GITHUB_STEP_SUMMARY
-          echo "- Artifact sizes and locations" >> $GITHUB_STEP_SUMMARY
-          echo "- Build environment details" >> $GITHUB_STEP_SUMMARY
-          echo "- Code signing status" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
       
       - name: Get version from tag
         id: version
@@ -625,27 +425,19 @@ jobs:
           
           ## Installation
           
-          See [USER_GUIDE.md](docs/USER_GUIDE.md) for detailed installation instructions.
+          See [INSTALLATION.md](docs/INSTALLATION.md) for detailed installation instructions.
           
           ### macOS First Launch
           
           **Important**: After downloading and extracting the macOS app, you may see a "damaged" error. This is due to macOS quarantine (see explanation below).
           
-          **Quick Fix (Method 1 - Terminal):**
+          **Quick Fix:**
           \`\`\`bash
           # Remove quarantine attribute
           xattr -d com.apple.quarantine HypoApp.app
           
           # Then launch by right-clicking → Open → Open
           \`\`\`
-          
-          **Alternative (Method 2 - System Settings):**
-          If you prefer not to use Terminal, you can also:
-          1. Try to open the app (you'll see the "damaged" error)
-          2. Go to **System Settings** → **Privacy & Security** → **Security**
-          3. Look for a message saying the app was blocked
-          4. Click **Open Anyway** button
-          5. Confirm by clicking **Open** in the dialog
           
           You'll see a "cannot be verified" warning - this is normal for ad-hoc signed apps. Click **Open** to proceed.
           
@@ -725,4 +517,3 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
           generate_release_notes: true
-

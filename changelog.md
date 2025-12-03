@@ -2,6 +2,131 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [1.0.1] - 2025-12-02 - Production Release
+
+### Added
+- **SMS Auto-Sync (Android)**: Automatically copies incoming SMS messages to clipboard and syncs to macOS
+  - `SmsReceiver` BroadcastReceiver listens for incoming SMS messages
+  - Formats SMS as "From: <sender>\n<message>" and copies to clipboard
+  - Leverages existing clipboard sync mechanism to send SMS to macOS
+  - Runtime permission request on Android 6.0+ with UI status display
+  - Settings screen shows permission status and provides grant button
+  - Note: Android 10+ may have restrictions requiring manual copy
+- **MIUI/HyperOS Optimization**: Automatic detection and workarounds for Xiaomi device restrictions
+  - Automatic device detection (Xiaomi/HyperOS)
+  - Multicast lock refresh every 10 minutes (prevents throttling)
+  - Periodic NSD restart every 5 minutes (recovers from throttling)
+  - Device-specific settings guidance in UI
+  - Transparent to users - no configuration required
+- **Automated CI/CD Pipeline**: GitHub Actions release workflow
+  - Automated builds for Android and macOS
+  - Automated release creation with artifacts
+  - Version tagging and release notes generation
+- **Backend Error Response Feature**: Error responses when target device not found
+  - Backend sends error message with type `"error"` when routing fails
+  - Error payload includes code, message, and target device ID
+  - Normalizes device IDs to lowercase for consistent matching
+  - Enables client-side error handling and user feedback
+- **Android Error Handling & Toast Notifications**: Client-side sync failure feedback
+  - Added `ERROR` message type and error payload support
+  - Shows toast notification: "Failed to sync to {deviceName}: incorrect device_id ({deviceId})"
+  - Resolves device name from device ID for user-friendly error messages
+
+### Changed
+- **Build System**: Improved build scripts and dependencies
+  - Android: Added Java-WebSocket dependency (1.5.4) for LAN WebSocket server
+  - macOS: Removed swift-crypto dependency (use CryptoKit directly)
+  - Build scripts: Always build apps to ensure latest code changes
+  - .gitignore: Added Cargo.lock comment, Python cache files, .secrets
+- **Documentation**: Comprehensive updates to reflect production release
+  - Updated PRD to v1.0.1 with all implemented features
+  - Updated technical.md with production architecture details
+  - Updated protocol.md to production status (v1.0.0)
+  - Updated USER_GUIDE.md and INSTALLATION.md to v1.0.1
+  - Consolidated and archived resolved bug reports
+
+### Fixed
+- **Transport Origin Bug Fix**: Fixed cloud messages incorrectly marked as LAN
+  - Fixed `RelayWebSocketClient.setIncomingClipboardHandler()` to use two-parameter lambda
+  - Ensures cloud messages correctly marked with `TransportOrigin.CLOUD`
+  - Prevents incorrect sync behavior from transport origin tracking bug
+- **Backend Test Infrastructure**: Fixed WebSocket handler test compilation errors
+  - Added `create_test_session()` test helper to create WebSocket sessions for testing
+  - Updated all test calls to `handle_text_message()` to include `sender_session` parameter
+  - Improved error handling in error response code to gracefully handle session closure in tests
+  - Changed error logging from `error!` to `warn!` when error response sending fails
+  - All 33 backend unit tests now pass successfully
+- **Android Settings Connection Status**: Fixed connection status display in Settings screen for LAN-connected devices
+  - Changed from using global `connectionState` to `cloudConnectionState` for cloud server status
+  - LAN device status now correctly determined by discovery status and active transport
+  - Previously, LAN-connected devices were incorrectly shown as disconnected when cloud server was offline
+- **Android Notification Visibility**: Improved notification visibility and permission handling
+  - Changed notification channel importance from `IMPORTANCE_LOW` to `IMPORTANCE_DEFAULT`
+  - Ensures persistent notification showing latest clipboard item is visible in notification list
+  - Added notification permission request for Android 13+ (required for foreground service notifications)
+  - Notification updates automatically when latest clipboard item changes
+  - Sound disabled for persistent notification to avoid intrusive alerts
+- **Cross-Platform History Sync**: Enhanced duplicate handling to move existing items to top
+  - Android: Added `deviceId`, `deviceName`, `isEncrypted`, `transportOrigin` fields to `ClipboardEvent`
+  - Android: `IncomingClipboardHandler` now moves matching items to top instead of creating duplicates
+  - macOS: `HistoryStore.insert()` moves matching items to top regardless of transport origin
+  - Preserves pin state when moving items to top
+  - Updates timestamp to reflect user's active use of the item
+  - Uses SHA-256 content matching for reliable duplicate detection across platforms
+
+## [1.0.0] - 2025-12-02 - Initial Production Release
+
+### Added
+- **Production Backend Deployment**: Deployed to Fly.io production (https://hypo.fly.dev)
+  - 2 machines in iad (Ashburn, VA) region
+  - Auto-scaling (min=1, max=3)
+  - Embedded Redis 7+ for session management
+  - Zero-downtime deployments
+  - Health checks on HTTP and TCP
+  - Prometheus metrics endpoint
+- **Device-Agnostic Pairing**: Pairing system supports pairing between any devices
+  - Any device can act as initiator (QR code creator) or responder (QR code scanner)
+  - Any device can create or claim pairing codes in remote pairing
+  - Platform automatically detected from device ID prefixes
+- **Automated Build and Release Pipeline**: GitHub Actions workflow for releases
+  - Automated builds for Android and macOS
+  - Automated release creation with artifacts
+  - Version tagging and release notes generation
+
+### Changed
+- **Pairing Protocol**: Refactored to use role-based field names
+  - Replaced platform-specific names with role-based names (`peer_device_id`, `initiator_device_id`, `responder_device_id`)
+  - Backward compatibility maintained through dual field support
+- **macOS Key Storage**: Replaced Keychain with encrypted file-based storage
+  - Created `FileBasedKeyStore` and `FileBasedPairingSigningKeyStore` for app-internal storage
+  - Keys stored in `~/Library/Application Support/Hypo/` with AES-GCM encryption
+  - Removes dependency on Keychain Sharing entitlement
+  - Improves Notarization compatibility for distribution
+- **macOS Logging Improvements**: Reduced log verbosity and improved debugging clarity
+  - Removed redundant logs from `versionString` computed property
+  - Changed routine operation logs from `info` to `debug` level
+  - Removed legacy `appendDebug` file-based logging in favor of unified `os_log`
+  - Improved error messages with clearer descriptions
+
+### Fixed
+- **Backend Routing to Wrong Device**: Fixed incorrect message routing
+  - Removed case-insensitive device ID matching fallback
+  - Messages now correctly routed to target devices only (exact UUID matching)
+  - Enhanced logging with detailed routing information
+  - Verified end-to-end: messages targeted to macOS only go to macOS, not Android
+- **Android LAN WebSocket Server**: Fixed binary frame reception
+  - Replaced custom frame parser with `org.java-websocket:Java-WebSocket` library
+  - Binary frames now reliably delivered via `onMessage(ByteBuffer)`
+  - Handles handshake, masking, fragmentation, ping/pong automatically
+  - Verified end-to-end: LAN sync now working correctly
+- **Android Startup Crash**: Fixed "Invalid URL port: 0" error
+  - Changed placeholder URL from `http://0.0.0.0:0` to `http://127.0.0.1:1`
+  - App now starts successfully on all devices
+- **macOS History Pinning**: Fixed pinning behavior
+  - Fixed issue where pinned items were automatically unpinned when copied locally
+  - Preserved user's pin preference when updating matching entries
+  - Pinned items now correctly stay pinned and appear at top
+
 ## [Unreleased] - SMS Auto-Sync & Permission Management
 
 ### Added
@@ -558,5 +683,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 **Changelog Maintained By**: Principal Engineering Team
-**Last Updated**: October 3, 2025
+**Last Updated**: December 2, 2025
+
+---
+
+## Project Status Summary
+
+**Current Version**: 1.0.1  
+**Project Phase**: Production Release  
+**Overall Progress**: 100%  
+**Status**: Production-ready, all critical issues resolved
+
+### Key Achievements
+- ✅ Full Android ↔ macOS synchronization
+- ✅ Device-agnostic pairing (any device ↔ any device)
+- ✅ Production backend deployed (https://hypo.fly.dev)
+- ✅ LAN auto-discovery with tap-to-pair
+- ✅ SMS auto-sync (Android → macOS)
+- ✅ MIUI/HyperOS optimization
+- ✅ Battery optimization (60-80% reduction when screen off)
+- ✅ Automated CI/CD pipeline
+- ✅ Comprehensive documentation
+
+### Performance Metrics
+- **LAN Sync Latency (P95)**: 44ms (target: <500ms) ✅
+- **Cloud Sync Latency (P95)**: 1.38s (target: <3s) ✅
+- **Backend Response Time**: ~50ms ✅
+- **Server Uptime**: 36+ days continuous ✅
+
+### All Critical Issues Resolved ✅
+- Android LAN sync binary frames ✅
+- Backend routing to wrong device ✅
+- Android build issues ✅
+- macOS build issues ✅
+- All known bugs archived and resolved ✅
 

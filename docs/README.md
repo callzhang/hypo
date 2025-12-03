@@ -9,7 +9,7 @@ This directory contains all documentation for the Hypo clipboard sync project.
 - **[Technical Specification](technical.md)** - Complete technical documentation
 - **[Protocol Specification](protocol.md)** - Message format and protocol details
 - **[Architecture Diagram](architecture.mermaid)** - System architecture visualization
-- **[Status](status.md)** - Current project status and progress
+- **[Changelog](../changelog.md)** - Version history and project status summary
 
 ### User Documentation
 - **[User Guide](USER_GUIDE.md)** - End-user documentation

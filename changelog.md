@@ -754,3 +754,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS build issues ✅
 - All known bugs archived and resolved ✅
 
+### Development Environment Requirements
+- **macOS Development**: Requires macOS 26+ with Xcode 15+
+- **Android Development**: Any platform with Android Studio Hedgehog+
+- **Backend Development**: Any platform with Rust 1.83+ (required for current dependencies)
+

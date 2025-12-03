@@ -75,7 +75,7 @@
 ## Documentation Structure
 - **Core Docs**: `docs/prd.md` (Product Requirements), `docs/technical.md` (Technical Spec), `docs/protocol.md` (Protocol Spec)
 - **User Docs**: `docs/USER_GUIDE.md` (includes installation guide), `docs/TROUBLESHOOTING.md`
-- **Project Status**: `changelog.md` (version history and project status summary), `docs/status.md` (sprint progress)
+- **Project Status**: `changelog.md` (version history and project status summary), `tasks.md` (development roadmap)
 - **Feature Docs**: Consolidated into PRD (e.g., SMS sync is now in `docs/prd.md` section 4.5)
 - **Archive**: Resolved bugs and historical reports in `docs/archive/`
 

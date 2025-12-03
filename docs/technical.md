@@ -34,6 +34,20 @@ See `docs/architecture.mermaid` for visual representation.
 
 ### 1.3 Technology Decisions
 
+**Decision History**: Technology stack decisions documented below were made during Sprint 1 (October 2025) and have been validated in production.
+
+| Component | Decision | Rationale | Date |
+|-----------|----------|-----------|------|
+| macOS Client | Swift 6 + SwiftUI | Native performance, modern concurrency | Oct 1, 2025 |
+| Android Client | Kotlin 1.9.22 + Compose | Modern UI, coroutines for async | Oct 6, 2025 |
+| Backend Relay | Rust + Actix-web | Performance, memory safety, WebSocket support | Oct 1, 2025 |
+| Storage - macOS | In-memory + UserDefaults | Lightweight, no Core Data overhead | Oct 1, 2025 |
+| Storage - Android | Room | Official Jetpack library, Flow support | Oct 1, 2025 |
+| State Storage - Backend | Redis | In-memory speed, ephemeral state | Oct 1, 2025 |
+| Encryption | AES-256-GCM | Industry standard, authenticated encryption | Oct 1, 2025 |
+| Key Exchange | ECDH | Forward secrecy, QR code compatibility | Oct 1, 2025 |
+| Transport | WebSocket | Bi-directional, real-time, wide support | Oct 1, 2025 |
+
 #### macOS Client ✅ Implemented
 - **Language**: Swift 6 (strict concurrency, actor isolation)
 - **UI Framework**: SwiftUI for menu bar UI, AppKit for NSPasteboard monitoring
@@ -1165,7 +1179,7 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 8. Notification display with preview
 
 ### 5.4 Performance Tests
-- Latency: Measure P50/P95/P99 for LAN and cloud; publish results in `docs/status.md`
+- Latency: Measure P50/P95/P99 for LAN and cloud; publish results in README.md performance section
 - Throughput: Send 100 clips in 10s, measure success rate
 - Memory: Profile both apps under sustained load
 - Availability: Track transport error rates (<0.5% target) using relay Prometheus metrics

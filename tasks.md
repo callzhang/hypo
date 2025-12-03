@@ -16,7 +16,7 @@ Last Updated: December 3, 2025
   - [x] Create `docs/architecture.mermaid`
   - [x] Create `docs/technical.md`
   - [x] Create `tasks/tasks.md`
-  - [x] Create `docs/status.md`
+  - [x] Create project status tracking (consolidated into changelog.md)
   - [x] Create `changelog.md`
   - [x] Create `README.md` with setup instructions
 - [ ] Development environment *(see README prerequisites; need validation run on clean machines)*
@@ -109,7 +109,7 @@ Last Updated: December 3, 2025
 - [x] Test LAN discovery on same network
   - [x] Create manual QA checklist for dual-device LAN pairing (success + failure cases). *(See `docs/testing/lan_manual.md` for loopback harness results and field execution steps.)*
   - [x] Capture Wireshark traces to confirm mDNS advertisement cadence and TLS handshake flow. *(Documented capture workflow; simulated handshake artifacts recorded pending physical trace upload.)*
-  - [x] Log metrics into `docs/status.md#Performance Targets` once baseline captured.
+  - [x] Log metrics into README.md performance targets section once baseline captured.
 - [x] Measure LAN latency
   - [x] Instrument round-trip measurement inside transport handshake (T1 pairing, T2 data message) and persist anonymized metrics. *(Implemented `TransportMetricsRecorder` on macOS and Android; data exported to `tests/transport/lan_loopback_metrics.json`.)*
   - [x] Produce comparison chart vs success criteria (<500 ms P95) in status report.
@@ -141,7 +141,7 @@ Last Updated: December 3, 2025
 - [x] Measure cloud latency
   - [x] Instrument handshake + first payload metrics over relay path and export aggregated results.
   - [x] Add automated nightly test hitting relay from CI runner to capture variability windows.
-  - [x] Update `docs/status.md` metrics table once results available.
+  - [x] Update README.md metrics table once results available.
 
 ### Phase 3.3: Transport Manager
 - [x] Implement transport selection algorithm

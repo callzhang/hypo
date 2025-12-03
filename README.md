@@ -59,9 +59,13 @@ Hypo enables seamless clipboard synchronization between any devices. Copy on one
 
 ### Installation
 
-*Coming soon - project in development*
+**📖 Complete Installation Guide**: See [`docs/USER_GUIDE.md#installation`](docs/USER_GUIDE.md#installation) for detailed setup instructions for all platforms.
 
-For now, see [Development Setup](#development-setup) to build from source.
+**Quick Links**:
+- **macOS**: Download from [GitHub Releases](https://github.com/callzhang/hypo/releases) or [build from source](#macos-client)
+- **Android**: Download APK from [GitHub Releases](https://github.com/callzhang/hypo/releases) or [build from source](#android-client)
+
+For development setup, see [Development Setup](#development-setup) below.
 
 ---
 
@@ -73,7 +77,7 @@ For now, see [Development Setup](#development-setup) to build from source.
 | [`docs/technical.md`](docs/technical.md) | Technical specifications and implementation details |
 | [`docs/LOGGING.md`](docs/LOGGING.md) | **How to view and filter logs** (Console.app, `log` command) |
 | [`tasks/tasks.md`](tasks/tasks.md) | Development roadmap and task breakdown |
-| [`docs/status.md`](docs/status.md) | Current project status and progress tracking |
+| [`changelog.md`](changelog.md) | Version history and project status summary |
 | [`changelog.md`](changelog.md) | Version history and release notes |
 
 ---
@@ -310,7 +314,7 @@ Hypo takes security seriously:
 2. Beta testing recruitment
 3. Production release preparation
 
-**Full Status**: See [`docs/status.md`](docs/status.md)
+**Full Status**: See [`changelog.md`](changelog.md) for version history and project status
 
 ---
 
@@ -419,7 +423,7 @@ MIT License - See [LICENSE](LICENSE) for details
 
 This project is in **production beta** phase. The system is fully functional and has been extensively tested. All critical bugs have been resolved. Ready for beta testing.
 
-**Current Version**: v0.2.3  
+**Current Version**: v1.0.2  
 **Stability**: Production-ready  
 **Next Milestone**: Public beta release
 

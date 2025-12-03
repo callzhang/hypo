@@ -210,9 +210,10 @@ TODO.txt
 .android-sdk/
 
 .gradle/
+# macOS build artifacts (app bundles)
 macos/HypoApp.app
+macos/HypoApp-release.app
 *.pyc
 __pycache__/
 
 .secrets
-macos/HypoApp.app/Contents/MacOS/HypoMenuBar

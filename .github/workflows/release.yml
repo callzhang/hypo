@@ -142,35 +142,8 @@ jobs:
           # Extract version from tag (remove 'v' prefix if present)
           VERSION="${{ github.event.inputs.version || github.ref_name }}"
           VERSION="${VERSION#v}"  # Remove 'v' prefix if present
-          # Use a simpler approach with sed to insert version
-          cat > HypoApp.app/Contents/Info.plist << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>HypoMenuBar</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.hypo.clipboard</string>
-    <key>CFBundleName</key>
-    <string>Hypo</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleVersion</key>
-    <string>5</string>
-    <key>CFBundleShortVersionString</key>
-    <string>${VERSION}</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-</dict>
-</plist>
-EOF
+          # Create Info.plist using printf to avoid YAML lint issues with heredoc
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n    <key>CFBundleExecutable</key>\n    <string>HypoMenuBar</string>\n    <key>CFBundleIdentifier</key>\n    <string>com.hypo.clipboard</string>\n    <key>CFBundleName</key>\n    <string>Hypo</string>\n    <key>CFBundlePackageType</key>\n    <string>APPL</string>\n    <key>CFBundleVersion</key>\n    <string>5</string>\n    <key>CFBundleShortVersionString</key>\n    <string>%s</string>\n    <key>LSMinimumSystemVersion</key>\n    <string>13.0</string>\n    <key>LSUIElement</key>\n    <true/>\n    <key>NSHighResolutionCapable</key>\n    <true/>\n    <key>NSPrincipalClass</key>\n    <string>NSApplication</string>\n</dict>\n</plist>\n' "${VERSION}" > HypoApp.app/Contents/Info.plist
           
           # Generate icons if script exists
           if [ -f "../scripts/generate-icons.py" ]; then
@@ -308,7 +281,7 @@ EOF
           echo "notes_path=release-notes.md" >> $GITHUB_OUTPUT
       
       - name: Delete existing release if present
-        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/test/')
+        if: github.event_name == 'workflow_dispatch' && ! startsWith(github.ref, 'refs/heads/test/')
         run: |
           TAG_NAME="${{ steps.version.outputs.tag }}"
           if gh release view "$TAG_NAME" &>/dev/null; then
@@ -318,7 +291,7 @@ EOF
         continue-on-error: true
       
       - name: Delete existing tag if present
-        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/test/')
+        if: github.event_name == 'workflow_dispatch' && ! startsWith(github.ref, 'refs/heads/test/')
         run: |
           TAG_NAME="${{ steps.version.outputs.tag }}"
           if git rev-parse "$TAG_NAME" &>/dev/null; then
@@ -329,7 +302,7 @@ EOF
         continue-on-error: true
       
       - name: Create Git Tag (if workflow_dispatch and not test branch)
-        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/test/')
+        if: github.event_name == 'workflow_dispatch' && ! startsWith(github.ref, 'refs/heads/test/')
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG_NAME="${{ steps.version.outputs.tag }}"
@@ -339,7 +312,7 @@ EOF
           git push origin "$TAG_NAME"
       
       - name: Create Release
-        if: !startsWith(github.ref, 'refs/heads/test/')  # Skip release creation for test branches
+        if: ! startsWith(github.ref, 'refs/heads/test/')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.tag }}

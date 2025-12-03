@@ -189,9 +189,14 @@ jobs:
           elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
             VERSION="${{ github.ref_name }}"
           elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/heads/test/* ]]; then
-            # For test branches, use version without -test suffix (cleaner artifact names)
-            # Test branches don't create releases or tags anyway
-            VERSION="v1.0.0"
+            # For test branches, check if current commit has a tag, otherwise use default
+            COMMIT_TAG=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
+            if [ -n "$COMMIT_TAG" ]; then
+              VERSION="$COMMIT_TAG"
+            else
+              # Default version for test branches (cleaner artifact names)
+              VERSION="v1.0.0"
+            fi
           else
             VERSION="${{ github.ref_name }}"
           fi

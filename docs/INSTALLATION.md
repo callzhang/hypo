@@ -1,7 +1,7 @@
 # Hypo Installation Guide
 
 **Quick setup guide for macOS and Android**  
-**Version**: 0.2.2 Beta  
+**Version**: 1.0.1  
 **Last Updated**: December 2, 2025
 
 ---
@@ -170,7 +170,9 @@ launchctl load ~/Library/LaunchAgents/com.hypo.agent.plist
 4. **Grant Permissions**
    - **Required Immediately**: Storage, Network
    - **Required for Sync**: Accessibility (for clipboard monitoring)
-   - **Recommended**: Disable battery optimization
+   - **Optional but Recommended**: SMS (for SMS auto-sync feature)
+   - **Android 13+**: Notification permission (for foreground service)
+   - **Critical**: Disable battery optimization for reliable sync
 
 5. **Battery Optimization (Critical)**
    ```
@@ -185,11 +187,13 @@ launchctl load ~/Library/LaunchAgents/com.hypo.agent.plist
    → Apps that won't be put to sleep → Add Hypo
    ```
    
-   **Xiaomi (MIUI)**:
+   **Xiaomi (MIUI/HyperOS)**:
    ```
    Settings → Apps → Manage apps → Hypo → Battery saver → No restrictions
    Security → Permissions → Autostart → Enable Hypo
    ```
+   
+   **Note**: Hypo automatically detects MIUI/HyperOS devices and applies workarounds for multicast throttling. The app will show device-specific instructions in Settings when detected.
    
    **OnePlus/OxygenOS**:
    ```
@@ -517,8 +521,8 @@ adb uninstall com.hypo.clipboard
 
 ---
 
-**Installation Guide Version**: 1.1  
-**Compatible with Hypo**: 0.2.2 Beta  
+**Installation Guide Version**: 1.2  
+**Compatible with Hypo**: 1.0.1  
 **Last Updated**: December 2, 2025
 
 ## 📦 Build Information

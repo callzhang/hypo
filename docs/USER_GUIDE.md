@@ -1,8 +1,8 @@
 # Hypo User Guide
 
 **Cross-Platform Clipboard Synchronization**  
-**Version**: 0.2.3 Beta  
-**Last Updated**: November 26, 2025
+**Version**: 1.0.1  
+**Last Updated**: December 2, 2025
 
 ---
 
@@ -32,6 +32,9 @@ Hypo is a secure, real-time clipboard synchronization app that seamlessly connec
 - **📝 Rich Content**: Supports text, links, images, and small files
 - **📂 History**: Keep track of your last 200 clipboard items
 - **🔍 Search**: Find any copied content instantly
+- **📲 SMS Sync**: Automatically sync incoming SMS messages to macOS (Android)
+- **🔋 Battery Optimized**: 60-80% reduction in battery drain when screen off
+- **🎯 MIUI/HyperOS Optimized**: Automatic workarounds for Xiaomi device restrictions
 
 ---
 
@@ -58,55 +61,33 @@ Hypo is a secure, real-time clipboard synchronization app that seamlessly connec
 
 ## 📦 Installation
 
-### macOS Installation
+> **📖 For detailed installation instructions, including build from source, see [Installation Guide](INSTALLATION.md)**
 
-1. **Download the App**
-   - Download `Hypo.app` from the releases page
-   - Or build from source (see Developer Guide)
+### Quick Start
 
-2. **Install the Application**
-   ```bash
-   # Move to Applications folder
-   mv Hypo.app /Applications/
-   
-   # Grant necessary permissions when prompted
-   ```
+**macOS**:
+1. Download `Hypo-1.0.1.zip` from [GitHub Releases](https://github.com/callzhang/hypo/releases)
+2. Extract and move `Hypo.app` to `/Applications/`
+3. Launch Hypo and grant required permissions
+4. App appears in menu bar (clipboard icon)
 
-3. **First Launch**
-   - Launch Hypo from Applications or Spotlight
-   - Grant clipboard access permission when prompted
-   - The app will appear in your menu bar (clipboard icon)
+**Android**:
+1. Download `Hypo.1.0.1.apk` from [GitHub Releases](https://github.com/callzhang/hypo/releases)
+2. Enable "Install from Unknown Sources" if needed
+3. Install APK and grant permissions:
+   - Clipboard access (Accessibility Service)
+   - Network access
+   - Notification access (Android 13+)
+   - SMS access (optional, for SMS auto-sync)
+4. Disable battery optimization for best performance
+5. Open app and sync service starts automatically
 
-4. **Launch Agent Setup (Optional)**
-   ```bash
-   # For automatic startup (recommended)
-   cp ~/Library/LaunchAgents/com.hypo.agent.plist
-   launchctl load ~/Library/LaunchAgents/com.hypo.agent.plist
-   ```
+**Important for Android**:
+- **Battery Optimization**: Must be disabled for reliable sync
+- **MIUI/HyperOS Users**: App automatically detects and applies workarounds
+- **SMS Auto-Sync**: Grant SMS permission in Settings to enable automatic SMS syncing to macOS
 
-### Android Installation
-
-1. **Download the APK**
-   - Download `hypo-clipboard.apk` from the releases page
-   - Or install from Google Play Store (coming soon)
-
-2. **Install the App**
-   ```bash
-   # Enable "Install from Unknown Sources" if installing APK
-   adb install hypo-clipboard.apk
-   # Or install manually through file manager
-   ```
-
-3. **Grant Permissions**
-   - **Clipboard Access**: Required for monitoring clipboard changes
-   - **Network Access**: Required for device sync
-   - **Notification Access**: For sync status and new content alerts
-   - **Battery Optimization**: Disable for best performance
-
-4. **Start the Service**
-   - Open the app and tap "Start Sync"
-   - The foreground service will begin running
-   - You'll see a persistent notification
+For detailed installation steps, build instructions, and troubleshooting, see the [Installation Guide](INSTALLATION.md).
 
 ---
 
@@ -275,6 +256,9 @@ Hypo is a secure, real-time clipboard synchronization app that seamlessly connec
 - **Notifications**: Customize notification behavior
 - **Battery**: Optimize for battery vs. performance
 - **Privacy**: Data retention, encryption status
+- **SMS Auto-Sync**: Enable/disable automatic SMS copying and syncing
+- **Permissions**: View and manage app permissions (SMS, notifications)
+- **MIUI/HyperOS**: Automatic optimization settings (if detected)
 
 ---
 
@@ -311,6 +295,11 @@ Hypo is a secure, real-time clipboard synchronization app that seamlessly connec
 3. Ensure "Auto-start" is enabled
 4. Check notification permission granted
 5. Restart the sync service
+
+**For MIUI/HyperOS Users**:
+- App automatically applies workarounds for multicast throttling
+- Ensure "Autostart" is enabled: Settings → Apps → Manage apps → Hypo → Autostart
+- Settings screen shows device-specific instructions when MIUI/HyperOS is detected
 
 #### "macOS Clipboard Access Denied"
 
@@ -377,6 +366,9 @@ A: Typically less than 2% per day with optimized settings. The foreground servic
 
 **Q: Can I sync between more than 2 devices?**  
 A: Currently, Hypo supports pairing between 2 devices. Multi-device support is planned for a future release.
+
+**Q: Can Hypo sync SMS messages?**  
+A: Yes! On Android, Hypo can automatically copy incoming SMS messages to the clipboard and sync them to macOS. Enable SMS permission in Settings to use this feature. Note: Android 10+ may have restrictions on SMS access.
 
 **Q: What happens if I copy a password?**  
 A: Passwords are encrypted like any other content. However, we recommend using a dedicated password manager for sensitive credentials.
@@ -474,13 +466,23 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ## 📝 Changelog
 
-**Version 0.2.3 Beta** (Current)
-- Initial beta release
-- Basic clipboard sync functionality
-- QR code and remote pairing
-- End-to-end encryption
-- History and search features
-- macOS and Android support
+**Version 1.0.1** (Current - Production Release)
+- Production-ready release
+- Full clipboard sync functionality
+- LAN auto-discovery and remote pairing
+- End-to-end encryption (AES-256-GCM)
+- Clipboard history and search
+- SMS auto-sync (Android → macOS)
+- MIUI/HyperOS optimization and workarounds
+- Battery optimization (60-80% reduction when screen off)
+- Automated build and release pipeline
+- Comprehensive documentation
+
+**Version 1.0.0** (December 2025)
+- Initial production release
+- Device-agnostic pairing system
+- Production backend deployment
+- All core features implemented
 
 **Upcoming Features**:
 - Multi-device support (>2 devices)
@@ -491,6 +493,6 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ---
 
-**Last Updated**: November 26, 2025  
-**Version**: 0.2.3 Beta  
+**Last Updated**: December 2, 2025  
+**Version**: 1.0.1  
 **For Technical Support**: support@hypo.app

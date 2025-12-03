@@ -189,8 +189,9 @@ jobs:
           elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
             VERSION="${{ github.ref_name }}"
           elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/heads/test/* ]]; then
-            # For test branches, use a test version
-            VERSION="v1.0.0-test"
+            # For test branches, use version without -test suffix (cleaner artifact names)
+            # Test branches don't create releases or tags anyway
+            VERSION="v1.0.0"
           else
             VERSION="${{ github.ref_name }}"
           fi

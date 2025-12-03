@@ -130,7 +130,7 @@ tasks.configureEach {
         val sentryAuthToken = System.getenv("SENTRY_AUTH_TOKEN") 
             ?: rootProject.file("../.env").let { file ->
                 if (file.exists()) {
-                    val props = java.util.Properties()
+                    val props = Properties()
                     file.inputStream().use { props.load(it) }
                     props.getProperty("SENTRY_AUTH_TOKEN", "")
                 } else {
@@ -144,8 +144,8 @@ tasks.configureEach {
 }
 
 androidComponents {
-    beforeVariants(selector().withBuildType("release")) { variant ->
-        variant.enableUnitTest = false
+    beforeVariants(selector().withBuildType("release")) { variantBuilder ->
+        (variantBuilder as? com.android.build.api.variant.HasHostTestsBuilder)?.hostTests?.get(com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE)?.enable = false
     }
 }
 

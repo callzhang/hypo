@@ -59,7 +59,8 @@ hex = "0.4"
 
 # Security: Force protobuf to 3.7.2+ to fix CVE-2025-53605 (uncontrolled recursion vulnerability)
 # This ensures all dependencies use the patched version (prometheus 0.14.0 also uses 3.7.2)
-protobuf = ">=3.7.2"
+# Using exact version to prevent Dependabot from seeing 2.28.0 as resolvable
+protobuf = "3.7.2"
 
 [dev-dependencies]
 actix-test = "0.1"

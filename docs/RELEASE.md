@@ -21,16 +21,17 @@ Releases are automated using GitHub Actions. When you push a tag or manually tri
 
 ```bash
 # 1. Update version numbers in code (if needed)
-#    - android/app/build.gradle.kts: versionName = "0.2.2"
+#    - android/app/build.gradle.kts: versionName = "1.0.2"
 #    - macos/HypoApp.app/Contents/Info.plist: CFBundleShortVersionString
+#    - backend/Cargo.toml: version = "1.0.2"
 
 # 2. Commit changes
 git add .
-git commit -m "Release v0.2.2"
+git commit -m "Release v1.0.2"
 
 # 3. Create and push tag
-git tag -a v0.2.2 -m "Release v0.2.2"
-git push origin v0.2.2
+git tag -a v1.0.2 -m "Release v1.0.2"
+git push origin v1.0.2
 ```
 
 The workflow will automatically:
@@ -43,7 +44,7 @@ The workflow will automatically:
 1. Go to **Actions** tab in GitHub
 2. Select **Release** workflow
 3. Click **Run workflow**
-4. Enter version tag (e.g., `v0.2.2`)
+4. Enter version tag (e.g., `v1.0.2`)
 5. Click **Run workflow**
 
 ---
@@ -54,9 +55,8 @@ Each release includes:
 
 | Artifact | Description | Size |
 |----------|-------------|------|
-| `hypo-android-release-{version}.apk` | Optimized production APK | ~15-20MB |
-| `hypo-android-debug-{version}.apk` | Debug APK for testing | ~47MB |
-| `Hypo-macOS-{version}.zip` | macOS app bundle | ~10-15MB |
+| `Hypo-{version}.apk` | Optimized production APK | ~15-20MB |
+| `Hypo-{version}.zip` | macOS app bundle | ~10-15MB |
 
 ---
 
@@ -69,10 +69,10 @@ Follow [Semantic Versioning](https://semver.org/):
 - **Patch** (0.0.X): Bug fixes
 
 Examples:
-- `v0.2.2` - Patch release
-- `v0.3.0` - Minor release
-- `v1.0.0` - Major release
-- `v0.2.2-beta` - Pre-release
+- `v1.0.2` - Patch release
+- `v1.1.0` - Minor release
+- `v2.0.0` - Major release
+- `v1.0.2-beta` - Pre-release
 
 ---
 
@@ -83,7 +83,10 @@ Before creating a release:
 - [ ] Update version numbers in:
   - [ ] `android/app/build.gradle.kts` (versionName, versionCode)
   - [ ] `macos/HypoApp.app/Contents/Info.plist` (CFBundleShortVersionString)
+  - [ ] `backend/Cargo.toml` (version)
   - [ ] `docs/INSTALLATION.md` (version number)
+  - [ ] `docs/prd.md` (version)
+  - [ ] `docs/USER_GUIDE.md` (version)
 - [ ] Update `changelog.md` with release notes
 - [ ] Test builds locally:
   ```bash
@@ -111,13 +114,12 @@ Release notes are automatically generated from:
 ### Format
 
 ```markdown
-# Release v0.2.2
+# Release v1.0.2
 
 ## Downloads
 
-- **Android (Release)**: `hypo-android-release-0.2.2.apk` (~15-20MB)
-- **Android (Debug)**: `hypo-android-debug-0.2.2.apk` (~47MB)
-- **macOS**: `Hypo-macOS-0.2.2.zip`
+- **Android**: `Hypo-1.0.2.apk` (~15-20MB, optimized for production)
+- **macOS**: `Hypo-1.0.2.zip` (extract and move to Applications)
 
 ## Installation
 
@@ -130,9 +132,8 @@ See [INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
 ## Checksums
 
 SHA256 checksums:
-  abc123...  hypo-android-release-0.2.2.apk
-  def456...  hypo-android-debug-0.2.2.apk
-  ghi789...  Hypo-macOS-0.2.2.zip
+  abc123...  Hypo-1.0.2.apk
+  def456...  Hypo-1.0.2.zip
 ```
 
 ---
@@ -154,8 +155,8 @@ SHA256 checksums:
 1. **Android Build** (Ubuntu):
    - Sets up JDK 17
    - Sets up Android SDK
-   - Builds debug and release APKs
-   - Uploads as artifacts
+   - Builds release APK only (optimized, ~15-20MB)
+   - Uploads as artifact
 
 2. **macOS Build** (macOS 14):
    - Builds Swift package in release mode
@@ -198,7 +199,7 @@ Artifacts are retained for **30 days** in GitHub Actions. After release creation
 - Check repository settings → Actions → General → Workflow permissions
 
 **Tag Already Exists**:
-- Delete existing tag: `git tag -d v0.2.2 && git push origin :refs/tags/v0.2.2`
+- Delete existing tag: `git tag -d v1.0.2 && git push origin :refs/tags/v1.0.2`
 - Or use a different version number
 
 ### Missing Artifacts
@@ -218,16 +219,15 @@ If you prefer to create releases manually:
 ./scripts/build-all.sh release
 
 # 2. Create tag
-git tag -a v0.2.2 -m "Release v0.2.2"
-git push origin v0.2.2
+git tag -a v1.0.2 -m "Release v1.0.2"
+git push origin v1.0.2
 
 # 3. Create release on GitHub
-gh release create v0.2.2 \
-  --title "Release v0.2.2" \
+gh release create v1.0.2 \
+  --title "Release v1.0.2" \
   --notes "Release notes here" \
   android/app/build/outputs/apk/release/app-release.apk \
-  android/app/build/outputs/apk/debug/app-debug.apk \
-  Hypo-macOS-v0.2.2.zip
+  Hypo-1.0.2.zip
 ```
 
 ---
@@ -251,5 +251,6 @@ gh release create v0.2.2 \
 
 ---
 
-**Last Updated**: December 2, 2025
+**Last Updated**: December 2, 2025  
+**Current Version**: 1.0.2
 

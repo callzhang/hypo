@@ -6,7 +6,7 @@ This document summarizes the breaking changes introduced when removing backward 
 
 ## Date
 
-**2025-12-02** - Deployed with v0.3.3 (superseded by v1.0.0 production release)
+**2025-01-XX** (To be updated with actual deployment date)
 
 ## Impact
 

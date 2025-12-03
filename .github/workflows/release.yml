@@ -161,14 +161,29 @@ jobs:
           VERSION="${{ github.event.inputs.version || github.ref_name }}"
           VERSION="${VERSION#v}"  # Remove 'v' prefix if present
           # Create Info.plist using printf to avoid YAML lint issues with heredoc
-          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n    <key>CFBundleExecutable</key>\n    <string>HypoMenuBar</string>\n    <key>CFBundleIdentifier</key>\n    <string>com.hypo.clipboard</string>\n    <key>CFBundleName</key>\n    <string>Hypo</string>\n    <key>CFBundlePackageType</key>\n    <string>APPL</string>\n    <key>CFBundleVersion</key>\n    <string>5</string>\n    <key>CFBundleShortVersionString</key>\n    <string>%s</string>\n    <key>LSMinimumSystemVersion</key>\n    <string>13.0</string>\n    <key>LSUIElement</key>\n    <true/>\n    <key>NSHighResolutionCapable</key>\n    <true/>\n    <key>NSPrincipalClass</key>\n    <string>NSApplication</string>\n</dict>\n</plist>\n' "${VERSION}" > HypoApp.app/Contents/Info.plist
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n    <key>CFBundleExecutable</key>\n    <string>HypoMenuBar</string>\n    <key>CFBundleIdentifier</key>\n    <string>com.hypo.clipboard</string>\n    <key>CFBundleName</key>\n    <string>Hypo</string>\n    <key>CFBundlePackageType</key>\n    <string>APPL</string>\n    <key>CFBundleVersion</key>\n    <string>5</string>\n    <key>CFBundleShortVersionString</key>\n    <string>%s</string>\n    <key>LSMinimumSystemVersion</key>\n    <string>13.0</string>\n    <key>LSUIElement</key>\n    <true/>\n    <key>NSHighResolutionCapable</key>\n    <true/>\n    <key>CFBundleIconFile</key>\n    <string>AppIcon</string>\n    <key>NSPrincipalClass</key>\n    <string>NSApplication</string>\n</dict>\n</plist>\n' "${VERSION}" > HypoApp.app/Contents/Info.plist
           
           # Generate icons if script exists
+          echo "Generating icons..."
           if [ -f "../scripts/generate-icons.py" ]; then
-            echo "Generating icons..."
-            python3 ../scripts/generate-icons.py || echo "Icon generation failed, continuing without icon"
+            # Ensure Resources directory exists
+            mkdir -p HypoApp.app/Contents/Resources
+            # Run icon generation and capture output
+            if python3 ../scripts/generate-icons.py 2>&1; then
+              echo "✅ Icons generated successfully"
+              # Verify icon was created
+              if [ -f "HypoApp.app/Contents/Resources/AppIcon.icns" ] || [ -d "HypoApp.app/Contents/Resources/AppIcon.iconset" ]; then
+                echo "✅ Icon file verified"
+              else
+                echo "⚠️  Warning: Icon generation reported success but icon file not found"
+              fi
+            else
+              echo "❌ Icon generation failed"
+              echo "⚠️  App will run without icon"
+            fi
           else
-            echo "Icon generation script not found, skipping"
+            echo "⚠️  Icon generation script not found at ../scripts/generate-icons.py"
+            echo "⚠️  App will run without icon"
           fi
           
           echo "macOS app build complete"

@@ -308,7 +308,7 @@ EOF
           echo "notes_path=release-notes.md" >> $GITHUB_OUTPUT
       
       - name: Delete existing release if present
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/test/')
         run: |
           TAG_NAME="${{ steps.version.outputs.tag }}"
           if gh release view "$TAG_NAME" &>/dev/null; then
@@ -318,7 +318,7 @@ EOF
         continue-on-error: true
       
       - name: Delete existing tag if present
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/test/')
         run: |
           TAG_NAME="${{ steps.version.outputs.tag }}"
           if git rev-parse "$TAG_NAME" &>/dev/null; then
@@ -328,8 +328,8 @@ EOF
           fi
         continue-on-error: true
       
-      - name: Create Git Tag (if workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Create Git Tag (if workflow_dispatch and not test branch)
+        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/test/')
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG_NAME="${{ steps.version.outputs.tag }}"
@@ -339,6 +339,7 @@ EOF
           git push origin "$TAG_NAME"
       
       - name: Create Release
+        if: !startsWith(github.ref, 'refs/heads/test/')  # Skip release creation for test branches
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.tag }}

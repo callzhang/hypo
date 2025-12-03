@@ -47,32 +47,18 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
       
-      - name: Build Debug APK
-        working-directory: android
-        run: ./gradlew assembleDebug
-      
       - name: Build Release APK
         working-directory: android
         env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN || '' }}
-        run: ./gradlew assembleRelease --stacktrace || echo "Release build failed, continuing with debug APK only"
-        continue-on-error: true
-      
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: ./gradlew assembleRelease --stacktrace
       
       - name: Upload Release APK
-        if: success() || failure()  # Upload if file exists
         uses: actions/upload-artifact@v4
         with:
           name: android-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
-          if-no-files-found: ignore
 
   build-macos:
     name: Build macOS App
@@ -205,12 +191,6 @@ jobs:
           echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "Version: $VERSION, Tag: $TAG_NAME"
       
-      - name: Download Android Debug APK
-        uses: actions/download-artifact@v4
-        with:
-          name: android-debug-apk
-          path: ./artifacts
-      
       - name: Download Android Release APK
         uses: actions/download-artifact@v4
         with:
@@ -227,12 +207,12 @@ jobs:
         run: |
           cd artifacts
           TAG_NAME="${{ steps.version.outputs.tag }}"
-          mv app-debug.apk hypo-android-debug-${TAG_NAME}.apk
-          # Release APK may not exist if build failed
+          # Rename release APK
           if [ -f "app-release.apk" ]; then
             mv app-release.apk hypo-android-release-${TAG_NAME}.apk
           else
-            echo "Release APK not found, skipping"
+            echo "❌ Release APK not found!"
+            exit 1
           fi
           # macOS zip already has version in name
           ls -lh
@@ -255,8 +235,7 @@ jobs:
           
           ## Downloads
           
-          - **Android (Release)**: \`hypo-android-release-${TAG_NAME}.apk\` (~15-20MB, optimized for production)
-          - **Android (Debug)**: \`hypo-android-debug-${TAG_NAME}.apk\` (~47MB, for development/testing)
+          - **Android**: \`hypo-android-release-${TAG_NAME}.apk\` (~15-20MB, optimized for production)
           - **macOS**: \`Hypo-macOS-${TAG_NAME}.zip\` (extract and move to Applications)
           
           ## Installation
@@ -325,7 +304,6 @@ jobs:
           name: Release ${{ steps.version.outputs.version }}
           body_path: ${{ steps.release-notes.outputs.notes_path }}
           files: |
-            artifacts/hypo-android-debug-*.apk
             artifacts/hypo-android-release-*.apk
             artifacts/Hypo-macOS-*.zip
           draft: false

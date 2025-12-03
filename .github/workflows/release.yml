@@ -87,6 +87,9 @@ jobs:
         with:
           python-version: '3.x'
       
+      - name: Install Python dependencies
+        run: pip install Pillow
+      
       - name: Build macOS App
         working-directory: macos
         run: |

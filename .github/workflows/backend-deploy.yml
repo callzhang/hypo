@@ -3,15 +3,35 @@ name: Deploy Backend Relay
 on:
   push:
     branches: [main]
-    paths:
-      - 'backend/**/*.rs'
-      - 'backend/Cargo.toml'
-      - 'backend/Cargo.lock'
-      - '.github/workflows/backend-deploy.yml'
   workflow_dispatch:
 
 jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend-rs-changed: ${{ steps.filter.outputs.backend-rs }}
+      backend-cargo-changed: ${{ steps.filter.outputs.backend-cargo }}
+      should-deploy: ${{ steps.filter.outputs.backend-rs == 'true' || steps.filter.outputs.backend-cargo == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Check for backend .rs or Cargo file changes
+        id: filter
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            backend-rs:
+              - 'backend/**/*.rs'
+            backend-cargo:
+              - 'backend/Cargo.toml'
+              - 'backend/Cargo.lock'
+
   build-and-deploy:
+    needs: check-changes
+    if: needs.check-changes.outputs.should-deploy == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       FLY_ACCESS_TOKEN: ${{ secrets.FLY_API_TOKEN }}

@@ -110,9 +110,9 @@ sentry {
     // Only configure uploads if auth token is provided (disable in CI without token)
     if (sentryAuthToken.isNotEmpty()) {
         authToken = sentryAuthToken
-        // Automatically upload ProGuard/R8 mapping files
-        uploadNativeSymbols = true
-        includeNativeSources = true
+    // Automatically upload ProGuard/R8 mapping files
+    uploadNativeSymbols = true
+    includeNativeSources = true
         autoUploadProguardMapping = true
     } else {
         // Disable all uploads when no token is available

@@ -144,6 +144,14 @@ jobs:
           
           echo "macOS app build complete"
       
+      - name: Sign macOS App
+        working-directory: macos
+        run: |
+          echo "Signing macOS app with ad-hoc signature..."
+          chmod +x ../scripts/sign-macos.sh
+          ../scripts/sign-macos.sh HypoApp.app
+          echo "✅ App signed successfully"
+      
       - name: Create macOS ZIP
         working-directory: macos
         run: |

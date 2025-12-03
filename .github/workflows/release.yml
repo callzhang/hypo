@@ -159,7 +159,7 @@ jobs:
           # Remove 'v' prefix if present and sanitize (replace slashes with dashes)
           VERSION="${VERSION#v}"
           SAFE_VERSION="${VERSION//\//-}"
-          zip -r ../Hypo-macOS-${SAFE_VERSION}.zip HypoApp.app
+          zip -r ../Hypo-macOS-release-${SAFE_VERSION}.zip HypoApp.app
       
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
@@ -232,7 +232,7 @@ jobs:
           # Rename macOS zip to use tag name (not branch name) if needed
           if [ -f "Hypo-macOS-"*.zip ]; then
             OLD_ZIP=$(ls Hypo-macOS-*.zip | head -1)
-            EXPECTED_NAME="Hypo-macOS-${TAG_NAME}.zip"
+            EXPECTED_NAME="Hypo-macOS-release-${TAG_NAME}.zip"
             if [ "$OLD_ZIP" != "$EXPECTED_NAME" ]; then
               mv "$OLD_ZIP" "$EXPECTED_NAME"
             else
@@ -260,7 +260,7 @@ jobs:
           ## Downloads
           
           - **Android**: \`hypo-android-release-${TAG_NAME}.apk\` (~15-20MB, optimized for production)
-          - **macOS**: \`Hypo-macOS-${TAG_NAME}.zip\` (extract and move to Applications)
+          - **macOS**: \`Hypo-macOS-release-${TAG_NAME}.zip\` (extract and move to Applications)
           
           ## Installation
           
@@ -329,7 +329,7 @@ jobs:
           body_path: ${{ steps.release-notes.outputs.notes_path }}
           files: |
             artifacts/hypo-android-release-*.apk
-            artifacts/Hypo-macOS-*.zip
+            artifacts/Hypo-macOS-release-*.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
           generate_release_notes: true

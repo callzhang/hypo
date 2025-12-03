@@ -38,7 +38,7 @@ class LanDiscoveryRepository(
 
     override fun discover(serviceType: String): Flow<LanDiscoveryEvent> = callbackFlow {
         val multicastLock = (multicastLockFactory ?: { createMulticastLock() }).invoke().also { it.acquire() }
-        var miuiRestartJob: Job? = null
+        var miuiRestartJob: Job?
 
         val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(regType: String?) {

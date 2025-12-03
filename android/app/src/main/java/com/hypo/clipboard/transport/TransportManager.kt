@@ -94,7 +94,7 @@ class TransportManager(
         }
         val key = "transport_$deviceId"
         try {
-            val editor = prefs?.edit()
+            val editor = prefs.edit()
             if (editor == null) {
                 android.util.Log.e("TransportManager", "❌ Failed to get SharedPreferences editor")
                 return
@@ -117,7 +117,7 @@ class TransportManager(
         // Normalize device ID to lowercase for consistent storage
         val normalizedId = deviceId.lowercase().removePrefix("macos-").removePrefix("android-")
         val key = "device_name_$normalizedId"
-        prefs?.edit()?.putString(key, deviceName)?.commit()
+        prefs.edit().putString(key, deviceName).commit()
         android.util.Log.d("TransportManager", "💾 Persisted device name: device=$deviceId (normalized: $normalizedId), name=$deviceName")
     }
     
@@ -129,7 +129,7 @@ class TransportManager(
         
         // Try with the normalized device ID first
         var key = "device_name_$normalizedId"
-        var name = prefs?.getString(key, null)
+        var name = prefs.getString(key, null)
         if (name != null) {
             android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (normalized: $normalizedId): $name")
             return name
@@ -138,7 +138,7 @@ class TransportManager(
         // Try with original case (in case it was stored with original case)
         if (deviceId != normalizedId) {
             key = "device_name_$deviceId"
-            name = prefs?.getString(key, null)
+            name = prefs.getString(key, null)
             if (name != null) {
                 android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (original case): $name")
                 return name
@@ -151,7 +151,7 @@ class TransportManager(
         val migratedId = normalizedId.removePrefix("macos-").removePrefix("android-")
         if (migratedId != normalizedId) {
             key = "device_name_$migratedId"
-            name = prefs?.getString(key, null)
+            name = prefs.getString(key, null)
             if (name != null) {
                 android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (migrated: $migratedId): $name")
                 return name
@@ -161,7 +161,7 @@ class TransportManager(
         // Also try with prefixes added (in case getAllDeviceIds returned unprefixed but name was stored with prefix)
         for (prefix in listOf("macos-", "android-")) {
             key = "device_name_${prefix}$normalizedId"
-            name = prefs?.getString(key, null)
+            name = prefs.getString(key, null)
             if (name != null) {
                 android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (with prefix $prefix): $name")
                 return name
@@ -303,7 +303,6 @@ class TransportManager(
                             android.util.Log.d("TransportManager", "✅ Decoded envelope: type=${envelope.type}, id=${envelope.id.take(8)}..., senderDeviceId=${envelope.payload.deviceId?.take(20)}...")
                             
                             // Check if this is from our own device ID (prevent echo loops)
-                            val senderDeviceId = envelope.payload.deviceId?.lowercase()
                             // Note: We need access to DeviceIdentity to compare - this check will be done in IncomingClipboardHandler
                             // For now, we'll pass it through and let IncomingClipboardHandler filter it
                             
@@ -366,8 +365,8 @@ class TransportManager(
                     if (!isActive) break
                     
                     // Check if advertising should be active but isn't
-                    val config = currentConfig
-                    if (config != null && config.port > 0 && !_isAdvertising.value) {
+                    val currentAdConfig = currentConfig
+                    if (currentAdConfig != null && currentAdConfig.port > 0 && !_isAdvertising.value) {
                         android.util.Log.w("TransportManager", "⚠️ Health check: Advertising should be active but isn't. Restarting...")
                         start(config)
                     }
@@ -692,7 +691,7 @@ class TransportManager(
                 ConnectionState.ConnectedLan,
                 ConnectionState.ConnectedCloud -> {
                     attempts = 0
-                    when (val monitorResult = monitorConnection(
+                    when (monitorConnection(
                         sendHeartbeat = sendHeartbeat,
                         awaitAck = awaitAck,
                         config = config

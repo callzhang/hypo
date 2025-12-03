@@ -159,7 +159,7 @@ class ClipboardSyncService : Service() {
         }
         
         // Set up error handlers for sync failures
-        val errorHandler: (String, String) -> Unit = { deviceId, errorMessage ->
+        val errorHandler: (String, String) -> Unit = { deviceId, _ ->
             scope.launch(Dispatchers.Main) {
                 val deviceName = transportManager.getDeviceName(deviceId) ?: deviceId.take(20)
                 val toastMessage = "Failed to sync to $deviceName: incorrect device_id ($deviceId)"

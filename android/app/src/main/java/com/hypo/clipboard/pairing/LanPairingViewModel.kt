@@ -242,7 +242,7 @@ class LanPairingViewModel @Inject constructor(
                         }
                         
                         // Step 4: Ensure connection is established before sending challenge
-                        wsClient?.let { client ->
+                        wsClient?.let { _ ->
                             withContext(Dispatchers.IO) {
                                 delay(100)
                             }

@@ -34,15 +34,15 @@ class FallbackSyncTransport(
      * At least one must succeed, but all are attempted in parallel.
      */
     private suspend fun sendToAll(envelope: SyncEnvelope, targetDeviceId: String?) = coroutineScope {
-        var lanSuccess = false
-        var cloudSuccess = false
+        var lanSuccess: Boolean
+        var cloudSuccess: Boolean
         var lanError: Exception? = null
         var cloudError: Exception? = null
         
         // Launch LAN send(s) and cloud send in parallel
         val lanJob = async {
             try {
-                withTimeoutOrNull(Duration.ofSeconds(3).toMillis()) {
+                val result = withTimeoutOrNull(Duration.ofSeconds(3).toMillis()) {
                     if (targetDeviceId != null) {
                         // Send to specific peer
                         val success = lanPeerConnectionManager.sendToPeer(targetDeviceId, envelope)
@@ -55,7 +55,8 @@ class FallbackSyncTransport(
                         val successCount = lanPeerConnectionManager.sendToAllPeers(envelope)
                         successCount > 0
                     }
-                } ?: false
+                }
+                result ?: false
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -69,8 +69,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
             val clip = clipboardManager?.primaryClip ?: return
             
             // Parse clipboard content
-            val event = clipboardParser.parse(clip) ?: return
-            val signature = event.signature()
+            val clipboardEvent = clipboardParser.parse(clip) ?: return
+            val signature = clipboardEvent.signature()
             
             // Skip if duplicate
             if (signature == lastSignature) {

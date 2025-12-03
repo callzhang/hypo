@@ -589,6 +589,7 @@ private fun DeviceRow(
     onRemove: () -> Unit,
     deviceName: String? = null
 ) {
+    // transport parameter is kept for API compatibility but not currently used in UI
     // Use stored device name if available, otherwise fall back to serviceName (Bonjour hostname)
     val displayName = deviceName ?: peer.attributes["device_name"] ?: peer.serviceName
     

@@ -242,16 +242,6 @@ jobs:
           
           echo "notes_path=release-notes.md" >> $GITHUB_OUTPUT
       
-      - name: Create Git Tag (if workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG_NAME="${{ steps.version.outputs.tag }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "Release $VERSION"
-          git push origin "$TAG_NAME"
-      
       - name: Delete existing release if present
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -272,6 +262,16 @@ jobs:
             git push origin ":refs/tags/$TAG_NAME" || true
           fi
         continue-on-error: true
+      
+      - name: Create Git Tag (if workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG_NAME="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" -m "Release $VERSION"
+          git push origin "$TAG_NAME"
       
       - name: Create Release
         uses: softprops/action-gh-release@v1

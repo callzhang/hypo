@@ -372,9 +372,10 @@ class TransportManager(
                     }
                     
                     // Check if WebSocket server should be running but isn't
-                    if (config != null && config.port > 0 && webSocketServer == null) {
+                    val currentWsConfig = currentConfig
+                    if (currentWsConfig != null && currentWsConfig.port > 0 && webSocketServer == null) {
                         android.util.Log.w("TransportManager", "⚠️ Health check: WebSocket server should be running but isn't. Restarting...")
-                        start(config)
+                        start(currentWsConfig)
                     }
                 }
             }

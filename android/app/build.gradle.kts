@@ -124,6 +124,25 @@ sentry {
     }
 }
 
+// Skip Sentry upload tasks when no auth token is available
+tasks.configureEach {
+    if (name.startsWith("uploadSentry") || name.startsWith("sentryBundle")) {
+        val sentryAuthToken = System.getenv("SENTRY_AUTH_TOKEN") 
+            ?: rootProject.file("../.env").let { file ->
+                if (file.exists()) {
+                    val props = java.util.Properties()
+                    file.inputStream().use { props.load(it) }
+                    props.getProperty("SENTRY_AUTH_TOKEN", "")
+                } else {
+                    ""
+                }
+            }
+        if (sentryAuthToken.isEmpty()) {
+            enabled = false
+        }
+    }
+}
+
 androidComponents {
     beforeVariants(selector().withBuildType("release")) { variant ->
         variant.enableUnitTest = false

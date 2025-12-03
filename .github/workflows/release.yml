@@ -222,9 +222,9 @@ jobs:
         run: |
           cd artifacts
           TAG_NAME="${{ steps.version.outputs.tag }}"
-          # Rename release APK (use dot separator: Hypo.1.0.1.apk)
+          # Rename release APK (use hyphen separator: Hypo-1.0.2.apk)
           if [ -f "app-release.apk" ]; then
-            mv app-release.apk Hypo.${TAG_NAME}.apk
+            mv app-release.apk Hypo-${TAG_NAME}.apk
           else
             echo "❌ Release APK not found!"
             exit 1
@@ -259,7 +259,7 @@ jobs:
           
           ## Downloads
           
-          - **Android**: \`Hypo.${TAG_NAME}.apk\` (~15-20MB, optimized for production)
+          - **Android**: \`Hypo-${TAG_NAME}.apk\` (~15-20MB, optimized for production)
           - **macOS**: \`Hypo-${TAG_NAME}.zip\` (extract and move to Applications)
           
           ## Installation

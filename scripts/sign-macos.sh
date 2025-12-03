@@ -98,10 +98,10 @@ log_success "Cleaned app bundle"
 log_info "Step 1: Ad-hoc signing app bundle..."
 log_warn "Note: This is a free ad-hoc signature, not notarized."
 log_warn "Users will see a Gatekeeper warning on first launch."
+log_info "Note: --timestamp is omitted for ad-hoc signing (only needed for Developer ID signatures)"
 
 codesign --force --deep --sign "-" \
     --entitlements "$ENTITLEMENTS" \
-    --timestamp \
     "$APP_BUNDLE"
 
 if [ $? -ne 0 ]; then

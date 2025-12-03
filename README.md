@@ -6,6 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green)]()
 [![Status](https://img.shields.io/badge/status-Production%20Beta-green)]()
 [![Deploy Backend Relay](https://github.com/callzhang/hypo/actions/workflows/backend-deploy.yml/badge.svg)](https://github.com/callzhang/hypo/actions/workflows/backend-deploy.yml)
+[![Release](https://github.com/callzhang/hypo/actions/workflows/release.yml/badge.svg)](https://github.com/callzhang/hypo/actions/workflows/release.yml)
 
 ---
 

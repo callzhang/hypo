@@ -258,7 +258,7 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
     }
 }
 
-extension UNUserNotificationCenter: @retroactive @unchecked Sendable {}
+extension UNUserNotificationCenter: @unchecked Sendable {}
 
 #if canImport(AppKit)
 extension ClipboardNotificationController {

@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 #endif
 
 // UserDefaults is thread-safe for reading/writing, safe to mark as Sendable
-extension UserDefaults: @retroactive @unchecked Sendable {}
+extension UserDefaults: @unchecked Sendable {}
 
 public actor HistoryStore {
     private let logger = HypoLogger(category: "HistoryStore")

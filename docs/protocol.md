@@ -1,8 +1,8 @@
 # Hypo Clipboard Sync Protocol Specification
 
-Version: 1.0.0-draft  
-Status: Draft  
-Date: October 1, 2025
+Version: 1.0.0  
+Status: Production  
+Date: December 2, 2025
 
 ---
 
@@ -653,9 +653,9 @@ See `tests/protocol-test-vectors.json` for encryption/decryption test vectors (c
 
 ---
 
-**Protocol Version**: 1.0.0-draft  
+**Protocol Version**: 1.0.0  
 **Document Authors**: Principal Engineering Team  
-**Last Updated**: October 1, 2025
+**Last Updated**: December 2, 2025
 
 
 ---
@@ -693,5 +693,5 @@ For detailed migration information, see `/workspace/docs/archive/breaking_change
 ---
 
 **Document Version**: 1.0.0  
-**Last Updated**: November 26, 2025  
+**Last Updated**: December 2, 2025  
 **Status**: Production

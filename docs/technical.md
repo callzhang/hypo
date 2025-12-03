@@ -74,9 +74,13 @@ See `docs/architecture.mermaid` for visual representation.
 
 ## 2. Protocol Specification
 
+> **Full Protocol Specification**: See [`docs/protocol.md`](./protocol.md) for the complete protocol specification, including detailed message formats, control messages, error handling, and breaking changes history.
+
+This section provides a high-level overview of the protocol implementation. For detailed message schemas, field definitions, and protocol versioning, refer to the [Protocol Specification](./protocol.md).
+
 ### 2.1 Message Format
 
-All messages are JSON-encoded with the following schema:
+All messages are JSON-encoded with the following schema (see [`docs/protocol.md`](./protocol.md) §2 for complete schema):
 
 ```json
 {
@@ -109,6 +113,8 @@ All messages are JSON-encoded with the following schema:
 | `file` | Base64 | 1MB | Include filename in metadata |
 
 ### 2.3 WebSocket Lifecycle
+
+> **Reference**: See [`docs/protocol.md`](./protocol.md) §5 for detailed connection flow diagrams and handshake sequences.
 
 #### Connection Handshake
 ```
@@ -183,6 +189,8 @@ Server → Client: ACK + session token
 
 ### 2.4 De-duplication Strategy
 
+> **Reference**: See [`docs/protocol.md`](./protocol.md) §6 for the complete de-duplication algorithm.
+
 To prevent clipboard ping-pong loops:
 1. Each device maintains a **last sent hash** (SHA-256 of payload)
 2. Each device maintains a **last received hash**
@@ -191,6 +199,9 @@ To prevent clipboard ping-pong loops:
 5. Update `last_received_hash` after receiving
 
 ### 2.5 Throttling
+
+> **Reference**: See [`docs/protocol.md`](./protocol.md) §7 for the complete throttling algorithm and token bucket implementation.
+
 - **Rate**: Max 1 clipboard update per 300ms per device
 - **Burst**: Allow 3 updates in 1s, then throttle
 - **Implementation**: Token bucket algorithm

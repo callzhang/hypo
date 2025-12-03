@@ -165,7 +165,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-app
-          path: Hypo-macOS-*.zip
+          path: Hypo-macOS-release-*.zip
           retention-days: 30
 
   create-release:

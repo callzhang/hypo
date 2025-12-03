@@ -191,7 +191,7 @@ def create_icon_image(size):
     return img.convert("RGB")
 
 def generate_android_icons():
-    """Generate Android mipmap icons."""
+    """Generate Android mipmap icons and adaptive icon drawables."""
     print("📱 Generating Android icons...")
     
     android_res = PROJECT_ROOT / "android" / "app" / "src" / "main" / "res"
@@ -214,6 +214,62 @@ def generate_android_icons():
         icon.save(density_dir / "ic_launcher_round.png", "PNG")
         
         print(f"  ✓ {density}: {size}x{size}")
+    
+    # Generate adaptive icon drawables (for API 26+)
+    print("  Generating adaptive icon drawables...")
+    drawable_dir = android_res / "drawable"
+    drawable_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Background: dark gradient matching SVG
+    background_xml = '''<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Dark futuristic background gradient (from SVG) -->
+    <path
+        android:fillColor="#05010F"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+</vector>
+'''
+    (drawable_dir / "ic_launcher_background.xml").write_text(background_xml)
+    
+    # Foreground: ripple design matching SVG
+    foreground_xml = '''<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Ripple design matching SVG (cyan -> purple gradient) -->
+    <group>
+        <!-- Core pulse (r=22 in 512px = ~4.6dp in 108dp) -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#7DD3FC"
+            android:strokeWidth="1.3"
+            android:strokeAlpha="0.9"
+            android:pathData="M54,54 m-4.6,0 a4.6,4.6 0 1,1 9.2,0 a4.6,4.6 0 1,1 -9.2,0" />
+        <!-- Main ripple (r=110 in 512px = ~23.2dp in 108dp) -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#8B5CF6"
+            android:strokeWidth="2.1"
+            android:strokeAlpha="0.7"
+            android:pathData="M54,54 m-23.2,0 a23.2,23.2 0 1,1 46.4,0 a23.2,23.2 0 1,1 -46.4,0" />
+        <!-- Outer echo (r=180 in 512px = ~38dp in 108dp) -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#9333EA"
+            android:strokeWidth="1.3"
+            android:strokeAlpha="0.54"
+            android:pathData="M54,54 m-38,0 a38,38 0 1,1 76,0 a38,38 0 1,1 -76,0" />
+    </group>
+</vector>
+'''
+    (drawable_dir / "ic_launcher_foreground.xml").write_text(foreground_xml)
+    print("  ✓ Adaptive icon drawables generated")
     
     print("✅ Android icons generated")
 

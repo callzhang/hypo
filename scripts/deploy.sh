@@ -136,25 +136,77 @@ deploy() {
     log_info "Config: $FLY_CONFIG"
     echo ""
     
-    # Deploy with remote-only (builds on Fly.io)
-    log_info "Starting deployment (remote build)..."
-    echo ""
+    # Determine build strategy - default to local for faster builds
+    BUILD_STRATEGY="${BUILD_STRATEGY:-local}"
+    
+    # Auto-detect: prefer local if Docker is available and fast, otherwise remote
+    if [ "$BUILD_STRATEGY" = "auto" ]; then
+        if command -v docker &> /dev/null && docker info &> /dev/null; then
+            # Check if we have a fast machine (rough heuristic: check CPU cores)
+            CPU_CORES=$(sysctl -n hw.ncpu 2>/dev/null || echo "4")
+            if [ "$CPU_CORES" -ge 4 ]; then
+                BUILD_STRATEGY="local"
+                log_info "Auto-detected: Using local build (Docker available, $CPU_CORES CPU cores)"
+            else
+                BUILD_STRATEGY="remote"
+                log_info "Auto-detected: Using remote build (limited CPU resources)"
+            fi
+        else
+            BUILD_STRATEGY="remote"
+            log_info "Auto-detected: Using remote build (Docker not available)"
+        fi
+    fi
+    
+    # Validate local build requirements
+    if [ "$BUILD_STRATEGY" = "local" ]; then
+        if ! command -v docker &> /dev/null || ! docker info &> /dev/null; then
+            log_warning "Docker not available - falling back to remote build"
+            BUILD_STRATEGY="remote"
+        fi
+    fi
     
     cd "$BACKEND_DIR"
-    if $FLYCTL_CMD deploy \
-        --remote-only \
-        --config "$FLY_CONFIG" \
-        --app "$APP_NAME" \
-        2>&1 | tee /tmp/hypo_backend_deploy.log; then
-        log_success "Deployment completed successfully"
+    
+    if [ "$BUILD_STRATEGY" = "local" ]; then
+        log_info "Starting deployment (local build - faster for Rust projects)..."
+        echo ""
+        log_info "Building Docker image locally, then uploading..."
         
-        # Scale to 1 machine after deployment
-        scale_to_one
-        
-        return 0
+        if $FLYCTL_CMD deploy \
+            --local-only \
+            --config "$FLY_CONFIG" \
+            --app "$APP_NAME" \
+            2>&1 | tee /tmp/hypo_backend_deploy.log; then
+            log_success "Deployment completed successfully"
+            
+            # Scale to 1 machine after deployment
+            scale_to_one
+            
+            return 0
+        else
+            log_error "Local deployment failed. Check /tmp/hypo_backend_deploy.log"
+            log_info "You can try remote build with: BUILD_STRATEGY=remote $0"
+            exit 1
+        fi
     else
-        log_error "Deployment failed. Check /tmp/hypo_backend_deploy.log"
-        exit 1
+        log_info "Starting deployment (remote build on Fly.io)..."
+        echo ""
+        
+        if $FLYCTL_CMD deploy \
+            --remote-only \
+            --config "$FLY_CONFIG" \
+            --app "$APP_NAME" \
+            2>&1 | tee /tmp/hypo_backend_deploy.log; then
+            log_success "Deployment completed successfully"
+            
+            # Scale to 1 machine after deployment
+            scale_to_one
+            
+            return 0
+        else
+            log_error "Deployment failed. Check /tmp/hypo_backend_deploy.log"
+            exit 1
+        fi
     fi
 }
 
@@ -272,9 +324,13 @@ case "${1:-deploy}" in
         echo "  scale   - Scale to 1 machine"
         echo ""
         echo "Environment variables:"
-        echo "  FLYCTL_PATH  - Path to flyctl binary (default: /Users/derek/.fly/bin/flyctl)"
-        echo "  DEPLOY_ENV   - Deployment environment (default: production)"
-        echo "  SKIP_CONFIRM - Skip confirmation prompt (set to 1)"
+        echo "  FLYCTL_PATH    - Path to flyctl binary (default: /Users/derek/.fly/bin/flyctl)"
+        echo "  DEPLOY_ENV     - Deployment environment (default: production)"
+        echo "  SKIP_CONFIRM   - Skip confirmation prompt (set to 1)"
+        echo "  BUILD_STRATEGY - Build strategy: local|remote|auto (default: local)"
+        echo "                    local:  Build locally then upload (usually faster, default)"
+        echo "                    remote: Build on Fly.io servers (more reliable)"
+        echo "                    auto:   Auto-detect (prefers local if Docker available)"
         exit 1
         ;;
 esac

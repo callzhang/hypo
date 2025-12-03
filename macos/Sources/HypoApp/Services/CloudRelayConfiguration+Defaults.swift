@@ -2,7 +2,7 @@ import Foundation
 
 public enum CloudRelayDefaults {
     public static func production(bundle: Bundle = .main) -> CloudRelayConfiguration {
-        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
         let deviceIdentity = DeviceIdentity()
         return CloudRelayConfiguration(
             url: URL(string: "wss://hypo.fly.dev/ws")!,

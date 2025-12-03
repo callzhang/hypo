@@ -240,8 +240,7 @@ private fun SyncSection(
             fontWeight = FontWeight.SemiBold
         )
         ListItem(
-            headlineContent = { Text(text = "Plain Text Mode (Debug)") },
-            supportingContent = { Text(text = "⚠️ Send clipboard without encryption. Less secure, for debugging only.") },
+            headlineContent = { Text(text = "Plain Text Mode") },
             trailingContent = {
                 Switch(checked = plainTextMode, onCheckedChange = onPlainTextModeChanged)
             }

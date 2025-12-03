@@ -252,6 +252,27 @@ jobs:
           git tag -a "$TAG_NAME" -m "Release $VERSION"
           git push origin "$TAG_NAME"
       
+      - name: Delete existing release if present
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG_NAME="${{ steps.version.outputs.tag }}"
+          if gh release view "$TAG_NAME" &>/dev/null; then
+            echo "Deleting existing release $TAG_NAME..."
+            gh release delete "$TAG_NAME" --yes || true
+          fi
+        continue-on-error: true
+      
+      - name: Delete existing tag if present
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG_NAME="${{ steps.version.outputs.tag }}"
+          if git rev-parse "$TAG_NAME" &>/dev/null; then
+            echo "Deleting existing tag $TAG_NAME..."
+            git tag -d "$TAG_NAME" || true
+            git push origin ":refs/tags/$TAG_NAME" || true
+          fi
+        continue-on-error: true
+      
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -265,4 +286,5 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
           generate_release_notes: true
+          make_latest: true
 

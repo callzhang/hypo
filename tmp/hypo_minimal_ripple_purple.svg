@@ -1,0 +1,39 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Dark futuristic background -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#05010F"/>
+      <stop offset="100%" stop-color="#0B0220"/>
+    </linearGradient>
+
+    <!-- Ripple gradient: soft blur cyan -> neon purple -->
+    <radialGradient id="rippleGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7DD3FC" stop-opacity="0.9"/>
+      <stop offset="40%" stop-color="#38BDF8" stop-opacity="0.7"/>
+      <stop offset="70%" stop-color="#8B5CF6" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#9333EA" stop-opacity="0.9"/>
+    </radialGradient>
+
+    <!-- Soft glow -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Squircle background -->
+  <rect width="512" height="512" rx="120" fill="url(#bg)"/>
+
+  <!-- Simple futuristic ripple -->
+  <g transform="translate(256 256)" fill="none" stroke="url(#rippleGrad)" filter="url(#glow)">
+    <!-- Core pulse -->
+    <circle r="22" stroke-width="6"/>
+    <!-- Main ripple -->
+    <circle r="110" stroke-width="10"/>
+    <!-- Outer echo -->
+    <circle r="180" stroke-width="6" opacity="0.6"/>
+  </g>
+</svg>

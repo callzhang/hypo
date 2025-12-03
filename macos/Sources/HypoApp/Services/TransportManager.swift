@@ -959,7 +959,7 @@ public func updateConnectionState(_ newState: ConnectionState) {
 
     private static func defaultLanConfiguration() -> BonjourPublisher.Configuration {
         let hostName = ProcessInfo.processInfo.hostName
-        let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
         
         // Use DeviceIdentity to get consistent device ID format (macos-{UUID})
         let deviceIdentity = DeviceIdentity()

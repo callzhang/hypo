@@ -23,12 +23,17 @@ This directory contains automation scripts for building, testing, and managing t
   ./scripts/build-all.sh                  # Build both platforms (debug)
   ./scripts/build-all.sh deploy           # Build both platforms and deploy backend
   ```
-- **`deploy.sh`** - Deploy backend to Fly.io production
+- **`deploy.sh`** - Deploy backend to Fly.io production (defaults to local build for faster deployment)
   ```bash
-  ./scripts/deploy.sh deploy              # Full deployment (default)
+  ./scripts/deploy.sh deploy              # Full deployment (default, local build)
   ./scripts/deploy.sh test                # Run tests only
   ./scripts/deploy.sh verify              # Verify existing deployment
   ./scripts/deploy.sh info                # Show deployment information
+  ```
+- **`benchmark-deploy.sh`** - Benchmark local vs remote Fly.io deployments
+  ```bash
+  ./scripts/benchmark-deploy.sh           # Full benchmark (local + remote comparison)
+  ./scripts/benchmark-deploy.sh --quick   # Quick local build benchmark only
   ```
 
 ### Testing Scripts
@@ -51,13 +56,13 @@ All test scripts are now in the `tests/` directory:
 - **`run-transport-regression.sh`** - Cross-platform transport metrics regression tests
 
 ### Monitoring Scripts
-- **macOS Logs**: Use unified logging system
+- **macOS Logs**: Use unified logging system (see `docs/TROUBLESHOOTING.md` for detailed logging guide)
   ```bash
   # View all logs (excluding MIUIInput)
   log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep -v "MIUIInput"
   
-  # View error logs only
-  log stream --predicate 'subsystem == "com.hypo.clipboard"' --level error
+  # View error logs only (quick error check)
+  log stream --predicate 'subsystem == "com.hypo.clipboard"' --level error --style compact
   ```
 
 ### Setup Scripts
@@ -94,15 +99,10 @@ All test scripts are now in the `tests/` directory:
 ### Development/Debugging Tools
 These scripts are for specific debugging scenarios:
 - **`diagnose-lan-discovery.sh`** - Comprehensive LAN discovery diagnostic tool (see `DIAGNOSTIC_README.md`)
-- **`check-macos-errors.sh`** - Quick check for macOS error logs (simple wrapper around `log stream`)
 - **`analyze-routing-logs.sh`** - Analyze backend routing logs from Fly.io
 - **`screenshot-android.sh`** - Capture Android device cast window screenshots
 - **`analyze-screenshot.sh`** - Analyze screenshots with OCR (requires tesseract)
 - **`capture-crash.sh`** - Monitor and capture crash logs when manually copying text
-- **`focus-cast-window.sh`** - Focus Android cast window for screenshots
-- **`list-windows.sh`** - List all macOS windows (debugging utility)
-- **`find-cast-window.py`** - Find Android cast window using Python
-- **`get-window-bounds.py`** - Get window bounds for screenshot automation
 
 ## Usage Examples
 
@@ -162,7 +162,7 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep 
 # Run transport regression tests
 ./scripts/run-transport-regression.sh
 
-# Deploy backend to Fly.io
+# Deploy backend to Fly.io (local build by default)
 ./scripts/deploy.sh deploy
 
 # Run backend tests only
@@ -170,6 +170,10 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep 
 
 # Verify deployment
 ./scripts/deploy.sh verify
+
+# Benchmark deployment strategies
+./scripts/benchmark-deploy.sh --quick    # Quick local build benchmark
+./scripts/benchmark-deploy.sh           # Full comparison
 ```
 
 ## Script Dependencies
@@ -195,7 +199,15 @@ The following scripts have been consolidated or removed:
 - ✅ `capture-window-auto.sh` → Removed (redundant with `screenshot-android.sh`)
 - ✅ `monitor-pairing.sh` → Removed (use unified logging: `log stream --predicate 'subsystem == "com.hypo.clipboard"'`)
 - ✅ `generate-icons.sh` → Removed (redundant with `generate-icons.py`, which is used by build scripts)
+- ✅ `generate-icons-from-svg.py` → Removed (redundant, `generate-icons.py` is used by build scripts and doesn't require SVG file)
 - ✅ `detect-cloud-disconnection.sh` → Removed (hardcoded device ID, use general log monitoring instead)
+- ✅ `quick-benchmark.sh` → Merged into `benchmark-deploy.sh` with `--quick` flag
+- ✅ `check-macos-errors.sh` → Merged into `docs/TROUBLESHOOTING.md` (see macOS logging section)
+- ✅ `create-release.sh` → Merged into `.github/workflows/release.yml` (automated via GitHub Actions)
+- ✅ `list-windows.sh` → Removed (no longer needed)
+- ✅ `get-window-bounds.py` → Removed (no longer needed)
+- ✅ `focus-cast-window.sh` → Removed (no longer needed)
+- ✅ `find-cast-window.py` → Removed (no longer needed)
 
 **All test scripts are now in the `tests/` directory:**
 - `tests/test-sync.sh` - Comprehensive sync testing suite

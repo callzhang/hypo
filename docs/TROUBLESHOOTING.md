@@ -71,8 +71,8 @@ log show --predicate 'process == "HypoMenuBar"' --last 5m --style compact
 # View logs for a specific category
 log show --predicate 'subsystem == "com.hypo.clipboard" && category == "LanWebSocketServer"' --last 1h
 
-# View only errors
-log show --predicate 'subsystem == "com.hypo.clipboard" && eventType == "errorEvent"' --last 1h
+# View only errors (quick error check)
+log stream --predicate 'subsystem == "com.hypo.clipboard"' --level error --style compact
 ```
 
 #### Method 3: Filter by Process

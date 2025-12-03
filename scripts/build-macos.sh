@@ -253,19 +253,45 @@ fi
 log_info "Launching app..."
 open "$APP_BUNDLE"
 
-# Wait a moment for app to start
-sleep 2
+# Wait for app to start (menu bar apps can take a moment to initialize)
+log_info "Waiting for app to initialize..."
+MAX_WAIT=10
+WAITED=0
+APP_STARTED=false
+
+while [ $WAITED -lt $MAX_WAIT ]; do
+    if pgrep -x "$BINARY_NAME" > /dev/null; then
+        APP_STARTED=true
+        break
+    fi
+    sleep 0.5
+    WAITED=$((WAITED + 1))
+done
 
 # Verify app is running
-if pgrep -x "$BINARY_NAME" > /dev/null; then
-    log_success "App is running (PID: $(pgrep -x "$BINARY_NAME"))"
+if [ "$APP_STARTED" = true ]; then
+    PID=$(pgrep -x "$BINARY_NAME")
+    log_success "App is running (PID: $PID)"
+    
+    # Give it a bit more time to show menu bar icon
+    sleep 1
+    
+    # Check if app is still running (might have crashed)
+    if ! pgrep -x "$BINARY_NAME" > /dev/null; then
+        log_error "App started but crashed immediately. Check logs for errors:"
+        log_info "  log stream --predicate 'subsystem == \"com.hypo.clipboard\"' --level debug"
+        exit 1
+    fi
     
     # macOS uses unified logging - view logs with:
     # log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug
     echo ""
     log_info "ℹ️  View logs with: log stream --predicate 'subsystem == \"com.hypo.clipboard\"' --level debug"
+    log_info "ℹ️  Look for the menu bar icon in the top-right of your screen"
 else
-    log_warn "App may not have started. Check Console.app for errors"
+    log_error "App failed to start after ${MAX_WAIT} seconds"
+    log_error "Check Console.app or run: log stream --predicate 'subsystem == \"com.hypo.clipboard\"' --level debug"
+    exit 1
 fi
 
 echo ""

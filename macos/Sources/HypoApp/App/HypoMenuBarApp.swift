@@ -1790,13 +1790,10 @@ private struct SettingsSectionView: View {
                 }
                 
                 Section("Security") {
-                    Toggle("Plain Text Mode (Debug)", isOn: Binding(
+                    Toggle("Plain Text Mode", isOn: Binding(
                         get: { viewModel.plainTextModeEnabled },
                         set: { viewModel.plainTextModeEnabled = $0 }
                     ))
-                    Text("⚠️ Send clipboard without encryption. Less secure, for debugging only.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
                 }
 
                 Section("History") {
@@ -1838,26 +1835,6 @@ private struct SettingsSectionView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                }
-
-                Section("Security") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Current encryption key")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Text(viewModel.encryptionKeySummary)
-                            .font(.system(.body, design: .monospaced))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .contextMenu {
-                                Button("Copy") { viewModel.copyEncryptionKeyToPasteboard() }
-                                Button("Regenerate", role: .destructive) { viewModel.regenerateEncryptionKey() }
-                            }
-                    }
-                    HStack {
-                        Button("Copy key") { viewModel.copyEncryptionKeyToPasteboard() }
-                        Button("Regenerate key", role: .destructive) { viewModel.regenerateEncryptionKey() }
-                    }
                 }
 
                 Section("Paired devices") {

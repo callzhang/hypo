@@ -1,6 +1,6 @@
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_ws::Message;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::engine::general_purpose::{STANDARD as BASE64, STANDARD_NO_PAD as BASE64_NO_PAD};
 use base64::Engine;
 use chrono::Utc;
 use serde::Deserialize;
@@ -107,6 +107,11 @@ pub async fn websocket_handler(
                     }
                 }
                 Message::Binary(bytes) => {
+                    // Skip empty binary frames (likely WebSocket keepalive/ping frames)
+                    if bytes.is_empty() {
+                        // Silently ignore empty frames - these are likely keepalive messages
+                        continue;
+                    }
                     // Binary frame format (4-byte length + JSON) - forward as-is
                     if let Err(err) =
                         handle_binary_message(&reader_device_id, &bytes, &reader_sessions, &key_store, &mut reader_session)
@@ -197,10 +202,14 @@ async fn handle_binary_message(
     let parsed: ClipboardMessage = serde_json::from_str(&json_str)
         .map_err(|err| {
             error!(
-                "Received invalid message from {}: {} (JSON length: {} bytes, first 200 chars: {})",
+                "Received invalid message from {}: {} (JSON length: {} bytes, first 500 chars: {})",
                 sender_id, err, json_str.len(),
-                json_str.chars().take(200).collect::<String>()
+                json_str.chars().take(500).collect::<String>()
             );
+            // Log the full JSON for debugging Android message format issues
+            if json_str.len() < 2000 {
+                error!("Full JSON message that failed to parse: {}", json_str);
+            }
             SessionError::InvalidMessage
         })?;
 
@@ -212,7 +221,19 @@ async fn handle_binary_message(
     }
 
     if let Err(err) = validate_encryption_block(payload) {
-        warn!("Discarding message from {}: {}", sender_id, err);
+        warn!("Discarding message from {}: {} (payload keys: {:?})", 
+            sender_id, err, 
+            payload.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default()
+        );
+        // Log the actual payload for debugging Android message format issues
+        if let Ok(payload_str) = serde_json::to_string(payload) {
+            let preview = if payload_str.len() > 500 {
+                format!("{}...", &payload_str[..500])
+            } else {
+                payload_str
+            };
+            warn!("Discarded message payload preview: {}", preview);
+        }
         return Ok(());
     }
 
@@ -293,7 +314,19 @@ async fn handle_text_message(
     }
 
     if let Err(err) = validate_encryption_block(payload) {
-        warn!("Discarding message from {}: {}", sender_id, err);
+        warn!("Discarding message from {}: {} (payload keys: {:?})", 
+            sender_id, err, 
+            payload.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default()
+        );
+        // Log the actual payload for debugging Android message format issues
+        if let Ok(payload_str) = serde_json::to_string(payload) {
+            let preview = if payload_str.len() > 500 {
+                format!("{}...", &payload_str[..500])
+            } else {
+                payload_str
+            };
+            warn!("Discarded message payload preview: {}", preview);
+        }
         return Ok(());
     }
 
@@ -420,9 +453,17 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
             .and_then(Value::as_str)
             .ok_or("missing data/ciphertext field")?;
         
+        // Android uses Base64.withoutPadding(), so we need to handle unpadded base64
+        // Try STANDARD first (handles both padded and unpadded), fallback to NO_PAD if needed
         BASE64
             .decode(data.as_bytes())
-            .map_err(|_| "invalid data encoding")
+            .or_else(|_| BASE64_NO_PAD.decode(data.as_bytes()))
+            .map_err(|e| {
+                error!("Plaintext data base64 decode failed: {} (data length: {}, first 50 chars: '{}')", 
+                    e, data.len(),
+                    if data.len() > 50 { &data[..50] } else { data });
+                "invalid data encoding"
+            })
             .map(|_| ())?;
         
         return Ok(());
@@ -430,24 +471,32 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
 
     // Encrypted message - validate nonce and tag
     // Android uses Base64.withoutPadding(), so we need to handle unpadded base64
-    // The STANDARD engine should handle both, but let's add explicit error handling
+    // Try STANDARD first (handles both padded and unpadded), fallback to NO_PAD if needed
     let nonce_decoded = BASE64
         .decode(nonce.as_bytes())
+        .or_else(|_| BASE64_NO_PAD.decode(nonce.as_bytes()))
         .map_err(|e| {
-            warn!("Failed to decode nonce: {} (nonce string: '{}', length: {})", e, nonce, nonce.len());
+            error!("Failed to decode nonce: {} (nonce string: '{}', length: {}, first 20 chars: '{}')", 
+                e, nonce, nonce.len(),
+                if nonce.len() > 20 { &nonce[..20] } else { nonce });
             "invalid nonce encoding"
         })?;
     if nonce_decoded.len() != 12 {
+        error!("Nonce decoded length is {} bytes, expected 12 bytes (nonce string: '{}')", nonce_decoded.len(), nonce);
         return Err("nonce must be 12 bytes");
     }
 
     let tag_decoded = BASE64
         .decode(tag.as_bytes())
+        .or_else(|_| BASE64_NO_PAD.decode(tag.as_bytes()))
         .map_err(|e| {
-            warn!("Failed to decode tag: {} (tag string: '{}', length: {})", e, tag, tag.len());
+            error!("Failed to decode tag: {} (tag string: '{}', length: {}, first 20 chars: '{}')", 
+                e, tag, tag.len(),
+                if tag.len() > 20 { &tag[..20] } else { tag });
             "invalid tag encoding"
         })?;
     if tag_decoded.len() != 16 {
+        error!("Tag decoded length is {} bytes, expected 16 bytes (tag string: '{}')", tag_decoded.len(), tag);
         return Err("tag must be 16 bytes");
     }
 
@@ -458,9 +507,17 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
         .and_then(Value::as_str)
         .ok_or("missing data/ciphertext field")?;
 
+    // Android uses Base64.withoutPadding(), so we need to handle unpadded base64
+    // Try STANDARD first (handles both padded and unpadded), fallback to NO_PAD if needed
     BASE64
         .decode(data.as_bytes())
-        .map_err(|_| "invalid data encoding")
+        .or_else(|_| BASE64_NO_PAD.decode(data.as_bytes()))
+        .map_err(|e| {
+            error!("Encrypted data base64 decode failed: {} (data length: {}, first 50 chars: '{}')", 
+                e, data.len(),
+                if data.len() > 50 { &data[..50] } else { data });
+            "invalid data encoding"
+        })
         .map(|_| ())
 }
 

@@ -84,7 +84,7 @@ Before creating a release:
   - [ ] `android/app/build.gradle.kts` (versionName, versionCode)
   - [ ] `macos/HypoApp.app/Contents/Info.plist` (CFBundleShortVersionString)
   - [ ] `backend/Cargo.toml` (version)
-  - [ ] `docs/INSTALLATION.md` (version number)
+  - [ ] `docs/USER_GUIDE.md` (version number in Installation section)
   - [ ] `docs/prd.md` (version)
   - [ ] `docs/USER_GUIDE.md` (version)
 - [ ] Update `changelog.md` with release notes
@@ -123,7 +123,7 @@ Release notes are automatically generated from:
 
 ## Installation
 
-See [INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
+See [User Guide - Installation Section](docs/USER_GUIDE.md#-installation) for detailed instructions.
 
 ## Changes
 
@@ -245,7 +245,7 @@ gh release create v1.0.2 \
 
 ## Related Documentation
 
-- [INSTALLATION.md](INSTALLATION.md) - Installation instructions
+- [USER_GUIDE.md](USER_GUIDE.md) - User guide including installation instructions
 - [CHANGELOG.md](../changelog.md) - Version history
 - [.github/workflows/release.yml](../.github/workflows/release.yml) - Workflow definition
 

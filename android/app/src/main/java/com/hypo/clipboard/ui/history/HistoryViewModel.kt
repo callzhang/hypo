@@ -1,11 +1,13 @@
 package com.hypo.clipboard.ui.history
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.data.settings.SettingsRepository
 import com.hypo.clipboard.data.settings.UserSettings
 import com.hypo.clipboard.domain.model.ClipboardItem
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow

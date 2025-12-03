@@ -876,6 +876,7 @@ struct MenuBarContentView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .accessibilityLabel("Menu sections")
             }
             

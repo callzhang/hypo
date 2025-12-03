@@ -13,7 +13,7 @@ This directory contains all documentation for the Hypo clipboard sync project.
 
 ### User Documentation
 - **[User Guide](USER_GUIDE.md)** - End-user documentation
-- **[Installation Guide](INSTALLATION.md)** - Setup instructions for all platforms
+- **[User Guide](docs/USER_GUIDE.md)** - Complete user guide including installation instructions
 - **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
 
 ### Development Documentation
@@ -46,7 +46,7 @@ This directory contains all documentation for the Hypo clipboard sync project.
 ## 🚀 Quick Start
 
 1. **New to the project?** Start with [PRD](prd.md) and [Technical Specification](technical.md)
-2. **Setting up?** See [Installation Guide](INSTALLATION.md)
+2. **Setting up?** See [User Guide - Installation Section](docs/USER_GUIDE.md#-installation)
 3. **Developing?** Read [Technical Specification](technical.md) and [Release Process](RELEASE.md)
 4. **Troubleshooting?** Check [Troubleshooting Guide](TROUBLESHOOTING.md)
 5. **Version history?** See [Changelog](../changelog.md)

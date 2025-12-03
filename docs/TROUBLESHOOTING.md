@@ -470,6 +470,8 @@ Settings → Device care → Battery → Background app limits
 ```
 Settings → Apps → Manage apps → Hypo
 → Other permissions → Display pop-up windows while running in background
+→ Autostart → Enable
+→ Battery saver → No restrictions
 ```
 
 **OnePlus**:
@@ -909,7 +911,7 @@ adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -F "content: Case X:"
 
 **Documentation**:
 - [User Guide](USER_GUIDE.md): Complete feature documentation
-- [Installation Guide](INSTALLATION.md): Setup instructions
+- [User Guide - Installation Section](USER_GUIDE.md#-installation): Setup instructions
 - [Developer Guide](DEVELOPER_GUIDE.md): Technical details
 
 **Community Resources**:
@@ -950,14 +952,14 @@ https://github.com/hypo-app/hypo/issues/new?template=bug_report.md
 
 2. **Complete Uninstall**:
    ```bash
-   # Follow uninstallation steps in INSTALLATION.md
+   # Follow uninstallation steps in User Guide (Installation section)
    # Remove all preferences and data
    ```
 
 3. **Fresh Installation**:
    ```bash
    # Download latest version
-   # Follow installation guide exactly
+   # Follow installation section in User Guide exactly
    # Don't restore old settings initially
    ```
 

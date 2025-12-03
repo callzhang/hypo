@@ -634,7 +634,7 @@ private fun hexDump(data: ByteArray, maxBytes: Int): String {
 }
 
 @Composable
-private fun ClipboardDetailContent(item: ClipboardItem, onDismiss: () -> Unit) {
+private fun ClipboardDetailContent(item: ClipboardItem, onDismiss: () -> Unit = {}) {
     val scrollState = rememberScrollState()
     
     Column(

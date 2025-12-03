@@ -91,9 +91,9 @@ if [ ! -d "$APP_BUNDLE" ]; then
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>6</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.3</string>
+    <string>1.0.2</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -247,9 +247,9 @@ if [ ! -f "$APP_BUNDLE/Contents/Info.plist" ]; then
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>6</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.3</string>
+    <string>1.0.2</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>

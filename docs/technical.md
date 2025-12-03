@@ -844,6 +844,7 @@ MIUI (Xiaomi's Android skin) and HyperOS (Xiaomi's newer OS) implement aggressiv
      Is HyperOS: true
   ```
 
+
 **Recommended User Settings** (documented in `android/README.md`):
 1. **Battery Optimization**: Settings → Apps → Hypo → Battery saver → No restrictions
 2. **Autostart**: Settings → Apps → Manage apps → Hypo → Autostart → Enable

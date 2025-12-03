@@ -1,8 +1,8 @@
 # Hypo User Guide
 
 **Cross-Platform Clipboard Synchronization**  
-**Version**: 1.0.1  
-**Last Updated**: December 2, 2025
+**Version**: 1.0.2  
+**Last Updated**: December 3, 2025
 
 ---
 
@@ -61,33 +61,515 @@ Hypo is a secure, real-time clipboard synchronization app that seamlessly connec
 
 ## 📦 Installation
 
-> **📖 For detailed installation instructions, including build from source, see [Installation Guide](INSTALLATION.md)**
+### Prerequisites
 
-### Quick Start
+#### System Requirements
 
-**macOS**:
-1. Download `Hypo-1.0.1.zip` from [GitHub Releases](https://github.com/callzhang/hypo/releases)
-2. Extract and move `Hypo.app` to `/Applications/`
-3. Launch Hypo and grant required permissions
-4. App appears in menu bar (clipboard icon)
+| Platform | Minimum Requirements |
+|----------|---------------------|
+| **macOS** | macOS 14.0+, 4GB RAM, 50MB storage |
+| **Android** | Android 8.0+ (API 26), 2GB RAM, 20MB storage (release APK) |
+| **Network** | Wi-Fi connection required for both devices |
 
-**Android**:
-1. Download `Hypo.1.0.1.apk` from [GitHub Releases](https://github.com/callzhang/hypo/releases)
-2. Enable "Install from Unknown Sources" if needed
-3. Install APK and grant permissions:
-   - Clipboard access (Accessibility Service)
-   - Network access
-   - Notification access (Android 13+)
-   - SMS access (optional, for SMS auto-sync)
-4. Disable battery optimization for best performance
-5. Open app and sync service starts automatically
+**Note**: Android release APK is optimized (~15-20MB). Debug APK is larger (~47MB) for development.
 
-**Important for Android**:
-- **Battery Optimization**: Must be disabled for reliable sync
-- **MIUI/HyperOS Users**: App automatically detects and applies workarounds
-- **SMS Auto-Sync**: Grant SMS permission in Settings to enable automatic SMS syncing to macOS
+#### Before You Begin
 
-For detailed installation steps, build instructions, and troubleshooting, see the [Installation Guide](INSTALLATION.md).
+- [ ] Both devices connected to internet
+- [ ] Administrative access on macOS for permissions
+- [ ] Android device allows installing from unknown sources (if using APK)
+- [ ] 15 minutes for complete setup
+
+---
+
+### macOS Installation
+
+#### Option 1: Direct Download (Recommended)
+
+1. **Download Application**
+   ```bash
+   # Download from releases page
+   curl -L https://github.com/callzhang/hypo/releases/latest/download/Hypo-1.0.2.zip -o Hypo-1.0.2.zip
+   unzip Hypo-1.0.2.zip
+   ```
+
+2. **Remove Quarantine Attribute** (Required for downloaded apps)
+   ```bash
+   # macOS adds quarantine attribute when downloading from internet
+   # This causes "app is damaged" error - remove it:
+   xattr -d com.apple.quarantine HypoApp.app
+   ```
+
+3. **Install to Applications**
+   ```bash
+   # Move to Applications folder
+   sudo mv HypoApp.app /Applications/
+   
+   # Make executable (if needed)
+   chmod +x /Applications/HypoApp.app/Contents/MacOS/HypoMenuBar
+   ```
+
+4. **First Launch & Permissions**
+   ```bash
+   # Launch from command line first time
+   open /Applications/HypoApp.app
+   ```
+   
+   **Grant Required Permissions**:
+   - **Accessibility**: System Settings → Privacy & Security → Accessibility → Add Hypo
+   - **Network**: Allow when prompted
+   - **Notifications**: System Settings → Notifications → Hypo → Allow
+
+5. **Verify Installation**
+   - Hypo icon appears in menu bar
+   - Click icon → "Settings" → Check version number
+   - Status should show "Ready to pair"
+
+#### Option 2: Build from Source
+
+1. **Install Dependencies**
+   ```bash
+   # Install Xcode and command line tools
+   xcode-select --install
+   
+   # Clone repository
+   git clone https://github.com/callzhang/hypo.git
+   cd hypo
+   ```
+
+2. **Build Application Using Build Script (Recommended)**
+   ```bash
+   # Build macOS app (debug, default)
+   ./scripts/build-macos.sh
+   
+   # Build release version
+   ./scripts/build-macos.sh release
+   
+   # Clean build (removes build cache)
+   ./scripts/build-macos.sh clean
+   ```
+   
+   The script will:
+   - Build the app using Swift Package Manager
+   - Create `HypoApp.app` bundle (debug) or `HypoApp-release.app` bundle (release)
+   - Sign the app for local development
+
+3. **Build Application Using Xcode**
+   ```bash
+   cd macos
+   
+   # Open in Xcode
+   open HypoApp.xcworkspace
+   
+   # Or build from command line
+   xcodebuild -workspace HypoApp.xcworkspace \
+              -scheme HypoApp \
+              -configuration Release \
+              -derivedDataPath build/
+   ```
+
+4. **Install Built App**
+   ```bash
+   # From build script output
+   # Debug app is built at: macos/HypoApp.app
+   # Release app is built at: macos/HypoApp-release.app
+   
+   # Or from Xcode build
+   cp -r build/Build/Products/Release/HypoApp.app /Applications/
+   ```
+
+#### Auto-Start Setup (Optional)
+
+```bash
+# Create launch agent for auto-start
+cat > ~/Library/LaunchAgents/com.hypo.agent.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hypo.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/HypoApp.app/Contents/MacOS/HypoMenuBar</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+EOF
+
+# Load the launch agent
+launchctl load ~/Library/LaunchAgents/com.hypo.agent.plist
+```
+
+---
+
+### Android Installation
+
+#### Option 1: APK Installation (Current Method)
+
+1. **Download APK**
+   ```bash
+   # Download latest APK
+   curl -L https://github.com/callzhang/hypo/releases/latest/download/Hypo.1.0.2.apk \
+        -o Hypo.1.0.2.apk
+   ```
+
+2. **Enable Unknown Sources**
+   - Android 8+: Settings → Apps & notifications → Special app access → Install unknown apps
+   - Select your browser/file manager → Allow from this source
+
+3. **Install Application**
+   ```bash
+   # Via ADB (if enabled)
+   adb install Hypo.1.0.2.apk
+   
+   # Or manually: Open file manager → Navigate to APK → Tap to install
+   ```
+
+4. **Grant Permissions**
+   - **Required Immediately**: Storage, Network
+   - **Required for Sync**: Accessibility (for clipboard monitoring)
+   - **Optional but Recommended**: SMS (for SMS auto-sync feature)
+   - **Android 13+**: Notification permission (for foreground service)
+   - **Critical**: Disable battery optimization for reliable sync
+
+5. **Battery Optimization (Critical)**
+   ```
+   Settings → Battery → Battery Optimization → Hypo → Don't optimize
+   ```
+   
+   **Manufacturer-Specific Settings**:
+   
+   **Samsung**:
+   ```
+   Settings → Device care → Battery → App power management
+   → Apps that won't be put to sleep → Add Hypo
+   ```
+   
+   **Xiaomi (MIUI/HyperOS)**:
+   ```
+   Settings → Apps → Manage apps → Hypo → Battery saver → No restrictions
+   Settings → Apps → Manage apps → Hypo → Autostart → Enable
+   ```
+   
+   **Note**: Hypo automatically detects MIUI/HyperOS devices and applies workarounds for multicast throttling. The app will show device-specific instructions in Settings when detected.
+   
+   **OnePlus/OxygenOS**:
+   ```
+   Settings → Battery → Battery optimization → Hypo → Don't optimize
+   Settings → Apps → Hypo → Advanced → Battery → Background activity → Allow
+   ```
+   
+   **Huawei**:
+   ```
+   Settings → Apps → Hypo → Battery → App launch → Manage manually
+   → Enable all three toggles (Auto-launch, Secondary launch, Run in background)
+   ```
+
+#### Option 2: Google Play Store (Coming Soon)
+
+```
+Google Play Store → Search "Hypo Clipboard" → Install
+```
+
+#### Option 3: Build from Source
+
+1. **Setup Development Environment**
+   ```bash
+   # Install OpenJDK 17
+   brew install openjdk@17
+   
+   # Setup Android SDK (if not using Android Studio)
+   ./scripts/setup-android-sdk.sh
+   
+   # Clone repository
+   git clone https://github.com/callzhang/hypo.git
+   cd hypo
+   ```
+
+2. **Build APK Using Build Script (Recommended)**
+   ```bash
+   # Build debug APK (default, for development/testing)
+   ./scripts/build-android.sh
+   
+   # Build release APK (optimized, ~15-20MB)
+   ./scripts/build-android.sh release
+   
+   # Build both debug and release APKs
+   ./scripts/build-android.sh both
+   
+   # Clean build (removes build cache)
+   ./scripts/build-android.sh clean
+   ```
+   
+   **Build Output**:
+   - Debug APK: `android/app/build/outputs/apk/debug/app-debug.apk` (~47MB)
+   - Release APK: `android/app/build/outputs/apk/release/app-release.apk` (~15-20MB)
+
+3. **Build APK Using Gradle Directly**
+   ```bash
+   cd android
+   
+   # Set Android SDK path (if not set)
+   export ANDROID_SDK_ROOT=/path/to/android-sdk
+   export JAVA_HOME=/path/to/java-17
+   
+   # Build debug APK
+   ./gradlew assembleDebug
+   
+   # Build release APK (optimized with R8/ProGuard)
+   ./gradlew assembleRelease
+   ```
+
+4. **Install Built APK**
+   ```bash
+   # Install debug APK via ADB (auto-installs if device connected, default)
+   ./scripts/build-android.sh
+   
+   # Or manually install
+   adb install android/app/build/outputs/apk/debug/app-debug.apk
+   adb install android/app/build/outputs/apk/release/app-release.apk
+   ```
+
+**Build Optimizations**:
+- Release builds are optimized with R8/ProGuard minification
+- Only arm64-v8a ABI included in release (saves ~15MB)
+- Unused dependencies removed (ML Kit, Camera libraries)
+- Resource shrinking enabled
+
+---
+
+### Device Pairing
+
+#### Method 1: LAN Auto-Discovery Pairing (Same Network)
+
+**Prerequisites**: Both devices on same Wi-Fi network
+
+1. **Start Pairing (macOS)**
+   ```
+   Menu Bar Icon → Pair Device
+   (macOS will automatically advertise itself on the network)
+   ```
+
+2. **Pair Device (Android)**
+   ```
+   Open Hypo → Pair Device → Select "LAN" tab
+   → Wait for macOS device to appear
+   → Tap on the device to pair
+   ```
+
+3. **Verify Connection**
+   - Both apps show "Connected" status
+   - Test by copying text on either device
+
+#### Method 2: Remote Pairing (Different Networks)
+
+**Prerequisites**: Both devices have internet connection
+
+1. **Generate Pairing Code (macOS)**
+   ```
+   Menu Bar Icon → Pair Device → Remote Pairing
+   → Note 6-digit code (valid 60 seconds)
+   ```
+
+2. **Enter Code (Android)**
+   ```
+   Open Hypo → Pair Device → Enter Code
+   → Type 6-digit code → Pair
+   ```
+
+3. **Verify Connection**
+   - Connection status shows "Cloud" mode
+   - Test clipboard sync between devices
+
+---
+
+### Verification & Testing
+
+#### Connection Test
+
+1. **Basic Sync Test**
+   ```
+   macOS: Copy some text (⌘C)
+   Android: Check if text appears in clipboard
+   Android: Copy different text
+   macOS: Check if text syncs back
+   ```
+
+2. **History Test**
+   ```
+   macOS: Menu Bar → View History → Should see recent items
+   Android: Open app → History tab → Should see same items
+   ```
+
+3. **Performance Test**
+   ```
+   Copy text → Time how long sync takes
+   Target: <500ms on LAN, <3s on cloud
+   ```
+
+#### Troubleshooting Verification
+
+**macOS Checks**:
+```bash
+# Check if app is running
+ps aux | grep Hypo
+
+# Check accessibility permission
+sqlite3 /Library/Application\ Support/com.apple.TCC/TCC.db \
+  "SELECT * FROM access WHERE service='kTCCServiceAccessibility';"
+
+# Check network connectivity
+nc -v your-android-ip 1234  # Should show connection attempts
+```
+
+**Android Checks**:
+```bash
+# Check if service is running
+adb shell dumpsys activity services | grep Hypo
+
+# Check battery optimization status
+adb shell dumpsys deviceidle whitelist | grep hypo
+
+# Check permissions
+adb shell pm list permissions -d | grep hypo
+```
+
+---
+
+### Configuration
+
+#### macOS Configuration
+
+**Settings File Location**: `~/Library/Application Support/Hypo/`
+
+**Command Line Configuration**:
+```bash
+# Set history size
+defaults write com.hypo.clipboard historySize -int 500
+
+# Enable debug logging
+defaults write com.hypo.clipboard debugLogging -bool true
+
+# Set sync timeout
+defaults write com.hypo.clipboard syncTimeout -int 5000
+```
+
+#### Android Configuration
+
+**Settings Location**: App → Settings menu
+
+**Key Settings**:
+- **Sync Frequency**: Auto/Manual/Scheduled
+- **History Retention**: 50-1000 items
+- **Battery Optimization**: Enabled/Disabled
+- **Network Preference**: LAN Only/Cloud Fallback/Cloud Only
+
+**Advanced Configuration** (via ADB):
+```bash
+# Enable debug mode
+adb shell am start -n com.hypo.clipboard/.MainActivity \
+  --es "debug_mode" "true"
+
+# Set custom sync interval
+adb shell setprop persist.hypo.sync_interval 1000
+```
+
+---
+
+### Updates
+
+#### macOS Updates
+
+**Manual Updates**:
+1. Download new version from [GitHub Releases](https://github.com/callzhang/hypo/releases)
+2. Quit current app: `Menu Bar → Quit`
+3. Remove quarantine: `xattr -d com.apple.quarantine HypoApp.app`
+4. Replace in Applications folder
+5. Restart app
+
+#### Android Updates
+
+**APK Updates**:
+1. Download new APK from [GitHub Releases](https://github.com/callzhang/hypo/releases)
+2. Install over existing app (data preserved)
+3. Grant any new permissions
+
+---
+
+### Uninstallation
+
+#### macOS Removal
+
+```bash
+# Stop the app
+killall HypoMenuBar
+
+# Remove launch agent (if installed)
+launchctl unload ~/Library/LaunchAgents/com.hypo.agent.plist 2>/dev/null || true
+rm ~/Library/LaunchAgents/com.hypo.agent.plist 2>/dev/null || true
+
+# Remove application
+rm -rf /Applications/HypoApp.app
+rm -rf /Applications/HypoApp-release.app
+
+# Remove preferences and data
+rm -rf ~/Library/Preferences/com.hypo.clipboard.*
+rm -rf ~/Library/Application\ Support/Hypo
+rm -rf ~/Library/Logs/Hypo
+```
+
+#### Android Removal
+
+```bash
+# Via ADB (debug build)
+adb uninstall com.hypo.clipboard.debug
+
+# Via ADB (release build)
+adb uninstall com.hypo.clipboard
+
+# Or manually: Settings → Apps → Hypo → Uninstall
+```
+
+**Note**: 
+- Debug builds use package name: `com.hypo.clipboard.debug`
+- Release builds use package name: `com.hypo.clipboard`
+- All clipboard history and pairing keys will be permanently deleted
+
+---
+
+### Build Information
+
+#### Android APK Sizes
+
+| Build Type | Size | Use Case |
+|------------|------|----------|
+| **Debug APK** | ~47MB | Development, testing, emulator |
+| **Release APK** | ~15-20MB | Production distribution |
+| **Release AAB** | ~12-15MB | Google Play Store (when available) |
+
+#### Build Optimizations
+
+The release APK includes the following optimizations:
+- **Code minification**: R8/ProGuard removes unused code (~20-25MB savings)
+- **Resource shrinking**: Unused resources removed
+- **ABI filtering**: Only arm64-v8a included (~15MB savings)
+- **Dependency optimization**: Removed unused libraries (ML Kit, Camera, etc.)
+
+#### Building App Bundle (AAB) for Play Store
+
+```bash
+cd android
+./gradlew bundleRelease
+
+# Output: app/build/outputs/bundle/release/app-release.aab
+```
+
+The App Bundle format allows Google Play to generate optimized APKs per device, resulting in smaller downloads for end users.
 
 ---
 
@@ -466,7 +948,13 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ## 📝 Changelog
 
-**Version 1.0.1** (Current - Production Release)
+**Version 1.0.2** (Current - Build & Release Improvements)
+- macOS app signing for free distribution (ad-hoc signing)
+- Automatic release notes generation
+- Android build optimizations (faster CI/CD builds)
+- Improved backend deployment workflow
+
+**Version 1.0.1** (Production Release)
 - Production-ready release
 - Full clipboard sync functionality
 - LAN auto-discovery and remote pairing
@@ -493,6 +981,6 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ---
 
-**Last Updated**: December 2, 2025  
-**Version**: 1.0.1  
+**Last Updated**: December 3, 2025  
+**Version**: 1.0.2  
 **For Technical Support**: support@hypo.app

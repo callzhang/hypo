@@ -215,3 +215,4 @@ macos/HypoApp.app
 __pycache__/
 
 .secrets
+macos/HypoApp.app/Contents/MacOS/HypoMenuBar

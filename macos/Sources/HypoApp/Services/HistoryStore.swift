@@ -13,6 +13,9 @@ import os.log
 import UniformTypeIdentifiers
 #endif
 
+// UserDefaults is thread-safe for reading/writing, safe to mark as Sendable
+extension UserDefaults: @retroactive @unchecked Sendable {}
+
 public actor HistoryStore {
     private let logger = HypoLogger(category: "HistoryStore")
     private var entries: [ClipboardEntry] = []

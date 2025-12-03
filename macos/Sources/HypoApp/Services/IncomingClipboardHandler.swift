@@ -74,7 +74,7 @@ public final class IncomingClipboardHandler {
             
             // Apply to system clipboard AFTER adding to history
             // Post notification to update ClipboardMonitor's changeCount to prevent duplicate detection
-            let beforeChangeCount = await MainActor.run { pasteboard.changeCount }
+            _ = await MainActor.run { pasteboard.changeCount }
             try await applyToClipboard(payload)
             let afterChangeCount = await MainActor.run { pasteboard.changeCount }
             
@@ -141,14 +141,14 @@ public final class IncomingClipboardHandler {
     }
     
     private func applyToClipboard(_ payload: ClipboardPayload) async throws {
-        await MainActor.run {
+        _ = await MainActor.run {
             pasteboard.clearContents()
         }
         
         switch payload.contentType {
         case .text:
             let text = String(data: payload.data, encoding: .utf8) ?? ""
-            await MainActor.run {
+            _ = await MainActor.run {
                 pasteboard.setString(text, forType: .string)
             }
             
@@ -158,7 +158,7 @@ public final class IncomingClipboardHandler {
             
         case .link:
             let urlString = String(data: payload.data, encoding: .utf8) ?? ""
-            await MainActor.run {
+            _ = await MainActor.run {
                 pasteboard.setString(urlString, forType: .string)
             }
             
@@ -170,7 +170,7 @@ public final class IncomingClipboardHandler {
             guard let image = NSImage(data: payload.data) else {
                 throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create image from data"])
             }
-            await MainActor.run {
+            _ = await MainActor.run {
                 pasteboard.writeObjects([image])
             }
             
@@ -237,7 +237,7 @@ public final class IncomingClipboardHandler {
             transportOrigin: transportOrigin
         )
         
-        let insertedEntries = await historyStore.insert(entry)
+        _ = await historyStore.insert(entry)
         // Notify callback if provided (e.g., to update viewModel)
         if let onEntryAdded = onEntryAdded {
             await onEntryAdded(entry)

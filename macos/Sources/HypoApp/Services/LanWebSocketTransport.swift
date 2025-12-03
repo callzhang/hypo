@@ -192,10 +192,8 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                 retainedSelf.handshakeContinuation = continuation
                 task.resume()
             }
-            let successMsg = "✅ [LanWebSocketTransport] Connection established successfully\n"
             logger.info("✅ [LanWebSocketTransport] Connection established successfully")
         } catch {
-            let errorMsg = "❌ [LanWebSocketTransport] Connection failed: \(error.localizedDescription)\n"
             logger.info("❌ [LanWebSocketTransport] Connection failed: \(error.localizedDescription)")
             throw error
         }
@@ -214,7 +212,6 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         )
         messageQueue.append(queuedMessage)
         
-        let queueMsg = "📥 [LanWebSocketTransport] Queued message (queue size: \(messageQueue.count))\n"
         logger.info("📥 [LanWebSocketTransport] Queued message (queue size: \(messageQueue.count))")
         
         // Start queue processor if not already running
@@ -239,9 +236,8 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             
             // Check timeout (10 minutes from queue time)
             if Date().timeIntervalSince(queuedMessage.queuedAt) > maxTimeout {
-                let timeoutMsg = "❌ [LanWebSocketTransport] Message timeout after \(queuedMessage.retryCount) retries (10 min elapsed), dropping\n"
                 logger.info("❌ [LanWebSocketTransport] Message timeout after \(queuedMessage.retryCount) retries (10 min elapsed), dropping")
-                await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 continue
             }
             
@@ -250,7 +246,6 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             
             // Wait before retry (skip wait on first attempt)
             if queuedMessage.retryCount > 0 {
-                let backoffMsg = "⏳ [LanWebSocketTransport] Retry \(queuedMessage.retryCount)/\(maxRetries) after \(Int(backoff))s backoff\n"
                 logger.info("⏳ [LanWebSocketTransport] Retry \(queuedMessage.retryCount)/\(maxRetries) after \(Int(backoff))s backoff")
                 try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
             }
@@ -259,29 +254,25 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             do {
                 try await ensureConnected()
             } catch {
-                let connectErrorMsg = "⚠️ [LanWebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)\n"
                 logger.info("⚠️ [LanWebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
                 } else {
-                    let maxRetriesMsg = "❌ [LanWebSocketTransport] Max retries reached, dropping message\n"
                     logger.info("❌ [LanWebSocketTransport] Max retries reached, dropping message")
-                    await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                    _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
                 continue
             }
             
             guard case .connected(let task) = state else {
-                let stateErrorMsg = "⚠️ [LanWebSocketTransport] Not connected after ensureConnected() on retry \(queuedMessage.retryCount)\n"
                 logger.info("⚠️ [LanWebSocketTransport] Not connected after ensureConnected() on retry \(queuedMessage.retryCount)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
                 } else {
-                    let maxRetriesMsg = "❌ [LanWebSocketTransport] Max retries reached, dropping message\n"
                     logger.info("❌ [LanWebSocketTransport] Max retries reached, dropping message")
-                    await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                    _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
                 continue
             }
@@ -304,27 +295,23 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                 }
                 
                 // Success!
-                let successMsg = "✅ [LanWebSocketTransport] Message sent successfully after \(queuedMessage.retryCount) retries (queue size: \(messageQueue.count))\n"
                 self.logger.info("✅ [LanWebSocketTransport] Message sent successfully after \(queuedMessage.retryCount) retries (queue size: \(messageQueue.count))")
-                await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 
             } catch {
-                let errorMsg = "❌ [LanWebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(error.localizedDescription)\n"
                 self.logger.info("❌ [LanWebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(error.localizedDescription)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
                 } else {
-                    let maxRetriesMsg = "❌ [LanWebSocketTransport] Max retries reached, dropping message\n"
                     logger.info("❌ [LanWebSocketTransport] Max retries reached, dropping message")
-                    await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                    _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
             }
         }
         
         // Queue is empty, stop processing
         queueProcessingTask = nil
-        let emptyMsg = "✅ [LanWebSocketTransport] Message queue empty, stopping processor\n"
         logger.info("✅ [LanWebSocketTransport] Message queue empty, stopping processor")
     }
 
@@ -354,7 +341,6 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         // Clear message queue on disconnect
         let queueSize = messageQueue.count
         if queueSize > 0 {
-            let clearMsg = "🧹 [LanWebSocketTransport] Clearing \(queueSize) queued messages on disconnect\n"
             logger.info("🧹 [LanWebSocketTransport] Clearing \(queueSize) queued messages on disconnect")
             for queuedMessage in messageQueue {
                 _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
@@ -388,8 +374,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         watchdogTask?.cancel()
         // For cloud relay connections, use ping/pong keepalive instead of idle timeout
         if configuration.environment == "cloud" || configuration.url.scheme == "wss" {
-            let watchdogMsg = "⏰ [LanWebSocketTransport] Starting ping/pong keepalive for cloud relay connection\n"
-            logger.info("⏰ [LanWebSocketTransport] Starting ping/pong keepalive for cloud relay connectio")
+            logger.info("⏰ [LanWebSocketTransport] Starting ping/pong keepalive for cloud relay connection")
             fflush(stdout)
             // Send ping every 20 seconds to keep connection alive
             watchdogTask = Task.detached { [weak self] in
@@ -397,7 +382,8 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 20_000_000_000) // 20 seconds
                     if Task.isCancelled { return }
-                    guard case .connected(let currentTask) = await self.state, currentTask === task else {
+                    // Access state directly since LanWebSocketTransport is a class, not an actor
+                    guard case .connected(let currentTask) = self.state, currentTask === task else {
                         return
                     }
                     // Send ping to keep connection alive
@@ -422,7 +408,6 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                                 }
                                 
                                 self.receiveRetryCount += 1
-                                let reconnectMsg = "🔄 [LanWebSocketTransport] Ping failed, reconnecting after \(Int(backoff))s backoff (attempt \(self.receiveRetryCount))...\n"
                                 self.logger.info("🔄 [LanWebSocketTransport] Ping failed, reconnecting after \(Int(backoff))s backoff (attempt \(self.receiveRetryCount))...")
                                 
                                 try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
@@ -431,7 +416,6 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                                     // Reset retry count on successful connection
                                     self.receiveRetryCount = 0
                                 } catch {
-                                    let connectErrorMsg = "❌ [LanWebSocketTransport] Reconnect after ping failure failed: \(error.localizedDescription)\n"
                                     logger.info("❌ [LanWebSocketTransport] Reconnect after ping failure failed: \(error.localizedDescription)")
                                     // Will retry again on next ping failure
                                 }
@@ -458,7 +442,8 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_800_000_000_000) // 30 minutes (30 * 60 * 1_000_000_000)
                 if Task.isCancelled { return }
-                guard case .connected(let currentTask) = await self.state, currentTask === task else {
+                // Access state directly since LanWebSocketTransport is a class, not an actor
+                guard case .connected(let currentTask) = self.state, currentTask === task else {
                     return
                 }
                 // Send ping to keep connection alive
@@ -637,7 +622,8 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                 completeMsg += "   Error domain: \(error.domain), code: \(error.code)\n"
                 
                 // Log all userInfo keys for debugging
-                if let userInfo = error.userInfo as? [String: Any], !userInfo.isEmpty {
+                let userInfo = error.userInfo
+                if !userInfo.isEmpty {
                     completeMsg += "   Error UserInfo keys: \(userInfo.keys.joined(separator: ", "))\n"
                     for (key, value) in userInfo {
                         completeMsg += "   UserInfo[\(key)]: \(value)\n"
@@ -647,7 +633,8 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
         } else if let error = error as NSError? {
             // Log additional error details for non-HTTP errors
             completeMsg += "❌ [LanWebSocketTransport] Error domain: \(error.domain), code: \(error.code)\n"
-            if let userInfo = error.userInfo as? [String: Any], !userInfo.isEmpty {
+            let userInfo = error.userInfo
+            if !userInfo.isEmpty {
                 completeMsg += "   Error UserInfo keys: \(userInfo.keys.joined(separator: ", "))\n"
                 for (key, value) in userInfo {
                     completeMsg += "   UserInfo[\(key)]: \(value)\n"
@@ -683,25 +670,21 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func receiveNext(on task: WebSocketTasking) {
-        let receiveMsg = "📡 [LanWebSocketTransport] receiveNext() called, setting up receive callback\n"
         logger.info("📡 [LanWebSocketTransport] receiveNext() called, setting up receive callback")
         task.receive { [weak self] result in
             guard let self else {
                 NSLog("⚠️ [LanWebSocketTransport] Self is nil in receive callback")
                 return
             }
-            let callbackMsg = "📡 [LanWebSocketTransport] receive callback triggered\n"
             self.logger.info("📡 [LanWebSocketTransport] receive callback triggered")
             fflush(stdout)
             
-            let resultTypeMsg = "🔍 [LanWebSocketTransport] Result type: \(String(describing: result))\n"
             self.logger.info("🔍 [LanWebSocketTransport] Result type: \(String(describing: result))")
             fflush(stdout)
             
             switch result {
             case .success(let message):
                 // Log success immediately to catch messages before any processing
-                let successImmediateMsg = "✅ [LanWebSocketTransport] Receive SUCCESS - message arrived!\n"
                 self.logger.info("✅ [LanWebSocketTransport] Receive SUCCESS - message arrived!")
                 fflush(stdout)
                 
@@ -715,26 +698,21 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                 @unknown default:
                     messageType = "unknown"
                 }
-                let successMsg = "✅ [LanWebSocketTransport] Message received: \(messageType)\n"
                 logger.info("✅ [LanWebSocketTransport] Message received: \(messageType)")
                 fflush(stdout)
                 if case .data(let data) = message {
-                    let dataMsg = "📦 [LanWebSocketTransport] Binary data received: \(data.count) bytes\n"
                     logger.info("📦 [LanWebSocketTransport] Binary data received: \(data.count) bytes")
                     fflush(stdout)
                     self.handleIncoming(data: data)
                 } else if case .string(let str) = message {
-                    let textMsg = "📝 [LanWebSocketTransport] Text message received: \(str.prefix(100))\n"
                     logger.info("📝 [LanWebSocketTransport] Text message received: \(str.prefix(100))")
                     fflush(stdout)
                 } else {
-                    let nonDataMsg = "⚠️ [LanWebSocketTransport] Non-binary message received\n"
                     logger.info("⚠️ [LanWebSocketTransport] Non-binary message received")
                     fflush(stdout)
                 }
                 self.receiveNext(on: task)
             case .failure(let error):
-                let errorMsg = "❌ [LanWebSocketTransport] Receive failed: \(error.localizedDescription)\n"
                 logger.info("❌ [LanWebSocketTransport] Receive failed: \(error.localizedDescription)")
                 fflush(stdout)
                 
@@ -753,7 +731,6 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                 self.lastReceiveFailure = Date()
                 
                 let isCloud = self.configuration.environment == "cloud" || self.configuration.url.scheme == "wss"
-                let reconnectMsg = "🔄 [LanWebSocketTransport] Connection reset (cloud=\(isCloud), retry \(self.receiveRetryCount)), reconnecting after \(Int(backoff))s backoff...\n"
                 logger.info("🔄 [LanWebSocketTransport] Connection reset (cloud=\(isCloud), retry \(self.receiveRetryCount)), reconnecting after \(Int(backoff))s backoff...")
                 fflush(stdout)
                 
@@ -768,7 +745,6 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                         self.receiveRetryCount = 0
                         self.lastReceiveFailure = nil
                     } catch {
-                        let connectErrorMsg = "❌ [LanWebSocketTransport] Reconnect failed: \(error.localizedDescription)\n"
                         self.logger.info("❌ [LanWebSocketTransport] Reconnect failed: \(error.localizedDescription)")
                         // Will retry again on next receive failure
                     }
@@ -778,7 +754,6 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func handleIncoming(data: Data) {
-        let handleMsg = "📥 [LanWebSocketTransport] handleIncoming: \(data.count) bytes\n"
         logger.info("📥 [LanWebSocketTransport] handleIncoming: \(data.count) bytes")
         
         do {
@@ -924,7 +899,9 @@ extension LanWebSocketTransport: URLSessionDelegate {
             return
         }
 
-        guard let serverCertificate = SecTrustGetCertificateAtIndex(trust, 0) else {
+        // Use SecTrustCopyCertificateChain for macOS 12.0+
+        guard let certificateChain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let serverCertificate = certificateChain.first else {
             analytics.record(
                 .pinningFailure(
                     environment: configuration.environment,

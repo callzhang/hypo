@@ -120,7 +120,6 @@ class LanPeerConnectionManager(
                     }
                 } else {
                     // Check if peer IP changed (reconnect if needed)
-                    val existingClient = peerConnections[deviceId]!!
                     // Note: We can't easily check the URL from WebSocketTransportClient
                     // For now, we'll rely on the connection failing and reconnecting naturally
                     // TODO: Track peer URLs separately to detect IP changes
@@ -211,7 +210,7 @@ class LanPeerConnectionManager(
      */
     fun shutdown() {
         android.util.Log.d("LanPeerConnectionManager", "🛑 Shutting down all peer connections")
-        for ((deviceId, job) in connectionJobs) {
+        for ((_, job) in connectionJobs) {
             job.cancel()
         }
         connectionJobs.clear()

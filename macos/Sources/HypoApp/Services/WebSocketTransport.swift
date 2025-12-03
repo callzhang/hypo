@@ -223,10 +223,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 retainedSelf.handshakeContinuation = continuation
                 task.resume()
             }
-            let successMsg = "✅ [WebSocketTransport] Connection established successfully\n"
             logger.info("✅ [WebSocketTransport] Connection established successfully")
         } catch {
-            let errorMsg = "❌ [WebSocketTransport] Connection failed: \(error.localizedDescription)\n"
             logger.info("❌ [WebSocketTransport] Connection failed: \(error.localizedDescription)")
             throw error
         }
@@ -245,7 +243,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         )
         messageQueue.append(queuedMessage)
         
-        let queueMsg = "📥 [WebSocketTransport] Queued message (queue size: \(messageQueue.count))\n"
         logger.info("📥 [WebSocketTransport] Queued message (queue size: \(messageQueue.count))")
         
         // Start queue processor if not already running
@@ -270,9 +267,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             
             // Check timeout (10 minutes from queue time)
             if Date().timeIntervalSince(queuedMessage.queuedAt) > maxTimeout {
-                let timeoutMsg = "❌ [WebSocketTransport] Message timeout after \(queuedMessage.retryCount) retries (10 min elapsed), dropping\n"
                 logger.info("❌ [WebSocketTransport] Message timeout after \(queuedMessage.retryCount) retries (10 min elapsed), dropping")
-                await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 continue
             }
             
@@ -281,7 +277,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             
             // Wait before retry (skip wait on first attempt)
             if queuedMessage.retryCount > 0 {
-                let backoffMsg = "⏳ [WebSocketTransport] Retry \(queuedMessage.retryCount)/\(maxRetries) after \(Int(backoff))s backoff\n"
                 logger.info("⏳ [WebSocketTransport] Retry \(queuedMessage.retryCount)/\(maxRetries) after \(Int(backoff))s backoff")
                 try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
             }
@@ -290,29 +285,25 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             do {
                 try await ensureConnected()
             } catch {
-                let connectErrorMsg = "⚠️ [WebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)\n"
                 logger.info("⚠️ [WebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
                 } else {
-                    let maxRetriesMsg = "❌ [WebSocketTransport] Max retries reached, dropping message\n"
                     logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
-                    await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                    _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
                 continue
             }
             
             guard case .connected(let task) = state else {
-                let stateErrorMsg = "⚠️ [WebSocketTransport] Not connected after ensureConnected() on retry \(queuedMessage.retryCount)\n"
                 logger.info("⚠️ [WebSocketTransport] Not connected after ensureConnected() on retry \(queuedMessage.retryCount)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
                 } else {
-                    let maxRetriesMsg = "❌ [WebSocketTransport] Max retries reached, dropping message\n"
                     logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
-                    await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                    _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
                 continue
             }
@@ -335,27 +326,23 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 }
                 
                 // Success!
-                let successMsg = "✅ [WebSocketTransport] Message sent successfully after \(queuedMessage.retryCount) retries (queue size: \(messageQueue.count))\n"
                 self.logger.info("✅ [WebSocketTransport] Message sent successfully after \(queuedMessage.retryCount) retries (queue size: \(messageQueue.count))")
-                await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 
             } catch {
-                let errorMsg = "❌ [WebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(error.localizedDescription)\n"
                 self.logger.info("❌ [WebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(error.localizedDescription)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
                 } else {
-                    let maxRetriesMsg = "❌ [WebSocketTransport] Max retries reached, dropping message\n"
                     logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
-                    await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                    _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
             }
         }
         
         // Queue is empty, stop processing
         queueProcessingTask = nil
-        let emptyMsg = "✅ [WebSocketTransport] Message queue empty, stopping processor\n"
         logger.info("✅ [WebSocketTransport] Message queue empty, stopping processor")
     }
 
@@ -385,7 +372,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         // Clear message queue on disconnect
         let queueSize = messageQueue.count
         if queueSize > 0 {
-            let clearMsg = "🧹 [WebSocketTransport] Clearing \(queueSize) queued messages on disconnect\n"
             logger.info("🧹 [WebSocketTransport] Clearing \(queueSize) queued messages on disconnect")
             for queuedMessage in messageQueue {
                 _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
@@ -419,8 +405,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         watchdogTask?.cancel()
         // For cloud relay connections, use ping/pong keepalive instead of idle timeout
         if configuration.environment == "cloud" || configuration.url.scheme == "wss" {
-            let watchdogMsg = "⏰ [WebSocketTransport] Starting ping/pong keepalive for cloud relay connection\n"
-            logger.info("⏰ [WebSocketTransport] Starting ping/pong keepalive for cloud relay connectio")
+            logger.info("⏰ [WebSocketTransport] Starting ping/pong keepalive for cloud relay connection")
             fflush(stdout)
             // Send ping every 20 seconds to keep connection alive
             watchdogTask = Task.detached { [weak self] in
@@ -428,7 +413,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 20_000_000_000) // 20 seconds
                     if Task.isCancelled { return }
-                    guard case .connected(let currentTask) = await self.state, currentTask === task else {
+                    // Access state directly since WebSocketTransport is a class, not an actor
+                    guard case .connected(let currentTask) = self.state, currentTask === task else {
                         return
                     }
                     // Send ping to keep connection alive
@@ -453,7 +439,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                                 }
                                 
                                 self.receiveRetryCount += 1
-                                let reconnectMsg = "🔄 [WebSocketTransport] Ping failed, reconnecting after \(Int(backoff))s backoff (attempt \(self.receiveRetryCount))...\n"
                                 self.logger.info("🔄 [WebSocketTransport] Ping failed, reconnecting after \(Int(backoff))s backoff (attempt \(self.receiveRetryCount))...")
                                 
                                 try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
@@ -462,7 +447,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                                     // Reset retry count on successful connection
                                     self.receiveRetryCount = 0
                                 } catch {
-                                    let connectErrorMsg = "❌ [WebSocketTransport] Reconnect after ping failure failed: \(error.localizedDescription)\n"
                                     logger.info("❌ [WebSocketTransport] Reconnect after ping failure failed: \(error.localizedDescription)")
                                     // Will retry again on next ping failure
                                 }
@@ -624,7 +608,8 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                 completeMsg += "   Error domain: \(error.domain), code: \(error.code)\n"
                 
                 // Log all userInfo keys for debugging
-                if let userInfo = error.userInfo as? [String: Any], !userInfo.isEmpty {
+                let userInfo = error.userInfo
+                if !userInfo.isEmpty {
                     completeMsg += "   Error UserInfo keys: \(userInfo.keys.joined(separator: ", "))\n"
                     for (key, value) in userInfo {
                         completeMsg += "   UserInfo[\(key)]: \(value)\n"
@@ -634,7 +619,8 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
         } else if let error = error as NSError? {
             // Log additional error details for non-HTTP errors
             completeMsg += "❌ [WebSocketTransport] Error domain: \(error.domain), code: \(error.code)\n"
-            if let userInfo = error.userInfo as? [String: Any], !userInfo.isEmpty {
+            let userInfo = error.userInfo
+            if !userInfo.isEmpty {
                 completeMsg += "   Error UserInfo keys: \(userInfo.keys.joined(separator: ", "))\n"
                 for (key, value) in userInfo {
                     completeMsg += "   UserInfo[\(key)]: \(value)\n"
@@ -710,25 +696,21 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func receiveNext(on task: WebSocketTasking) {
-        let receiveMsg = "📡 [WebSocketTransport] receiveNext() called, setting up receive callback\n"
         logger.info("📡 [WebSocketTransport] receiveNext() called, setting up receive callback")
         task.receive { [weak self] result in
             guard let self else {
                 NSLog("⚠️ [WebSocketTransport] Self is nil in receive callback")
                 return
             }
-            let callbackMsg = "📡 [WebSocketTransport] receive callback triggered\n"
             self.logger.info("📡 [WebSocketTransport] receive callback triggered")
             fflush(stdout)
             
-            let resultTypeMsg = "🔍 [WebSocketTransport] Result type: \(String(describing: result))\n"
             self.logger.info("🔍 [WebSocketTransport] Result type: \(String(describing: result))")
             fflush(stdout)
             
             switch result {
             case .success(let message):
                 // Log success immediately to catch messages before any processing
-                let successImmediateMsg = "✅ [WebSocketTransport] Receive SUCCESS - message arrived!\n"
                 self.logger.info("✅ [WebSocketTransport] Receive SUCCESS - message arrived!")
                 fflush(stdout)
                 
@@ -742,26 +724,21 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                 @unknown default:
                     messageType = "unknown"
                 }
-                let successMsg = "✅ [WebSocketTransport] Message received: \(messageType)\n"
                 logger.info("✅ [WebSocketTransport] Message received: \(messageType)")
                 fflush(stdout)
                 if case .data(let data) = message {
-                    let dataMsg = "📦 [WebSocketTransport] Binary data received: \(data.count) bytes\n"
                     logger.info("📦 [WebSocketTransport] Binary data received: \(data.count) bytes")
                     fflush(stdout)
                     self.handleIncoming(data: data)
                 } else if case .string(let str) = message {
-                    let textMsg = "📝 [WebSocketTransport] Text message received: \(str.prefix(100))\n"
                     logger.info("📝 [WebSocketTransport] Text message received: \(str.prefix(100))")
                     fflush(stdout)
                 } else {
-                    let nonDataMsg = "⚠️ [WebSocketTransport] Non-binary message received\n"
                     logger.info("⚠️ [WebSocketTransport] Non-binary message received")
                     fflush(stdout)
                 }
                 self.receiveNext(on: task)
             case .failure(let error):
-                let errorMsg = "❌ [WebSocketTransport] Receive failed: \(error.localizedDescription)\n"
                 logger.info("❌ [WebSocketTransport] Receive failed: \(error.localizedDescription)")
                 fflush(stdout)
                 
@@ -780,7 +757,6 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                 self.lastReceiveFailure = Date()
                 
                 let isCloud = self.configuration.environment == "cloud" || self.configuration.url.scheme == "wss"
-                let reconnectMsg = "🔄 [WebSocketTransport] Connection reset (cloud=\(isCloud), retry \(self.receiveRetryCount)), reconnecting after \(Int(backoff))s backoff...\n"
                 logger.info("🔄 [WebSocketTransport] Connection reset (cloud=\(isCloud), retry \(self.receiveRetryCount)), reconnecting after \(Int(backoff))s backoff...")
                 fflush(stdout)
                 
@@ -795,7 +771,6 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                         self.receiveRetryCount = 0
                         self.lastReceiveFailure = nil
                     } catch {
-                        let connectErrorMsg = "❌ [WebSocketTransport] Reconnect failed: \(error.localizedDescription)\n"
                         self.logger.info("❌ [WebSocketTransport] Reconnect failed: \(error.localizedDescription)")
                         // Will retry again on next receive failure
                     }
@@ -805,7 +780,6 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func handleIncoming(data: Data) {
-        let handleMsg = "📥 [WebSocketTransport] handleIncoming: \(data.count) bytes\n"
         logger.info("📥 [WebSocketTransport] handleIncoming: \(data.count) bytes")
         
         do {
@@ -951,7 +925,9 @@ extension WebSocketTransport: URLSessionDelegate {
             return
         }
 
-        guard let serverCertificate = SecTrustGetCertificateAtIndex(trust, 0) else {
+        // Use SecTrustCopyCertificateChain for macOS 12.0+
+        guard let certificateChain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let serverCertificate = certificateChain.first else {
             analytics.record(
                 .pinningFailure(
                     environment: configuration.environment,

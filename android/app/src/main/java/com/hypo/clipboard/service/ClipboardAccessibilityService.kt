@@ -69,8 +69,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
             val clip = clipboardManager?.primaryClip ?: return
             
             // Parse clipboard content
-            val event = clipboardParser.parse(clip) ?: return
-            val signature = event.signature()
+            val clipboardEvent = clipboardParser.parse(clip) ?: return
+            val signature = clipboardEvent.signature()
             
             // Skip if duplicate
             if (signature == lastSignature) {
@@ -78,14 +78,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
             }
             lastSignature = signature
             
-            Log.i(TAG, "📋 Accessibility service detected clipboard change: ${event.type}, preview: ${event.preview.take(50)}")
+            Log.i(TAG, "📋 Accessibility service detected clipboard change: ${clipboardEvent.type}, preview: ${clipboardEvent.content.take(50)}")
             
             // Forward to sync coordinator if available
             val coordinator = syncCoordinator
             if (coordinator != null) {
                 scope.launch {
                     try {
-                        coordinator.onClipboardEvent(event)
+                        coordinator.onClipboardEvent(clipboardEvent)
                         Log.i(TAG, "✅ Clipboard event forwarded to SyncCoordinator")
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Failed to forward clipboard event: ${e.message}", e)

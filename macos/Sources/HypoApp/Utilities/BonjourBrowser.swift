@@ -117,7 +117,8 @@ public actor BonjourBrowser {
             let token = UUID()
             continuations[token] = continuation
             continuation.onTermination = { [weak self] _ in
-                Task { await self?.removeContinuation(for: token) }
+                guard let self = self else { return }
+                Task { await self.removeContinuation(for: token) }
             }
         }
     }

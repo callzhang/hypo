@@ -84,7 +84,6 @@ class IncomingClipboardHandler @Inject constructor(
                     com.hypo.clipboard.domain.model.ClipboardType.LINK -> event.content.take(100)
                     com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> "image(${event.content.length} bytes)"
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> "file(${event.content.length} bytes)"
-                    else -> "<unknown>"
                 }
                 Log.d(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=$senderDeviceName, content: $contentPreview")
                 

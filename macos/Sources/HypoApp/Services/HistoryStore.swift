@@ -13,6 +13,9 @@ import os.log
 import UniformTypeIdentifiers
 #endif
 
+// UserDefaults is thread-safe for reading/writing, safe to mark as Sendable
+extension UserDefaults: @unchecked Sendable {}
+
 public actor HistoryStore {
     private let logger = HypoLogger(category: "HistoryStore")
     private var entries: [ClipboardEntry] = []
@@ -356,8 +359,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                   let deviceId = userInfo["deviceId"] as? String else {
                 return
             }
-            Task { @MainActor in
-                await self?.updateDeviceLastSeen(deviceId: deviceId)
+            guard let self = self else { return }
+            Task { @MainActor [self] in
+                await self.updateDeviceLastSeen(deviceId: deviceId)
             }
         }
     }

@@ -233,7 +233,7 @@ class SyncCoordinator @Inject constructor(
                         val results = mutableListOf<String>()
                         pairedDevices.forEach { target ->
                             try {
-                                val envelope = syncEngine.sendClipboard(item, target)
+                                syncEngine.sendClipboard(item, target)
                                 results.add("✅ $target")
                             } catch (error: TransportPayloadTooLargeException) {
                                 results.add("⚠️ $target (too large)")

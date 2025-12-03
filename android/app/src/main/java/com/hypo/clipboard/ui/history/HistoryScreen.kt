@@ -454,7 +454,7 @@ private val ClipboardType.iconVector: androidx.compose.ui.graphics.vector.ImageV
     }
 
 @Composable
-private fun FileDetailContent(item: ClipboardItem, onDismiss: () -> Unit) {
+private fun FileDetailContent(item: ClipboardItem, onDismiss: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isSaving by remember { mutableStateOf(false) }

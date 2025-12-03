@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'  # Triggers on tags like v0.2.2, v1.0.0, etc.
+    branches:
+      - 'test/**'  # Also trigger on test branches for debugging
   workflow_dispatch:
     inputs:
       version:
@@ -30,33 +32,33 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
+      - name: Accept Android SDK Licenses
+        run: |
+          # Accept all Android SDK licenses
+          mkdir -p "$ANDROID_HOME/licenses"
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo "601085b94cd77f0b54ff86406957099ebe79c4d6" > "$ANDROID_HOME/licenses/android-googletv-license"
+          echo "33b6a2b64607a11ce79713110d54f32d" > "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
+          echo "d975f751698a77b662f1254ddbeed3901e976f5a" > "$ANDROID_HOME/licenses/intel-android-extra-license"
+          echo "8403addf88ab4874007e1c1e80a0025de956b318" > "$ANDROID_HOME/licenses/google-gdk-license"
+          echo "601085b94cd77f0b54ff86406957099ebe79c4d6" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
+      
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
       
-      - name: Build Debug APK
-        working-directory: android
-        run: ./gradlew assembleDebug
-      
       - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleRelease --stacktrace || echo "Release build failed, continuing with debug APK only"
-        continue-on-error: true
-      
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: ./gradlew assembleRelease --stacktrace
       
       - name: Upload Release APK
-        if: success() || failure()  # Upload if file exists
         uses: actions/upload-artifact@v4
         with:
           name: android-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
-          if-no-files-found: ignore
 
   build-macos:
     name: Build macOS App
@@ -71,75 +73,99 @@ jobs:
         with:
           python-version: '3.x'
       
+      - name: Install Python dependencies
+        run: pip install Pillow
+      
       - name: Build macOS App
         working-directory: macos
         run: |
+          set -e
           # Build the Swift package
+          echo "Building Swift package..."
           swift build -c release
           
           # Create app bundle structure if it doesn't exist
           if [ ! -d "HypoApp.app" ]; then
+            echo "Creating app bundle structure..."
             mkdir -p HypoApp.app/Contents/MacOS
             mkdir -p HypoApp.app/Contents/Resources
           fi
           
           # Copy binary to app bundle (check actual build output)
+          echo "Looking for built binary..."
+          # The product name is HypoMenuBar, but the target is HypoMenuBarApp
+          # SwiftPM builds executables with the product name
+          BINARY_FOUND=false
           if [ -f ".build/release/HypoMenuBar" ]; then
+            echo "Found: .build/release/HypoMenuBar"
             cp .build/release/HypoMenuBar HypoApp.app/Contents/MacOS/HypoMenuBar
+            BINARY_FOUND=true
           elif [ -f ".build/release/HypoMenuBarApp" ]; then
+            echo "Found: .build/release/HypoMenuBarApp"
             cp .build/release/HypoMenuBarApp HypoApp.app/Contents/MacOS/HypoMenuBar
+            BINARY_FOUND=true
           else
-            echo "Error: Binary not found. Available files:"
-            find .build/release -type f || true
+            echo "Error: Binary not found. Searching for executables..."
+            echo "Available files in .build/release:"
+            find .build/release -type f 2>/dev/null || echo "No .build/release directory found"
+            echo "Available executables in .build:"
+            find .build -type f -executable -name "*MenuBar*" 2>/dev/null || echo "No MenuBar executables found"
+            # Try to find any executable
+            EXECUTABLE=$(find .build/release -type f -executable 2>/dev/null | head -1)
+            if [ -n "$EXECUTABLE" ]; then
+              echo "Found executable: $EXECUTABLE, using it"
+              cp "$EXECUTABLE" HypoApp.app/Contents/MacOS/HypoMenuBar
+              BINARY_FOUND=true
+            fi
+          fi
+          
+          if [ "$BINARY_FOUND" = false ]; then
             exit 1
           fi
+          
           chmod +x HypoApp.app/Contents/MacOS/HypoMenuBar
+          echo "Binary copied successfully"
           
           # Create or update Info.plist
-          cat > HypoApp.app/Contents/Info.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>HypoMenuBar</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.hypo.clipboard</string>
-              <key>CFBundleName</key>
-              <string>Hypo</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleVersion</key>
-              <string>1</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${{ github.ref_name }}</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>13.0</string>
-              <key>LSUIElement</key>
-              <true/>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>NSPrincipalClass</key>
-              <string>NSApplication</string>
-          </dict>
-          </plist>
-          EOF
+          echo "Creating Info.plist..."
+          # Extract version from tag (remove 'v' prefix if present)
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          VERSION="${VERSION#v}"  # Remove 'v' prefix if present
+          # Create Info.plist using printf to avoid YAML lint issues with heredoc
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n    <key>CFBundleExecutable</key>\n    <string>HypoMenuBar</string>\n    <key>CFBundleIdentifier</key>\n    <string>com.hypo.clipboard</string>\n    <key>CFBundleName</key>\n    <string>Hypo</string>\n    <key>CFBundlePackageType</key>\n    <string>APPL</string>\n    <key>CFBundleVersion</key>\n    <string>5</string>\n    <key>CFBundleShortVersionString</key>\n    <string>%s</string>\n    <key>LSMinimumSystemVersion</key>\n    <string>13.0</string>\n    <key>LSUIElement</key>\n    <true/>\n    <key>NSHighResolutionCapable</key>\n    <true/>\n    <key>NSPrincipalClass</key>\n    <string>NSApplication</string>\n</dict>\n</plist>\n' "${VERSION}" > HypoApp.app/Contents/Info.plist
           
           # Generate icons if script exists
           if [ -f "../scripts/generate-icons.py" ]; then
+            echo "Generating icons..."
             python3 ../scripts/generate-icons.py || echo "Icon generation failed, continuing without icon"
+          else
+            echo "Icon generation script not found, skipping"
           fi
+          
+          echo "macOS app build complete"
       
       - name: Create macOS ZIP
         working-directory: macos
         run: |
-          zip -r ../Hypo-macOS-${{ github.ref_name }}.zip HypoApp.app
+          # Extract version from tag or input (not branch name for test branches)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            # For test branches, use a test version
+            VERSION="v1.0.0-test"
+          fi
+          # Remove 'v' prefix if present and sanitize (replace slashes with dashes)
+          VERSION="${VERSION#v}"
+          SAFE_VERSION="${VERSION//\//-}"
+          zip -r ../Hypo-macOS-release-${SAFE_VERSION}.zip HypoApp.app
       
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
         with:
           name: macos-app
-          path: Hypo-macOS-${{ github.ref_name }}.zip
+          path: Hypo-macOS-release-*.zip
           retention-days: 30
 
   create-release:
@@ -160,6 +186,17 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
+          elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/heads/test/* ]]; then
+            # For test branches, check if current commit has a tag, otherwise use default
+            COMMIT_TAG=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
+            if [ -n "$COMMIT_TAG" ]; then
+              VERSION="$COMMIT_TAG"
+            else
+              # Default version for test branches (cleaner artifact names)
+              VERSION="v1.0.0"
+            fi
           else
             VERSION="${{ github.ref_name }}"
           fi
@@ -168,12 +205,6 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "Version: $VERSION, Tag: $TAG_NAME"
-      
-      - name: Download Android Debug APK
-        uses: actions/download-artifact@v4
-        with:
-          name: android-debug-apk
-          path: ./artifacts
       
       - name: Download Android Release APK
         uses: actions/download-artifact@v4
@@ -191,14 +222,23 @@ jobs:
         run: |
           cd artifacts
           TAG_NAME="${{ steps.version.outputs.tag }}"
-          mv app-debug.apk hypo-android-debug-${TAG_NAME}.apk
-          # Release APK may not exist if build failed
+          # Rename release APK
           if [ -f "app-release.apk" ]; then
             mv app-release.apk hypo-android-release-${TAG_NAME}.apk
           else
-            echo "Release APK not found, skipping"
+            echo "❌ Release APK not found!"
+            exit 1
           fi
-          # macOS zip already has version in name
+          # Rename macOS zip to use tag name (not branch name) if needed
+          if [ -f "Hypo-macOS-"*.zip ]; then
+            OLD_ZIP=$(ls Hypo-macOS-*.zip | head -1)
+            EXPECTED_NAME="Hypo-macOS-release-${TAG_NAME}.zip"
+            if [ "$OLD_ZIP" != "$EXPECTED_NAME" ]; then
+              mv "$OLD_ZIP" "$EXPECTED_NAME"
+            else
+              echo "✓ macOS ZIP already has correct name: $EXPECTED_NAME"
+            fi
+          fi
           ls -lh
       
       - name: Generate release notes
@@ -219,9 +259,8 @@ jobs:
           
           ## Downloads
           
-          - **Android (Release)**: \`hypo-android-release-${TAG_NAME}.apk\` (~15-20MB, optimized for production)
-          - **Android (Debug)**: \`hypo-android-debug-${TAG_NAME}.apk\` (~47MB, for development/testing)
-          - **macOS**: \`Hypo-macOS-${TAG_NAME}.zip\` (extract and move to Applications)
+          - **Android**: \`hypo-android-release-${TAG_NAME}.apk\` (~15-20MB, optimized for production)
+          - **macOS**: \`Hypo-macOS-release-${TAG_NAME}.zip\` (extract and move to Applications)
           
           ## Installation
           
@@ -251,7 +290,7 @@ jobs:
           echo "notes_path=release-notes.md" >> $GITHUB_OUTPUT
       
       - name: Delete existing release if present
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !contains(github.ref, 'refs/heads/test/')
         run: |
           TAG_NAME="${{ steps.version.outputs.tag }}"
           if gh release view "$TAG_NAME" &>/dev/null; then
@@ -261,7 +300,7 @@ jobs:
         continue-on-error: true
       
       - name: Delete existing tag if present
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !contains(github.ref, 'refs/heads/test/')
         run: |
           TAG_NAME="${{ steps.version.outputs.tag }}"
           if git rev-parse "$TAG_NAME" &>/dev/null; then
@@ -271,8 +310,8 @@ jobs:
           fi
         continue-on-error: true
       
-      - name: Create Git Tag (if workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Create Git Tag (if workflow_dispatch and not test branch)
+        if: github.event_name == 'workflow_dispatch' && !contains(github.ref, 'refs/heads/test/')
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG_NAME="${{ steps.version.outputs.tag }}"
@@ -282,15 +321,15 @@ jobs:
           git push origin "$TAG_NAME"
       
       - name: Create Release
+        if: github.event_name != 'push' || !contains(github.ref, 'refs/heads/test/')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Release ${{ steps.version.outputs.version }}
           body_path: ${{ steps.release-notes.outputs.notes_path }}
           files: |
-            artifacts/hypo-android-debug-*.apk
             artifacts/hypo-android-release-*.apk
-            artifacts/Hypo-macOS-*.zip
+            artifacts/Hypo-macOS-release-*.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
           generate_release_notes: true

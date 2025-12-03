@@ -223,10 +223,15 @@ jobs:
             echo "❌ Release APK not found!"
             exit 1
           fi
-          # Rename macOS zip to use tag name (not branch name)
+          # Rename macOS zip to use tag name (not branch name) if needed
           if [ -f "Hypo-macOS-"*.zip ]; then
             OLD_ZIP=$(ls Hypo-macOS-*.zip | head -1)
-            mv "$OLD_ZIP" "Hypo-macOS-${TAG_NAME}.zip"
+            EXPECTED_NAME="Hypo-macOS-${TAG_NAME}.zip"
+            if [ "$OLD_ZIP" != "$EXPECTED_NAME" ]; then
+              mv "$OLD_ZIP" "$EXPECTED_NAME"
+            else
+              echo "✓ macOS ZIP already has correct name: $EXPECTED_NAME"
+            fi
           fi
           ls -lh
       

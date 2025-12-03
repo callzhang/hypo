@@ -328,7 +328,7 @@ jobs:
           name: Release ${{ steps.version.outputs.version }}
           body_path: ${{ steps.release-notes.outputs.notes_path }}
           files: |
-            artifacts/Hypo.*.apk
+            artifacts/Hypo-*.apk
             artifacts/Hypo-*.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}

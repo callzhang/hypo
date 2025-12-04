@@ -121,7 +121,10 @@ fun SettingsScreen(
             }
 
             item {
-                BatterySection(onOpenBatterySettings = onOpenBatterySettings)
+                BatterySection(
+                    isDisabled = state.isBatteryOptimizationDisabled,
+                    onOpenBatterySettings = onOpenBatterySettings
+                )
             }
 
             item {
@@ -312,7 +315,10 @@ private fun HistorySection(
 }
 
 @Composable
-private fun BatterySection(onOpenBatterySettings: () -> Unit) {
+private fun BatterySection(
+    isDisabled: Boolean,
+    onOpenBatterySettings: () -> Unit
+) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
@@ -342,8 +348,29 @@ private fun BatterySection(onOpenBatterySettings: () -> Unit) {
                     color = MaterialTheme.colorScheme.primary
                 )
             }
-            Button(onClick = onOpenBatterySettings, modifier = Modifier.align(Alignment.End)) {
-                Text(text = stringResource(id = R.string.settings_battery_optimize_button))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isDisabled) {
+                        stringResource(id = R.string.settings_battery_status_disabled)
+                    } else {
+                        stringResource(id = R.string.settings_battery_status_enabled)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isDisabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+                if (!isDisabled) {
+                    Button(onClick = onOpenBatterySettings) {
+                        Text(text = stringResource(id = R.string.settings_battery_optimize_button))
+                    }
+                }
             }
         }
     }
@@ -394,8 +421,10 @@ private fun AccessibilitySection(
                         MaterialTheme.colorScheme.error
                     }
                 )
-                Button(onClick = onOpenAccessibilitySettings) {
-                    Text(text = stringResource(id = R.string.settings_accessibility_open_button))
+                if (!isEnabled) {
+                    Button(onClick = onOpenAccessibilitySettings) {
+                        Text(text = stringResource(id = R.string.settings_accessibility_open_button))
+                    }
                 }
             }
         }

@@ -63,12 +63,46 @@ class IncomingClipboardHandler @Inject constructor(
                 // The syncEngine.decode() will fetch the key using envelope.payload.deviceId
                 val clipboardPayload = syncEngine.decode(envelope)
                 
+                // For images and files, keep content as base64 string (binary data)
+                // For text and links, decode base64 to get the actual text
+                val content: String
+                val preview: String
+                when (clipboardPayload.contentType) {
+                    com.hypo.clipboard.domain.model.ClipboardType.TEXT,
+                    com.hypo.clipboard.domain.model.ClipboardType.LINK -> {
+                        // Decode base64 to get text content
+                        val decoded = java.util.Base64.getDecoder().decode(clipboardPayload.dataBase64)
+                        content = String(decoded, Charsets.UTF_8)
+                        preview = content.take(100)
+                    }
+                    com.hypo.clipboard.domain.model.ClipboardType.IMAGE,
+                    com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
+                        // Keep as base64 string for binary data
+                        content = clipboardPayload.dataBase64
+                        // Generate preview from metadata
+                        val size = clipboardPayload.metadata["size"]?.toLongOrNull() ?: 0L
+                        preview = when (clipboardPayload.contentType) {
+                            com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
+                                val width = clipboardPayload.metadata["width"] ?: "?"
+                                val height = clipboardPayload.metadata["height"] ?: "?"
+                                val format = clipboardPayload.metadata["format"] ?: "image"
+                                "Image ${width}×${height} (${formatBytes(size)})"
+                            }
+                            com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
+                                val filename = clipboardPayload.metadata["file_name"] ?: "file"
+                                "$filename (${formatBytes(size)})"
+                            }
+                            else -> "Binary data (${formatBytes(size)})"
+                        }
+                    }
+                }
+                
                 // Convert to ClipboardEvent with device info (normalized to lowercase)
                 val event = ClipboardEvent(
                     id = java.util.UUID.randomUUID().toString(),
                     type = clipboardPayload.contentType,
-                    content = String(java.util.Base64.getDecoder().decode(clipboardPayload.dataBase64)),
-                    preview = String(java.util.Base64.getDecoder().decode(clipboardPayload.dataBase64)).take(100),
+                    content = content,
+                    preview = preview,
                     metadata = clipboardPayload.metadata,
                     createdAt = java.time.Instant.now(),
                     deviceId = senderDeviceId.lowercase(), // ✅ Normalize to lowercase for consistent matching
@@ -113,6 +147,16 @@ class IncomingClipboardHandler @Inject constructor(
                 onDecryptionWarning?.invoke(deviceId, deviceName, reason)
             }
         }
+    }
+    
+    private fun formatBytes(size: Long): String {
+        if (size < 1024) return "$size B"
+        val kb = size / 1024.0
+        if (kb < 1024) return String.format("%.1f KB", kb)
+        val mb = kb / 1024.0
+        if (mb < 1024) return String.format("%.1f MB", mb)
+        val gb = mb / 1024.0
+        return String.format("%.1f GB", gb)
     }
     
     companion object {

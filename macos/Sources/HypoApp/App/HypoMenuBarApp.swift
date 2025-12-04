@@ -1818,6 +1818,8 @@ private struct SettingsSectionView: View {
     private let logger = HypoLogger(category: "SettingsSectionView")
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @State private var isPresentingPairing = false
+    @State private var localHistoryLimit: Double = 200
+    @State private var historyLimitUpdateTask: Task<Void, Never>?
     
     var body: some View {
         ScrollView {
@@ -1842,16 +1844,38 @@ private struct SettingsSectionView: View {
                 }
 
                 Section("History") {
-                    Slider(value: Binding(
-                        get: { Double(viewModel.historyLimit) },
-                        set: { viewModel.updateHistoryLimit(Int($0)) }
-                    ), in: 20...500, step: 10) {
-                        Text("History size")
-                    }
                     HStack {
-                        Text("Current limit")
-                        Spacer()
-                        Text("\(viewModel.historyLimit)")
+                        Slider(value: Binding(
+                            get: { localHistoryLimit },
+                            set: { newValue in
+                                localHistoryLimit = newValue
+                                // Cancel any pending update
+                                historyLimitUpdateTask?.cancel()
+                                // Debounce the update - only apply after 0.3 seconds of no changes
+                                historyLimitUpdateTask = Task {
+                                    try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+                                    if !Task.isCancelled {
+                                        await MainActor.run {
+                                            viewModel.updateHistoryLimit(Int(newValue))
+                                        }
+                                    }
+                                }
+                            }
+                        ), in: 20...500, step: 10) {
+                            Text("History size")
+                        }
+                        Text("\(Int(localHistoryLimit))")
+                            .frame(width: 50, alignment: .trailing)
+                            .foregroundStyle(.secondary)
+                    }
+                    .onAppear {
+                        localHistoryLimit = Double(viewModel.historyLimit)
+                    }
+                    .onChange(of: viewModel.historyLimit) { newValue in
+                        // Update local value when viewModel changes (e.g., from external source)
+                        if abs(localHistoryLimit - Double(newValue)) > 1 {
+                            localHistoryLimit = Double(newValue)
+                        }
                     }
                     Toggle("Auto-delete after a delay", isOn: Binding(
                         get: { viewModel.autoDeleteAfterHours > 0 },
@@ -1885,6 +1909,12 @@ private struct SettingsSectionView: View {
                 #if canImport(UserNotifications)
                 Section("Notifications") {
                     NotificationPermissionSection()
+                }
+                #endif
+                
+                #if canImport(AppKit)
+                Section("Accessibility") {
+                    AccessibilityPermissionSection()
                 }
                 #endif
 
@@ -1924,6 +1954,7 @@ private struct SettingsSectionView: View {
                                 .buttonStyle(.plain)
                                 .help("Remove device")
                             }
+                            .help("Device ID: \(device.id)")
                         }
                     }
                     Button("Pair new device") { isPresentingPairing = true }
@@ -2217,6 +2248,66 @@ private struct NotificationPermissionSection: View {
                 authorizationStatus = settings.authorizationStatus
                 isChecking = false
             }
+        }
+    }
+}
+#endif
+
+#if canImport(AppKit)
+private struct AccessibilityPermissionSection: View {
+    @State private var isAccessibilityEnabled = false
+    @State private var isChecking = true
+    
+    var body: some View {
+        Group {
+            HStack {
+                Text("Permission")
+                Spacer()
+                if isChecking {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                } else {
+                    statusText
+                }
+            }
+            
+            if !isAccessibilityEnabled {
+                Button("Open System Settings") {
+                    openSystemSettings()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .onAppear {
+            checkAccessibilityStatus()
+        }
+    }
+    
+    private var statusText: some View {
+        Group {
+            if isAccessibilityEnabled {
+                Label("Enabled", systemImage: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+            } else {
+                Label("Disabled", systemImage: "xmark.circle.fill")
+                    .foregroundColor(.red)
+            }
+        }
+    }
+    
+    private func openSystemSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+    
+    private func checkAccessibilityStatus() {
+        // Check accessibility permissions without prompting
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false]
+        let isEnabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        DispatchQueue.main.async {
+            isAccessibilityEnabled = isEnabled
+            isChecking = false
         }
     }
 }

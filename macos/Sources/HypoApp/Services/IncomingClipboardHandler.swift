@@ -179,7 +179,36 @@ public final class IncomingClipboardHandler {
             #endif
             
         case .file:
-            throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "File clipboard type not yet supported"])
+            // Save file data to temporary location and add to clipboard
+            let fileName = payload.metadata?["file_name"] ?? "file"
+            let tempDir = FileManager.default.temporaryDirectory
+            let fileExtension = (fileName as NSString).pathExtension
+            let baseFileName = (fileName as NSString).deletingPathExtension
+            let fullFileName = fileExtension.isEmpty ? baseFileName : "\(baseFileName).\(fileExtension)"
+            let tempURL = tempDir.appendingPathComponent(fullFileName)
+            
+            // Write data to temp file
+            do {
+                try payload.data.write(to: tempURL)
+                
+                // Add file URL to clipboard
+                await MainActor.run {
+                    pasteboard.clearContents()
+                    pasteboard.writeObjects([tempURL as NSURL])
+                }
+                
+                #if canImport(os)
+                logger.info("✅ Applied file to clipboard: \(fileName) (\(payload.data.count) bytes)")
+                #endif
+                
+                // Clean up temp file after a delay (30 seconds)
+                Task {
+                    try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+                    try? FileManager.default.removeItem(at: tempURL)
+                }
+            } catch {
+                throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to write file to temporary location: \(error.localizedDescription)"])
+            }
         }
     }
     

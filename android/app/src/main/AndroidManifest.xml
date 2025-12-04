@@ -50,6 +50,19 @@
             </intent-filter>
         </activity>
 
+        <!-- Process Text Activity - Adds "Hypo" to text selection context menu -->
+        <activity
+            android:name=".ProcessTextActivity"
+            android:exported="true"
+            android:label="@string/process_text_label"
+            android:theme="@style/Theme.Hypo">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <!-- Clipboard Sync Foreground Service -->
         <service
             android:name=".service.ClipboardSyncService"

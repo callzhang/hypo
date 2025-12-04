@@ -5,6 +5,9 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.webkit.MimeTypeMap
+import java.io.File
+import java.io.FileOutputStream
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -51,7 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import android.graphics.BitmapFactory
-import android.util.Base64
+import java.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -66,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -269,17 +273,70 @@ private fun ClipboardCard(
         
         // Launch new job and store it immediately - this makes isCopying true synchronously
         // The job is stored before it starts executing, preventing race conditions
-        copyJob = scope.launch(Dispatchers.Main) {
+        copyJob = scope.launch(Dispatchers.IO) {
             try {
-                val clip = ClipData.newPlainText("Hypo Clipboard", content)
-                manager.setPrimaryClip(clip)
-                android.util.Log.d("HistoryScreen", "✅ Copied to clipboard (itemId=$itemId): ${content.take(30)}")
+                // Helper functions for file handling (local to this scope)
+                fun createTempFileForClipboard(context: Context, bytes: ByteArray, prefix: String, suffix: String): File {
+                    val tempFile = File.createTempFile(prefix, suffix, context.cacheDir)
+                    FileOutputStream(tempFile).use { it.write(bytes) }
+                    return tempFile
+                }
                 
-                // Notify parent to scroll to top after item is copied
-                // The clipboard listener will detect the change and update the database,
-                // moving the item to the top. We scroll after a short delay to allow
-                // the database update to complete.
-                onItemClicked()
+                fun getExtensionFromFilename(filename: String): String? {
+                    val lastDot = filename.lastIndexOf('.')
+                    return if (lastDot >= 0 && lastDot < filename.length - 1) {
+                        filename.substring(lastDot + 1).lowercase()
+                    } else {
+                        null
+                    }
+                }
+                
+                fun getExtensionFromMimeType(mimeType: String): String? {
+                    return MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+                }
+                
+                val clip = when (item.type) {
+                    com.hypo.clipboard.domain.model.ClipboardType.TEXT,
+                    com.hypo.clipboard.domain.model.ClipboardType.LINK -> {
+                        // Text and links: use plain text
+                        ClipData.newPlainText("Hypo Clipboard", content)
+                    }
+                    com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
+                        // Images: decode base64, save to temp file, create URI
+                        val imageBytes = Base64.getDecoder().decode(content)
+                        val format = item.metadata?.get("format") ?: "png"
+                        val mimeType = when (format.lowercase()) {
+                            "png" -> "image/png"
+                            "jpeg", "jpg" -> "image/jpeg"
+                            "webp" -> "image/webp"
+                            "gif" -> "image/gif"
+                            else -> "image/png"
+                        }
+                        val tempFile = createTempFileForClipboard(context, imageBytes, "hypo_image", ".$format")
+                        ClipData.newUri(context.contentResolver, mimeType, Uri.fromFile(tempFile))
+                    }
+                    com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
+                        // Files: decode base64, save to temp file, create URI
+                        val fileBytes = Base64.getDecoder().decode(content)
+                        val filename = item.metadata?.get("file_name") ?: "file"
+                        val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
+                        val extension = getExtensionFromFilename(filename) ?: getExtensionFromMimeType(mimeType) ?: ""
+                        val tempFile = createTempFileForClipboard(context, fileBytes, "hypo_file", if (extension.isNotEmpty()) ".$extension" else "")
+                        ClipData.newUri(context.contentResolver, mimeType, Uri.fromFile(tempFile))
+                    }
+                }
+                
+                // Switch to Main thread to set clipboard
+                withContext(Dispatchers.Main) {
+                    manager.setPrimaryClip(clip)
+                    android.util.Log.d("HistoryScreen", "✅ Copied to clipboard (itemId=$itemId, type=${item.type}): ${content.take(30)}")
+                    
+                    // Notify parent to scroll to top after item is copied
+                    // The clipboard listener will detect the change and update the database,
+                    // moving the item to the top. We scroll after a short delay to allow
+                    // the database update to complete.
+                    onItemClicked()
+                }
             } catch (e: SecurityException) {
                 android.util.Log.e("HistoryScreen", "❌ SecurityException when copying to clipboard: ${e.message}", e)
             } catch (e: IllegalStateException) {
@@ -288,7 +345,6 @@ private fun ClipboardCard(
                 android.util.Log.e("HistoryScreen", "❌ Failed to copy to clipboard: ${e.message}", e)
             } finally {
                 // Clear the job reference when done - this makes isCopying false
-                // Since we're on Main dispatcher, this update happens synchronously with UI
                 copyJob = null
             }
         }
@@ -461,7 +517,7 @@ private fun FileDetailContent(item: ClipboardItem, onDismiss: () -> Unit = {}) {
     var saveError by remember { mutableStateOf<String?>(null) }
     
     val fileBytes = try {
-        Base64.decode(item.content, Base64.DEFAULT)
+        Base64.getDecoder().decode(item.content)
     } catch (e: Exception) {
         null
     }
@@ -666,7 +722,7 @@ private fun ClipboardDetailContent(item: ClipboardItem, onDismiss: () -> Unit = 
             ClipboardType.IMAGE -> {
                 // Decode and display image
                 val imageBytes = try {
-                    Base64.decode(item.content, Base64.DEFAULT)
+                    Base64.getDecoder().decode(item.content)
                 } catch (e: Exception) {
                     null
                 }

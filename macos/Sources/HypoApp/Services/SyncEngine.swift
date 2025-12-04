@@ -88,6 +88,7 @@ public struct SyncEnvelope: Codable {
     public enum MessageType: String, Codable {
         case clipboard
         case control
+        case error
     }
 
     public struct Payload: Codable {

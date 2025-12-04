@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import com.hypo.clipboard.sync.ClipboardEvent
@@ -34,6 +35,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var lastSignature: String? = null
     private var lastClipboardCheck: Long = 0
     private val clipboardCheckInterval = 500L // Check clipboard every 500ms
+    
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -56,6 +58,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        event ?: return
+        
         // Use accessibility events as a trigger to check clipboard
         // This allows us to monitor clipboard even when app is in background
         val now = System.currentTimeMillis()
@@ -101,6 +105,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
             Log.e(TAG, "❌ Error processing clipboard in accessibility service: ${e.message}", e)
         }
     }
+    
 
     override fun onInterrupt() {
         Log.w(TAG, "⚠️ ClipboardAccessibilityService interrupted")

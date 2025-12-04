@@ -66,6 +66,14 @@ class SettingsViewModel @Inject constructor(
             emit(checkNotificationPermissionStatus())
         }
     }
+    
+    // Flow that emits battery optimization status periodically (needed for UI updates)
+    private val batteryOptimizationStatusFlow = flow {
+        while (true) {
+            delay(2_000L) // Check every 2 seconds
+            emit(checkBatteryOptimizationStatus())
+        }
+    }
 
     init {
         observeState()
@@ -84,7 +92,8 @@ class SettingsViewModel @Inject constructor(
                 transportManager.cloudConnectionState,  // Cloud-only connection state - tracks cloud state separately from LAN
                 accessibilityStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) }, // Emit immediately on start, then every 2 seconds
                 smsPermissionStatusFlow.onStart { emit(checkSmsPermissionStatus()) }, // Emit immediately on start, then every 2 seconds
-                notificationPermissionStatusFlow.onStart { emit(checkNotificationPermissionStatus()) } // Emit immediately on start, then every 2 seconds
+                notificationPermissionStatusFlow.onStart { emit(checkNotificationPermissionStatus()) }, // Emit immediately on start, then every 2 seconds
+                batteryOptimizationStatusFlow.onStart { emit(checkBatteryOptimizationStatus()) } // Emit immediately on start, then every 2 seconds
             ) { values ->
                 val settings = values[0] as UserSettings
                 val peers = values[1] as List<DiscoveredPeer>
@@ -93,6 +102,7 @@ class SettingsViewModel @Inject constructor(
                 val isAccessibilityEnabled = values[4] as Boolean
                 val isSmsPermissionGranted = values[5] as Boolean
                 val isNotificationPermissionGranted = values[6] as Boolean
+                val isBatteryOptimizationDisabled = values[7] as Boolean
                 // Load all paired devices directly from persistent storage
                 val allPairedDeviceIds = runCatching { 
                     deviceKeyStore.getAllDeviceIds() 
@@ -211,6 +221,7 @@ class SettingsViewModel @Inject constructor(
                     isAccessibilityServiceEnabled = isAccessibilityEnabled,
                     isSmsPermissionGranted = isSmsPermissionGranted,
                     isNotificationPermissionGranted = isNotificationPermissionGranted,
+                    isBatteryOptimizationDisabled = isBatteryOptimizationDisabled,
                     connectionState = cloudConnectionState,
                     peerDiscoveryStatus = peerDiscoveryStatus,
                     peerDeviceNames = peerDeviceNames
@@ -303,6 +314,10 @@ class SettingsViewModel @Inject constructor(
         // On older versions, notifications are always allowed
         return true
     }
+    
+    private fun checkBatteryOptimizationStatus(): Boolean {
+        return com.hypo.clipboard.util.MiuiAdapter.isBatteryOptimizationDisabled(context)
+    }
 }
 
 data class SettingsUiState(
@@ -316,6 +331,7 @@ data class SettingsUiState(
         val isAccessibilityServiceEnabled: Boolean = false,
         val isSmsPermissionGranted: Boolean = false,
         val isNotificationPermissionGranted: Boolean = false,
+        val isBatteryOptimizationDisabled: Boolean = false,
         val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Disconnected,
         val peerDiscoveryStatus: Map<String, Boolean> = emptyMap(), // Maps serviceName to isDiscovered
         val peerDeviceNames: Map<String, String?> = emptyMap() // Maps serviceName to device name

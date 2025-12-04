@@ -797,6 +797,29 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                         logger.info("🔍 [WebSocketTransport] JSON payload (first 200 chars): \(jsonString.prefix(200))")
                         
                         // Check if this is a control message (from cloud relay) before trying to decode as SyncEnvelope
+                        // Check for error messages with structure: {"type":"error","payload":{...}}
+                        if jsonString.contains("\"type\"") && jsonString.contains("\"error\"") {
+                            logger.info("⚠️ [WebSocketTransport] Received error message from cloud relay - handling separately")
+                            // Try to parse as error message
+                            if let jsonDict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                               let type = jsonDict["type"] as? String,
+                               type == "error",
+                               let payload = jsonDict["payload"] as? [String: Any] {
+                                let code = payload["code"] as? String ?? "unknown"
+                                let message = payload["message"] as? String ?? "Unknown error"
+                                let targetDeviceId = payload["target_device_id"] as? String
+                                
+                                // Log error message (these are expected when target device is not connected)
+                                logger.debug("⚠️ [WebSocketTransport] Server error: \(code) - \(message)")
+                                if let targetDeviceId = targetDeviceId {
+                                    logger.debug("   Target device: \(targetDeviceId)")
+                                }
+                                
+                                // Error messages are informational - don't try to decode as SyncEnvelope
+                                return
+                            }
+                        }
+                        
                         // Control messages have structure: {"msg_type":"control","payload":{...}}
                         // They don't have an "id" field, so decoding as SyncEnvelope will fail
                         if jsonString.contains("\"msg_type\"") && jsonString.contains("\"control\"") {

@@ -23,7 +23,7 @@ public struct TransportFrameCodec: Sendable {
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             return decoder
         }(),
-        maxPayloadSize: Int = 256 * 1024
+        maxPayloadSize: Int = 10 * 1024 * 1024 // 10MB (matches app content size limits)
     ) {
         self.encoder = encoder
         self.decoder = decoder

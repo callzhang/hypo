@@ -854,6 +854,10 @@ public final class LanWebSocketServer {
             // Handle based on envelope type
             logger.info("🔍  Switching on envelope type")
             switch envelope.type {
+            case .error:
+                // Error messages from server - log and ignore
+                logger.warning("⚠️ [LanWebSocketServer] Received error message from server (id: \(envelope.id))")
+                return
             case .clipboard:
                 logger.info("✅  Case .clipboard matched")
                 

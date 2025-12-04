@@ -323,6 +323,11 @@ fi
 # Sign the app for local development (adhoc signature)
 # This allows the app to run locally without Gatekeeper blocking it
 log_info "Signing app bundle for local development..."
+
+# Always clear extended attributes before signing to prevent signing failures
+log_info "Clearing extended attributes..."
+xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+
 if [ -f "$SCRIPT_DIR/sign-macos.sh" ]; then
     # Use the dedicated signing script
     # Temporarily disable exit on error to allow build to continue if signing fails
@@ -332,13 +337,22 @@ if [ -f "$SCRIPT_DIR/sign-macos.sh" ]; then
     set -e
     
     if [ $SIGN_EXIT_CODE -ne 0 ]; then
-        log_warn "Code signing failed (exit code: $SIGN_EXIT_CODE), but app may still work for local development"
-        log_info "If macOS says the app is damaged, right-click and select 'Open' to bypass Gatekeeper"
+        log_warn "Code signing failed (exit code: $SIGN_EXIT_CODE), trying fallback method..."
+        # Fallback to simple ad-hoc signing
+        xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+        if codesign --force --sign - "$APP_BINARY" 2>/dev/null && \
+           codesign --force --sign - "$APP_BUNDLE" 2>/dev/null; then
+            log_success "App signed with fallback method"
+        else
+            log_warn "Code signing failed, but app may still work for local development"
+            log_info "If macOS says the app is damaged, right-click and select 'Open' to bypass Gatekeeper"
+        fi
+    else
+        log_success "App signed successfully"
     fi
 else
     # Fallback to simple ad-hoc signing if script not found
     log_warn "sign-macos.sh not found, using simple ad-hoc signing..."
-    xattr -cr "$APP_BUNDLE" 2>/dev/null || true
     if codesign --force --sign - "$APP_BINARY" 2>/dev/null && \
        codesign --force --sign - "$APP_BUNDLE" 2>/dev/null; then
         log_success "App signed successfully"

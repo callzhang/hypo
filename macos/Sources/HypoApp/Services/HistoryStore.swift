@@ -647,9 +647,71 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 data: Data(url.absoluteString.utf8),
                 metadata: ["device_id": entry.deviceId, "device_name": entry.originDeviceName ?? ""]
             )
-        case .image, .file:
-            // Skip images/files for now (would need more complex handling)
-            return
+        case .image(let metadata):
+            // Extract image data from ImageMetadata
+            guard let imageData = metadata.data else {
+#if canImport(os)
+                logger.warning("⚠️ [HistoryStore] Image entry has no data, skipping sync")
+#endif
+                return
+            }
+            
+            // Check size limit (10MB)
+            let maxAttachmentSize = 10 * 1024 * 1024
+            if imageData.count > maxAttachmentSize {
+#if canImport(os)
+                logger.warning("⚠️ [HistoryStore] Image too large: \(imageData.count) bytes (limit: \(maxAttachmentSize)), skipping sync")
+#endif
+                return
+            }
+            
+            var imageMetadata: [String: String] = [
+                "device_id": entry.deviceId,
+                "device_name": entry.originDeviceName ?? ""
+            ]
+            if let altText = metadata.altText {
+                imageMetadata["file_name"] = altText
+            }
+            imageMetadata["format"] = metadata.format
+            imageMetadata["width"] = "\(Int(metadata.pixelSize.width))"
+            imageMetadata["height"] = "\(Int(metadata.pixelSize.height))"
+            
+            payload = ClipboardPayload(
+                contentType: .image,
+                data: imageData,
+                metadata: imageMetadata
+            )
+        case .file(let metadata):
+            // Extract file data from FileMetadata (base64 encoded)
+            guard let base64String = metadata.base64,
+                  let fileData = Data(base64Encoded: base64String) else {
+#if canImport(os)
+                logger.warning("⚠️ [HistoryStore] File entry has no data, skipping sync")
+#endif
+                return
+            }
+            
+            // Check size limit (10MB)
+            let maxAttachmentSize = 10 * 1024 * 1024
+            if fileData.count > maxAttachmentSize {
+#if canImport(os)
+                logger.warning("⚠️ [HistoryStore] File too large: \(fileData.count) bytes (limit: \(maxAttachmentSize)), skipping sync")
+#endif
+                return
+            }
+            
+            var fileMetadataDict: [String: String] = [
+                "device_id": entry.deviceId,
+                "device_name": entry.originDeviceName ?? "",
+                "file_name": metadata.fileName,
+                "uti": metadata.uti
+            ]
+            
+            payload = ClipboardPayload(
+                contentType: .file,
+                data: fileData,
+                metadata: fileMetadataDict
+            )
         }
         
         // Queue messages for all paired devices that have encryption keys

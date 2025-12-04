@@ -53,12 +53,13 @@ struct MenuBarIconRightClickHandler: NSViewRepresentable {
         versionItem.isEnabled = false
         menu.addItem(versionItem)
 
-        // Show Clipboard
+        // Show Clipboard (alt+v)
         let showHistoryItem = NSMenuItem(
-            title: "Show Clipboard",
+            title: "Show Clipboard (alt+v)",
             action: #selector(MenuActionTarget.showHistory),
-            keyEquivalent: ""
+            keyEquivalent: "v"
         )
+        showHistoryItem.keyEquivalentModifierMask = [.option]
         showHistoryItem.target = MenuActionTarget.shared
         MenuActionTarget.shared.showHistoryAction = {
             NSLog("📋 [Right-click menu] Show Clipboard selected")

@@ -208,6 +208,9 @@ log_success "Build complete: $BUILT_BINARY"
 # Always copy binary to app bundle to ensure it's updated
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$BINARY_NAME"
 
+# Ensure MacOS directory exists
+mkdir -p "$APP_BUNDLE/Contents/MacOS"
+
 log_info "Copying binary to app bundle..."
 cp -f "$BUILT_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"

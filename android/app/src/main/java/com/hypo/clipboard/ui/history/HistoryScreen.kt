@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
+import android.widget.Toast
 import java.io.File
 import java.io.FileOutputStream
 import androidx.compose.foundation.clickable
@@ -78,11 +79,14 @@ import androidx.compose.ui.unit.dp
 import com.hypo.clipboard.R
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
+import com.hypo.clipboard.util.SizeConstants
 import com.hypo.clipboard.domain.model.TransportOrigin
 import com.hypo.clipboard.transport.ConnectionState
 import com.hypo.clipboard.ui.components.ConnectionStatusBadge
+import com.hypo.clipboard.util.TempFileManager
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.CoroutineScope
 
 @Composable
 fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.hiltViewModel()) {
@@ -92,6 +96,7 @@ fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.
         query = state.query,
         currentDeviceId = viewModel.currentDeviceId,
         connectionState = state.connectionState,
+        viewModel = viewModel,
         onQueryChange = viewModel::onQueryChange
     )
 }
@@ -102,9 +107,24 @@ fun HistoryScreen(
     query: String,
     currentDeviceId: String,
     connectionState: ConnectionState,
+    viewModel: HistoryViewModel,
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val clipboardManager = remember { context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager }
+    
+    // Initialize TempFileManager for automatic cleanup (created once per composition)
+    val tempFileManager = remember(context, scope, clipboardManager) {
+        TempFileManager(
+            context = context,
+            scope = scope,
+            clipboardManager = clipboardManager
+        )
+    }
+    
+    
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -143,7 +163,6 @@ fun HistoryScreen(
             EmptyHistory()
         } else {
             val listState = rememberLazyListState()
-            val scope = rememberCoroutineScope()
             
             // Track the first item's timestamp to detect when an item moves to top
             // When an item is clicked and moved to top, its timestamp changes, triggering scroll
@@ -170,6 +189,8 @@ fun HistoryScreen(
                     ClipboardCard(
                         item = item,
                         currentDeviceId = currentDeviceId,
+                        viewModel = viewModel,
+                        tempFileManager = tempFileManager,
                         onItemClicked = {
                             // When item is clicked, it will be copied to clipboard
                             // The clipboard listener will detect the change and update the database,
@@ -222,6 +243,8 @@ private fun EmptyHistory() {
 private fun ClipboardCard(
     item: ClipboardItem,
     currentDeviceId: String,
+    viewModel: HistoryViewModel,
+    tempFileManager: TempFileManager,
     onItemClicked: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -249,8 +272,15 @@ private fun ClipboardCard(
     
     // Pre-cache content to avoid accessing it during click
     // Use item.id as key to ensure we get the correct content even if item reference changes
+    // For IMAGE/FILE types, content may be empty (excluded from list query to avoid CursorWindow overflow)
+    // We'll load it on-demand when copying
     val contentToCopy = remember(item.id) { item.content }
     val itemId = remember(item.id) { item.id }  // Capture item ID to verify we're copying the right item
+    val needsContentLoad = remember(item.id) { 
+        (item.type == com.hypo.clipboard.domain.model.ClipboardType.IMAGE || 
+         item.type == com.hypo.clipboard.domain.model.ClipboardType.FILE) && 
+        contentToCopy.isBlank()
+    }
     
     fun copyToClipboard() {
         // Prevent multiple rapid clicks by checking if job is already active
@@ -261,12 +291,6 @@ private fun ClipboardCard(
         }
         
         val manager = clipboardManager ?: return
-        // Use the remembered content, which is keyed by item.id
-        val content = contentToCopy
-        if (content.isBlank()) {
-            android.util.Log.w("HistoryScreen", "⚠️ Content is blank for item ${itemId}, cannot copy")
-            return
-        }
         
         // Cancel any existing job (shouldn't happen due to check above, but defensive)
         copyJob?.cancel()
@@ -275,6 +299,56 @@ private fun ClipboardCard(
         // The job is stored before it starts executing, preventing race conditions
         copyJob = scope.launch(Dispatchers.IO) {
             try {
+                // Load content on-demand if needed (for IMAGE/FILE types that have empty content)
+                var content = contentToCopy
+                if (needsContentLoad) {
+                    android.util.Log.d("HistoryScreen", "📥 Loading full content for ${item.type} item ${itemId}")
+                    content = viewModel.loadFullContent(itemId) ?: contentToCopy
+                    if (content.isBlank()) {
+                        android.util.Log.w("HistoryScreen", "⚠️ Failed to load content for item ${itemId}, cannot copy")
+                        // Show toast on main thread
+                        kotlinx.coroutines.withContext(Dispatchers.Main) {
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.error_content_too_large),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        return@launch
+                    }
+                }
+                
+                if (content.isBlank()) {
+                    android.util.Log.w("HistoryScreen", "⚠️ Content is blank for item ${itemId}, cannot copy")
+                    // Show toast on main thread
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.error_content_too_large),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    return@launch
+                }
+                
+                // Size check: prevent copying very large items
+                // Base64 encoding increases size by ~33%, so check the base64 string size
+                val estimatedSizeBytes = (content.length * 3) / 4 // Approximate decoded size
+                if (estimatedSizeBytes > SizeConstants.MAX_COPY_SIZE_BYTES) {
+                    android.util.Log.w("HistoryScreen", "⚠️ Item too large to copy: ${estimatedSizeBytes} bytes (limit: ${SizeConstants.MAX_COPY_SIZE_BYTES})")
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.error_item_too_large_to_copy, 
+                                String.format("%.1f", estimatedSizeBytes / (1024.0 * 1024.0)),
+                                String.format("%.0f", SizeConstants.MAX_COPY_SIZE_BYTES / (1024.0 * 1024.0))
+                            ),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    return@launch
+                }
+        
                 // Helper functions for file handling (local to this scope)
                 fun createTempFileForClipboard(context: Context, bytes: ByteArray, prefix: String, suffix: String): File {
                     val tempFile = File.createTempFile(prefix, suffix, context.cacheDir)
@@ -313,6 +387,8 @@ private fun ClipboardCard(
                             else -> "image/png"
                         }
                         val tempFile = createTempFileForClipboard(context, imageBytes, "hypo_image", ".$format")
+                        // Register temp file for automatic cleanup
+                        tempFileManager.registerTempFile(tempFile)
                         ClipData.newUri(context.contentResolver, mimeType, Uri.fromFile(tempFile))
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
@@ -322,6 +398,8 @@ private fun ClipboardCard(
                         val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
                         val extension = getExtensionFromFilename(filename) ?: getExtensionFromMimeType(mimeType) ?: ""
                         val tempFile = createTempFileForClipboard(context, fileBytes, "hypo_file", if (extension.isNotEmpty()) ".$extension" else "")
+                        // Register temp file for automatic cleanup
+                        tempFileManager.registerTempFile(tempFile)
                         ClipData.newUri(context.contentResolver, mimeType, Uri.fromFile(tempFile))
                     }
                 }

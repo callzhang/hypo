@@ -1,8 +1,8 @@
 # Hypo Troubleshooting Guide
 
 **Comprehensive troubleshooting for Hypo clipboard sync**  
-**Version**: 0.2.3 Beta  
-**Last Updated**: December 30, 2025
+**Version**: 1.0.3  
+**Last Updated**: December 4, 2025
 
 > **Note**: As of November 2025, all critical bugs have been resolved. The system is production-ready. If you encounter issues, they are likely related to network configuration or device-specific settings.
 
@@ -282,6 +282,71 @@ curl -I https://hypo.fly.dev/health
 - Verify relay server status at status.hypo.app
 - Clear app cache and restart
 - Re-pair devices to refresh cloud credentials
+
+### Problem: "Item Too Large to Copy" Notification
+
+**Symptoms**: System notification appears when trying to copy large images or files
+
+**Explanation**:
+- Hypo enforces a **50MB limit** for copying items to clipboard
+- This is separate from the **10MB sync limit** (items can be synced but not copied if too large)
+- Prevents excessive disk space usage from temporary files
+
+**Solutions**:
+- Use smaller images/files (compress or resize before copying)
+- Copy items individually rather than in bulk
+- The item will still be synced to other devices (if under 10MB), but won't be copied to local clipboard
+
+**Size Limits** (defined in `SizeConstants` on both platforms):
+- **Sync Limit**: 10MB - Maximum size for items synced between devices (raw content before base64 encoding)
+- **Copy Limit**: 50MB - Maximum size for copying items to clipboard
+- **Transport Frame**: 25MB - Maximum frame payload size (accounts for base64 encoding, JSON structure, and encryption overhead)
+- **Compression Target**: 7.5MB - Target raw size for image compression (75% of sync limit)
+- **Max Image Dimension**: 2560px - Images with longest side >2560px are automatically scaled down
+
+### Problem: "Android App Crashes with Large Images/Files in History"
+
+**Symptoms**: App crashes when opening history containing large image or file items
+
+**Root Cause**: Android Room database has a 2MB limit per row in CursorWindow. Large base64-encoded images/files exceed this limit.
+
+**Solution**: ✅ **Fixed in v1.0.3**
+- App now uses lazy loading for IMAGE/FILE types
+- Content is excluded from list queries and loaded on-demand when copying
+- If you still experience crashes, clear app data and restart:
+  ```bash
+  adb shell pm clear com.hypo.clipboard.debug
+  ```
+
+**Diagnostic Steps**:
+```bash
+# Check for SQLiteBlobTooBigException errors
+adb logcat -d | grep -E "SQLiteBlobTooBigException|CursorWindow"
+```
+
+### Problem: "Disk Space Being Consumed by Temp Files"
+
+**Symptoms**: Disk space gradually decreases, especially after copying large images/files
+
+**Explanation**:
+- Hypo creates temporary files when copying images/files to clipboard
+- Files are automatically cleaned up after 30 seconds or when clipboard changes
+- Periodic cleanup removes files older than 5 minutes
+
+**Solutions**:
+- ✅ **Automatic**: Temp files are automatically managed (v1.0.3+)
+- Manual cleanup: Clear app cache/data if needed
+  - **Android**: Settings → Apps → Hypo → Storage → Clear Cache
+  - **macOS**: Files in `~/Library/Caches/` are automatically managed by system
+
+**Verification**:
+```bash
+# Android: Check temp file count
+adb shell ls -la /data/data/com.hypo.clipboard.debug/cache/ | grep hypo_
+
+# macOS: Check temp directory
+ls -la ~/Library/Caches/ | grep hypo_
+```
 
 ### Problem: "Device Not Appearing After Pairing"
 

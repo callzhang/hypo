@@ -183,14 +183,24 @@ class SyncCoordinator @Inject constructor(
                 }
                 
                 // Check if matches something in history (excluding the latest entry)
-                val matchingEntry = repository.findMatchingEntryInHistory(eventItem)
+                val matchingEntry = try {
+                    repository.findMatchingEntryInHistory(eventItem)
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "❌ Error finding matching entry in history: ${e.message}", e)
+                    null // Continue as if no match found
+                }
                 
                 val item: ClipboardItem
                 if (matchingEntry != null) {
                     // Found matching entry in history - move it to the top by updating timestamp
                     val newTimestamp = Instant.now()
-                    repository.updateTimestamp(matchingEntry.id, newTimestamp)
-                    android.util.Log.d(TAG, "🔄 New message matches history item, moved to top: ${matchingEntry.preview.take(50)}")
+                    try {
+                        repository.updateTimestamp(matchingEntry.id, newTimestamp)
+                        android.util.Log.d(TAG, "🔄 New message matches history item, moved to top: ${matchingEntry.preview.take(50)}")
+                    } catch (e: Exception) {
+                        android.util.Log.e(TAG, "❌ Error updating timestamp: ${e.message}", e)
+                        // Continue anyway - item is still matched
+                    }
                     // Use the existing item for broadcasting
                     item = matchingEntry
                 } else {
@@ -208,7 +218,16 @@ class SyncCoordinator @Inject constructor(
                         isEncrypted = event.isEncrypted,
                         transportOrigin = event.transportOrigin
                     )
-                    repository.upsert(item)
+                    try {
+                        repository.upsert(item)
+                    } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
+                        android.util.Log.e(TAG, "❌ SQLiteBlobTooBigException when saving ${event.type} item: ${e.message}. Item too large to save.", e)
+                        // Skip this item - it's too large to save
+                        continue
+                    } catch (e: Exception) {
+                        android.util.Log.e(TAG, "❌ Error upserting item to database: ${e.message}", e)
+                        // Continue anyway - don't crash the whole sync process
+                    }
                 }
 
                 // Only broadcast if not a received item (prevent loops)

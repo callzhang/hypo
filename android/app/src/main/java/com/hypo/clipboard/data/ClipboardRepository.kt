@@ -13,4 +13,6 @@ interface ClipboardRepository {
     suspend fun getLatestEntry(): ClipboardItem?
     suspend fun findMatchingEntryInHistory(item: ClipboardItem): ClipboardItem?
     suspend fun updateTimestamp(id: String, newTimestamp: Instant)
+    // Load full content for an item (needed when copying IMAGE/FILE items that have empty content in list view)
+    suspend fun loadFullContent(itemId: String): String?
 }

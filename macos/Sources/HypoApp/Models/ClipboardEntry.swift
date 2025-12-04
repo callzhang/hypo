@@ -198,8 +198,12 @@ public extension ClipboardEntry {
         case .image(let metadata):
             return metadata.data
         case .file(let metadata):
-            if let base64 = metadata.base64 {
-                return Data(base64Encoded: base64)
+            if let base64 = metadata.base64,
+               let data = Data(base64Encoded: base64) {
+                return data
+            }
+            if let url = metadata.url {
+                return try? Data(contentsOf: url)
             }
             return nil
         }
@@ -251,8 +255,27 @@ public extension ClipboardEntry {
             if meta1.byteSize != meta2.byteSize {
                 return false
             }
-            let data1 = meta1.base64.flatMap { Data(base64Encoded: $0) } ?? Data()
-            let data2 = meta2.base64.flatMap { Data(base64Encoded: $0) } ?? Data()
+            let data1: Data
+            if let base64 = meta1.base64,
+               let decoded = Data(base64Encoded: base64) {
+                data1 = decoded
+            } else if let url = meta1.url,
+                      let loaded = try? Data(contentsOf: url) {
+                data1 = loaded
+            } else {
+                return false
+            }
+            
+            let data2: Data
+            if let base64 = meta2.base64,
+               let decoded = Data(base64Encoded: base64) {
+                data2 = decoded
+            } else if let url = meta2.url,
+                      let loaded = try? Data(contentsOf: url) {
+                data2 = loaded
+            } else {
+                return false
+            }
             let hash1 = sha256(data1)
             let hash2 = sha256(data2)
             return hash1 == hash2

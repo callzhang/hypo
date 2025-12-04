@@ -69,6 +69,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
     private var queueProcessingTask: Task<Void, Never>?
     private var receiveRetryCount: UInt = 0
     private var lastReceiveFailure: Date?
+    private var reconnectingTask: Task<Void, Never>? // Guard to prevent concurrent reconnection attempts
 
     public init(
         configuration: LanWebSocketConfiguration,
@@ -320,6 +321,8 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         watchdogTask = nil
         queueProcessingTask?.cancel()
         queueProcessingTask = nil
+        reconnectingTask?.cancel()
+        reconnectingTask = nil
         var taskToCancel: WebSocketTasking?
         switch state {
         case .connected(let task):
@@ -362,11 +365,66 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
     }
 
     private func ensureConnected() async throws {
+        // Wait for any in-progress reconnection to complete
+        if let reconnecting = reconnectingTask {
+            logger.info("⏳ [LanWebSocketTransport] Waiting for in-progress reconnection...")
+            await reconnecting.value
+        }
+        
         switch state {
         case .connected:
             return
         case .idle, .connecting:
+            // If not reconnecting, try to connect
             try await connect()
+        }
+    }
+    
+    private func reconnectWithBackoff() {
+        // Prevent concurrent reconnection attempts
+        guard reconnectingTask == nil || reconnectingTask?.isCancelled == true else {
+            logger.info("⏭️ [LanWebSocketTransport] Reconnection already in progress, skipping")
+            return
+        }
+        
+        let initialBackoff: TimeInterval = 1.0
+        let maxBackoff: TimeInterval = 128.0
+        let backoff: TimeInterval
+        if receiveRetryCount < 8 {
+            backoff = initialBackoff * pow(2.0, Double(receiveRetryCount))
+        } else {
+            backoff = maxBackoff
+        }
+        
+        receiveRetryCount += 1
+        lastReceiveFailure = Date()
+        
+        let isCloud = configuration.environment == "cloud" || configuration.url.scheme == "wss"
+        logger.info("🔄 [LanWebSocketTransport] Scheduling reconnection (cloud=\(isCloud), retry \(receiveRetryCount)) after \(Int(backoff))s backoff...")
+        
+        reconnectingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            
+            // Wait for backoff
+            try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+            
+            // Disconnect first
+            await self.disconnect()
+            
+            // Try to reconnect
+            do {
+                try await self.connect()
+                // Reset retry count on successful connection
+                self.receiveRetryCount = 0
+                self.lastReceiveFailure = nil
+                self.logger.info("✅ [LanWebSocketTransport] Reconnection successful")
+            } catch {
+                self.logger.info("❌ [LanWebSocketTransport] Reconnection failed: \(error.localizedDescription)")
+                // Will retry again on next failure
+            }
+            
+            // Clear reconnecting task
+            self.reconnectingTask = nil
         }
     }
 
@@ -391,34 +449,10 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                         guard let self = self else { return }
                         if let error {
                             self.logger.info("❌ [LanWebSocketTransport] Ping failed: \(error.localizedDescription)")
-                            // If ping fails, the connection is likely dead - disconnect and reconnect
-                            // Use exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
+                            // Use centralized reconnection logic
                             Task { @MainActor [weak self] in
                                 guard let self = self else { return }
-                                await self.disconnect()
-                                
-                                // Calculate backoff based on ping retry count
-                                let initialBackoff: TimeInterval = 1.0
-                                let maxBackoff: TimeInterval = 128.0
-                                let backoff: TimeInterval
-                                if self.receiveRetryCount < 8 {
-                                    backoff = initialBackoff * pow(2.0, Double(self.receiveRetryCount))
-                                } else {
-                                    backoff = maxBackoff // Keep retrying every 128s indefinitely
-                                }
-                                
-                                self.receiveRetryCount += 1
-                                self.logger.info("🔄 [LanWebSocketTransport] Ping failed, reconnecting after \(Int(backoff))s backoff (attempt \(self.receiveRetryCount))...")
-                                
-                                try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
-                                do {
-                                    try await self.connect()
-                                    // Reset retry count on successful connection
-                                    self.receiveRetryCount = 0
-                                } catch {
-                                    logger.info("❌ [LanWebSocketTransport] Reconnect after ping failure failed: \(error.localizedDescription)")
-                                    // Will retry again on next ping failure
-                                }
+                                self.reconnectWithBackoff()
                             }
                         } else {
                             self.logger.info("🏓 [LanWebSocketTransport] Ping sent successfully")
@@ -451,34 +485,10 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                     guard let self = self else { return }
                     if let error {
                         self.logger.info("❌ [LanWebSocketTransport] Ping failed: \(error.localizedDescription)")
-                        // If ping fails, the connection is likely dead - disconnect and reconnect
-                        // Use exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
+                        // Use centralized reconnection logic
                         Task { @MainActor [weak self] in
                             guard let self = self else { return }
-                            await self.disconnect()
-                            
-                            // Calculate backoff based on ping retry count
-                            let initialBackoff: TimeInterval = 1.0
-                            let maxBackoff: TimeInterval = 128.0
-                            let backoff: TimeInterval
-                            if self.receiveRetryCount < 8 {
-                                backoff = initialBackoff * pow(2.0, Double(self.receiveRetryCount))
-                            } else {
-                                backoff = maxBackoff // Keep retrying every 128s indefinitely
-                            }
-                            
-                            self.receiveRetryCount += 1
-                            self.logger.info("🔄 [LanWebSocketTransport] Ping failed, reconnecting after \(Int(backoff))s backoff (attempt \(self.receiveRetryCount))...")
-                            
-                            try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
-                            do {
-                                try await self.connect()
-                                // Reset retry count on successful connection
-                                self.receiveRetryCount = 0
-                            } catch {
-                                self.logger.info("❌ [LanWebSocketTransport] Reconnect after ping failure failed: \(error.localizedDescription)")
-                                // Will retry again on next ping failure
-                            }
+                            self.reconnectWithBackoff()
                         }
                     } else {
                         self.logger.info("🏓 [LanWebSocketTransport] Ping sent successfully")
@@ -716,39 +726,8 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                 logger.info("❌ [LanWebSocketTransport] Receive failed: \(error.localizedDescription)")
                 fflush(stdout)
                 
-                // Unified reconnection logic for both cloud and LAN connections
-                // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, then keep at 128s
-                let initialBackoff: TimeInterval = 1.0 // 1 second
-                let maxBackoff: TimeInterval = 128.0 // 128 seconds
-                let backoff: TimeInterval
-                if self.receiveRetryCount < 8 {
-                    backoff = initialBackoff * pow(2.0, Double(self.receiveRetryCount))
-                } else {
-                    backoff = maxBackoff // Keep retrying every 128s indefinitely
-                }
-                
-                self.receiveRetryCount += 1
-                self.lastReceiveFailure = Date()
-                
-                let isCloud = self.configuration.environment == "cloud" || self.configuration.url.scheme == "wss"
-                logger.info("🔄 [LanWebSocketTransport] Connection reset (cloud=\(isCloud), retry \(self.receiveRetryCount)), reconnecting after \(Int(backoff))s backoff...")
-                fflush(stdout)
-                
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    await self.disconnect()
-                    // Reconnect after exponential backoff
-                    try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
-                    do {
-                        try await self.connect()
-                        // Reset retry count on successful connection
-                        self.receiveRetryCount = 0
-                        self.lastReceiveFailure = nil
-                    } catch {
-                        self.logger.info("❌ [LanWebSocketTransport] Reconnect failed: \(error.localizedDescription)")
-                        // Will retry again on next receive failure
-                    }
-                }
+                // Use centralized reconnection logic
+                reconnectWithBackoff()
             }
         }
     }

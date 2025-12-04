@@ -1,8 +1,8 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 0.3.8  
-Date: December 2, 2025  
-Status: Production Beta
+Version: 1.0.4  
+Date: December 4, 2025  
+Status: Production
 
 ---
 
@@ -54,20 +54,33 @@ See `docs/architecture.mermaid` for visual representation.
 - **Storage**: In-memory optimized history store with UserDefaults persistence, encrypted file storage (encryption keys)
   - Keys stored in `~/Library/Application Support/Hypo/` with AES-GCM encryption
   - No Keychain dependency - improves Notarization compatibility
+  - **Local file entries**: Store only file URL + lightweight metadata (name, size, UTI); no duplicate Base64 blob is kept for files that originated on this Mac. Bytes are loaded on-demand when syncing, previewing, or copying.
+  - **Remote file entries**: Store file bytes (Base64) so received files remain available even if the sender goes offline; temp files are created only when needed for clipboard/Finder and scrubbed automatically
+  - **Size Constants**: Single source of truth in `SizeConstants.swift` (10MB sync limit, 50MB copy limit, 25MB transport limit, 7.5MB compression target, 2560px max image dimension)
 - **Networking**: Network.framework for WebSocket server, URLSession for client connections
 - **Crypto**: CryptoKit (AES-256-GCM, Curve25519, Ed25519)
+  - Custom encoding: `Data` fields (ciphertext, nonce, tag) encoded as base64 strings for Android compatibility
 - **Discovery**: Bonjour (NetService) for LAN device discovery and advertising
+- **Temp File Management** ✅ Implemented (December 2025): Automatic cleanup of temporary files (30s delay, clipboard change detection, periodic cleanup)
+- **Size Limits**: 50MB copy limit, 10MB sync limit with user notifications
 - **Background**: Launch agent support planned for auto-start
 
 #### Android Client ✅ Implemented
 - **Language**: Kotlin 1.9.22 with coroutines and structured concurrency
 - **UI**: Jetpack Compose with Material 3 and dynamic color
-- **Storage**: Room database (history with indexed queries), EncryptedSharedPreferences (keys)
+- **Storage**: Room database (history with indexed queries, lazy loading for large content), EncryptedSharedPreferences (keys)
+  - Lazy loading: IMAGE/FILE content excluded from list queries to prevent CursorWindow overflow
+  - Content loaded on-demand when copying or viewing details
 - **Networking**: OkHttp WebSocket for client, Java-WebSocket library for server
 - **Crypto**: Google Tink (AES-256-GCM, HKDF key derivation)
 - **Discovery**: NSD (Network Service Discovery) for LAN device discovery and registration
+- **Compression** ✅ Implemented (December 2025): Gzip compression of JSON payloads before encryption (always enabled, no backward compatibility). Uses proper gzip format (raw deflate with gzip headers/footers) compatible with Java GZIPInputStream.
+- **Image Compression** ✅ Implemented (December 2025): Automatic compression of large images (scale down >2560px, re-encode as JPEG with quality 85-40%)
+- **Size Constants**: Single source of truth in `SizeConstants.kt` (10MB sync limit, 50MB copy limit, 25MB transport limit, 7.5MB compression target, 2560px max image dimension)
 - **Background**: Foreground Service with FOREGROUND_SERVICE_DATA_SYNC permission
 - **Battery Optimization**: Screen-state aware connection management (60-80% battery saving)
+- **Temp File Management** ✅ Implemented (December 2025): Automatic cleanup of temporary files (30s delay, clipboard change detection, periodic cleanup)
+- **Size Limits**: 50MB copy limit, 10MB sync limit with user notifications
 - **MIUI/HyperOS Adaptation** ✅ Implemented (December 2025): Automatic detection and workarounds for MIUI/HyperOS-specific restrictions
 - **SMS Auto-Sync** ✅ Implemented (December 2025): Automatically copies incoming SMS to clipboard for sync to macOS
 
@@ -123,8 +136,17 @@ All messages are JSON-encoded with the following schema (see [`docs/protocol.md`
 |------|----------|----------|-------|
 | `text` | UTF-8 string | 100KB | No base64 |
 | `link` | UTF-8 URL | 2KB | Validated URL format |
-| `image` | Base64 PNG/JPEG | 1MB | Auto-compress >1MB |
-| `file` | Base64 | 1MB | Include filename in metadata |
+| `image` | Base64 PNG/JPEG | 10MB | Auto-compress if >7.5MB (scale down, re-encode) |
+| `file` | Base64 | 10MB | Include filename in metadata |
+
+> **macOS storage note**: For files that originate on macOS, the local history store keeps only a pointer (file URL + metadata) and streams bytes from disk when syncing or previewing. The Base64-encoded payload is materialized on-demand for transport. Files received from other devices are stored as Base64 so they remain available even if the original sender is offline.
+
+**Image Compression** (macOS + Android):
+- Images larger than ~7.5MB are automatically compressed before sync
+- Scaling: Images with longest side >2560px are scaled down
+- Re-encoding: Large images are re-encoded as JPEG with quality 85%
+- Progressive compression: If still too large, quality is reduced (75% → 40%) until under limit
+- Target: ~7.5MB raw size to stay under 10MB after base64 + JSON overhead
 
 ### 2.3 WebSocket Lifecycle
 
@@ -1006,7 +1028,19 @@ This section compares the implementation details between Android and macOS clien
 - **LAN Timeout**: 3-second timeout for LAN transport
 - **Transport Marking**: Marks device as connected via LAN or cloud after successful send
 - **Error Handling**: Requires at least one transport to succeed (throws if both fail)
-- **Payload Size**: Increased from 256KB to 10MB to support larger clipboard content (images, files)
+- **Payload / Frame Size**:
+  - Per-item attachment limit: **10MB** raw content for `image`/`file` types (after any compression)
+  - Transport frame payload limit: **40MB** JSON payload (excluding 4-byte length prefix) on both Android and macOS to account for Base64 and JSON overhead
+- **Transport Frame Limit**: 25MB frame payload limit (accounts for base64 encoding and JSON overhead)
+- **Compression**: Gzip compression of JSON payloads before encryption (always enabled, no backward compatibility)
+  - Compression applied to `ClipboardPayload` JSON before encryption
+  - Decompression applied after decryption on receiving side
+  - Significant bandwidth savings for text content (70-90% reduction)
+  - Minimal impact on already-compressed images (3-5% reduction)
+- **Image Compression**: Automatic compression of large images on both platforms
+  - macOS: Scale down >2560px, re-encode as JPEG with quality 85-40%
+  - Android: Scale down >2560px, re-encode as JPEG with quality 85-40%
+  - Target: ~7.5MB raw size to stay under 10MB after base64 + JSON overhead
 
 **macOS** (`DualSyncTransport.swift` + `LanSyncTransport.swift`):
 - **Always Dual-Send**: Always sends to both LAN (all peers) and cloud simultaneously

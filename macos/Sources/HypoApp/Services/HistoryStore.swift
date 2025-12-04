@@ -12,6 +12,9 @@ import os.log
 #if canImport(UniformTypeIdentifiers)
 import UniformTypeIdentifiers
 #endif
+#if canImport(UserNotifications)
+import UserNotifications
+#endif
 
 // UserDefaults is thread-safe for reading/writing, safe to mark as Sendable
 extension UserDefaults: @unchecked Sendable {}
@@ -656,14 +659,29 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 return
             }
             
-            // Check size limit (10MB)
-            let maxAttachmentSize = 10 * 1024 * 1024
-            if imageData.count > maxAttachmentSize {
+            // Check size limit
+            if imageData.count > SizeConstants.maxAttachmentBytes {
 #if canImport(os)
-                logger.warning("⚠️ [HistoryStore] Image too large: \(imageData.count) bytes (limit: \(maxAttachmentSize)), skipping sync")
+                logger.warning("⚠️ [HistoryStore] Image too large: \(imageData.count) bytes (limit: \(SizeConstants.maxAttachmentBytes)), skipping sync")
 #endif
+                // Show notification to user
+                await MainActor.run {
+                    let sizeMB = Double(imageData.count) / (1024.0 * 1024.0)
+                    let maxMB = Double(SizeConstants.maxAttachmentBytes) / (1024.0 * 1024.0)
+                    showSizeLimitExceededNotification(itemType: "Image", sizeMB: sizeMB, maxMB: maxMB)
+                }
+                // Show notification to user
+                await MainActor.run {
+                    let sizeMB = Double(imageData.count) / (1024.0 * 1024.0)
+                    let maxMB = Double(SizeConstants.maxAttachmentBytes) / (1024.0 * 1024.0)
+                    showSizeLimitExceededNotification(itemType: "Image", sizeMB: sizeMB, maxMB: maxMB)
+                }
                 return
             }
+            
+#if canImport(os)
+            logger.info("🖼️ [HistoryStore] Preparing image sync: \(imageData.count) bytes, format: \(metadata.format), size: \(Int(metadata.pixelSize.width))×\(Int(metadata.pixelSize.height))")
+#endif
             
             var imageMetadata: [String: String] = [
                 "device_id": entry.deviceId,
@@ -682,21 +700,35 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 metadata: imageMetadata
             )
         case .file(let metadata):
-            // Extract file data from FileMetadata (base64 encoded)
-            guard let base64String = metadata.base64,
-                  let fileData = Data(base64Encoded: base64String) else {
+            // Extract file data for sync.
+            // Prefer base64 (for remote-origin entries); fall back to local file URL
+            // for entries that originated on this device where we only stored a pointer.
+            let fileData: Data
+            if let base64String = metadata.base64,
+               let decoded = Data(base64Encoded: base64String) {
+                fileData = decoded
+            } else if let url = metadata.url,
+                      let data = try? Data(contentsOf: url) {
+                fileData = data
+            } else {
 #if canImport(os)
                 logger.warning("⚠️ [HistoryStore] File entry has no data, skipping sync")
 #endif
                 return
             }
             
-            // Check size limit (10MB)
-            let maxAttachmentSize = 10 * 1024 * 1024
-            if fileData.count > maxAttachmentSize {
+            // Check size limit
+            if fileData.count > SizeConstants.maxAttachmentBytes {
 #if canImport(os)
-                logger.warning("⚠️ [HistoryStore] File too large: \(fileData.count) bytes (limit: \(maxAttachmentSize)), skipping sync")
+                logger.warning("⚠️ [HistoryStore] File too large: \(fileData.count) bytes (limit: \(SizeConstants.maxAttachmentBytes)), skipping sync")
 #endif
+                // Show notification to user
+                await MainActor.run {
+                    let sizeMB = Double(fileData.count) / (1024.0 * 1024.0)
+                    let maxMB = Double(SizeConstants.maxAttachmentBytes) / (1024.0 * 1024.0)
+                    let fileName = metadata.fileName
+                    showSizeLimitExceededNotification(itemType: fileName, sizeMB: sizeMB, maxMB: maxMB)
+                }
                 return
             }
             
@@ -1261,6 +1293,40 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 
     public func copyToPasteboard(_ entry: ClipboardEntry) {
         #if canImport(AppKit)
+        // Size check: prevent copying very large items (50MB limit for copying)
+        let MAX_COPY_SIZE_BYTES = SizeConstants.maxCopySizeBytes
+        let itemSize: Int
+        switch entry.content {
+        case .text(let value):
+            itemSize = value.utf8.count
+        case .link:
+            itemSize = 0 // Links are small
+        case .image(let metadata):
+            itemSize = metadata.data?.count ?? 0
+        case .file(let metadata):
+            itemSize = metadata.byteSize
+        }
+        
+        if itemSize > MAX_COPY_SIZE_BYTES {
+            let sizeMB = Double(itemSize) / (1024.0 * 1024.0)
+            let limitMB = Double(MAX_COPY_SIZE_BYTES) / (1024.0 * 1024.0)
+            logger.warning("⚠️ Item too large to copy: \(String(format: "%.1f", sizeMB)) MB (limit: \(String(format: "%.0f", limitMB)) MB)")
+            // Show notification
+            Task {
+                let itemType: String
+                switch entry.content {
+                case .image:
+                    itemType = "Image"
+                case .file:
+                    itemType = "File"
+                default:
+                    itemType = "Item"
+                }
+                await showSizeLimitNotification(itemType: itemType, sizeMB: sizeMB, limitMB: limitMB)
+            }
+            return
+        }
+        
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         switch entry.content {
@@ -1273,10 +1339,44 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 pasteboard.setData(data, forType: .png)
             }
         case .file(let metadata):
+            // For files, we need to create a temp file if we only have base64 data
             if let url = metadata.url {
+                // File URL exists, use it directly
                 pasteboard.writeObjects([url as NSURL])
+            } else if let base64 = metadata.base64, let data = Data(base64Encoded: base64) {
+                // Create temp file from base64 data
+                let tempDir = FileManager.default.temporaryDirectory
+                let fileExtension = (metadata.fileName as NSString).pathExtension
+                let baseFileName = (metadata.fileName as NSString).deletingPathExtension
+                let uniqueFileName = "hypo_\(UUID().uuidString)_\(fileExtension.isEmpty ? baseFileName : "\(baseFileName).\(fileExtension)")"
+                let tempURL = tempDir.appendingPathComponent(uniqueFileName)
+                
+                do {
+                    try data.write(to: tempURL)
+                    // Register temp file for automatic cleanup
+                    Task { @MainActor in
+                        await TempFileManager.shared.registerTempFile(tempURL)
+                    }
+                    pasteboard.writeObjects([tempURL as NSURL])
+                    logger.info("✅ Copied file to clipboard: \(metadata.fileName) (\(data.count) bytes)")
+                } catch {
+                    logger.error("❌ Failed to create temp file for copying: \(error.localizedDescription)")
+                }
             }
         }
+        #endif
+    }
+    
+    private func showSizeLimitNotification(itemType: String, sizeMB: Double, limitMB: Double) async {
+        #if canImport(UserNotifications)
+        let center = UNUserNotificationCenter.current()
+        let content = UNMutableNotificationContent()
+        content.title = "Item Too Large"
+        content.body = String(format: "Item (%.1f MB) exceeds the maximum copy limit of %.0f MB. Please use a smaller %@.", sizeMB, limitMB, itemType.lowercased())
+        content.sound = UNNotificationSound.default
+        
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        try? await center.add(request)
         #endif
     }
 
@@ -1382,6 +1482,32 @@ public extension ClipboardHistoryViewModel {
         }
         #endif
     }
+    
+    @MainActor
+    private func showSizeLimitExceededNotification(itemType: String, sizeMB: Double, maxMB: Double) {
+        #if canImport(UserNotifications)
+        let center = UNUserNotificationCenter.current()
+        let content = UNMutableNotificationContent()
+        content.title = "Item Too Large"
+        content.body = String(format: "\"%@\" (%.1f MB) exceeds the maximum size limit of %.0f MB", itemType, sizeMB, maxMB)
+        content.sound = .default
+        
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil // Show immediately
+        )
+        
+        let logger = self.logger // Capture logger explicitly
+        center.add(request) { error in
+            if let error = error {
+                Task { @MainActor in
+                    logger.error("❌ Failed to show size limit notification: \(error.localizedDescription)")
+                }
+            }
+        }
+        #endif
+    }
 }
 
 #endif
@@ -1449,4 +1575,3 @@ public struct PairedDevice: Identifiable, Equatable, Codable {
         )
     }
 }
-

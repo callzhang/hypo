@@ -1,8 +1,8 @@
 # Hypo User Guide
 
 **Cross-Platform Clipboard Synchronization**  
-**Version**: 1.0.2  
-**Last Updated**: December 3, 2025
+**Version**: 1.0.3  
+**Last Updated**: December 4, 2025
 
 ---
 
@@ -623,10 +623,10 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 ### Clipboard Synchronization
 
 **Supported Content Types**:
-- **Text**: Plain text up to 100KB
+- **Text**: Plain text (unlimited size, but sync limited to 10MB)
 - **Links**: URLs automatically detected and validated
-- **Images**: PNG/JPEG up to 1MB (auto-compressed)
-- **Files**: Small files up to 1MB
+- **Images**: PNG, JPEG, GIF, WebP up to 10MB (sync limit)
+- **Files**: Files up to 10MB (sync limit)
 
 **Sync Behavior**:
 - Automatic sync within 300ms of clipboard change
@@ -878,7 +878,12 @@ A: Hypo uses dynamic ports for LAN discovery (mDNS) and a randomly assigned port
 A: Yes, using cloud relay. However, LAN sync requires both devices on the same Wi-Fi network.
 
 **Q: How large files can I sync?**  
-A: Currently limited to 1MB per item. Larger file support via cloud storage is planned for future versions.
+A: 
+- **Sync Limit**: 10MB per item (images and files)
+- **Copy Limit**: 50MB per item (prevents excessive disk usage)
+- Items larger than 10MB cannot be synced between devices
+- Items larger than 50MB cannot be copied to clipboard (but can be synced if under 10MB)
+- Temporary files are automatically cleaned up after 30 seconds or when clipboard changes
 
 **Q: Does Hypo work with VPNs?**  
 A: LAN sync may not work with VPN. Cloud relay sync should work normally with most VPN configurations.

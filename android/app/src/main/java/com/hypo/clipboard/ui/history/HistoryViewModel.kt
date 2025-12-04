@@ -97,6 +97,11 @@ class HistoryViewModel @Inject constructor(
     fun onQueryChange(query: String) {
         searchQuery.value = query
     }
+    
+    // Load full content for an item (needed when copying IMAGE/FILE items that have empty content in list view)
+    suspend fun loadFullContent(itemId: String): String? {
+        return repository.loadFullContent(itemId)
+    }
 
     companion object {
         private const val MAX_HISTORY_ITEMS = 500

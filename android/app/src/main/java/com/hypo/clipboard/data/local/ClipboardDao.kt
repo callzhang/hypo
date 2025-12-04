@@ -12,30 +12,105 @@ import java.time.Instant
 
 @Dao
 interface ClipboardDao {
-    @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC")
+    // For list views, exclude content for IMAGE and FILE types to avoid CursorWindow overflow
+    // Content will be loaded lazily when needed (copying or viewing details)
+    @Query("""
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
+        ORDER BY created_at DESC
+    """)
     fun observe(): Flow<List<ClipboardEntity>>
     
-    @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC LIMIT :limit")
+    @Query("""
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
+        ORDER BY created_at DESC 
+        LIMIT :limit
+    """)
     fun observeWithLimit(limit: Int = 200): Flow<List<ClipboardEntity>>
 
-    @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC")
+    @Query("""
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
+        ORDER BY created_at DESC
+    """)
     fun observePaged(): PagingSource<Int, ClipboardEntity>
 
-    @Query("SELECT * FROM clipboard_items WHERE is_pinned = 1 ORDER BY created_at DESC")
+    @Query("""
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
+        WHERE is_pinned = 1 
+        ORDER BY created_at DESC
+    """)
     fun observePinned(): Flow<List<ClipboardEntity>>
 
     @Query("""
-        SELECT * FROM clipboard_items 
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
         WHERE content LIKE '%' || :query || '%' OR preview LIKE '%' || :query || '%'
         ORDER BY created_at DESC 
         LIMIT :limit
     """)
     fun search(query: String, limit: Int = 50): Flow<List<ClipboardEntity>>
 
-    @Query("SELECT * FROM clipboard_items WHERE device_id = :deviceId ORDER BY created_at DESC LIMIT :limit")
+    @Query("""
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
+        WHERE device_id = :deviceId 
+        ORDER BY created_at DESC 
+        LIMIT :limit
+    """)
     fun observeByDevice(deviceId: String, limit: Int = 100): Flow<List<ClipboardEntity>>
 
-    @Query("SELECT * FROM clipboard_items WHERE type = :type ORDER BY created_at DESC LIMIT :limit")
+    @Query("""
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
+        WHERE type = :type 
+        ORDER BY created_at DESC 
+        LIMIT :limit
+    """)
     fun observeByType(type: String, limit: Int = 100): Flow<List<ClipboardEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -74,6 +149,28 @@ interface ClipboardDao {
     """)
     suspend fun trimToSize(keepCount: Int)
 
+    // findById needs full content for loading on-demand
+    // For large IMAGE/FILE items, we need to load content separately to avoid CursorWindow overflow
+    // First get the item without content, then load content if needed
+    @Query("""
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
+        WHERE id = :id 
+        LIMIT 1
+    """)
+    suspend fun findByIdWithoutContent(id: String): ClipboardEntity?
+    
+    // Load only the content field for a specific item (for large IMAGE/FILE items)
+    @Query("SELECT content FROM clipboard_items WHERE id = :id LIMIT 1")
+    suspend fun findContentById(id: String): String?
+    
+    // Legacy findById - kept for backward compatibility but may fail for large items
     @Query("SELECT * FROM clipboard_items WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): ClipboardEntity?
 
@@ -87,12 +184,33 @@ interface ClipboardDao {
     suspend fun updatePinnedStatus(id: String, isPinned: Boolean)
     
     // Get the latest (most recent) clipboard entry
-    @Query("SELECT * FROM clipboard_items ORDER BY created_at DESC LIMIT 1")
+    // Exclude content for IMAGE/FILE types to avoid CursorWindow overflow
+    @Query("""
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
+        ORDER BY created_at DESC 
+        LIMIT 1
+    """)
     suspend fun getLatestEntry(): ClipboardEntity?
     
     // Find matching entry by content and type (excluding the latest entry)
+    // For IMAGE/FILE types, exclude content from SELECT to avoid CursorWindow overflow
+    // We compare content in the WHERE clause, but don't load it into the result
     @Query("""
-        SELECT * FROM clipboard_items 
+        SELECT 
+            id, type, 
+            CASE 
+                WHEN type IN ('IMAGE', 'FILE') THEN '' 
+                ELSE content 
+            END as content,
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+        FROM clipboard_items 
         WHERE content = :content 
         AND type = :type 
         AND id != (SELECT id FROM clipboard_items ORDER BY created_at DESC LIMIT 1)

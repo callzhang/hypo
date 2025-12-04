@@ -145,6 +145,29 @@ public struct SyncEnvelope: Codable {
             target = try container.decodeIfPresent(String.self, forKey: .target)
             encryption = try container.decode(EncryptionMetadata.self, forKey: .encryption)
         }
+        
+        // Custom encoding: macOS encodes Data as base64 strings for Android compatibility
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(contentType, forKey: .contentType)
+            // Encode ciphertext Data as base64 string (Android expects base64 string)
+            try container.encode(ciphertext.base64EncodedString(), forKey: .ciphertext)
+            try container.encode(deviceId, forKey: .deviceId)
+            try container.encodeIfPresent(devicePlatform, forKey: .devicePlatform)
+            try container.encodeIfPresent(deviceName, forKey: .deviceName)
+            try container.encodeIfPresent(target, forKey: .target)
+            try container.encode(encryption, forKey: .encryption)
+        }
+        
+        private enum CodingKeys: String, CodingKey {
+            case contentType
+            case ciphertext
+            case deviceId
+            case devicePlatform
+            case deviceName
+            case target
+            case encryption
+        }
     }
 
     public struct EncryptionMetadata: Codable {
@@ -170,6 +193,21 @@ public struct SyncEnvelope: Codable {
             let tagString = try container.decode(String.self, forKey: .tag)
             self.tag = try decodeBase64Field(tagString, forKey: .tag, in: container)
         }
+        
+        // Custom encoding: macOS encodes Data as base64 strings for Android compatibility
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(algorithm, forKey: .algorithm)
+            // Encode nonce and tag Data as base64 strings (Android expects base64 strings)
+            try container.encode(nonce.base64EncodedString(), forKey: .nonce)
+            try container.encode(tag.base64EncodedString(), forKey: .tag)
+        }
+        
+        private enum CodingKeys: String, CodingKey {
+            case algorithm
+            case nonce
+            case tag
+        }
     }
 }
 
@@ -184,11 +222,13 @@ public struct ClipboardPayload: Codable {
     public let contentType: ContentType
     public let data: Data
     public let metadata: [String: String]?
+    public let compressed: Bool  // Indicates if the JSON payload was compressed
 
-    public init(contentType: ContentType, data: Data, metadata: [String: String]? = nil) {
+    public init(contentType: ContentType, data: Data, metadata: [String: String]? = nil, compressed: Bool = false) {
         self.contentType = contentType
         self.data = data
         self.metadata = metadata
+        self.compressed = compressed
     }
     
     // Custom decoding: Android sends data_base64 (base64 string), macOS expects data (Data)
@@ -196,6 +236,7 @@ public struct ClipboardPayload: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         contentType = try container.decode(ContentType.self, forKey: .contentType)
         metadata = try container.decodeIfPresent([String: String].self, forKey: .metadata)
+        compressed = try container.decodeIfPresent(Bool.self, forKey: .compressed) ?? false
         
         // Android sends "data_base64" as a base64-encoded string
         if let dataBase64String = try? container.decode(String.self, forKey: .dataBase64) {
@@ -214,15 +255,18 @@ public struct ClipboardPayload: Codable {
         }
     }
     
-    // Custom encoding: macOS encodes data as Data, but we can also support data_base64 for compatibility
+    // Custom encoding: macOS encodes only data_base64 (base64 string) for efficiency
+    // Android only uses data_base64, so encoding both data (as array) and data_base64 is wasteful
+    // For a 10MB image: data as array = ~40-60MB, data_base64 = ~13.3MB
+    // By encoding only data_base64, we reduce payload size by ~50-70%
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(contentType, forKey: .contentType)
-        try container.encode(data, forKey: .data)
-        // Also encode data_base64 for Android clients that expect this field
+        // Only encode data_base64 - Android expects this field and it's more efficient than encoding Data as array
         let base64 = data.base64EncodedString()
         try container.encode(base64, forKey: .dataBase64)
         try container.encodeIfPresent(metadata, forKey: .metadata)
+        try container.encode(compressed, forKey: .compressed)
     }
     
     // Use camelCase CodingKeys so JSONDecoder's .convertFromSnakeCase can map snake_case payloads correctly.
@@ -231,6 +275,7 @@ public struct ClipboardPayload: Codable {
         case data
         case dataBase64
         case metadata
+        case compressed
     }
 }
 
@@ -325,7 +370,11 @@ public final actor SyncEngine {
             logger.info("🔒 [SyncEngine] Encryption mode: Sending encrypted")
         }
 
-        let plaintext = try encoder.encode(payload)
+        // Always compress the JSON payload before encryption
+        let jsonData = try encoder.encode(payload)
+        let plaintext = try CompressionUtils.compress(jsonData)
+        let isCompressed = true
+        logger.info("🗜️ [SyncEngine] Compressed payload: \(jsonData.count) bytes -> \(plaintext.count) bytes (\(String(format: "%.1f", Double(plaintext.count) / Double(jsonData.count) * 100))%)")
         
         let ciphertext: Data
         let nonce: Data
@@ -446,17 +495,18 @@ public final actor SyncEngine {
             logger.info("   Tag hex: \(envelope.payload.encryption.tag.map { String(format: "%02x", $0) }.joined())")
             
             do {
-                plaintext = try await cryptoService.decrypt(
+                let encryptedData = try await cryptoService.decrypt(
                     ciphertext: envelope.payload.ciphertext,
                     key: key,
                     nonce: envelope.payload.encryption.nonce,
                     tag: envelope.payload.encryption.tag,
                     aad: aad
                 )
-                logger.info("✅ [SyncEngine] Decrypted plaintext: \(plaintext.count) bytes")
-                if let plaintextString = String(data: plaintext, encoding: .utf8) {
-                    logger.info("🔍 [SyncEngine] Decrypted plaintext JSON: \(plaintextString)")
-                }
+                logger.info("✅ [SyncEngine] Decrypted data: \(encryptedData.count) bytes")
+                
+                // Always decompress (all payloads are compressed by default)
+                plaintext = try CompressionUtils.decompress(encryptedData)
+                logger.info("🗜️ [SyncEngine] Decompressed payload: \(encryptedData.count) bytes -> \(plaintext.count) bytes")
             } catch {
                 logger.info("❌ [SyncEngine] Decryption failed: \(error)")
                 logger.info("   Error type: \(String(describing: type(of: error)))")

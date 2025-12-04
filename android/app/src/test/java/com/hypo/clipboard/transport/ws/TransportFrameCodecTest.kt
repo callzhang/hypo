@@ -58,7 +58,9 @@ class TransportFrameCodecTest {
 
     @Test
     fun `encode fails on oversize`() {
-        val largePayload = "a".repeat(300_000)
+        // Use a codec with a very small maxPayloadBytes to keep the test fast
+        val strictCodec = TransportFrameCodec(maxPayloadBytes = 1024)
+        val largePayload = "a".repeat(2_048)
         val envelope = SyncEnvelope(
             type = MessageType.CLIPBOARD,
             payload = Payload(
@@ -71,7 +73,7 @@ class TransportFrameCodecTest {
                 )
             )
         )
-        assertFailsWith<TransportFrameException> { codec.encode(envelope) }
+        assertFailsWith<TransportFrameException> { strictCodec.encode(envelope) }
     }
 
     @Test

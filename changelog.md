@@ -2,6 +2,80 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [1.0.4] - 2025-12-04 - Code Quality & Storage Optimization
+
+### Added
+- **Size Constants Consolidation**: Single source of truth for all size limits
+  - Created `SizeConstants.kt` (Android) and `SizeConstants.swift` (macOS)
+  - All size-related constants now defined in one place (10MB sync, 50MB copy, 25MB transport, 7.5MB compression target, 2560px max dimension)
+  - Eliminates duplicate definitions and ensures consistency across codebase
+  - Makes future size limit updates easier and less error-prone
+
+### Fixed
+- **Gzip Compression Format**: Fixed "invalid stored block lengths" error on Android
+  - macOS now uses proper gzip format (raw deflate with gzip headers/footers) instead of zlib-wrapped deflate
+  - Uses `deflateInit2` with `MAX_WBITS + 16` for gzip format
+  - Uses `inflateInit2` with `MAX_WBITS + 16` for gzip decompression
+  - Fully compatible with Java's `GZIPInputStream` on Android
+  - Resolves compression format mismatch between platforms
+
+### Changed
+- **macOS Local File Storage Optimization**: Pointer-only storage for local files
+  - Local file entries now store only file URL + metadata (no duplicate Base64 blob)
+  - Bytes loaded on-demand when syncing, previewing, copying, or opening in Finder
+  - Reduces disk usage for local-origin files (no duplicate storage in history database)
+  - Remote files still stored as Base64 for offline availability
+  - All code paths (sync, preview, dedup, UI) handle both pointer-based and Base64-based entries
+
+### Technical Details
+- Size constants consolidation reduces maintenance burden and prevents inconsistencies
+- Gzip fix ensures proper format compatibility between Swift zlib and Java GZIPInputStream
+- Pointer-only storage leverages macOS file system instead of duplicating bytes in database
+- All file operations (sync, preview, copy, open) gracefully handle missing files (URL no longer valid)
+
+## [1.0.3] - 2025-12-04 - Temp File Management & Performance Improvements
+
+### Added
+- **Automatic Temp File Cleanup (Android & macOS)**: Prevents disk space accumulation
+  - Temp files automatically deleted after 30 seconds
+  - Cleanup triggered on clipboard changes
+  - Periodic cleanup of old temp files (>5 minutes)
+  - Centralized `TempFileManager` for both platforms
+  - Prevents disk space issues when copying large images/files
+- **Size Limit Checks Before Copying**: Prevents copying very large items
+  - 50MB limit for copying (separate from 10MB sync limit)
+  - System notifications when items exceed limit
+  - Applied to both incoming clipboard items and history copy operations
+  - Protects against excessive disk space usage
+- **Android Lazy Loading for Large Content**: Fixed crash with large images/files
+  - Implemented lazy loading for IMAGE/FILE types in database queries
+  - Content excluded from list queries to prevent `SQLiteBlobTooBigException`
+  - Content loaded on-demand when copying or viewing details
+  - Resolves app crashes when history contains large items (>2MB)
+
+### Fixed
+- **macOS Encryption Encoding**: Fixed decryption failures on Android
+  - macOS now encodes `Data` fields (ciphertext, nonce, tag) as base64 strings
+  - Android expects base64 strings, not arrays of integers
+  - Resolves `BAD_DECRYPT` errors when receiving encrypted messages from macOS
+  - Custom `encode(to:)` methods added to `Payload` and `EncryptionMetadata` structs
+- **Android Database CursorWindow Overflow**: Fixed app crashes with large content
+  - Modified all database queries to exclude `content` field for IMAGE/FILE types
+  - Added `loadFullContent()` method for on-demand content loading
+  - Prevents `SQLiteBlobTooBigException` when displaying history with large items
+
+### Changed
+- **Temp File Naming**: Improved uniqueness and tracking
+  - Android: Uses `hypo_` prefix for easy identification
+  - macOS: Uses `hypo_` prefix with UUID for uniqueness
+  - Better cleanup tracking and periodic maintenance
+
+### Technical Details
+- Temp file cleanup uses clipboard change notifications and polling
+- Size checks use estimated decoded size (base64 length × 3/4) before decoding
+- Lazy loading uses SQL `CASE` statements to return empty strings for large content
+- macOS encoding fix ensures compatibility with Android's base64 string expectations
+
 ## [1.0.2] - 2025-12-03 - Build & Release Improvements
 
 ### Added

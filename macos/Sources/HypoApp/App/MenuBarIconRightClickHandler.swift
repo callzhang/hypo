@@ -62,7 +62,7 @@ struct MenuBarIconRightClickHandler: NSViewRepresentable {
         showHistoryItem.keyEquivalentModifierMask = [.option]
         showHistoryItem.target = MenuActionTarget.shared
         MenuActionTarget.shared.showHistoryAction = {
-            NSLog("📋 [Right-click menu] Show Clipboard selected")
+            NSLog("📋 [Right-click menu] Show Clipboard√ selected")
             // Save frontmost app before showing (right-click menu may have activated Hypo)
             HistoryPopupPresenter.shared.saveFrontmostAppBeforeActivation()
             if let viewModel = AppContext.shared.historyViewModel {

@@ -54,5 +54,6 @@ data class EncryptionMetadata(
 data class ClipboardPayload(
     @SerialName("content_type") val contentType: ClipboardType,
     @SerialName("data_base64") val dataBase64: String,
-    val metadata: Map<String, String> = emptyMap()
+    val metadata: Map<String, String> = emptyMap(),
+    val compressed: Boolean = false  // Indicates if the JSON payload was compressed
 )

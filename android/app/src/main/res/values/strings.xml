@@ -56,6 +56,11 @@
     <string name="settings_accessibility_description">Enable accessibility service for background clipboard access on Android 10+</string>
     <string name="settings_accessibility_status_enabled">Enabled</string>
     <string name="settings_accessibility_status_disabled">Disabled</string>
+    
+    <!-- Error Messages -->
+    <string name="error_content_too_large">Item too large to copy (exceeds 10MB limit)</string>
+    <string name="error_failed_to_load_content">Failed to load item content</string>
+    <string name="error_item_too_large_to_copy">Item too large to copy (%1$s MB exceeds %2$s MB limit)</string>
     <string name="settings_accessibility_open_button">Open Settings</string>
     <string name="settings_sms_permission">SMS Auto-Sync</string>
     <string name="settings_sms_permission_description">Automatically copy incoming SMS to clipboard and sync to macOS</string>

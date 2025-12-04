@@ -21,8 +21,8 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 - ✅ Support for multiple clipboard data types:
   - ✅ Plain text
   - ✅ Links/URLs
-  - ✅ Images (PNG/JPEG, compressed if >1 MB)
-  - ✅ Files (up to 1 MB)
+  - ✅ Images (PNG/JPEG/HEIC/GIF/WebP, auto-compressed if >7.5MB, max 10MB)
+  - ✅ Files (up to 10MB, lazy loading on macOS)
 - ✅ Clipboard history on both platforms (200 items default)
 - ✅ Rich notifications with content preview
 - ✅ Modern, native UI (SwiftUI on macOS, Material 3 on Android)
@@ -42,7 +42,7 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 - Advanced features (OCR, smart paste, clipboard filtering)
 
 ## 3. Non-Goals (v1.0)
-- Not designed for very large file transfers (> 1 MB) - use dedicated file transfer tools
+- Not designed for very large file transfers (> 10 MB) - use dedicated file transfer tools
 - No guarantee of perfect fidelity for proprietary clipboard formats (e.g., styled RTF from Word, complex spreadsheet formulas)
 - Not a file backup or storage solution - clipboard history is local only
 - Not a replacement for platform-specific features (e.g., Apple Universal Clipboard, Google Nearby Share)
@@ -80,8 +80,9 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 
 ### 4.3 Clipboard Data Support
 - Text/Links/URLs: UTF-8 encoded.
-- Images: Compressed to PNG or JPEG.
-- Files: Base64-encoded small files (< 1 MB).
+- Images: Auto-compressed if >7.5MB (scale down >2560px, re-encode as JPEG with quality 85-40%), max 10MB.
+- Files: Base64-encoded files up to 10MB. macOS uses lazy loading (file bytes loaded on-demand when syncing).
+- Compression: Gzip compression of JSON payloads before encryption (always enabled, 70-90% reduction for text).
 
 ### 4.4 macOS Features ✅ Implemented
 - **Menu bar application**: Non-intrusive, always-accessible from menu bar
@@ -209,7 +210,7 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 
 ## 6. User Stories
 1. As a user, I copy a text snippet on my Xiaomi phone, and within 1 s, it appears on my Mac.
-2. As a user, I copy an image (≤ 1 MB) on my Mac, and it syncs to my phone’s clipboard.
+2. As a user, I copy an image (≤ 10 MB) on my Mac, and it syncs to my phone's clipboard.
 3. As a user, I want a macOS menu-bar app to view my clipboard history and paste from it.
 4. As a user, if I’m away from my LAN, I want the clipboard to still sync via the cloud.
 5. As a user, I want notifications on macOS when a new clipboard item arrives from my phone.
@@ -286,7 +287,7 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 ### Addressed ✅
 - ✅ **Android background clipboard access restrictions**: Mitigated with Accessibility Service and foreground service
 - ✅ **HyperOS multicast throttling**: Automatic workarounds implemented (multicast lock refresh, NSD restart)
-- ✅ **Performance with image/file transfers**: Optimized with compression and size limits (1MB)
+- ✅ **Performance with image/file transfers**: Optimized with compression and size limits (10MB, gzip compression for JSON payloads)
 - ✅ **Cloud fallback latency**: Achieved <3s P95 latency with production relay
 - ✅ **Security**: Strong encryption (AES-256-GCM) with certificate pinning
 

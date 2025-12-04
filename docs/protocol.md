@@ -1,8 +1,8 @@
 # Hypo Clipboard Sync Protocol Specification
 
-Version: 1.0.0  
+Version: 1.0.1  
 Status: Production  
-Date: December 2, 2025
+Date: December 4, 2025
 
 ---
 
@@ -170,10 +170,14 @@ Sent when clipboard content changes and needs to be synced.
 ```
 
 **Constraints**:
-- Max size: 1MB
-- Supported formats: PNG, JPEG
-- Base64-encoded
-- Auto-compress if >1MB
+- Max size: 10MB (raw image bytes)
+- Supported formats: PNG, JPEG, HEIC, HEIF, GIF, WebP, BMP, TIFF
+- Base64-encoded in payload
+- Auto-compress if >7.5MB:
+  - Scale down if longest side >2560px
+  - Re-encode as JPEG with quality 85%
+  - Progressive quality reduction (75% → 40%) if still too large
+  - Target: ~7.5MB raw to stay under 10MB after base64 + JSON overhead
 
 ---
 
@@ -194,9 +198,15 @@ Sent when clipboard content changes and needs to be synced.
 ```
 
 **Constraints**:
-- Max size: 1MB
-- Base64-encoded
+- Max size: 10MB (raw file bytes)
+- Base64-encoded in payload
 - Preserve original filename
+- **macOS storage optimization**: For files that originate on macOS, only a file URL pointer + metadata is stored in history (no duplicate Base64 blob). Bytes are loaded on-demand when:
+  - Syncing to other devices
+  - Previewing file content
+  - Copying to clipboard
+  - Opening in Finder
+- **Remote files**: Files received from other devices are stored as Base64 so they remain available even if the sender goes offline
 
 ---
 
@@ -258,6 +268,47 @@ The `metadata` object can contain type-specific fields:
 1. Decode Base64 nonce and tag
 2. Decrypt `data` using shared key, nonce, and associated data (device ID)
 3. Verify authentication tag
+4. Decompress the decrypted plaintext (gzip compression is always enabled)
+
+---
+
+### 3.6 Compression
+
+**Status**: ✅ Always enabled (no backward compatibility, no threshold check)
+
+All `ClipboardPayload` JSON payloads are compressed using gzip before encryption. The compression happens at the transport layer:
+
+1. **Encoding**: `ClipboardPayload` is JSON-encoded
+2. **Compression**: JSON bytes are gzip-compressed
+3. **Encryption**: Compressed bytes are encrypted with AES-256-GCM
+4. **Transport**: Encrypted ciphertext is base64-encoded and sent via WebSocket
+
+**Decompression**:
+- Recipients must decompress the decrypted plaintext before JSON parsing
+- Compression is always applied (no flag checking needed)
+- If decompression fails, the payload is treated as uncompressed (for backward compatibility during transition)
+
+**Compression Benefits**:
+- **Text content**: 70-90% size reduction
+- **JSON structure**: Significant compression of metadata and structure
+- **Images**: Minimal impact (3-5% reduction) as images are already compressed
+- **Files**: Minimal impact (3-5% reduction) depending on file type
+
+**Implementation**:
+- **macOS**: Uses `Compression` framework (zlib algorithm)
+- **Android**: Uses `java.util.zip.GZIPInputStream/GZIPOutputStream`
+
+**ClipboardPayload Structure**:
+```json
+{
+  "content_type": "text|link|image|file",
+  "data_base64": "base64_encoded_content",
+  "metadata": { ... },
+  "compressed": true
+}
+```
+
+The `compressed` field indicates if the JSON payload was compressed (always `true` in current implementation).
 
 ---
 

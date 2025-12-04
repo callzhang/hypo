@@ -27,7 +27,6 @@ public final class ClipboardMonitor {
     private var changeCount: Int
     private var timer: Timer?
     private let throttle: TokenBucket
-    private let maxAttachmentSize = 10 * 1024 * 1024 // 10MB (matches Android limit)
     private let deviceId: UUID
     private let platform: DevicePlatform
     private let deviceName: String
@@ -193,20 +192,62 @@ public final class ClipboardMonitor {
                 // Generate thumbnail for display
                 let thumbnail = image.thumbnail(maxPixelSize: 128)
                 
-                // Check size limit on original data
-                if rawData.count > maxAttachmentSize {
-                    logger.warning("⚠️", "Image too large: \(rawData.count) bytes (limit: \(maxAttachmentSize))")
+                // Compress image if too large (similar to Android's approach)
+                let maxRawSize = SizeConstants.maxRawSizeForCompression
+                var processedData = rawData
+                var processedImage = image
+                var processedPixels = pixels
+                
+                if processedData.count > maxRawSize {
+                    logger.info("📐 [ClipboardMonitor] Image too large: \(processedData.count) bytes, compressing...")
+                    
+                    // Scale down to reasonable size
+                    let maxDimension = SizeConstants.maxImageDimensionPx
+                    let longestSide = max(size.width, size.height)
+                    
+                    if longestSide > maxDimension {
+                        let scale = maxDimension / longestSide
+                        let newSize = NSSize(width: size.width * scale, height: size.height * scale)
+                        if let scaledImage = image.resized(to: newSize) {
+                            processedImage = scaledImage
+                            processedPixels = CGSizeValue(width: Int(newSize.width), height: Int(newSize.height))
+                            logger.info("📐 [ClipboardMonitor] Scaled image: \(Int(size.width))×\(Int(size.height)) -> \(Int(newSize.width))×\(Int(newSize.height))")
+                        }
+                    }
+                    
+                    // Re-encode with compression (use JPEG for better compression)
+                    if let compressedData = processedImage.jpegData(compressionQuality: 0.85) {
+                        processedData = compressedData
+                        logger.info("🗜️ [ClipboardMonitor] Re-encoded as JPEG: \(processedData.count) bytes")
+                    }
+                    
+                    // Further compress if still too large
+                    if processedData.count > maxRawSize {
+                        var quality: CGFloat = 0.75
+                        while processedData.count > maxRawSize && quality >= 0.4 {
+                            if let furtherCompressed = processedImage.jpegData(compressionQuality: quality) {
+                                processedData = furtherCompressed
+                                logger.info("🗜️ [ClipboardMonitor] Further compressed (quality: \(Int(quality * 100))%): \(processedData.count) bytes")
+                            }
+                            quality -= 0.1
+                        }
+                    }
+                }
+                
+                // Final check - if still too large, skip
+                if processedData.count > SizeConstants.maxAttachmentBytes {
+                    logger.warning("⚠️ [ClipboardMonitor] Image exceeds \(SizeConstants.maxAttachmentBytes / (1024 * 1024))MB limit after compression: \(processedData.count) bytes, skipping")
                     return nil
                 }
                 
-                // Store original format as-is
+                // Store processed image data
                 // Note: altText is nil for clipboard images (no filename available)
                 let metadata = ImageMetadata(
-                    pixelSize: pixels,
-                    byteSize: rawData.count,
-                    format: format,
+                    pixelSize: processedPixels,
+                    byteSize: processedData.count,
+                    format: processedData.count < rawData.count ? "jpeg" : format, // Use jpeg if we re-encoded
                     altText: nil,
-                    data: rawData,
+                    data: processedData,
                     thumbnail: thumbnail
                 )
                 
@@ -269,20 +310,62 @@ public final class ClipboardMonitor {
                     }
                 }()
                 
-                // Check size limit
-                if imageData.count > maxAttachmentSize {
-                    logger.warning("⚠️ [ClipboardMonitor] Image file too large: \(imageData.count) bytes (limit: \(maxAttachmentSize))")
+                // Compress image if too large (similar to Android's approach)
+                let maxRawSize = SizeConstants.maxRawSizeForCompression
+                var processedData = imageData
+                var processedImage = image
+                var processedPixels = pixels
+                
+                if processedData.count > maxRawSize {
+                    logger.info("📐 [ClipboardMonitor] Image file too large: \(processedData.count) bytes, compressing...")
+                    
+                    // Scale down to reasonable size
+                    let maxDimension = SizeConstants.maxImageDimensionPx
+                    let longestSide = max(size.width, size.height)
+                    
+                    if longestSide > maxDimension {
+                        let scale = maxDimension / longestSide
+                        let newSize = NSSize(width: size.width * scale, height: size.height * scale)
+                        if let scaledImage = image.resized(to: newSize) {
+                            processedImage = scaledImage
+                            processedPixels = CGSizeValue(width: Int(newSize.width), height: Int(newSize.height))
+                            logger.info("📐 [ClipboardMonitor] Scaled image file: \(Int(size.width))×\(Int(size.height)) -> \(Int(newSize.width))×\(Int(newSize.height))")
+                        }
+                    }
+                    
+                    // Re-encode with compression (use JPEG for better compression)
+                    if let compressedData = processedImage.jpegData(compressionQuality: 0.85) {
+                        processedData = compressedData
+                        logger.info("🗜️ [ClipboardMonitor] Re-encoded image file as JPEG: \(processedData.count) bytes")
+                    }
+                    
+                    // Further compress if still too large
+                    if processedData.count > maxRawSize {
+                        var quality: CGFloat = 0.75
+                        while processedData.count > maxRawSize && quality >= 0.4 {
+                            if let furtherCompressed = processedImage.jpegData(compressionQuality: quality) {
+                                processedData = furtherCompressed
+                                logger.info("🗜️ [ClipboardMonitor] Further compressed image file (quality: \(Int(quality * 100))%): \(processedData.count) bytes")
+                            }
+                            quality -= 0.1
+                        }
+                    }
+                }
+                
+                // Final check - if still too large, skip
+                if processedData.count > SizeConstants.maxAttachmentBytes {
+                    logger.warning("⚠️ [ClipboardMonitor] Image file exceeds \(SizeConstants.maxAttachmentBytes / (1024 * 1024))MB limit after compression: \(processedData.count) bytes, skipping")
                     return nil
                 }
                 
                 // Store filename in altText for image files
                 let fileName = fileURL.lastPathComponent
                 let metadata = ImageMetadata(
-                    pixelSize: pixels,
-                    byteSize: imageData.count,
-                    format: format,
+                    pixelSize: processedPixels,
+                    byteSize: processedData.count,
+                    format: processedData.count < imageData.count ? "jpeg" : format, // Use jpeg if we re-encoded
                     altText: fileName,
-                    data: imageData,
+                    data: processedData,
                     thumbnail: thumbnail
                 )
                 
@@ -291,19 +374,28 @@ public final class ClipboardMonitor {
             }
         }
         
-        // Not an image file, or failed to read as image - treat as regular file
+        // Not an image file, or failed to read as image - treat as regular file.
+        // For local files we only store a pointer (URL) and metadata to avoid
+        // duplicating file bytes in our history database. The actual bytes are
+        // loaded lazily when syncing to other devices or when needed for preview.
         let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
         let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
-        guard size <= maxAttachmentSize else { return nil }
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        guard size <= SizeConstants.maxAttachmentBytes else { return nil }
         let metadata = FileMetadata(
             fileName: fileURL.lastPathComponent,
             byteSize: size,
             uti: uti,
             url: fileURL,
-            base64: data.base64EncodedString()
+            base64: nil
         )
-        return ClipboardEntry(deviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .file(metadata), isEncrypted: false, transportOrigin: nil)
+        return ClipboardEntry(
+            deviceId: deviceId.uuidString,
+            originPlatform: platform,
+            originDeviceName: deviceName,
+            content: .file(metadata),
+            isEncrypted: false,
+            transportOrigin: nil
+        )
     }
 }
 
@@ -325,6 +417,23 @@ private extension NSImage {
         guard let tiffData = tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData) else { return nil }
         return bitmap.representation(using: .png, properties: [.compressionFactor: compressionQuality])
+    }
+    
+    /// Resize image to specified size
+    func resized(to newSize: NSSize) -> NSImage? {
+        let resized = NSImage(size: newSize)
+        resized.lockFocus()
+        defer { resized.unlockFocus() }
+        NSGraphicsContext.current?.imageInterpolation = .high
+        draw(in: NSRect(origin: .zero, size: newSize), from: NSRect(origin: .zero, size: size), operation: .sourceOver, fraction: 1.0)
+        return resized
+    }
+    
+    /// Convert image to JPEG data with specified compression quality
+    func jpegData(compressionQuality: CGFloat) -> Data? {
+        guard let tiffData = tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData) else { return nil }
+        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: compressionQuality])
     }
 }
 

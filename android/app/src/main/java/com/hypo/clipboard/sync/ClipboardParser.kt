@@ -21,13 +21,8 @@ import kotlin.math.max
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.webkit.MimeTypeMap
+import com.hypo.clipboard.util.SizeConstants
 
-// Maximum file size: 10MB
-private const val MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10MB
-// Transport limit: 10MB (increased from 256KB to support larger files)
-private const val MAX_TRANSPORT_PAYLOAD_BYTES = 10 * 1024 * 1024 // 10MB
-// For images, we still want to compress them reasonably, but allow up to transport limit
-private const val MAX_IMAGE_BYTES_FOR_TRANSPORT = MAX_TRANSPORT_PAYLOAD_BYTES
 private val base64Encoder = Base64.getEncoder().withoutPadding()
 
 class ClipboardParser(
@@ -163,7 +158,7 @@ class ClipboardParser(
             val bytes = readBytes(uri) ?: return null
             
             // Check if image is too large before decoding
-            if (bytes.size > MAX_ATTACHMENT_BYTES * 10) {
+            if (bytes.size > SizeConstants.MAX_ATTACHMENT_BYTES * 10) {
                 android.util.Log.w("ClipboardParser", "⚠️ Image too large: ${formatBytes(bytes.size.toLong())}, skipping")
                 return null
             }
@@ -204,12 +199,11 @@ class ClipboardParser(
 
             var encodedBytes = encodeBitmap(bitmap, format)
             
-            // Compress if larger than 10MB (accounting for base64 + JSON overhead)
-            // Base64 increases size by ~33%, so we target ~7.5MB raw to stay under 10MB after encoding
-            val maxRawSize = (MAX_ATTACHMENT_BYTES * 0.75).toInt() // ~7.5MB
+            // Compress if larger than target size (accounting for base64 + JSON overhead)
+            val maxRawSize = SizeConstants.MAX_RAW_SIZE_FOR_COMPRESSION
             if (encodedBytes.size > maxRawSize) {
                 android.util.Log.d("ClipboardParser", "📐 Image too large: ${formatBytes(encodedBytes.size.toLong())}, scaling down...")
-                val scaledBitmap = bitmap.scaleToMaxPixels(2560) // Scale to reasonable size
+                val scaledBitmap = bitmap.scaleToMaxPixels(SizeConstants.MAX_IMAGE_DIMENSION_PX) // Scale to reasonable size
                 bitmap.recycle() // Free original bitmap
                 bitmap = scaledBitmap
                 encodedBytes = encodeBitmap(bitmap, "jpeg", quality = 85)
@@ -221,8 +215,8 @@ class ClipboardParser(
             }
 
             // Final check - if still too large, show warning and skip
-            if (encodedBytes.size > MAX_ATTACHMENT_BYTES) {
-                android.util.Log.w("ClipboardParser", "⚠️ Image exceeds 10MB limit: ${formatBytes(encodedBytes.size.toLong())}, skipping")
+            if (encodedBytes.size > SizeConstants.MAX_ATTACHMENT_BYTES) {
+                android.util.Log.w("ClipboardParser", "⚠️ Image exceeds ${SizeConstants.MAX_ATTACHMENT_BYTES / (1024 * 1024)}MB limit: ${formatBytes(encodedBytes.size.toLong())}, skipping")
                 onFileTooLarge?.invoke("Image", encodedBytes.size.toLong())
                 return null
             }
@@ -287,8 +281,8 @@ class ClipboardParser(
             val filename = metadata?.displayName ?: uri.lastPathSegment ?: "file"
             
             // Check size before reading
-            if (size > MAX_ATTACHMENT_BYTES) {
-                android.util.Log.w("ClipboardParser", "⚠️ File too large: ${formatBytes(size)} (limit: ${formatBytes(MAX_ATTACHMENT_BYTES.toLong())})")
+            if (size > SizeConstants.MAX_ATTACHMENT_BYTES) {
+                android.util.Log.w("ClipboardParser", "⚠️ File too large: ${formatBytes(size)} (limit: ${formatBytes(SizeConstants.MAX_ATTACHMENT_BYTES.toLong())})")
                 onFileTooLarge?.invoke(filename, size)
                 return null
             }
@@ -298,8 +292,8 @@ class ClipboardParser(
             val bytes = readBytes(uri) ?: return null
             
             // Double-check after reading
-            if (bytes.size > MAX_ATTACHMENT_BYTES) {
-                android.util.Log.w("ClipboardParser", "⚠️ File too large after reading: ${formatBytes(bytes.size.toLong())} (limit: ${formatBytes(MAX_ATTACHMENT_BYTES.toLong())})")
+            if (bytes.size > SizeConstants.MAX_ATTACHMENT_BYTES) {
+                android.util.Log.w("ClipboardParser", "⚠️ File too large after reading: ${formatBytes(bytes.size.toLong())} (limit: ${formatBytes(SizeConstants.MAX_ATTACHMENT_BYTES.toLong())})")
                 onFileTooLarge?.invoke(filename, bytes.size.toLong())
                 return null
             }

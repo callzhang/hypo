@@ -46,7 +46,10 @@ final class ClipboardMonitorTests: XCTestCase {
             return XCTFail("Expected file metadata")
         }
         XCTAssertEqual(metadata.byteSize, data.count)
-        XCTAssertNotNil(metadata.base64)
+        XCTAssertEqual(metadata.fileName, fileURL.lastPathComponent)
+        XCTAssertEqual(metadata.url, fileURL)
+        // Local-origin files should not duplicate bytes in base64; we only store a pointer.
+        XCTAssertNil(metadata.base64)
     }
 
     func testSkipsFilesOverSizeLimit() throws {

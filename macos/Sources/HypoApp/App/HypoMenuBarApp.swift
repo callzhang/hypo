@@ -1361,6 +1361,14 @@ private struct ClipboardCard: View {
     
     private func openFileInFinder(entry: ClipboardEntry) {
         guard case .file(let fileMetadata) = entry.content else { return }
+        
+        // Prefer original file URL when available (local-origin entries),
+        // to avoid creating additional copies on disk.
+        if let url = fileMetadata.url {
+            NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: "")
+            return
+        }
+        
         guard let base64 = fileMetadata.base64,
               let data = Data(base64Encoded: base64) else { return }
         
@@ -1564,6 +1572,14 @@ private struct ClipboardRow: View {
     
     private func openFileInFinder(entry: ClipboardEntry) {
         guard case .file(let fileMetadata) = entry.content else { return }
+        
+        // Prefer original file URL when available (local-origin entries),
+        // to avoid creating additional copies on disk.
+        if let url = fileMetadata.url {
+            NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: "")
+            return
+        }
+        
         guard let base64 = fileMetadata.base64,
               let data = Data(base64Encoded: base64) else { return }
         
@@ -2604,8 +2620,14 @@ private struct FileDetailView: View {
     }
     
     private var fileData: Data? {
-        guard let base64 = metadata.base64 else { return nil }
-        return Data(base64Encoded: base64)
+        if let base64 = metadata.base64,
+           let data = Data(base64Encoded: base64) {
+            return data
+        }
+        if let url = metadata.url {
+            return try? Data(contentsOf: url)
+        }
+        return nil
     }
     
     private var fileContent: String? {

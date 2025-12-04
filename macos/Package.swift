@@ -24,7 +24,10 @@ let package = Package(
             name: "HypoApp",
             dependencies: [
             ],
-            path: "Sources/HypoApp"
+            path: "Sources/HypoApp",
+            linkerSettings: [
+                .linkedLibrary("z")
+            ]
         ),
         .executableTarget(
             name: "HypoMenuBarApp",

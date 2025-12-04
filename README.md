@@ -19,7 +19,7 @@ Hypo enables seamless clipboard synchronization between any devices. Copy on one
 - **🚀 Real-time Sync**: Sub-second clipboard updates across devices
 - **🔒 E2E Encrypted**: AES-256-GCM encryption, your data never exposed
 - **📡 Dual Transport**: LAN-first for speed, cloud fallback for mobility
-- **📋 Multi-Format**: Text, links, images (≤1MB), and files
+- **📋 Multi-Format**: Text, links, images (≤10MB), and files (≤10MB)
 - **🕒 Clipboard History**: Search and restore past clipboard items (macOS)
 - **🔔 Rich Notifications**: Preview content before pasting
 - **🎨 Native UI**: SwiftUI on macOS, Material 3 on Android
@@ -288,11 +288,16 @@ Hypo takes security seriously:
 ## 📊 Current Status
 
 **Phase**: Production Release ✅  
-**Version**: v1.0.2  
+**Version**: v1.0.3  
 **Progress**: 100%  
-**Last Updated**: December 3, 2025
+**Last Updated**: December 4, 2025
 
 **Recent Milestones**:
+- ✅ **v1.0.3 Released** (Dec 4, 2025): Temp File Management & Performance Improvements
+  - Automatic temp file cleanup (30s delay, clipboard change detection)
+  - Size limit checks (50MB copy, 10MB sync) with user notifications
+  - Android lazy loading for large content (prevents crashes)
+  - Fixed macOS encryption encoding (base64 strings for Android compatibility)
 - ✅ **v1.0.2 Released** (Dec 3, 2025): Build & Release Improvements
   - macOS app signing for free distribution (ad-hoc signing)
   - Automatic release notes generation
@@ -425,7 +430,7 @@ MIT License - See [LICENSE](LICENSE) for details
 
 This project is in **production release** phase. The system is fully functional and has been extensively tested. All critical bugs have been resolved. Ready for distribution.
 
-**Current Version**: v1.0.2  
+**Current Version**: v1.0.3  
 **Stability**: Production-ready  
 **Next Milestone**: Public beta testing and future feature development
 

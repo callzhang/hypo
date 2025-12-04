@@ -3,6 +3,7 @@ package com.hypo.clipboard.sync
 import com.hypo.clipboard.crypto.CryptoService
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
+import com.hypo.clipboard.util.SizeConstants
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -82,9 +83,15 @@ class SyncEngine @Inject constructor(
         val payload = ClipboardPayload(
             contentType = item.type,
             dataBase64 = dataBase64,
-            metadata = item.metadata ?: emptyMap()
+            metadata = item.metadata ?: emptyMap(),
+            compressed = true  // Always compress by default
         )
-        val plaintext = json.encodeToString(payload).encodeToByteArray()
+        val jsonString = json.encodeToString(payload)
+        val jsonBytes = jsonString.encodeToByteArray()
+        
+        // Always compress the JSON payload before encryption
+        val plaintext = compressGzip(jsonBytes)
+        android.util.Log.d("SyncEngine", "🗜️ Compressed payload: ${jsonBytes.size} bytes -> ${plaintext.size} bytes (${String.format("%.1f", plaintext.size.toDouble() / jsonBytes.size * 100)}%)")
 
         val (ciphertextBase64, nonceBase64, tagBase64) = if (!plainTextMode && key != null) {
             // Normalize device ID to lowercase for AAD to match decryption (macOS uses lowercase)
@@ -138,12 +145,12 @@ class SyncEngine @Inject constructor(
             )
         )
 
-        // Check payload size before sending (transport limit is 10MB)
+        // Check payload size before sending (transport frame limit)
         // Estimate JSON-encoded size: base64 string + metadata overhead (~500 bytes for JSON structure)
         val estimatedPayloadSize = ciphertextBase64.length + 
             (item.metadata?.values?.sumOf { it.toString().length } ?: 0) + 
             500 // JSON structure overhead
-        val maxTransportPayload = 10 * 1024 * 1024 // 10MB limit from TransportFrameCodec
+        val maxTransportPayload = SizeConstants.MAX_TRANSPORT_PAYLOAD_BYTES
         
         if (estimatedPayloadSize > maxTransportPayload) {
             android.util.Log.w("SyncEngine", "⚠️ Payload too large for transport: ${estimatedPayloadSize} bytes (limit: ${maxTransportPayload} bytes)")
@@ -187,8 +194,11 @@ class SyncEngine @Inject constructor(
         val decoded = if (isPlainText) {
             android.util.Log.w("SyncEngine", "⚠️ PLAIN TEXT MODE: Receiving unencrypted payload")
             // Decode base64-encoded plaintext directly
-            val plaintext = ciphertext.fromBase64()
-            plaintext.decodeToString()
+            val plaintextBytes = ciphertext.fromBase64()
+            // Always decompress (all payloads are compressed by default)
+            val decompressed = decompressGzip(plaintextBytes)
+            android.util.Log.d("SyncEngine", "🗜️ Decompressed plaintext payload: ${plaintextBytes.size} bytes -> ${decompressed.size} bytes")
+            decompressed.decodeToString()
         } else {
             val deviceId = envelope.payload.deviceId
             if (deviceId == null) {
@@ -232,7 +242,11 @@ class SyncEngine @Inject constructor(
                 key = key,
                 aad = aad
             )
-            decrypted.decodeToString()
+            
+            // Always decompress (all payloads are compressed by default)
+            val decompressed = decompressGzip(decrypted)
+            android.util.Log.d("SyncEngine", "🗜️ Decompressed payload: ${decrypted.size} bytes -> ${decompressed.size} bytes")
+            decompressed.decodeToString()
         }
 
         return withContext(Dispatchers.Default) {
@@ -248,3 +262,23 @@ sealed class SyncEngineException(message: String) : Exception(message) {
 private fun ByteArray.toBase64(): String = base64Encoder.encodeToString(this)
 
 private fun String.fromBase64(): ByteArray = base64Decoder.decode(this)
+
+/**
+ * Compress data using gzip
+ */
+private fun compressGzip(data: ByteArray): ByteArray {
+    val outputStream = java.io.ByteArrayOutputStream()
+    val gzipOutputStream = java.util.zip.GZIPOutputStream(outputStream)
+    gzipOutputStream.write(data)
+    gzipOutputStream.close()
+    return outputStream.toByteArray()
+}
+
+/**
+ * Decompress gzip-compressed data
+ */
+private fun decompressGzip(data: ByteArray): ByteArray {
+    val inputStream = java.io.ByteArrayInputStream(data)
+    val gzipInputStream = java.util.zip.GZIPInputStream(inputStream)
+    return gzipInputStream.readBytes()
+}

@@ -1,5 +1,8 @@
 import Foundation
 import AppKit
+#if canImport(UserNotifications)
+import UserNotifications
+#endif
 #if canImport(os)
 import os
 #endif
@@ -141,6 +144,19 @@ public final class IncomingClipboardHandler {
     }
     
     private func applyToClipboard(_ payload: ClipboardPayload) async throws {
+        // Size check: prevent copying very large items
+        let MAX_COPY_SIZE_BYTES = SizeConstants.maxCopySizeBytes
+        if payload.data.count > MAX_COPY_SIZE_BYTES {
+            let sizeMB = Double(payload.data.count) / (1024.0 * 1024.0)
+            let limitMB = Double(MAX_COPY_SIZE_BYTES) / (1024.0 * 1024.0)
+            #if canImport(os)
+            logger.warning("⚠️ Item too large to copy: \(String(format: "%.1f", sizeMB)) MB (limit: \(String(format: "%.0f", limitMB)) MB)")
+            #endif
+            // Show notification to user
+            await showSizeLimitNotification(itemType: payload.contentType == .image ? "Image" : "File", sizeMB: sizeMB, limitMB: limitMB)
+            throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "Item too large to copy: \(String(format: "%.1f", sizeMB)) MB exceeds \(String(format: "%.0f", limitMB)) MB limit"])
+        }
+        
         _ = await MainActor.run {
             pasteboard.clearContents()
         }
@@ -184,12 +200,16 @@ public final class IncomingClipboardHandler {
             let tempDir = FileManager.default.temporaryDirectory
             let fileExtension = (fileName as NSString).pathExtension
             let baseFileName = (fileName as NSString).deletingPathExtension
-            let fullFileName = fileExtension.isEmpty ? baseFileName : "\(baseFileName).\(fileExtension)"
-            let tempURL = tempDir.appendingPathComponent(fullFileName)
+            // Use UUID to ensure unique filename and prevent conflicts
+            let uniqueFileName = "hypo_\(UUID().uuidString)_\(fileExtension.isEmpty ? baseFileName : "\(baseFileName).\(fileExtension)")"
+            let tempURL = tempDir.appendingPathComponent(uniqueFileName)
             
             // Write data to temp file
             do {
                 try payload.data.write(to: tempURL)
+                
+                // Register temp file for automatic cleanup
+                await TempFileManager.shared.registerTempFile(tempURL)
                 
                 // Add file URL to clipboard
                 await MainActor.run {
@@ -200,16 +220,23 @@ public final class IncomingClipboardHandler {
                 #if canImport(os)
                 logger.info("✅ Applied file to clipboard: \(fileName) (\(payload.data.count) bytes)")
                 #endif
-                
-                // Clean up temp file after a delay (30 seconds)
-                Task {
-                    try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
-                    try? FileManager.default.removeItem(at: tempURL)
-                }
             } catch {
                 throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to write file to temporary location: \(error.localizedDescription)"])
             }
         }
+    }
+    
+    private func showSizeLimitNotification(itemType: String, sizeMB: Double, limitMB: Double) async {
+        #if canImport(UserNotifications)
+        let center = UNUserNotificationCenter.current()
+        let content = UNMutableNotificationContent()
+        content.title = "Item Too Large"
+        content.body = String(format: "Item (%.1f MB) exceeds the maximum copy limit of %.0f MB. Please use a smaller %@.", sizeMB, limitMB, itemType.lowercased())
+        content.sound = UNNotificationSound.default
+        
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        try? await center.add(request)
+        #endif
     }
     
     private func addToHistory(_ payload: ClipboardPayload, deviceId: String, devicePlatform: DevicePlatform?, deviceName: String?, isEncrypted: Bool, transportOrigin: TransportOrigin, timestamp: Date) async {

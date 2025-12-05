@@ -109,6 +109,8 @@ jobs:
         working-directory: macos
         run: |
           set -e
+          BINARY_NAME="HypoMenuBar"
+          
           # Build the Swift package
           echo "Building Swift package..."
           swift build -c release
@@ -120,40 +122,50 @@ jobs:
             mkdir -p HypoApp.app/Contents/Resources
           fi
           
-          # Copy binary to app bundle (check actual build output)
+          # Find the built binary (product name is HypoMenuBar, target is HypoMenuBarApp)
           echo "Looking for built binary..."
-          # The product name is HypoMenuBar, but the target is HypoMenuBarApp
-          # SwiftPM builds executables with the product name
-          BINARY_FOUND=false
-          if [ -f ".build/release/HypoMenuBar" ]; then
-            echo "Found: .build/release/HypoMenuBar"
-            cp .build/release/HypoMenuBar HypoApp.app/Contents/MacOS/HypoMenuBar
-            BINARY_FOUND=true
+          BUILT_BINARY=""
+          
+          # First, try the expected location (product name)
+          if [ -f ".build/release/$BINARY_NAME" ]; then
+            BUILT_BINARY=".build/release/$BINARY_NAME"
+            echo "Found: $BUILT_BINARY"
+          # Fallback: try target name
           elif [ -f ".build/release/HypoMenuBarApp" ]; then
-            echo "Found: .build/release/HypoMenuBarApp"
-            cp .build/release/HypoMenuBarApp HypoApp.app/Contents/MacOS/HypoMenuBar
-            BINARY_FOUND=true
+            BUILT_BINARY=".build/release/HypoMenuBarApp"
+            echo "Found: $BUILT_BINARY"
+          # Fallback: search for any executable with MenuBar in name
           else
-            echo "Error: Binary not found. Searching for executables..."
-            echo "Available files in .build/release:"
-            find .build/release -type f 2>/dev/null || echo "No .build/release directory found"
-            echo "Available executables in .build:"
-            find .build -type f -executable -name "*MenuBar*" 2>/dev/null || echo "No MenuBar executables found"
-            # Try to find any executable
-            EXECUTABLE=$(find .build/release -type f -executable 2>/dev/null | head -1)
-            if [ -n "$EXECUTABLE" ]; then
-              echo "Found executable: $EXECUTABLE, using it"
-              cp "$EXECUTABLE" HypoApp.app/Contents/MacOS/HypoMenuBar
-              BINARY_FOUND=true
+            BUILT_BINARY=$(find .build/release -name "*MenuBar*" -type f -executable 2>/dev/null | head -1)
+            if [ -n "$BUILT_BINARY" ]; then
+              echo "Found: $BUILT_BINARY"
             fi
           fi
           
-          if [ "$BINARY_FOUND" = false ]; then
+          # Last resort: find any executable in release directory
+          if [ -z "$BUILT_BINARY" ]; then
+            echo "Error: Binary not found. Searching for any executables..."
+            echo "Available files in .build/release:"
+            find .build/release -type f 2>/dev/null | head -10 || echo "No .build/release directory found"
+            echo "Available executables in .build:"
+            find .build -type f -executable 2>/dev/null | head -10 || echo "No executables found"
+            BUILT_BINARY=$(find .build/release -type f -executable 2>/dev/null | head -1)
+            if [ -n "$BUILT_BINARY" ]; then
+              echo "Found executable: $BUILT_BINARY, using it"
+            fi
+          fi
+          
+          if [ -z "$BUILT_BINARY" ] || [ ! -f "$BUILT_BINARY" ]; then
+            echo "❌ Error: Built binary not found"
+            echo "Build may have succeeded but binary was not produced"
             exit 1
           fi
           
-          chmod +x HypoApp.app/Contents/MacOS/HypoMenuBar
-          echo "Binary copied successfully"
+          # Copy binary to app bundle
+          APP_BINARY="HypoApp.app/Contents/MacOS/$BINARY_NAME"
+          cp "$BUILT_BINARY" "$APP_BINARY"
+          chmod +x "$APP_BINARY"
+          echo "✅ Binary copied successfully: $APP_BINARY"
           
           # Create or update Info.plist
           echo "Creating Info.plist..."
@@ -178,7 +190,7 @@ jobs:
                 echo "⚠️  Warning: Icon generation reported success but icon file not found"
               fi
             else
-              echo "❌ Icon generation failed"√√
+              echo "❌ Icon generation failed"
               echo "⚠️  App will run without icon"
             fi
           else

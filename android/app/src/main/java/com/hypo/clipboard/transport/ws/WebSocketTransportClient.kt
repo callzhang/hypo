@@ -43,6 +43,7 @@ import okio.ByteString
 import okio.ByteString.Companion.of
 import kotlin.math.max
 import kotlin.math.min
+import java.util.concurrent.TimeUnit
 
 interface WebSocketConnector {
     fun connect(listener: WebSocketListener): WebSocket
@@ -84,6 +85,16 @@ class OkHttpWebSocketConnector @Inject constructor(
             }
             android.util.Log.d("OkHttpWebSocketConnector", "✅ Parsed URL - scheme: ${url.scheme}, host: ${url.host}, port: ${url.port}")
         val builder = baseClient.newBuilder()
+            // Configure timeouts to match roundTripTimeoutMillis for large payloads (images)
+            // Default OkHttpClient has 10s timeouts, which can be too short for large image transfers
+            // Use roundTripTimeoutMillis (60s default) or a minimum of 30s for connection establishment
+            val connectTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
+            val readTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
+            val writeTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
+            builder.connectTimeout(connectTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            builder.readTimeout(readTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            builder.writeTimeout(writeTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            android.util.Log.d("OkHttpWebSocketConnector", "⏱️ Configured timeouts: connect=${connectTimeoutMs}ms, read=${readTimeoutMs}ms, write=${writeTimeoutMs}ms")
             // Only apply certificate pinning for secure connections (wss:// -> https://)
             // Skip pinning for non-secure connections (ws:// -> http://)
             val isSecure = urlString.startsWith("wss://", ignoreCase = true)

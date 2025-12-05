@@ -61,7 +61,14 @@ class IncomingClipboardHandler @Inject constructor(
                 
                 // Decode the encrypted clipboard payload using key fetched by UUID (device ID)
                 // The syncEngine.decode() will fetch the key using envelope.payload.deviceId
-                val clipboardPayload = syncEngine.decode(envelope)
+                Log.d(TAG, "🔓 Starting decryption for deviceId=${senderDeviceId?.take(20)}, type=${envelope.type}, payloadSize=${envelope.payload.ciphertext?.length ?: 0}")
+                val clipboardPayload = try {
+                    syncEngine.decode(envelope)
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Decryption failed in syncEngine.decode(): ${e.javaClass.simpleName}: ${e.message}", e)
+                    throw e // Re-throw to be caught by outer catch block
+                }
+                Log.d(TAG, "✅ Decryption successful: contentType=${clipboardPayload.contentType}, dataSize=${clipboardPayload.dataBase64.length}")
                 
                 // For images and files, keep content as base64 string (binary data)
                 // For text and links, decode base64 to get the actual text
@@ -193,13 +200,27 @@ class IncomingClipboardHandler @Inject constructor(
                 // Decryption failed or other error
                 val deviceId = envelope.payload.deviceId ?: "unknown"
                 val deviceName = envelope.payload.deviceName ?: "Unknown Device"
+                val exceptionType = e.javaClass.simpleName
+                val exceptionMessage = e.message ?: "No error message"
+                val stackTrace = e.stackTraceToString()
+                
+                // Detailed error logging for debugging
+                Log.e(TAG, "❌ Failed to decode clipboard from $deviceName ($deviceId)")
+                Log.e(TAG, "   Exception type: $exceptionType")
+                Log.e(TAG, "   Exception message: $exceptionMessage")
+                Log.e(TAG, "   Stack trace: ${stackTrace.take(500)}")
+                
+                // Check for specific decryption errors
                 val reason = when {
-                    e.message?.contains("decrypt", ignoreCase = true) == true -> "Decryption failed"
-                    e.message?.contains("key", ignoreCase = true) == true -> "Invalid encryption key"
-                    else -> "Failed to decode message: ${e.message?.take(50) ?: "Unknown error"}"
+                    e is java.security.GeneralSecurityException -> "Decryption failed: ${e.message}"
+                    e.message?.contains("decrypt", ignoreCase = true) == true -> "Decryption failed: ${e.message}"
+                    e.message?.contains("key", ignoreCase = true) == true -> "Invalid encryption key: ${e.message}"
+                    e.message?.contains("BAD_DECRYPT", ignoreCase = true) == true -> "Decryption authentication failed (BAD_DECRYPT)"
+                    e.message?.contains("AEADBadTagException", ignoreCase = true) == true -> "Decryption tag verification failed"
+                    else -> "Failed to decode message: ${exceptionMessage.take(50)}"
                 }
                 
-                Log.e(TAG, "❌ Failed to decode clipboard from $deviceName ($deviceId): ${e.message}", e)
+                Log.e(TAG, "   Reason: $reason")
                 onDecryptionWarning?.invoke(deviceId, deviceName, reason)
             }
         }

@@ -235,15 +235,28 @@ class SyncEngine @Inject constructor(
             android.util.Log.d("SyncEngine", "🔓 Key size: ${key.size} bytes")
             android.util.Log.d("SyncEngine", "🔓 Original deviceId from envelope: $deviceId")
 
-            val decrypted = cryptoService.decrypt(
-                encrypted = com.hypo.clipboard.crypto.EncryptedData(
-                    ciphertext = ciphertextBytes,
-                    nonce = nonce,
-                    tag = tag
-                ),
-                key = key,
-                aad = aad
-            )
+            android.util.Log.d("SyncEngine", "🔓 Calling cryptoService.decrypt() with key size=${key.size}, aad size=${aad.size}, ciphertext size=${ciphertextBytes.size}")
+            val decrypted = try {
+                cryptoService.decrypt(
+                    encrypted = com.hypo.clipboard.crypto.EncryptedData(
+                        ciphertext = ciphertextBytes,
+                        nonce = nonce,
+                        tag = tag
+                    ),
+                    key = key,
+                    aad = aad
+                )
+            } catch (e: java.security.GeneralSecurityException) {
+                android.util.Log.e("SyncEngine", "❌ Decryption failed in cryptoService.decrypt(): ${e.javaClass.simpleName}: ${e.message}")
+                android.util.Log.e("SyncEngine", "   Device ID: $deviceId (normalized: $normalizedDeviceId)")
+                android.util.Log.e("SyncEngine", "   Key size: ${key.size} bytes")
+                android.util.Log.e("SyncEngine", "   AAD: ${aad.decodeToString()} (${aad.size} bytes)")
+                android.util.Log.e("SyncEngine", "   Ciphertext: ${ciphertextBytes.size} bytes")
+                android.util.Log.e("SyncEngine", "   Nonce: ${nonce.size} bytes")
+                android.util.Log.e("SyncEngine", "   Tag: ${tag.size} bytes")
+                throw e
+            }
+            android.util.Log.d("SyncEngine", "✅ Decryption successful: ${decrypted.size} bytes")
             
             // Always decompress (all payloads are compressed by default)
             val decompressed = decompressGzip(decrypted)

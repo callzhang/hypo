@@ -716,6 +716,7 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 - **Swipe Left**: Delete item
 - **Swipe Right**: Pin/unpin item
 - **Pull to Refresh**: Sync with other devices
+- **Text Selection Context Menu**: Select text in any app → "Copy to Hypo" appears first in menu → Automatically copies and syncs to other devices
 
 **Notification Actions**:
 - **Pause Sync**: Temporarily stop clipboard monitoring

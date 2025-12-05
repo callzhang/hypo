@@ -232,6 +232,8 @@ class SyncEngine @Inject constructor(
             val normalizedDeviceId = deviceId.lowercase()
             val aad = normalizedDeviceId.encodeToByteArray()
             android.util.Log.d("SyncEngine", "🔓 AAD: deviceId=$normalizedDeviceId (${aad.size} bytes)")
+            android.util.Log.d("SyncEngine", "🔓 Key size: ${key.size} bytes")
+            android.util.Log.d("SyncEngine", "🔓 Original deviceId from envelope: $deviceId")
 
             val decrypted = cryptoService.decrypt(
                 encrypted = com.hypo.clipboard.crypto.EncryptedData(

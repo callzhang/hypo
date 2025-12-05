@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import androidx.compose.foundation.clickable
@@ -60,6 +61,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -353,7 +355,17 @@ private fun ClipboardCard(
                 fun createTempFileForClipboard(context: Context, bytes: ByteArray, prefix: String, suffix: String): File {
                     val tempFile = File.createTempFile(prefix, suffix, context.cacheDir)
                     FileOutputStream(tempFile).use { it.write(bytes) }
+                    // Ensure file is readable
+                    tempFile.setReadable(true, false)
                     return tempFile
+                }
+                
+                fun getFileProviderUri(context: Context, file: File): android.net.Uri {
+                    return androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        file
+                    )
                 }
                 
                 fun getExtensionFromFilename(filename: String): String? {
@@ -387,9 +399,12 @@ private fun ClipboardCard(
                             else -> "image/png"
                         }
                         val tempFile = createTempFileForClipboard(context, imageBytes, "hypo_image", ".$format")
+                        android.util.Log.d("HistoryScreen", "📁 Created temp file: ${tempFile.absolutePath}, exists=${tempFile.exists()}, readable=${tempFile.canRead()}, size=${tempFile.length()}")
                         // Register temp file for automatic cleanup
                         tempFileManager.registerTempFile(tempFile)
-                        ClipData.newUri(context.contentResolver, mimeType, Uri.fromFile(tempFile))
+                        val uri = getFileProviderUri(context, tempFile)
+                        android.util.Log.d("HistoryScreen", "🔗 FileProvider URI: $uri")
+                        ClipData.newUri(context.contentResolver, mimeType, uri)
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
                         // Files: decode base64, save to temp file, create URI
@@ -398,29 +413,80 @@ private fun ClipboardCard(
                         val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
                         val extension = getExtensionFromFilename(filename) ?: getExtensionFromMimeType(mimeType) ?: ""
                         val tempFile = createTempFileForClipboard(context, fileBytes, "hypo_file", if (extension.isNotEmpty()) ".$extension" else "")
+                        android.util.Log.d("HistoryScreen", "📁 Created temp file: ${tempFile.absolutePath}, exists=${tempFile.exists()}, readable=${tempFile.canRead()}, size=${tempFile.length()}")
                         // Register temp file for automatic cleanup
                         tempFileManager.registerTempFile(tempFile)
-                        ClipData.newUri(context.contentResolver, mimeType, Uri.fromFile(tempFile))
+                        val uri = getFileProviderUri(context, tempFile)
+                        android.util.Log.d("HistoryScreen", "🔗 FileProvider URI: $uri")
+                        ClipData.newUri(context.contentResolver, mimeType, uri)
                     }
                 }
                 
                 // Switch to Main thread to set clipboard
                 withContext(Dispatchers.Main) {
-                    manager.setPrimaryClip(clip)
-                    android.util.Log.d("HistoryScreen", "✅ Copied to clipboard (itemId=$itemId, type=${item.type}): ${content.take(30)}")
-                    
-                    // Notify parent to scroll to top after item is copied
-                    // The clipboard listener will detect the change and update the database,
-                    // moving the item to the top. We scroll after a short delay to allow
-                    // the database update to complete.
-                    onItemClicked()
+                    try {
+                        // Log clip details before setting
+                        android.util.Log.d("HistoryScreen", "📋 Setting clipboard: type=${item.type}, clip.description=${clip.description}, clip.itemCount=${clip.itemCount}")
+                        if (item.type == com.hypo.clipboard.domain.model.ClipboardType.IMAGE || 
+                            item.type == com.hypo.clipboard.domain.model.ClipboardType.FILE) {
+                            val uri = clip.getItemAt(0).uri
+                            android.util.Log.d("HistoryScreen", "📋 Clip URI: $uri, scheme=${uri.scheme}, authority=${uri.authority}")
+                        }
+                        
+                        // ClipData.newUri() automatically adds FLAG_GRANT_READ_URI_PERMISSION
+                        // This allows the clipboard system to read the FileProvider URI
+                        manager.setPrimaryClip(clip)
+                        
+                        android.util.Log.d("HistoryScreen", "✅ Copied to clipboard (itemId=$itemId, type=${item.type}): ${content.take(30)}")
+                        
+                        // Show success toast for all types
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.copied_to_clipboard),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        
+                        // The clipboard listener will detect the change and trigger duplicate detection,
+                        // which will move the matching item to the top. No need to manually scroll -
+                        // the UI will automatically update when the database changes.
+                        onItemClicked()
+                    } catch (e: Exception) {
+                        android.util.Log.e("HistoryScreen", "❌ Error setting clipboard on main thread: ${e.message}", e)
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.error_copying_to_clipboard, e.message ?: "Unknown error"),
+                            Toast.LENGTH_LONG
+                        ).show()
+                        throw e // Re-throw to be caught by outer catch blocks
+                    }
                 }
             } catch (e: SecurityException) {
                 android.util.Log.e("HistoryScreen", "❌ SecurityException when copying to clipboard: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.error_clipboard_permission),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             } catch (e: IllegalStateException) {
                 android.util.Log.e("HistoryScreen", "❌ IllegalStateException when copying to clipboard: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.error_clipboard_state, e.message ?: "Unknown error"),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             } catch (e: Exception) {
                 android.util.Log.e("HistoryScreen", "❌ Failed to copy to clipboard: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.error_copying_to_clipboard, e.message ?: "Unknown error"),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             } finally {
                 // Clear the job reference when done - this makes isCopying false
                 copyJob = null
@@ -514,13 +580,58 @@ private fun ClipboardCard(
             var showDetailDialog by remember { mutableStateOf(false) }
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             
+            // Reconstruct preview for IMAGE/FILE types if size is 0B (historical items)
+            // Calculate size from metadata or content dynamically
+            val displayPreview = remember(item.id, item.type, item.preview, item.metadata, item.content) {
+                if (item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE) {
+                    // Check if preview shows 0B (historical items with incorrect size)
+                    if (item.preview.contains("(0 B)") || item.preview.contains("(0B)")) {
+                        // Try to get size from metadata first
+                        val sizeFromMetadata = item.metadata?.get("size")?.toLongOrNull()
+                        val size = if (sizeFromMetadata != null && sizeFromMetadata > 0) {
+                            sizeFromMetadata
+                        } else if (item.content.isNotEmpty()) {
+                            // Calculate from base64 content
+                            val base64WithoutPadding = item.content.trimEnd('=')
+                            (base64WithoutPadding.length * 3L / 4L)
+                        } else {
+                            // Try to load content to calculate size (async, will update later)
+                            null
+                        }
+                        
+                        if (size != null && size > 0) {
+                            // Reconstruct preview with correct size
+                            when (item.type) {
+                                ClipboardType.IMAGE -> {
+                                    val width = item.metadata?.get("width") ?: "?"
+                                    val height = item.metadata?.get("height") ?: "?"
+                                    val format = item.metadata?.get("format") ?: "image"
+                                    "Image ${width}×${height} (${formatBytes(size)})"
+                                }
+                                ClipboardType.FILE -> {
+                                    val filename = item.metadata?.get("file_name") ?: item.metadata?.get("filename") ?: "file"
+                                    "$filename (${formatBytes(size)})"
+                                }
+                                else -> item.preview
+                            }
+                        } else {
+                            item.preview // Keep original if we can't calculate
+                        }
+                    } else {
+                        item.preview // Preview already has correct size
+                    }
+                } else {
+                    item.preview // For TEXT/LINK, use preview as-is
+                }
+            }
+            
             // Show preview text with magnetic icon if truncated
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (isTruncated) item.preview else item.content,
+                    text = if (isTruncated) displayPreview else item.content,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.weight(1f)
                 )
@@ -571,6 +682,7 @@ private fun ClipboardCard(
                 ) {
                     ClipboardDetailContent(
                         item = item,
+                        viewModel = viewModel,
                         onDismiss = { showDetailDialog = false }
                     )
                 }
@@ -768,8 +880,38 @@ private fun hexDump(data: ByteArray, maxBytes: Int): String {
 }
 
 @Composable
-private fun ClipboardDetailContent(item: ClipboardItem, onDismiss: () -> Unit = {}) {
+private fun ClipboardDetailContent(
+    item: ClipboardItem,
+    viewModel: HistoryViewModel,
+    onDismiss: () -> Unit = {}
+) {
     val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+    
+    // Load full content for IMAGE/FILE types automatically when detail view opens
+    var loadedContent by remember { mutableStateOf(item.content) }
+    var isLoading by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    
+    // Load content automatically when detail view opens for IMAGE/FILE types
+    LaunchedEffect(item.id, item.type) {
+        if ((item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE) && loadedContent.isEmpty()) {
+            isLoading = true
+            loadError = null
+            try {
+                val content = viewModel.loadFullContent(item.id)
+                if (content != null) {
+                    loadedContent = content
+                } else {
+                    loadError = "Failed to load content"
+                }
+            } catch (e: Exception) {
+                loadError = "Error loading content: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
     
     Column(
         modifier = Modifier
@@ -798,26 +940,62 @@ private fun ClipboardDetailContent(item: ClipboardItem, onDismiss: () -> Unit = 
         // Content based on type
         when (item.type) {
             ClipboardType.IMAGE -> {
-                // Decode and display image
-                val imageBytes = try {
-                    Base64.getDecoder().decode(item.content)
-                } catch (e: Exception) {
-                    null
-                }
-                
-                if (imageBytes != null) {
-                    val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-                    if (bitmap != null) {
-                        Image(
-                            bitmap = bitmap.asImageBitmap(),
-                            contentDescription = "Clipboard Image",
+                if (isLoading) {
+                    Text("Loading image...")
+                } else if (loadError != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Error: $loadError", color = MaterialTheme.colorScheme.error)
+                        Button(
+                            onClick = { 
+                                // Retry loading
+                                isLoading = true
+                                loadError = null
+                                coroutineScope.launch {
+                                    try {
+                                        val content = viewModel.loadFullContent(item.id)
+                                        if (content != null) {
+                                            loadedContent = content
+                                        } else {
+                                            loadError = "Failed to load content"
+                                        }
+                                    } catch (e: Exception) {
+                                        loadError = "Error loading content: ${e.message}"
+                                    } finally {
+                                        isLoading = false
+                                    }
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth()
-                        )
-                    } else {
-                        Text("Failed to decode image")
+                        ) {
+                            Text("Retry")
+                        }
                     }
                 } else {
-                    Text("Invalid image data")
+                    // Decode and display image
+                    val imageBytes = try {
+                        if (loadedContent.isNotEmpty()) {
+                            Base64.getDecoder().decode(loadedContent)
+                        } else {
+                            null
+                        }
+                    } catch (e: Exception) {
+                        null
+                    }
+                    
+                    if (imageBytes != null && imageBytes.isNotEmpty()) {
+                        val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Clipboard Image",
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            Text("Failed to decode image")
+                        }
+                    } else {
+                        Text("Invalid image data")
+                    }
                 }
             }
             ClipboardType.TEXT, ClipboardType.LINK -> {

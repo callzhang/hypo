@@ -174,59 +174,106 @@ class SyncCoordinator @Inject constructor(
                 
                 // Check if matches current clipboard (latest entry)
                 val matchesCurrentClipboard = latestEntry?.let { latest ->
-                    eventItem.matchesContent(latest)
+                    val matches = eventItem.matchesContent(latest)
+                    android.util.Log.d(TAG, "🔍 Checking match with latest entry: eventType=${eventItem.type}, latestType=${latest.type}, matches=$matches")
+                    if (eventItem.type == ClipboardType.IMAGE || eventItem.type == ClipboardType.FILE) {
+                        val eventHash = eventItem.metadata?.get("hash")
+                        val latestHash = latest.metadata?.get("hash")
+                        android.util.Log.d(TAG, "🔍 Hash comparison: eventHash=${eventHash?.take(16)}, latestHash=${latestHash?.take(16)}, hashMatch=${eventHash == latestHash}")
+                    }
+                    matches
                 } ?: false
                 
-                if (matchesCurrentClipboard) {
-                    android.util.Log.d(TAG, "⏭️ New message matches current clipboard, discarding: ${event.preview.take(50)}")
-                    continue
-                }
-                
-                // Check if matches something in history (excluding the latest entry)
-                val matchingEntry = try {
-                    repository.findMatchingEntryInHistory(eventItem)
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "❌ Error finding matching entry in history: ${e.message}", e)
-                    null // Continue as if no match found
-                }
-                
-                val item: ClipboardItem
-                if (matchingEntry != null) {
-                    // Found matching entry in history - move it to the top by updating timestamp
-                    val newTimestamp = Instant.now()
+                val item: ClipboardItem = if (matchesCurrentClipboard && latestEntry != null) {
+                    // Remove old item and create new one at top (ensures it's definitely at top)
+                    android.util.Log.d(TAG, "🔄 Matched current clipboard, removing old item and creating new one at top: id=${latestEntry.id}")
                     try {
-                        repository.updateTimestamp(matchingEntry.id, newTimestamp)
-                        android.util.Log.d(TAG, "🔄 New message matches history item, moved to top: ${matchingEntry.preview.take(50)}")
+                        repository.delete(latestEntry.id)
+                        // Create new item with current timestamp (will be at top)
+                        val newItem = ClipboardItem(
+                            id = event.id,
+                            type = event.type,
+                            content = event.content,
+                            preview = event.preview,
+                            metadata = event.metadata.ifEmpty { emptyMap() },
+                            deviceId = deviceId,
+                            deviceName = deviceName,
+                            createdAt = Instant.now(),
+                            isPinned = false,
+                            isEncrypted = event.isEncrypted,
+                            transportOrigin = event.transportOrigin
+                        )
+                        repository.upsert(newItem)
+                        android.util.Log.d(TAG, "✅ Successfully removed old item and created new one at top: ${newItem.preview.take(50)}")
+                        newItem
                     } catch (e: Exception) {
-                        android.util.Log.e(TAG, "❌ Error updating timestamp: ${e.message}", e)
-                        // Continue anyway - item is still matched
+                        android.util.Log.e(TAG, "❌ Error removing/creating item: ${e.message}", e)
+                        // Fallback: use existing item
+                        latestEntry
                     }
-                    // Use the existing item for broadcasting
-                    item = matchingEntry
                 } else {
-                    // Not a duplicate - add to history
-                    item = ClipboardItem(
-                        id = event.id,
-                        type = event.type,
-                        content = event.content,
-                        preview = event.preview,
-                        metadata = event.metadata.ifEmpty { emptyMap() },
-                        deviceId = deviceId,
-                        deviceName = deviceName,
-                        createdAt = event.createdAt,
-                        isPinned = false,
-                        isEncrypted = event.isEncrypted,
-                        transportOrigin = event.transportOrigin
-                    )
-                    try {
-                        repository.upsert(item)
-                    } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
-                        android.util.Log.e(TAG, "❌ SQLiteBlobTooBigException when saving ${event.type} item: ${e.message}. Item too large to save.", e)
-                        // Skip this item - it's too large to save
-                        continue
+                    // Check if matches something in history (excluding the latest entry)
+                    android.util.Log.d(TAG, "🔍 Checking for match in history (excluding latest entry)")
+                    val matchingEntry = try {
+                        repository.findMatchingEntryInHistory(eventItem)
                     } catch (e: Exception) {
-                        android.util.Log.e(TAG, "❌ Error upserting item to database: ${e.message}", e)
-                        // Continue anyway - don't crash the whole sync process
+                        android.util.Log.e(TAG, "❌ Error finding matching entry in history: ${e.message}", e)
+                        null // Continue as if no match found
+                    }
+                    
+                    if (matchingEntry != null) {
+                        // Found matching entry in history - remove old item and create new one at top
+                        android.util.Log.d(TAG, "🔄 Matched history item, removing old item and creating new one at top: id=${matchingEntry.id}")
+                        try {
+                            repository.delete(matchingEntry.id)
+                            // Create new item with current timestamp (will be at top)
+                            val newItem = ClipboardItem(
+                                id = event.id,
+                                type = event.type,
+                                content = event.content,
+                                preview = event.preview,
+                                metadata = event.metadata.ifEmpty { emptyMap() },
+                                deviceId = deviceId,
+                                deviceName = deviceName,
+                                createdAt = Instant.now(),
+                                isPinned = false,
+                                isEncrypted = event.isEncrypted,
+                                transportOrigin = event.transportOrigin
+                            )
+                            repository.upsert(newItem)
+                            android.util.Log.d(TAG, "✅ Successfully removed old history item and created new one at top: ${newItem.preview.take(50)}")
+                            newItem
+                        } catch (e: Exception) {
+                            android.util.Log.e(TAG, "❌ Error removing/creating history item: ${e.message}", e)
+                            // Fallback: use existing item
+                            matchingEntry
+                        }
+                    } else {
+                        // Not a duplicate - add to history
+                        val newItem = ClipboardItem(
+                            id = event.id,
+                            type = event.type,
+                            content = event.content,
+                            preview = event.preview,
+                            metadata = event.metadata.ifEmpty { emptyMap() },
+                            deviceId = deviceId,
+                            deviceName = deviceName,
+                            createdAt = event.createdAt,
+                            isPinned = false,
+                            isEncrypted = event.isEncrypted,
+                            transportOrigin = event.transportOrigin
+                        )
+                        try {
+                            repository.upsert(newItem)
+                        } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
+                            android.util.Log.e(TAG, "❌ SQLiteBlobTooBigException when saving ${event.type} item: ${e.message}. Item too large to save.", e)
+                            // Skip this item - it's too large to save
+                            continue
+                        } catch (e: Exception) {
+                            android.util.Log.e(TAG, "❌ Error upserting item to database: ${e.message}", e)
+                            // Continue anyway - don't crash the whole sync process
+                        }
+                        newItem
                     }
                 }
 

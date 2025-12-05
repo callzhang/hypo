@@ -67,6 +67,7 @@ class IncomingClipboardHandler @Inject constructor(
                 // For text and links, decode base64 to get the actual text
                 val content: String
                 val preview: String
+                var enhancedMetadata: MutableMap<String, String>? = null // For IMAGE/FILE types with hash and size
                 when (clipboardPayload.contentType) {
                     com.hypo.clipboard.domain.model.ClipboardType.TEXT,
                     com.hypo.clipboard.domain.model.ClipboardType.LINK -> {
@@ -77,19 +78,64 @@ class IncomingClipboardHandler @Inject constructor(
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.IMAGE,
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
-                        // Keep as base64 string for binary data
+                        // Content should already be base64-encoded binary data
+                        // ClipboardParser extracts binary data from URIs when creating local clipboard events,
+                        // so incoming messages should never contain URIs (which wouldn't be accessible anyway)
                         content = clipboardPayload.dataBase64
-                        // Generate preview from metadata
-                        val size = clipboardPayload.metadata["size"]?.toLongOrNull() ?: 0L
+                        
+                        // Calculate size from base64 content
+                        // Base64 encoding: 4 chars represent 3 bytes, so original size ≈ base64_length * 3/4
+                        // But we need to account for padding (base64 strings may have = padding)
+                        val sizeFromMetadata = clipboardPayload.metadata?.get("size")?.toLongOrNull()
+                        val sizeFromContent = if (content.isNotEmpty()) {
+                            // Remove padding characters for accurate calculation
+                            val base64WithoutPadding = content.trimEnd('=')
+                            // Calculate: base64 chars represent 3 bytes per 4 chars
+                            // For every 4 base64 chars, we get 3 bytes
+                            val estimatedBytes = (base64WithoutPadding.length * 3L / 4L)
+                            estimatedBytes
+                        } else {
+                            0L
+                        }
+                        val size = sizeFromMetadata ?: sizeFromContent
+                        
+                        // Calculate hash for duplication detection (macOS doesn't send hash)
+                        val contentHash = if (content.isNotEmpty()) {
+                            try {
+                                // Content is now base64-encoded binary data (after URI extraction if needed)
+                                val bytes = java.util.Base64.getDecoder().decode(content)
+                                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                                val hashBytes = digest.digest(bytes)
+                                hashBytes.joinToString("") { "%02x".format(it) }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "⚠️ Failed to calculate hash for ${clipboardPayload.contentType}: ${e.message}")
+                                null
+                            }
+                        } else {
+                            null
+                        }
+                        
+                        // Add hash and size to metadata if not present (for duplication detection and size display)
+                        enhancedMetadata = clipboardPayload.metadata?.toMutableMap() ?: mutableMapOf()
+                        if (contentHash != null && !enhancedMetadata!!.containsKey("hash")) {
+                            enhancedMetadata!!["hash"] = contentHash
+                        }
+                        if (size > 0 && !enhancedMetadata!!.containsKey("size")) {
+                            enhancedMetadata!!["size"] = size.toString()
+                        }
+                        
+                        // Debug logging
+                        Log.d(TAG, "📏 Size calculation: dataBase64.length=${clipboardPayload.dataBase64.length}, content.length=${content.length}, sizeFromContent=$sizeFromContent, sizeFromMetadata=$sizeFromMetadata, finalSize=$size, hash=${contentHash?.take(8)}")
+                        
                         preview = when (clipboardPayload.contentType) {
                             com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
-                                val width = clipboardPayload.metadata["width"] ?: "?"
-                                val height = clipboardPayload.metadata["height"] ?: "?"
-                                val format = clipboardPayload.metadata["format"] ?: "image"
+                                val width = enhancedMetadata!!["width"] ?: "?"
+                                val height = enhancedMetadata!!["height"] ?: "?"
+                                val format = enhancedMetadata!!["format"] ?: "image"
                                 "Image ${width}×${height} (${formatBytes(size)})"
                             }
                             com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
-                                val filename = clipboardPayload.metadata["file_name"] ?: "file"
+                                val filename = enhancedMetadata!!["file_name"] ?: "file"
                                 "$filename (${formatBytes(size)})"
                             }
                             else -> "Binary data (${formatBytes(size)})"
@@ -98,12 +144,22 @@ class IncomingClipboardHandler @Inject constructor(
                 }
                 
                 // Convert to ClipboardEvent with device info (normalized to lowercase)
+                // For IMAGE/FILE types, use enhanced metadata (with hash and size) that was created above
+                val finalMetadata = when (clipboardPayload.contentType) {
+                    com.hypo.clipboard.domain.model.ClipboardType.IMAGE,
+                    com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
+                        // Use enhancedMetadata that was created in the when block above
+                        enhancedMetadata ?: clipboardPayload.metadata?.toMutableMap() ?: mutableMapOf()
+                    }
+                    else -> clipboardPayload.metadata
+                }
+                
                 val event = ClipboardEvent(
                     id = java.util.UUID.randomUUID().toString(),
                     type = clipboardPayload.contentType,
                     content = content,
                     preview = preview,
-                    metadata = clipboardPayload.metadata,
+                    metadata = finalMetadata,
                     createdAt = java.time.Instant.now(),
                     deviceId = senderDeviceId.lowercase(), // ✅ Normalize to lowercase for consistent matching
                     deviceName = senderDeviceName,

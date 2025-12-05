@@ -209,7 +209,7 @@ public final class IncomingClipboardHandler {
                 try payload.data.write(to: tempURL)
                 
                 // Register temp file for automatic cleanup
-                await TempFileManager.shared.registerTempFile(tempURL)
+                TempFileManager.shared.registerTempFile(tempURL)
                 
                 // Add file URL to clipboard
                 await MainActor.run {

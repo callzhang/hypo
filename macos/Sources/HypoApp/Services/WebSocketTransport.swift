@@ -355,13 +355,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 let timeoutDuration: TimeInterval = frameSize > 100_000 ? 10.0 : 5.0 // Longer timeout for large messages
                 Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(timeoutDuration * 1_000_000_000))
+                    guard let strongSelf = self else { return }
                     await MainActor.run {
-                        guard let self else { return }
                         // If still in-flight after timeout and no error was received, assume success
-                        if self.inFlightMessages.removeValue(forKey: messageId) != nil {
-                            self.logger.debug("✅ [WebSocketTransport] Message confirmed (timeout): id=\(messageId.uuidString.prefix(8))")
+                        if strongSelf.inFlightMessages.removeValue(forKey: messageId) != nil {
+                            strongSelf.logger.debug("✅ [WebSocketTransport] Message confirmed (timeout): id=\(messageId.uuidString.prefix(8))")
                             Task {
-                                _ = await self.pendingRoundTrips.remove(id: messageId)
+                                _ = await strongSelf.pendingRoundTrips.remove(id: messageId)
                             }
                         }
                     }

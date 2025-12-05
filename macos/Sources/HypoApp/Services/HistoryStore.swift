@@ -725,7 +725,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 return
             }
             
-            var fileMetadataDict: [String: String] = [
+            let fileMetadataDict: [String: String] = [
                 "device_id": entry.deviceId,
                 "device_name": entry.originDeviceName ?? "",
                 "file_name": metadata.fileName,
@@ -1332,9 +1332,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 do {
                     try data.write(to: tempURL)
                     // Register temp file for automatic cleanup
-                    Task { @MainActor in
-                        await TempFileManager.shared.registerTempFile(tempURL)
-                    }
+                    TempFileManager.shared.registerTempFile(tempURL)
                     pasteboard.writeObjects([tempURL as NSURL])
                     logger.info("✅ Copied file to clipboard: \(metadata.fileName) (\(data.count) bytes)")
                 } catch {

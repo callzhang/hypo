@@ -359,13 +359,9 @@ public final actor SyncEngine {
         let appDefaults = UserDefaults.standard
         let plainTextMode = appDefaults.bool(forKey: "plain_text_mode_enabled")
         
-        // Also check the defaults instance passed to SyncEngine for debugging
-        let engineDefaultsValue = defaults.bool(forKey: "plain_text_mode_enabled")
-        
         // Always compress the JSON payload before encryption
         let jsonData = try encoder.encode(payload)
         let plaintext = try CompressionUtils.compress(jsonData)
-        let isCompressed = true
         logger.debug("🗜️ [SyncEngine] Compressed: \(jsonData.count) -> \(plaintext.count) bytes")
         
         let ciphertext: Data

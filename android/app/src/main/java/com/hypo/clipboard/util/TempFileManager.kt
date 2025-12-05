@@ -43,9 +43,9 @@ class TempFileManager(
     
     companion object {
         private const val TAG = "TempFileManager"
-        private const val CLEANUP_DELAY_MS = 30_000L // 30 seconds
+        private const val CLEANUP_DELAY_MS = 300_000L // 5 minutes - increased to ensure clipboard can access files
         private const val PERIODIC_CLEANUP_INTERVAL_MS = 60_000L // 1 minute
-        private const val MAX_TEMP_FILE_AGE_MS = 300_000L // 5 minutes
+        private const val MAX_TEMP_FILE_AGE_MS = 600_000L // 10 minutes - increased to prevent premature cleanup
     }
     
     init {
@@ -53,9 +53,14 @@ class TempFileManager(
         startPeriodicCleanup()
         
         // Listen to clipboard changes if clipboardManager is provided
+        // Note: We don't immediately clean up on clipboard change because the clipboard
+        // system needs to access the file via ContentResolver. Files are cleaned up
+        // after CLEANUP_DELAY_MS (30 seconds) or during periodic cleanup.
         clipboardManager?.let { manager ->
             clipboardListener = ClipboardChangeListener {
-                cleanupAll()
+                // Don't clean up immediately - the clipboard system needs to access the file
+                // Files will be cleaned up after CLEANUP_DELAY_MS or during periodic cleanup
+                Log.d(TAG, "📋 Clipboard changed, but not cleaning up temp files immediately (they may still be in use)")
             }
             manager.addPrimaryClipChangedListener(clipboardListener)
         }

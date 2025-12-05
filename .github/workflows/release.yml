@@ -178,7 +178,7 @@ jobs:
                 echo "⚠️  Warning: Icon generation reported success but icon file not found"
               fi
             else
-              echo "❌ Icon generation failed"
+              echo "❌ Icon generation failed"√√
               echo "⚠️  App will run without icon"
             fi
           else

@@ -1,8 +1,8 @@
 # Hypo User Guide
 
 **Cross-Platform Clipboard Synchronization**  
-**Version**: 1.0.3  
-**Last Updated**: December 4, 2025
+**Version**: 1.0.5  
+**Last Updated**: December 5, 2025
 
 ---
 
@@ -741,6 +741,7 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 - **SMS Auto-Sync**: Enable/disable automatic SMS copying and syncing
 - **Permissions**: View and manage app permissions (SMS, notifications)
 - **MIUI/HyperOS**: Automatic optimization settings (if detected)
+- **Text Selection**: "Copy to Hypo" context menu item (appears first in text selection menu)
 
 ---
 
@@ -986,6 +987,6 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ---
 
-**Last Updated**: December 3, 2025  
-**Version**: 1.0.2  
+**Last Updated**: December 5, 2025  
+**Version**: 1.0.5  
 **For Technical Support**: support@hypo.app

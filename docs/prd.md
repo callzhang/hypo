@@ -4,8 +4,8 @@
 - **Project**: Hypo - Cross-Platform Clipboard Sync
 - **Platforms**: Android (8.0+), macOS (14.0+), with support for additional platforms (iOS, Windows, Linux)
 - **Status**: Production Release (Sprint 11 - Production Release)
-- **Version**: v1.0.1
-- **Last Updated**: December 2, 2025
+- **Version**: v1.0.5
+- **Last Updated**: December 5, 2025
 
 ## 1. Purpose
 Users frequently move between mobile devices (Android, iOS) and desktop computers (macOS, Windows, Linux) but lack a native universal clipboard that works across all platforms. Hypo enables real-time, bi-directional clipboard synchronization across any combination of devices, supporting both LAN (local network) for speed and efficiency and a cloud fallback for mobility. The system provides clipboard history, rich notifications, and cross-format support for text, links, images, and small files.
@@ -123,6 +123,17 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
   - Runtime permission requests for SMS (Android 6.0+)
   - Notification permission handling (Android 13+)
   - Permission status monitoring and UI updates
+- **Text Selection Context Menu** ✅ Implemented (December 2025):
+  - "Copy to Hypo" appears first in text selection menu across all apps
+  - ProcessTextActivity handles ACTION_PROCESS_TEXT intent
+  - Forces immediate clipboard processing via service intent
+  - Passes text directly in intent to avoid timing issues with clipboard access
+  - Works even when ClipboardListener isn't started (e.g., accessibility service enabled)
+- **History Item Copying** ✅ Improved (December 2025):
+  - Items move to top when copied from history
+  - Universal "Copied to clipboard" toast notification for all item types
+  - FileProvider integration for secure file sharing on Android 10+
+  - Resolves "FrameInsert open fail" errors when copying images/files
 - **SMS Auto-Sync** ✅ Implemented (December 2025):
   - **Overview**: Automatically copies incoming SMS messages to clipboard and syncs to macOS via existing clipboard sync mechanism
   - **How It Works**:

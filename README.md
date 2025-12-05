@@ -288,11 +288,23 @@ Hypo takes security seriously:
 ## 📊 Current Status
 
 **Phase**: Production Release ✅  
-**Version**: v1.0.3  
+**Version**: v1.0.5  
 **Progress**: 100%  
-**Last Updated**: December 4, 2025
+**Last Updated**: December 5, 2025
 
 **Recent Milestones**:
+- ✅ **v1.0.5 Released** (Dec 5, 2025): Text Selection Context Menu & Clipboard Processing Improvements
+  - Android text selection context menu: "Copy to Hypo" appears first in menu
+  - Force immediate clipboard processing for context menu selections
+  - Fixed Android history item copying (FileProvider for images/files)
+  - Improved duplicate detection: items move to top when copied
+  - Universal "Copied to clipboard" toast for all item types
+  - Reduced logging verbosity across all platforms
+  - macOS UI improvements: hover tooltips, better connection status display
+- ✅ **v1.0.4 Released** (Dec 4, 2025): Code Quality & Storage Optimization
+  - Size constants consolidation (single source of truth)
+  - Fixed gzip compression format compatibility
+  - macOS local file storage optimization (pointer-only storage)
 - ✅ **v1.0.3 Released** (Dec 4, 2025): Temp File Management & Performance Improvements
   - Automatic temp file cleanup (30s delay, clipboard change detection)
   - Size limit checks (50MB copy, 10MB sync) with user notifications
@@ -430,7 +442,7 @@ MIT License - See [LICENSE](LICENSE) for details
 
 This project is in **production release** phase. The system is fully functional and has been extensively tested. All critical bugs have been resolved. Ready for distribution.
 
-**Current Version**: v1.0.3  
+**Current Version**: v1.0.5  
 **Stability**: Production-ready  
 **Next Milestone**: Public beta testing and future feature development
 

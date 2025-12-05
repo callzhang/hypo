@@ -1,7 +1,7 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 1.0.4  
-Date: December 4, 2025  
+Version: 1.0.5  
+Date: December 5, 2025  
 Status: Production
 
 ---
@@ -83,6 +83,15 @@ See `docs/architecture.mermaid` for visual representation.
 - **Size Limits**: 50MB copy limit, 10MB sync limit with user notifications
 - **MIUI/HyperOS Adaptation** ✅ Implemented (December 2025): Automatic detection and workarounds for MIUI/HyperOS-specific restrictions
 - **SMS Auto-Sync** ✅ Implemented (December 2025): Automatically copies incoming SMS to clipboard for sync to macOS
+- **Text Selection Context Menu** ✅ Implemented (December 2025): "Copy to Hypo" appears first in text selection menu across all apps
+  - ProcessTextActivity handles ACTION_PROCESS_TEXT intent
+  - Forces immediate clipboard processing via service intent
+  - Passes text directly in intent to avoid timing issues with clipboard access
+  - Works even when ClipboardListener isn't started (e.g., accessibility service enabled)
+- **FileProvider Integration** ✅ Implemented (December 2025): Secure file sharing for images/files on Android 10+
+  - Uses FileProvider for content:// URIs instead of file:// URIs
+  - Resolves "FrameInsert open fail" errors when copying images/files from history
+  - Automatic temp file management with proper permissions
 
 #### Backend Relay ✅ Deployed
 - **Language**: Rust 1.83+

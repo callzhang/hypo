@@ -1944,6 +1944,7 @@ private struct SettingsSectionView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
                                         Text(device.name)
+                                            .help(deviceTooltip(for: device))
                                         PlatformBadge(platform: device.platform)
                                     }
                                     Text(connectionStatusText(for: device))
@@ -1962,6 +1963,7 @@ private struct SettingsSectionView: View {
                                     .onAppear {
                                         logger.debug("🎨 [UI] Device \(device.name) rendered: isOnline=\(device.isOnline), id=\(device.id)")
                                     }
+                                    .help(deviceTooltip(for: device))
                                 Button(role: .destructive) {
                                     viewModel.removePairedDevice(device)
                                 } label: {
@@ -2127,11 +2129,10 @@ private struct SettingsSectionView: View {
         
         // Device is online - determine connection method
         // Match Android's logic: show "and server" if device is discovered on LAN AND server is connected
-        let hasLan = device.bonjourHost != nil && device.bonjourPort != nil && device.bonjourHost != "unknown"
         let isServerConnected = viewModel.connectionState == .connectedCloud
         
-        // Check if device is currently discovered (even if bonjourHost/bonjourPort not set yet)
-        var isCurrentlyDiscovered = false
+        // ALWAYS check current discovery state first (not just stored values)
+        // This ensures we show IP even if device was just discovered and not yet updated in storage
         var discoveredPeerHost: String? = nil
         var discoveredPeerPort: Int? = nil
         if let transportManager = viewModel.transportManager {
@@ -2142,7 +2143,6 @@ private struct SettingsSectionView: View {
                 }
                 return false
             }) {
-                isCurrentlyDiscovered = true
                 discoveredPeerHost = peer.endpoint.host
                 discoveredPeerPort = peer.endpoint.port
             }
@@ -2157,9 +2157,10 @@ private struct SettingsSectionView: View {
         }
         let isCloudTransport = deviceTransport == .cloud && isServerConnected
         
-        // If device has LAN info (from stored data or current discovery), always show it
-        let effectiveHost = device.bonjourHost ?? discoveredPeerHost
-        let effectivePort = device.bonjourPort ?? discoveredPeerPort
+        // Use current discovery info if available, otherwise fall back to stored values
+        // Priority: current discovery > stored bonjour info
+        let effectiveHost = discoveredPeerHost ?? device.bonjourHost
+        let effectivePort = discoveredPeerPort ?? device.bonjourPort
         let hasEffectiveLan = effectiveHost != nil && effectivePort != nil && effectiveHost != "unknown"
         
         if hasEffectiveLan {
@@ -2192,8 +2193,35 @@ private struct SettingsSectionView: View {
         // 3. Server is not connected
         // 4. No cloud transport record
         // This could happen if there's a timing issue where the device status is updated before connection details
-        logger.debug("⚠️ [HypoMenuBarApp] Device \(device.name) is online but connection method unknown (hasLan=\(hasLan), isDiscovered=\(isCurrentlyDiscovered), isServerConnected=\(isServerConnected), deviceTransport=\(deviceTransport?.rawValue ?? "nil"))")
         return "Connected"
+    }
+    
+    private func deviceTooltip(for device: PairedDevice) -> String {
+        var tooltip = "Device: \(device.name)\n"
+        tooltip += "Platform: \(device.platform)\n"
+        tooltip += "Device ID: \(device.id)\n"
+        tooltip += "Status: \(device.isOnline ? "Online" : "Offline")\n"
+        
+        if !device.isOnline {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .short
+            tooltip += "Last seen: \(formatter.string(from: device.lastSeen))"
+        } else {
+            tooltip += "Connection: \(connectionStatusText(for: device))"
+            
+            // Add LAN details if available
+            if let host = device.bonjourHost, let port = device.bonjourPort, host != "unknown" {
+                tooltip += "\nLAN: \(host):\(port)"
+            }
+            
+            // Add service name if available
+            if let serviceName = device.serviceName {
+                tooltip += "\nService: \(serviceName)"
+            }
+        }
+        
+        return tooltip
     }
 }
 

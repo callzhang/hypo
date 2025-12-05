@@ -181,15 +181,30 @@ public final class ConnectionStatusProber {
         var discoveredDeviceIds = Set<String>()
         if let transportManager = transportManager {
             let discoveredPeers = transportManager.lanDiscoveredPeers()
+            
+            // Get current device ID to filter out self
+            let deviceIdentity = DeviceIdentity()
+            let currentDeviceId = deviceIdentity.deviceId.uuidString.lowercased()
+            
             logger.debug("discovery", "🔍 [ConnectionStatusProber] Found \(discoveredPeers.count) discovered peers (all peers: \(discoveredPeers.map { "\($0.serviceName):\($0.endpoint.metadata["device_id"] ?? "none")" }.joined(separator: ", ")))\n")
+            logger.debug("self", "   🏠 Current device ID: \(currentDeviceId)\n")
+            
             for peer in discoveredPeers {
                 if let deviceId = peer.endpoint.metadata["device_id"] {
+                    let peerDeviceIdLower = deviceId.lowercased()
+                    
+                    // Filter out self
+                    if peerDeviceIdLower == currentDeviceId {
+                        logger.debug("self", "   ⏭️ Skipping self: \(peer.serviceName) (device_id=\(deviceId))\n")
+                        continue
+                    }
+                    
                     discoveredDeviceIds.insert(deviceId)
                     logger.debug("peer", "   ✅ Peer: \(peer.serviceName), device_id=\(deviceId)\n")
                     
                     // Also check if this device ID matches any paired device (case-insensitive)
                     for device in pairedDevices {
-                        if device.id.lowercased() == deviceId.lowercased() {
+                        if device.id.lowercased() == peerDeviceIdLower {
                             logger.debug("match", "   ✅ Matched discovered peer to paired device: \(device.name) (\(device.id) == \(deviceId))\n")
                             // Ensure we're using the paired device's ID (in case of case differences)
                             discoveredDeviceIds.insert(device.id)
@@ -198,7 +213,14 @@ public final class ConnectionStatusProber {
                     }
                 } else {
                     logger.debug("peer", "   ⚠️ Peer: \(peer.serviceName), no device_id attribute\n")
-                    // Fallback: match by service name
+                    // Fallback: match by service name (but still filter out self by service name)
+                    let serviceNameLower = peer.serviceName.lowercased()
+                    let currentServiceName = deviceIdentity.deviceName.lowercased()
+                    if serviceNameLower.contains(currentServiceName) || serviceNameLower == currentServiceName {
+                        logger.debug("self", "   ⏭️ Skipping self by service name: \(peer.serviceName)\n")
+                        continue
+                    }
+                    
                     for device in pairedDevices {
                         if peer.serviceName.contains(device.id) || device.id.contains(peer.serviceName) {
                             discoveredDeviceIds.insert(device.id)
@@ -208,7 +230,7 @@ public final class ConnectionStatusProber {
                     }
                 }
             }
-            logger.debug("discovered", "🔍 [ConnectionStatusProber] discoveredDeviceIds: \(discoveredDeviceIds)\n")
+            logger.debug("discovered", "🔍 [ConnectionStatusProber] discoveredDeviceIds (after filtering self): \(discoveredDeviceIds)\n")
         }
         
         // Check network connectivity - update status immediately if disconnected

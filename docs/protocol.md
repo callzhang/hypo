@@ -743,6 +743,6 @@ For detailed migration information, see `/workspace/docs/archive/breaking_change
 
 ---
 
-**Document Version**: 1.0.0  
-**Last Updated**: December 2, 2025  
+**Document Version**: 1.0.5  
+**Last Updated**: December 5, 2025  
 **Status**: Production

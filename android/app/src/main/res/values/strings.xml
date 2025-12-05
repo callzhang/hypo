@@ -135,5 +135,11 @@
     <string name="file_too_large_warning">File \"%1$s\" (%2$s MB) exceeds the maximum size limit of %3$s MB. Please use a smaller file.</string>
     
     <!-- Process Text -->
-    <string name="process_text_label">Hypo</string>
+    <string name="process_text_label">Copy to Hypo</string>
+    
+    <!-- Clipboard Copy Messages -->
+    <string name="copied_to_clipboard">Copied to clipboard</string>
+    <string name="error_copying_to_clipboard">Failed to copy: %1$s</string>
+    <string name="error_clipboard_permission">Clipboard permission denied</string>
+    <string name="error_clipboard_state">Clipboard error: %1$s</string>
 </resources>

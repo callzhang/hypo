@@ -2,6 +2,58 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [1.0.5] - 2025-12-05 - Text Selection Context Menu & Clipboard Processing Improvements
+
+### Added
+- **Android Text Selection Context Menu**: "Copy to Hypo" appears first in text selection menu
+  - Renamed context menu item from "Hypo" to "Copy to Hypo" for clarity
+  - Added high priority (1000) to ensure it appears first in the menu
+  - Users can select text in any app and tap "Copy to Hypo" to sync immediately
+- **Force Clipboard Processing**: Immediate processing for text selection context menu
+  - ProcessTextActivity now forces immediate clipboard processing via service intent
+  - Text passed directly in intent to avoid timing issues with clipboard access
+  - Works even when ClipboardListener isn't started (e.g., accessibility service enabled)
+  - Resolves issue where text from context menu wasn't being processed/synced
+
+### Fixed
+- **Android History Item Copying**: Fixed "FrameInsert open fail" error for images/files
+  - Implemented FileProvider for secure file sharing (required on Android 10+)
+  - Replaced `Uri.fromFile()` with `FileProvider.getUriForFile()` for content:// URIs
+  - Added `file_provider_paths.xml` configuration
+  - Ensures temp files are readable and properly shared
+- **Android Duplicate Detection**: Items now move to top when copied from history
+  - Changed from timestamp update to delete old + create new item
+  - Ensures copied items always appear at the top of history
+  - Works for both "matches current clipboard" and "matches history item" cases
+- **Universal Toast Notification**: "Copied to clipboard" toast now shows for all item types
+  - Previously only showed for images/files
+  - Now shows for text, links, images, and files
+- **Incoming Message URI Handling**: Removed incorrect URI extraction from receiver
+  - URIs from sender's local file system are not accessible on receiver
+  - Binary data should be extracted before sending, not upon receipt
+  - ClipboardParser already handles URI extraction when creating clipboard events
+
+### Changed
+- **Reduced Logging Verbosity**: Significantly reduced log noise across all platforms
+  - Android: Removed repetitive debug logs from SettingsViewModel (every 2 seconds)
+  - macOS: Converted many `.info` logs to `.debug` for routine operations
+  - Backend: Changed `DeviceNotConnected` from ERROR to WARN (expected condition)
+  - Removed redundant logs (duplicate queue size, frame details, JSON previews)
+  - Improved log clarity by distinguishing expected conditions from actual errors
+- **macOS Connection Status Display**: Shows detailed connection information
+  - Displays "Connected via IP <and cloud>" instead of just "Connected"
+  - Prioritizes LAN IP addresses when device is discovered
+  - Better visibility into connection method (LAN vs cloud)
+- **macOS Peer Discovery**: Excludes self from discovered peers list
+  - Filters out current device by device ID and service name
+  - Prevents confusion when viewing available devices
+
+### Technical Details
+- FileProvider implementation follows Android 10+ security requirements
+- Force processing ensures immediate sync even with background restrictions
+- Delete + create approach for duplicates ensures items always move to top
+- Log reduction improves signal-to-noise ratio for debugging
+
 ## [1.0.4] - 2025-12-04 - Code Quality & Storage Optimization
 
 ### Added

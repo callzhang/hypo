@@ -50,13 +50,13 @@
             </intent-filter>
         </activity>
 
-        <!-- Process Text Activity - Adds "Hypo" to text selection context menu -->
+        <!-- Process Text Activity - Adds "Copy to Hypo" to text selection context menu -->
         <activity
             android:name=".ProcessTextActivity"
             android:exported="true"
             android:label="@string/process_text_label"
             android:theme="@style/Theme.Hypo">
-            <intent-filter>
+            <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.PROCESS_TEXT" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
@@ -93,6 +93,17 @@
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
+
+        <!-- FileProvider for sharing clipboard files (images, files) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
 
     </application>
 

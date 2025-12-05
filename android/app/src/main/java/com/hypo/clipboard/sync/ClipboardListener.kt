@@ -236,6 +236,36 @@ class ClipboardListener(
         }
     }
 
+    /**
+     * Force process the current clipboard content.
+     * This is useful when clipboard is set from a context where onPrimaryClipChanged
+     * might not fire reliably (e.g., ProcessTextActivity on Android 10+).
+     * 
+     * This will process the clipboard even if the listener is not started,
+     * which is useful when accessibility service is handling clipboard monitoring.
+     */
+    fun forceProcessCurrentClipboard() {
+        scope.launch(Dispatchers.Default) {
+            try {
+                val clip = clipboardManager.primaryClip
+                if (clip != null) {
+                    if (!isListening) {
+                        Log.d(TAG, "🔄 Force processing clipboard (listener not started, but processing anyway)")
+                    } else {
+                        Log.d(TAG, "🔄 Force processing current clipboard content")
+                    }
+                    process(clip)
+                } else {
+                    Log.w(TAG, "⚠️ Cannot force process: clipboard is null")
+                }
+            } catch (e: SecurityException) {
+                Log.d(TAG, "🔒 Force process: Clipboard access blocked: ${e.message}")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error force processing clipboard: ${e.message}", e)
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "ClipboardListener"
     }

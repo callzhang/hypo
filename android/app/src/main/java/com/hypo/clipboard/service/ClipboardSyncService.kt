@@ -227,6 +227,68 @@ class ClipboardSyncService : Service() {
             ACTION_RESUME -> resumeListener()
             ACTION_OPEN_CLIPBOARD_SETTINGS -> openClipboardSettings()
             ACTION_OPEN_ACCESSIBILITY_SETTINGS -> openAccessibilitySettings()
+            ACTION_FORCE_PROCESS_CLIPBOARD -> {
+                Log.d(TAG, "🔄 Force processing clipboard from ProcessTextActivity")
+                // Get text from intent if available (avoids timing issues with clipboard access)
+                val textFromIntent = intent?.getStringExtra("text")
+                if (textFromIntent != null) {
+                    Log.d(TAG, "📝 Processing text from intent (${textFromIntent.length} chars)")
+                    // Create a ClipboardEvent directly from the text
+                    scope.launch {
+                        try {
+                            val bytes = textFromIntent.encodeToByteArray()
+                            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                            val hashBytes = digest.digest(bytes)
+                            val hash = hashBytes.joinToString("") { "%02x".format(it) }
+                            
+                            val event = com.hypo.clipboard.sync.ClipboardEvent(
+                                id = java.util.UUID.randomUUID().toString(),
+                                type = if (android.util.Patterns.WEB_URL.matcher(textFromIntent).matches()) {
+                                    com.hypo.clipboard.domain.model.ClipboardType.LINK
+                                } else {
+                                    com.hypo.clipboard.domain.model.ClipboardType.TEXT
+                                },
+                                content = textFromIntent,
+                                preview = textFromIntent.take(100),
+                                metadata = mapOf(
+                                    "size" to bytes.size.toString(),
+                                    "hash" to hash,
+                                    "encoding" to "UTF-8"
+                                ),
+                                createdAt = java.time.Instant.now()
+                            )
+                            syncCoordinator.onClipboardEvent(event)
+                            Log.d(TAG, "✅ Processed text from ProcessTextActivity and synced to peers")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "❌ Error processing text from intent: ${e.message}", e)
+                            // Fallback: try to process from clipboard
+                            listener.forceProcessCurrentClipboard()
+                        }
+                    }
+                } else {
+                    // Fallback: process from clipboard (may have timing issues)
+                    if (!listener.isListening) {
+                        Log.d(TAG, "⚠️ Listener not started, attempting to start it first...")
+                        if (!isAccessibilityServiceEnabled) {
+                            scope.launch {
+                                val allowed = clipboardAccessChecker.canReadClipboard()
+                                if (allowed) {
+                                    listener.start()
+                                    Log.d(TAG, "✅ Listener started, now processing clipboard")
+                                    listener.forceProcessCurrentClipboard()
+                                } else {
+                                    Log.w(TAG, "⚠️ Cannot process: clipboard permission not granted")
+                                }
+                            }
+                        } else {
+                            Log.d(TAG, "ℹ️ Accessibility service is enabled - it should handle clipboard changes")
+                            listener.forceProcessCurrentClipboard()
+                        }
+                    } else {
+                        listener.forceProcessCurrentClipboard()
+                    }
+                }
+            }
             ACTION_STOP -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -1017,5 +1079,6 @@ class ClipboardSyncService : Service() {
         private const val ACTION_OPEN_CLIPBOARD_SETTINGS = "com.hypo.clipboard.action.OPEN_CLIPBOARD_SETTINGS"
         private const val ACTION_OPEN_ACCESSIBILITY_SETTINGS = "com.hypo.clipboard.action.OPEN_ACCESSIBILITY_SETTINGS"
         private const val ACTION_STOP = "com.hypo.clipboard.action.STOP"
+        const val ACTION_FORCE_PROCESS_CLIPBOARD = "com.hypo.clipboard.action.FORCE_PROCESS_CLIPBOARD"
     }
 }

@@ -597,14 +597,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     
     private func syncToPairedDevices(_ entry: ClipboardEntry) async {
 #if canImport(os)
-        logger.info("🔄 [HistoryStore] syncToPairedDevices called for entry: \(entry.previewText.prefix(50))")
-        logger.info("🔄 [HistoryStore] Entry deviceId: \(entry.deviceId), localDeviceId: \(localDeviceId.lowercased())")
-        logger.info("🔄 [HistoryStore] Entry transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
-        logger.info("🔄 [HistoryStore] TransportManager is \(transportManager != nil ? "set" : "nil")")
-        logger.info("🔄 [HistoryStore] Paired devices count: \(pairedDevices.count)")
-        for (idx, device) in pairedDevices.enumerated() {
-            logger.info("🔄 [HistoryStore] Paired device[\(idx)]: id=\(device.id), name=\(device.name), isOnline=\(device.isOnline)")
-        }
+        logger.debug("🔄 [HistoryStore] syncToPairedDevices: \(entry.previewText.prefix(30)), devices=\(pairedDevices.count)")
 #endif
         guard transportManager != nil else {
 #if canImport(os)
@@ -632,7 +625,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         
 #if canImport(os)
-        logger.info("✅ [HistoryStore] Entry is local, proceeding with sync. Paired devices: \(pairedDevices.count)")
+        logger.debug("✅ [HistoryStore] Entry is local, syncing to \(pairedDevices.count) device(s)")
 #endif
         
         // Convert clipboard entry to payload
@@ -680,7 +673,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             }
             
 #if canImport(os)
-            logger.info("🖼️ [HistoryStore] Preparing image sync: \(imageData.count) bytes, format: \(metadata.format), size: \(Int(metadata.pixelSize.width))×\(Int(metadata.pixelSize.height))")
+            logger.debug("🖼️ [HistoryStore] Preparing image sync: \(imageData.count) bytes")
 #endif
             
             var imageMetadata: [String: String] = [
@@ -761,7 +754,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         
 #if canImport(os)
-        logger.info("📤 [HistoryStore] Queuing messages for \(devicesWithKeys.count) paired device(s) with keys (skipping \(devicesWithoutKeys.count) device(s) without keys)")
+        logger.debug("📤 [HistoryStore] Queuing for \(devicesWithKeys.count) device(s) with keys")
         if pairedDevices.isEmpty {
             logger.warning("⚠️ [HistoryStore] No paired devices found! Clipboard sync will not be sent to any peers.")
             logger.warning("⚠️ [HistoryStore] To sync clipboard, you need to pair with at least one device first.")
@@ -777,7 +770,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         // Each device gets its own message, so failures for one device don't affect others
         for device in devicesWithKeys {
 #if canImport(os)
-            logger.info("📤 [HistoryStore] Queuing message for device: \(device.name) (id: \(device.id), isOnline: \(device.isOnline))")
+            logger.debug("📤 [HistoryStore] Queuing for \(device.name)")
 #endif
             let queuedMessage = QueuedSyncMessage(
                 entry: entry,
@@ -789,9 +782,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         
         // Trigger immediate queue processing (event-driven)
-#if canImport(os)
-        logger.info("📤 [HistoryStore] Triggering sync queue processing, queue size: \(syncMessageQueue.count)")
-#endif
         triggerSyncQueueProcessing()
     }
     
@@ -799,13 +789,12 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     @MainActor
     private func triggerSyncQueueProcessing() {
 #if canImport(os)
-        logger.info("🔄 [HistoryStore] triggerSyncQueueProcessing() called, queue size: \(syncMessageQueue.count), connectionState: \(connectionState)")
-        logger.info("🔄 [HistoryStore] queueProcessingTask state: \(queueProcessingTask == nil ? "nil" : (queueProcessingTask?.isCancelled == true ? "cancelled" : "active"))")
+        logger.debug("🔄 [HistoryStore] triggerSyncQueueProcessing: queue=\(syncMessageQueue.count), state=\(connectionState)")
 #endif
         // Resume continuation if waiting
         if queueProcessingContinuation != nil {
 #if canImport(os)
-            logger.info("🔄 [HistoryStore] Resuming waiting queue processing continuation")
+            logger.debug("🔄 [HistoryStore] Resuming queue processing")
 #endif
             queueProcessingContinuation?.resume()
             queueProcessingContinuation = nil
@@ -814,14 +803,14 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         // Start queue processor if not running
         if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
 #if canImport(os)
-            logger.info("🔄 [HistoryStore] Starting new queue processing task")
+            logger.debug("🔄 [HistoryStore] Starting queue processing")
 #endif
             queueProcessingTask = Task { [weak self] in
                 await self?.processSyncQueue()
             }
         } else {
 #if canImport(os)
-            logger.info("🔄 [HistoryStore] Queue processing task already running, continuation resumed")
+            logger.debug("🔄 [HistoryStore] Queue processing already running")
 #endif
         }
     }
@@ -829,7 +818,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     /// Process the sync message queue (event-driven: triggered when connection available or message queued)
     private func processSyncQueue() async {
 #if canImport(os)
-        logger.info("🔄 [HistoryStore] processSyncQueue() started, queue size: \(syncMessageQueue.count), connectionState: \(connectionState)")
+        logger.debug("🔄 [HistoryStore] processSyncQueue started: queue=\(syncMessageQueue.count)")
 #else
         // No-op
 #endif
@@ -853,7 +842,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             }
             
 #if canImport(os)
-            logger.info("🔄 [HistoryStore] processSyncQueue() processing, queue size: \(syncMessageQueue.count), connectionState: \(connectionState)")
+            logger.debug("🔄 [HistoryStore] Processing queue: \(syncMessageQueue.count) messages")
 #endif
             // Process queue - send to all devices independently
             // Each message targets a specific device, so failures for one device don't block others
@@ -866,7 +855,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 // Expire messages older than 1 minute
                 if now.timeIntervalSince(message.queuedAt) > 60 {
 #if canImport(os)
-                    logger.info("⏭️ Expired sync message for device \(message.targetDeviceId) (queued \(Int(now.timeIntervalSince(message.queuedAt)))s ago)")
+                    logger.debug("⏭️ [HistoryStore] Expired sync message for device \(message.targetDeviceId.prefix(8))")
 #endif
                     continue // Drop expired message
                 }
@@ -874,13 +863,13 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 // Try to send message to this specific device
                 // Note: Each device is processed independently - failure for one doesn't affect others
 #if canImport(os)
-            logger.info("🔄 [HistoryStore] Processing queued message for device \(message.targetDeviceId), queue size: \(syncMessageQueue.count)")
+            logger.debug("🔄 [HistoryStore] Processing message for device \(message.targetDeviceId.prefix(8))")
 #endif
                 if await trySendMessage(message, transportManager: transportManager) {
                     // Success - message cleared from queue
                     successCount += 1
 #if canImport(os)
-                    logger.info("✅ [HistoryStore] Successfully sent queued message to device \(message.targetDeviceId)")
+                    logger.debug("✅ [HistoryStore] Sent to device \(message.targetDeviceId.prefix(8))")
 #endif
                     continue
                 } else {
@@ -896,21 +885,21 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             
 #if canImport(os)
             if successCount > 0 || failureCount > 0 {
-                logger.info("📊 [HistoryStore] Queue processing summary: \(successCount) succeeded, \(failureCount) failed, \(remainingMessages.count) remaining")
+                logger.debug("📊 [HistoryStore] Queue summary: \(successCount) succeeded, \(failureCount) failed")
             }
 #endif
             
             syncMessageQueue = remainingMessages
             
 #if canImport(os)
-            logger.info("🔄 [HistoryStore] processSyncQueue() completed iteration: hasMessagesToRetry=\(hasMessagesToRetry), connectionState=\(connectionState), remaining queue size=\(syncMessageQueue.count)")
+            logger.debug("🔄 [HistoryStore] Queue processing completed: retry=\(hasMessagesToRetry), remaining=\(syncMessageQueue.count)")
 #endif
             
             if hasMessagesToRetry && connectionState != .disconnected {
                 // If we have messages to retry and connection is available, wait for next event
                 // (connection state change or new message queued) instead of polling
 #if canImport(os)
-                logger.info("🔄 [HistoryStore] processSyncQueue() waiting for next event (hasMessagesToRetry=true, connectionState != .disconnected)")
+                logger.debug("🔄 [HistoryStore] processSyncQueue waiting for event")
 #endif
                 await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                     Task { @MainActor [weak self] in
@@ -918,14 +907,14 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                     }
                 }
 #if canImport(os)
-                logger.info("🔄 [HistoryStore] processSyncQueue() continuation resumed after waiting for event, continuing loop (queue size: \(syncMessageQueue.count))")
+                logger.debug("🔄 [HistoryStore] processSyncQueue resumed")
 #endif
                 // Continue loop to process queue again
                 continue
             } else if hasMessagesToRetry {
                 // Connection not available, wait for connection state change (event-driven)
 #if canImport(os)
-                logger.info("🔄 [HistoryStore] processSyncQueue() waiting for connection (hasMessagesToRetry=true, connectionState=\(connectionState))")
+                logger.debug("🔄 [HistoryStore] processSyncQueue waiting for connection")
 #endif
                 await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                     Task { @MainActor [weak self] in
@@ -933,14 +922,14 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                     }
                 }
 #if canImport(os)
-                logger.info("🔄 [HistoryStore] processSyncQueue() continuation resumed after waiting for connection, continuing loop (queue size: \(syncMessageQueue.count))")
+                logger.debug("🔄 [HistoryStore] processSyncQueue resumed after connection")
 #endif
                 // Continue loop to process queue again
                 continue
             } else {
                 // No messages to process, exit (will restart when new message is queued)
 #if canImport(os)
-                logger.info("🔄 [HistoryStore] processSyncQueue() exiting (no messages to retry, queue size=\(syncMessageQueue.count))")
+                logger.debug("🔄 [HistoryStore] processSyncQueue exiting")
 #endif
                 return
             }
@@ -950,11 +939,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     /// Attempt to send a queued sync message
     private func trySendMessage(_ message: QueuedSyncMessage, transportManager: TransportManager) async -> Bool {
         do {
-#if canImport(os)
-        logger.info("📤 [HistoryStore] Attempting to send message to device \(message.targetDeviceId)")
-        logger.info("📤 [HistoryStore] Entry preview: \(message.entry.previewText.prefix(50))")
-        logger.info("📤 [HistoryStore] Payload type: \(message.payload.contentType.rawValue), size: \(message.payload.data.count) bytes")
-#endif
         // Get sync engine with transport
         let transport = transportManager.loadTransport()
         let keyProvider = KeychainDeviceKeyProvider()
@@ -965,20 +949,14 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 localPlatform: deviceIdentity.platform
         )
         
-#if canImport(os)
-        logger.info("📤 [HistoryStore] SyncEngine created, establishing connection...")
-#endif
         // Ensure transport is connected
         await syncEngine.establishConnection()
         
+        // Attempt to send (best-effort - try regardless of device online status)
+        try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
+        
 #if canImport(os)
-        logger.info("📤 [HistoryStore] Connection established, transmitting message...")
-#endif
-            // Attempt to send (best-effort - try regardless of device online status)
-            try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
-            
-#if canImport(os)
-        logger.info("✅ [HistoryStore] Successfully transmitted message to \(message.targetDeviceId)")
+        logger.debug("✅ [HistoryStore] Sent to device \(message.targetDeviceId.prefix(8))")
 #endif
             // Update lastSeen timestamp after successful sync
             if let device = pairedDevices.first(where: { $0.id == message.targetDeviceId }) {

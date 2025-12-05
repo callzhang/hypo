@@ -245,41 +245,26 @@ public func updateConnectionState(_ newState: ConnectionState) {
     /// Start auto-connect to cloud relay
     @MainActor
     private func startAutoConnect() async {
-        logger.info("🚀 [TransportManager] startAutoConnect() called")
-        
         autoConnectTask = Task { @MainActor in
-            logger.info("🚀 [TransportManager] Auto-connect Task started")
             do {
                 // Auto-connect to cloud relay after a delay to show server availability
-                logger.info("⏳ [TransportManager] Waiting 3 seconds before cloud connection attempt")
-                
                 try await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
                 
-                logger.info("⏰ [TransportManager] Delay completed, proceeding with cloud connection")
-                
-                logger.info("🔍 [TransportManager] Checking cloud transport provider")
-                
                 if let provider = provider as? DefaultTransportProvider {
-                    logger.info("✅ [TransportManager] Provider is DefaultTransportProvider")
                     let cloudTransport = provider.getCloudTransport()
                     if !cloudTransport.isConnected() {
-                        logger.info("☁️ [TransportManager] Auto-connecting to cloud relay")
-                        
                         connectionState = .connectingCloud
                         do {
                             try await cloudTransport.connect()
                             connectionState = .connectedCloud
-                            logger.info("✅ [TransportManager] Successfully connected to cloud relay")
+                            logger.debug("✅ [TransportManager] Connected to cloud relay")
                         } catch {
                             connectionState = .disconnected
-                            logger.info("❌ [TransportManager] Cloud connection failed: \(error.localizedDescription)")
+                            logger.warning("❌ [TransportManager] Cloud connection failed: \(error.localizedDescription)")
                         }
                     } else {
                         connectionState = .connectedCloud
-                        logger.info("☁️ [TransportManager] Cloud relay already connected")
                     }
-                } else {
-                    logger.info("⚠️ [TransportManager] Provider is not DefaultTransportProvider: \(type(of: provider))")
                 }
             } catch {
                 logger.error("❌ [TransportManager] Auto-connect task error: \(error.localizedDescription)")
@@ -301,9 +286,28 @@ public func updateConnectionState(_ newState: ConnectionState) {
     }
 
     public func lanDiscoveredPeers() -> [DiscoveredPeer] {
-        let peers = lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
-        logger.info("🔍 [TransportManager] lanDiscoveredPeers() returning \(peers.count) peers: \(peers.map { "\($0.serviceName):\($0.endpoint.metadata["device_id"] ?? "none")" }.joined(separator: ", "))")
-        return peers
+        let allPeers = lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
+        
+        // Filter out self
+        let deviceIdentity = DeviceIdentity()
+        let currentDeviceId = deviceIdentity.deviceId.uuidString.lowercased()
+        let currentServiceName = deviceIdentity.deviceName.lowercased()
+        
+        let filteredPeers = allPeers.filter { peer in
+            // Filter by device_id if available
+            if let peerDeviceId = peer.endpoint.metadata["device_id"] {
+                if peerDeviceId.lowercased() == currentDeviceId {
+                    return false
+                }
+            }
+            // Also filter by service name (in case device_id is missing)
+            let peerServiceNameLower = peer.serviceName.lowercased()
+            if peerServiceNameLower.contains(currentServiceName) || peerServiceNameLower == currentServiceName {
+                return false
+            }
+            return true
+        }
+        return filteredPeers
     }
 
     public func currentLanConfiguration() -> BonjourPublisher.Configuration {
@@ -923,6 +927,31 @@ public func updateConnectionState(_ newState: ConnectionState) {
     private func handle(event: LanDiscoveryEvent) {
         switch event {
         case .added(let peer):
+            // Filter out self before adding
+            let deviceIdentity = DeviceIdentity()
+            let currentDeviceId = deviceIdentity.deviceId.uuidString.lowercased()
+            let currentServiceName = deviceIdentity.deviceName.lowercased()
+            
+            // Check if this is self
+            var isSelf = false
+            if let peerDeviceId = peer.endpoint.metadata["device_id"] {
+                if peerDeviceId.lowercased() == currentDeviceId {
+                    isSelf = true
+                    logger.debug("🔍 [TransportManager] Ignoring self discovery: \(peer.serviceName) (device_id=\(peerDeviceId))")
+                }
+            }
+            if !isSelf {
+                let peerServiceNameLower = peer.serviceName.lowercased()
+                if peerServiceNameLower.contains(currentServiceName) || peerServiceNameLower == currentServiceName {
+                    isSelf = true
+                    logger.debug("🔍 [TransportManager] Ignoring self discovery by service name: \(peer.serviceName)")
+                }
+            }
+            
+            if isSelf {
+                return // Don't add self to discovered peers
+            }
+            
             logger.info("🔍 [TransportManager] Peer discovered: \(peer.serviceName) at \(peer.endpoint.host):\(peer.endpoint.port), device_id=\(peer.endpoint.metadata["device_id"] ?? "none")")
             lanPeers[peer.serviceName] = peer
             lastSeen[peer.serviceName] = peer.lastSeen

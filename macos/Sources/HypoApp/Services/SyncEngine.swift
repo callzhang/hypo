@@ -362,19 +362,11 @@ public final actor SyncEngine {
         // Also check the defaults instance passed to SyncEngine for debugging
         let engineDefaultsValue = defaults.bool(forKey: "plain_text_mode_enabled")
         
-        logger.info("🔍 [SyncEngine] Plaintext mode check: appDefaults=\(plainTextMode), engineDefaults=\(engineDefaultsValue), using=\(plainTextMode)")
-        
-        if plainTextMode {
-            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending without encryption")
-        } else {
-            logger.info("🔒 [SyncEngine] Encryption mode: Sending encrypted")
-        }
-
         // Always compress the JSON payload before encryption
         let jsonData = try encoder.encode(payload)
         let plaintext = try CompressionUtils.compress(jsonData)
         let isCompressed = true
-        logger.info("🗜️ [SyncEngine] Compressed payload: \(jsonData.count) bytes -> \(plaintext.count) bytes (\(String(format: "%.1f", Double(plaintext.count) / Double(jsonData.count) * 100))%)")
+        logger.debug("🗜️ [SyncEngine] Compressed: \(jsonData.count) -> \(plaintext.count) bytes")
         
         let ciphertext: Data
         let nonce: Data
@@ -382,13 +374,10 @@ public final actor SyncEngine {
         
         if plainTextMode {
             // Plain text mode: use plaintext directly as "ciphertext", with empty nonce/tag
-            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending unencrypted payload")
-            logger.info("   Plaintext content: \(String(data: plaintext.prefix(100), encoding: .utf8) ?? "binary")")
+            logger.warning("⚠️ [SyncEngine] PLAIN TEXT MODE: Sending unencrypted")
             ciphertext = plaintext
             nonce = Data()
             tag = Data()
-            
-            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes")
         } else {
             // Normal encryption mode
             let key = try await keyProvider.key(for: targetDeviceId)
@@ -396,12 +385,12 @@ public final actor SyncEngine {
             // Android decrypts using envelope.payload.deviceId as AAD, so they must match
             // deviceId is already normalized to lowercase in ClipboardEntry.init
             let aad = Data(entry.deviceId.utf8)
+            logger.debug("🔒 [SyncEngine] Encrypting: deviceId=\(entry.deviceId), targetDeviceId=\(targetDeviceId), aad=\(entry.deviceId) (\(aad.count) bytes)")
             let sealed = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
             ciphertext = sealed.ciphertext
             nonce = sealed.nonce
             tag = sealed.tag
-            
-            logger.info("🔒 [SyncEngine] ENCRYPTED: ciphertext=\(ciphertext.count) bytes, nonce=\(nonce.count) bytes, tag=\(tag.count) bytes, AAD=deviceId=\(entry.deviceId)")
+            logger.debug("🔒 [SyncEngine] Encrypted: \(ciphertext.count) bytes")
         }
 
         let envelope = SyncEnvelope(
@@ -417,8 +406,7 @@ public final actor SyncEngine {
             )
         )
         
-        // Log final envelope state before sending
-        logger.info("📦 [SyncEngine] Envelope before send: nonce=\(envelope.payload.encryption.nonce.count) bytes, tag=\(envelope.payload.encryption.tag.count) bytes, ciphertext=\(envelope.payload.ciphertext.count) bytes")
+        logger.debug("📦 [SyncEngine] Envelope ready: \(envelope.payload.ciphertext.count) bytes")
         
         try await transport.send(envelope)
     }
@@ -434,48 +422,11 @@ public final actor SyncEngine {
         
         let plaintext: Data
         if isPlainText {
-            logger.info("⚠️ [SyncEngine] PLAIN TEXT MODE: Receiving unencrypted payload")
+            logger.warning("⚠️ [SyncEngine] PLAIN TEXT MODE: Receiving unencrypted")
             // Use ciphertext directly as plaintext (it's not actually encrypted)
             plaintext = envelope.payload.ciphertext
         } else {
-            // Log device ID format for debugging key lookup issues
-            logger.info("🔑 [SyncEngine] Looking up key for device ID: '\(senderId)' (length: \(senderId.count))")
-            
-            // Normalize device ID to see what format will be used for lookup
-            let keyStore = FileBasedKeyStore()
-            let normalizedId = keyStore.normalizeDeviceId(senderId)
-            logger.info("   Normalized device ID for lookup: '\(normalizedId)'")
-            
-            // Check if key exists before attempting to load
             let keyProvider = KeychainDeviceKeyProvider()
-            let hasKey = keyProvider.hasKey(for: senderId)
-            logger.info("   Key exists check: \(hasKey)")
-            
-            // List all stored device IDs for debugging
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let storageDir = appSupport.appendingPathComponent("Hypo", isDirectory: true)
-            if let files = try? FileManager.default.contentsOfDirectory(at: storageDir, includingPropertiesForKeys: nil) {
-                let keyFiles = files.filter { $0.pathExtension == "key" }
-                logger.info("   Stored keys count: \(keyFiles.count)")
-                for keyFile in keyFiles.prefix(5) {
-                    let filename = keyFile.lastPathComponent
-                    // Try to decode base64 filename to get device ID
-                    let base64String = filename.replacingOccurrences(of: ".key", with: "")
-                    // Base64 decode with padding
-                    var paddedBase64 = base64String
-                    let remainder = paddedBase64.count % 4
-                    if remainder > 0 {
-                        paddedBase64 += String(repeating: "=", count: 4 - remainder)
-                    }
-                    if let decoded = Data(base64Encoded: paddedBase64),
-                       let deviceId = String(data: decoded, encoding: .utf8) {
-                        logger.info("     Stored key device ID: '\(deviceId)' (normalized: '\(deviceId.lowercased())')")
-                    } else {
-                        logger.info("     Stored key file: \(filename)")
-                    }
-                }
-            }
-            
             let key = try await keyProvider.key(for: senderId)
             let keyData = key.withUnsafeBytes { Data($0) }
             logger.info("🔑 [SyncEngine] Loaded key for device \(senderId): \(keyData.count) bytes")
@@ -502,20 +453,17 @@ public final actor SyncEngine {
                     tag: envelope.payload.encryption.tag,
                     aad: aad
                 )
-                logger.info("✅ [SyncEngine] Decrypted data: \(encryptedData.count) bytes")
-                
                 // Always decompress (all payloads are compressed by default)
                 plaintext = try CompressionUtils.decompress(encryptedData)
-                logger.info("🗜️ [SyncEngine] Decompressed payload: \(encryptedData.count) bytes -> \(plaintext.count) bytes")
+                logger.debug("🗜️ [SyncEngine] Decompressed: \(encryptedData.count) -> \(plaintext.count) bytes")
             } catch {
-                logger.info("❌ [SyncEngine] Decryption failed: \(error)")
-                logger.info("   Error type: \(String(describing: type(of: error)))")
+                logger.error("❌ [SyncEngine] Decryption failed: \(error)")
                 throw error
             }
         }
         
         let payload = try decoder.decode(ClipboardPayload.self, from: plaintext)
-        logger.info("✅ [SyncEngine] ClipboardPayload decoded successfully: type=\(payload.contentType.rawValue), data=\(payload.data.count) bytes")
+        logger.debug("✅ [SyncEngine] Decoded: type=\(payload.contentType.rawValue), \(payload.data.count) bytes")
         return payload
     }
 }

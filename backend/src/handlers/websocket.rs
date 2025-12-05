@@ -100,10 +100,22 @@ pub async fn websocket_handler(
                         handle_text_message(&reader_device_id, &text, &reader_sessions, &key_store, &mut reader_session)
                             .await
                     {
-                        error!(
-                            "Failed to handle message from {}: {:?}",
-                            reader_device_id, err
-                        );
+                        // DeviceNotConnected is expected when target device is offline - log as warn
+                        // Other errors (InvalidMessage, SendError) are actual problems - log as error
+                        match &err {
+                            SessionError::DeviceNotConnected => {
+                                warn!(
+                                    "Target device not connected for message from {}: {:?}",
+                                    reader_device_id, err
+                                );
+                            }
+                            _ => {
+                                error!(
+                                    "Failed to handle message from {}: {:?}",
+                                    reader_device_id, err
+                                );
+                            }
+                        }
                     }
                 }
                 Message::Binary(bytes) => {
@@ -117,10 +129,22 @@ pub async fn websocket_handler(
                         handle_binary_message(&reader_device_id, &bytes, &reader_sessions, &key_store, &mut reader_session)
                             .await
                     {
-                        error!(
-                            "Failed to handle binary message from {}: {:?}",
-                            reader_device_id, err
-                        );
+                        // DeviceNotConnected is expected when target device is offline - log as warn
+                        // Other errors (InvalidMessage, SendError) are actual problems - log as error
+                        match &err {
+                            SessionError::DeviceNotConnected => {
+                                warn!(
+                                    "Target device not connected for message from {}: {:?}",
+                                    reader_device_id, err
+                                );
+                            }
+                            _ => {
+                                error!(
+                                    "Failed to handle binary message from {}: {:?}",
+                                    reader_device_id, err
+                                );
+                            }
+                        }
                     }
                 }
                 Message::Ping(bytes) => {
@@ -251,7 +275,11 @@ async fn handle_binary_message(
                 Ok(())
             }
             Err(SessionError::DeviceNotConnected) => {
-                warn!("Target device {} not connected, message not delivered", target);
+                let registered_devices = sessions.get_connected_devices().await;
+                warn!(
+                    "Target device {} not connected, message not delivered. Connected devices: {:?}",
+                    target, registered_devices
+                );
                 
                 // Send error response back to sender
                 let error_message = serde_json::json!({
@@ -261,9 +289,10 @@ async fn handle_binary_message(
                     "type": "error",
                     "payload": {
                         "code": "device_not_connected",
-                        "message": format!("Failed to sync to target device: incorrect device_id ({})", target),
+                        "message": format!("Target device {} is not connected to the relay server. Device may be offline or disconnected.", target),
                         "original_message_id": parsed.id,
-                        "target_device_id": target
+                        "target_device_id": target,
+                        "connected_devices": registered_devices
                     }
                 });
                 
@@ -342,7 +371,11 @@ async fn handle_text_message(
         match sessions.send_binary(&target, binary_frame).await {
             Ok(()) => Ok(()),
             Err(SessionError::DeviceNotConnected) => {
-                warn!("Target device {} not connected, message not delivered", target);
+                let registered_devices = sessions.get_connected_devices().await;
+                warn!(
+                    "Target device {} not connected, message not delivered. Connected devices: {:?}",
+                    target, registered_devices
+                );
                 
                 // Send error response back to sender
                 let error_message = serde_json::json!({
@@ -352,9 +385,10 @@ async fn handle_text_message(
                     "type": "error",
                     "payload": {
                         "code": "device_not_connected",
-                        "message": format!("Failed to sync to target device: incorrect device_id ({})", target),
+                        "message": format!("Target device {} is not connected to the relay server. Device may be offline or disconnected.", target),
                         "original_message_id": parsed.id,
-                        "target_device_id": target
+                        "target_device_id": target,
+                        "connected_devices": registered_devices
                     }
                 });
                 

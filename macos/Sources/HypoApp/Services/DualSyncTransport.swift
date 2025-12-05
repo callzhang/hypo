@@ -27,21 +27,21 @@ public final class DualSyncTransport: SyncTransport {
         // Wait for both, but don't fail if one fails
         do {
             try await lanConnect
-            logger.info("✅ [DualSyncTransport] LAN transport connected")
+            logger.debug("✅ [DualSyncTransport] LAN connected")
         } catch {
             logger.info("⚠️ [DualSyncTransport] LAN transport connect failed: \(error.localizedDescription)")
         }
         
         do {
             try await cloudConnect
-            logger.info("✅ [DualSyncTransport] Cloud transport connected")
+            logger.debug("✅ [DualSyncTransport] Cloud connected")
         } catch {
             logger.info("⚠️ [DualSyncTransport] Cloud transport connect failed: \(error.localizedDescription)")
         }
     }
     
     public func send(_ envelope: SyncEnvelope) async throws {
-        logger.info("📡 [DualSyncTransport] Sending to both LAN and cloud simultaneously...")
+        logger.debug("📡 [DualSyncTransport] Sending to LAN and cloud")
         
         // Send to both transports in parallel
         async let lanSend = sendViaLAN(envelope)
@@ -54,7 +54,7 @@ public final class DualSyncTransport: SyncTransport {
         // Log results but don't throw errors (best-effort dual send)
         switch (lanResult, cloudResult) {
         case (.success, .success):
-            logger.info("✅ [DualSyncTransport] Both LAN and cloud transports succeeded")
+            logger.debug("✅ [DualSyncTransport] Both succeeded")
         case (.success, .failure):
             logger.info("✅ [DualSyncTransport] LAN transport succeeded (cloud failed, but both were attempted)")
         case (.failure, .success):

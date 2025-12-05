@@ -136,28 +136,15 @@ public final class LanSyncTransport: SyncTransport {
     /// Simply calls connect() once - all reconnection is handled by receiveNext() callbacks
     /// with the same exponential backoff as cloud connections.
     private func maintainPeerConnection(deviceId: String, transport: WebSocketTransport, peerName: String) async {
-        #if canImport(os)
-        logger.info("🔌 [LanSyncTransport] Starting connection maintenance for peer \(peerName) (\(deviceId))")
-        #endif
-        
         // Start connection - this will establish connection and maintain it
         // WebSocketTransport handles all reconnection via receiveNext() callbacks
         // with unified exponential backoff (same as cloud connections)
         do {
             if !transport.isConnected() {
-                #if canImport(os)
-                logger.info("🔌 [LanSyncTransport] Connecting to peer \(peerName) (\(deviceId))")
-                #endif
                 try await transport.connect()
-                #if canImport(os)
-                logger.info("✅ [LanSyncTransport] Connected to peer \(peerName) (\(deviceId))")
-                #endif
             }
         } catch {
-            #if canImport(os)
-            logger.warning("⚠️ [LanSyncTransport] Initial connection to peer \(peerName) (\(deviceId)) failed: \(error.localizedDescription)")
-            logger.info("🔄 [LanSyncTransport] WebSocketTransport will handle reconnection via receiveNext() callbacks")
-            #endif
+            logger.warning("⚠️ [LanSyncTransport] Initial connection to peer \(peerName) failed: \(error.localizedDescription)")
         }
         
         // Keep this task alive while peer is still in our map
@@ -165,10 +152,6 @@ public final class LanSyncTransport: SyncTransport {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 10_000_000_000) // Just keep alive - reconnection handled by WebSocketTransport
         }
-        
-        #if canImport(os)
-        logger.info("🔌 [LanSyncTransport] Connection maintenance ended for peer \(peerName) (\(deviceId))")
-        #endif
     }
     
     public func connect() async throws {
@@ -194,7 +177,7 @@ public final class LanSyncTransport: SyncTransport {
         }
         
         #if canImport(os)
-        logger.info("Sending clipboard envelope (type: \(envelope.type.rawValue))")
+        logger.debug("📤 [LanSyncTransport] Sending envelope: type=\(envelope.type.rawValue)")
         #endif
         
         let framed = try frameCodec.encode(envelope)
@@ -202,7 +185,7 @@ public final class LanSyncTransport: SyncTransport {
         // 1) Send to all currently connected peers (inbound connections to our server)
         let activeConnections = server.activeConnections()
         #if canImport(os)
-        logger.info("📡 [LanSyncTransport] Broadcasting to all \(activeConnections.count) connected peer(s)")
+        logger.debug("📡 [LanSyncTransport] Broadcasting to \(activeConnections.count) peer(s)")
         #endif
         server.sendToAll(framed)
         
@@ -221,7 +204,7 @@ public final class LanSyncTransport: SyncTransport {
             }
             
             #if canImport(os)
-            logger.info("📡 [LanSyncTransport] Attempting best-effort delivery to \(disconnectedPeers.count) disconnected peer(s) using last seen address")
+            logger.debug("📡 [LanSyncTransport] Attempting delivery to \(disconnectedPeers.count) disconnected peer(s)")
             #endif
             
             // Send to disconnected peers using persistent connections (maintained by syncPeerConnections)
@@ -240,7 +223,7 @@ public final class LanSyncTransport: SyncTransport {
                             }
                             try await clientTransport.send(envelope)
                             #if canImport(os)
-                            logger.info("✅ [LanSyncTransport] Sent to peer \(peer.serviceName) via persistent connection")
+                            logger.debug("✅ [LanSyncTransport] Sent to peer \(peer.serviceName)")
                             #endif
                         } catch {
                             #if canImport(os)

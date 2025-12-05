@@ -108,12 +108,9 @@ class SettingsViewModel @Inject constructor(
                     deviceKeyStore.getAllDeviceIds() 
                 }.getOrElse { emptyList() }
                 
-                android.util.Log.d("SettingsViewModel", "📋 Loaded ${allPairedDeviceIds.size} paired device IDs: $allPairedDeviceIds")
-                
                 // Build list of paired devices from storage (not synthetic peers)
                 val pairedDevices = allPairedDeviceIds.mapNotNull { deviceId ->
                     val deviceName = transportManager.getDeviceName(deviceId)
-                    android.util.Log.d("SettingsViewModel", "🔍 Device ID: $deviceId, name: $deviceName")
                     if (deviceName != null) {
                         // Find discovered peer for this device (if any) - use case-insensitive matching
                         val normalizedDeviceId = deviceId.lowercase()
@@ -124,7 +121,6 @@ class SettingsViewModel @Inject constructor(
                             peerDeviceId == deviceId || 
                             peer.serviceName == deviceId
                         }
-                        android.util.Log.d("SettingsViewModel", "✅ Added paired device: $deviceId ($deviceName), discovered: ${discoveredPeer != null}")
                         PairedDeviceInfo(
                             deviceId = deviceId,
                             deviceName = deviceName,
@@ -132,17 +128,13 @@ class SettingsViewModel @Inject constructor(
                         )
                     } else {
                         // Skip devices without stored name (they were deleted)
-                        android.util.Log.w("SettingsViewModel", "⚠️ Skipping device $deviceId - no stored name")
                         null
                     }
                 }
                 
-                android.util.Log.d("SettingsViewModel", "📋 Built ${pairedDevices.size} paired devices from ${allPairedDeviceIds.size} device IDs")
-                
                 // Convert paired devices to DiscoveredPeer for UI (since UI still expects DiscoveredPeer)
                 // This is cleaner than "synthetic peers" - we're converting from storage to display format
                 val pairedPeersForUi = pairedDevices.map { device ->
-                    android.util.Log.d("SettingsViewModel", "🔄 Converting paired device to DiscoveredPeer: $device")
                     device.discoveredPeer ?: DiscoveredPeer(
                         serviceName = device.deviceName,
                         host = "unknown",
@@ -208,7 +200,6 @@ class SettingsViewModel @Inject constructor(
                     serviceName to (device.discoveredPeer != null)
                 }
                 
-                android.util.Log.d("SettingsViewModel", "📊 Final UI state: ${pairedPeersForUi.size} peers for display")
                 
                 SettingsUiState(
                     lanSyncEnabled = settings.lanSyncEnabled,

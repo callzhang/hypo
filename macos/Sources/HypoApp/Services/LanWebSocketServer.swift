@@ -165,12 +165,7 @@ public final class LanWebSocketServer {
     
     public func send(_ data: Data, to connectionId: UUID) throws {
         #if canImport(os)
-        logger.info("📤 [LanWebSocketServer] send() called: connectionId=\(connectionId.uuidString.prefix(8)), data=\(data.count) bytes")
-        if let metadata = connectionMetadata[connectionId] {
-            logger.info("📤 [LanWebSocketServer] Connection metadata: deviceId=\(metadata.deviceId ?? "nil")")
-        } else {
-            logger.warning("⚠️ [LanWebSocketServer] No metadata found for connection \(connectionId.uuidString.prefix(8))")
-        }
+        logger.debug("📤 [LanWebSocketServer] Sending \(data.count) bytes to \(connectionId.uuidString.prefix(8))")
         #endif
         guard let context = connections[connectionId] else {
             #if canImport(os)
@@ -189,17 +184,10 @@ public final class LanWebSocketServer {
                 NSLocalizedDescriptionKey: "Connection not upgraded"
             ])
         }
-        #if canImport(os)
-        logger.info("✅ [LanWebSocketServer] Sending frame: \(data.count) bytes to connection \(connectionId.uuidString.prefix(8))")
-        #endif
         sendFrame(payload: data, opcode: 0x2, context: context) { error in
             if let error {
                 #if canImport(os)
                 self.logger.error("❌ [LanWebSocketServer] Send error: \(error.localizedDescription)")
-                #endif
-            } else {
-                #if canImport(os)
-                self.logger.info("✅ [LanWebSocketServer] Frame sent successfully to \(connectionId.uuidString.prefix(8))")
                 #endif
             }
         }
@@ -275,7 +263,7 @@ public final class LanWebSocketServer {
         connections[id] = context
         connectionMetadata[id] = ConnectionMetadata(deviceId: nil, connectedAt: Date())
         
-        logger.info("🔌 New connection: \(id.uuidString.prefix(8))")
+        logger.debug("🔌 [LanWebSocketServer] New connection: \(id.uuidString.prefix(8))")
         
         // Check initial state - connection might already be ready
         if case .ready = connection.state {
@@ -287,25 +275,20 @@ public final class LanWebSocketServer {
             Task { @MainActor [self] in
                 switch state {
                 case .ready:
-                    self.logger.info("🔗 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) state: ready")
                     self.beginHandshake(for: id)
                 case .failed(let error):
                     // Connection resets (error 54) are normal when clients disconnect abruptly
-                    // Log as info/warning instead of error to reduce noise
                     let errorCode = (error as NSError).code
-                    if errorCode == 54 { // Connection reset by peer
-                        self.logger.info("🔌 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) reset by peer (client disconnected)")
-                    } else {
+                    if errorCode != 54 { // Only log non-reset errors
                         self.logger.warning("⚠️ [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) failed: \(error.localizedDescription)")
                     }
                     self.closeConnection(id)
                 case .cancelled:
-                    self.logger.info("🔌 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) cancelled by system")
                     self.closeConnection(id)
-                case .waiting(let error):
-                    self.logger.info("⏳ [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) waiting: \(error.localizedDescription)")
+                case .waiting:
+                    // Normal waiting state, no need to log
+                    break
                 default:
-                    self.logger.info("🟡 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)) state: \(String(describing: state))")
                     break
                 }
             }
@@ -314,7 +297,7 @@ public final class LanWebSocketServer {
     }
 
     private func beginHandshake(for connectionId: UUID) {
-        logger.info("🤝  beginHandshake called for \(connectionId.uuidString.prefix(8))")
+        logger.debug("🤝 [LanWebSocketServer] beginHandshake for \(connectionId.uuidString.prefix(8))")
         guard let context = connections[connectionId] else {
             logger.info("⚠️  No context found for connection \(connectionId.uuidString.prefix(8))")
             return
@@ -336,16 +319,12 @@ public final class LanWebSocketServer {
                     return
                 }
                 if let data, !data.isEmpty {
-                    self.logger.info("📥  Handshake data received: \(data.count) bytes")
                     context.appendToBuffer(data)
-                    self.logger.info("📥  Data appended to buffer, calling processHandshakeBuffer")
                     let processed = self.processHandshakeBuffer(for: connectionId, context: context)
-                    self.logger.info("📥  processHandshakeBuffer returned: \(processed)")
                     if processed {
-                        self.logger.info("✅  Handshake processing complete, stopping receive loop")
+                        self.logger.debug("✅ [LanWebSocketServer] Handshake complete for \(connectionId.uuidString.prefix(8))")
                         return
                     } else {
-                        self.logger.info("⏳  Handshake processing incomplete, continuing receive loop")
                         // Continue receiving even if isComplete is true (might have more data)
                         self.receiveHandshakeChunk(for: connectionId, context: context)
                         return
@@ -359,7 +338,6 @@ public final class LanWebSocketServer {
                     if bufferSnapshot.isEmpty {
                         // If already upgraded, this is fine - just EOF, don't close
                         if context.upgraded {
-                            self.logger.info("✅  Handshake already complete, EOF is normal")
                             return
                         }
                         // During handshake, isComplete with empty buffer might mean:
@@ -367,24 +345,20 @@ public final class LanWebSocketServer {
                         // 2. This receive operation finished but more data might come
                         // Be more tolerant - check connection state before closing
                         let connectionState = context.connection.state
-                        self.logger.info("⚠️  Handshake receive completed without data and empty buffer (connection state: \(connectionState))")
                         // Check connection state - if it's still ready, continue receiving
                         if connectionState == .ready {
-                            self.logger.info("⏳  Connection still ready, continuing to receive handshake data")
                             self.receiveHandshakeChunk(for: connectionId, context: context)
                             return
                         } else {
                             // Connection is not ready (failed, cancelled, etc.) - close it
-                            self.logger.info("⚠️  Connection not ready (state: \(connectionState)), closing")
+                            self.logger.debug("⚠️ [LanWebSocketServer] Connection not ready, closing")
                             self.closeConnection(connectionId)
                             return
                         }
                     } else {
                         // Buffer has data but we didn't receive new data - try processing buffer one more time
-                        self.logger.info("⚠️  Handshake receive completed but buffer has \(bufferSnapshot.count) bytes - processing buffer")
                         let processed = self.processHandshakeBuffer(for: connectionId, context: context)
                         if processed {
-                            self.logger.info("✅  Handshake processing complete from buffer")
                             return
                         } else {
                             // If already upgraded, don't close - might be data frames mixed in

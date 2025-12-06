@@ -207,13 +207,6 @@ class IncomingClipboardHandler @Inject constructor(
                 val deviceName = envelope.payload.deviceName ?: "Unknown Device"
                 val exceptionType = e.javaClass.simpleName
                 val exceptionMessage = e.message ?: "No error message"
-                val stackTrace = e.stackTraceToString()
-                
-                // Detailed error logging for debugging
-                Log.e(TAG, "❌ Failed to decode clipboard from $deviceName ($deviceId)")
-                Log.e(TAG, "   Exception type: $exceptionType")
-                Log.e(TAG, "   Exception message: $exceptionMessage")
-                Log.e(TAG, "   Stack trace: ${stackTrace.take(500)}")
                 
                 // Check for specific decryption errors
                 val reason = when {
@@ -222,10 +215,22 @@ class IncomingClipboardHandler @Inject constructor(
                     e.message?.contains("key", ignoreCase = true) == true -> "Invalid encryption key: ${e.message}"
                     e.message?.contains("BAD_DECRYPT", ignoreCase = true) == true -> "Decryption authentication failed (BAD_DECRYPT)"
                     e.message?.contains("AEADBadTagException", ignoreCase = true) == true -> "Decryption tag verification failed"
-                    else -> "Failed to decode message: ${exceptionMessage.take(50)}"
+                    e.message?.contains("Missing", ignoreCase = true) == true -> "Missing data: ${e.message}"
+                    e.message?.contains("IllegalArgument", ignoreCase = true) == true -> "Invalid payload: ${e.message}"
+                    else -> "Failed to decode: ${exceptionMessage.take(80)}"
                 }
                 
-                Log.e(TAG, "   Reason: $reason")
+                // Log comprehensive error in main line for easier filtering
+                Log.e(TAG, "❌ Failed to decode clipboard from $deviceName ($deviceId): $exceptionType - $reason")
+                
+                // Additional detailed logging for debugging
+                Log.e(TAG, "   Exception type: $exceptionType")
+                Log.e(TAG, "   Exception message: $exceptionMessage")
+                Log.e(TAG, "   Envelope type: ${envelope.type}, payload size: ${envelope.payload.ciphertext?.length ?: 0}")
+                if (e.stackTrace.isNotEmpty()) {
+                    Log.e(TAG, "   Stack trace: ${e.stackTrace.take(3).joinToString(" -> ") { "${it.className}.${it.methodName}:${it.lineNumber}" }}")
+                }
+                
                 onDecryptionWarning?.invoke(deviceId, deviceName, reason)
             }
         }

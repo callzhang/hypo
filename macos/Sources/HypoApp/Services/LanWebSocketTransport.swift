@@ -300,13 +300,68 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                 _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 
             } catch {
-                self.logger.info("❌ [LanWebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(error.localizedDescription)")
-                queuedMessage.retryCount += 1
-                if queuedMessage.retryCount <= maxRetries {
+                let errorDescription = error.localizedDescription
+                let nsError = error as NSError
+                
+                // Check if this is a cancellation error (Operation canceled)
+                let isCancellationError = error is CancellationError ||
+                                         errorDescription.contains("Operation canceled") ||
+                                         errorDescription.contains("cancelled") ||
+                                         (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled)
+                
+                // Check if this is a "Socket is not connected" error
+                let isSocketNotConnected = errorDescription.contains("Socket is not connected") || 
+                                          errorDescription.contains("not connected") ||
+                                          (nsError.domain == "NSPOSIXErrorDomain" && nsError.code == 57)
+                
+                // Treat cancellation and socket closure as transient errors - requeue without incrementing retry count
+                // This is especially important for large payloads (images/files) that may take time to send
+                if isCancellationError || isSocketNotConnected {
+                    let errorType = isCancellationError ? "cancellation" : "socket closure"
+                    self.logger.info("⚠️ [LanWebSocketTransport] \(errorType.capitalized) during send (likely during large payload transmission), requeuing message")
+                    // Don't increment retry count for transient errors - this is expected for large payloads
                     messageQueue.append(queuedMessage)
+                    
+                    // Only trigger reconnection if socket is actually not connected
+                    // For cancellation errors, the connection might still be valid - just retry the send
+                    if isSocketNotConnected {
+                        // Socket is closed - need to reconnect
+                        if case .idle = state {
+                            // Only trigger reconnection if we're idle (not already reconnecting)
+                            Task { [weak self] in
+                                do {
+                                    try await self?.connect()
+                                } catch {
+                                    self?.logger.info("⚠️ [LanWebSocketTransport] Reconnection failed: \(error.localizedDescription)")
+                                }
+                            }
+                        }
+                    } else if isCancellationError {
+                        // Cancellation error but connection might still be valid
+                        // Check if we're still connected - if not, trigger reconnection
+                        if case .connected = state {
+                            // Still connected - just retry without reconnecting
+                            self.logger.debug("🔄 [LanWebSocketTransport] Connection still valid, will retry send")
+                        } else if case .idle = state {
+                            // Not connected - trigger reconnection
+                            Task { [weak self] in
+                                do {
+                                    try await self?.connect()
+                                } catch {
+                                    self?.logger.info("⚠️ [LanWebSocketTransport] Reconnection failed: \(error.localizedDescription)")
+                                }
+                            }
+                        }
+                    }
                 } else {
-                    logger.info("❌ [LanWebSocketTransport] Max retries reached, dropping message")
-                    _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                    self.logger.info("❌ [LanWebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(errorDescription)")
+                    queuedMessage.retryCount += 1
+                    if queuedMessage.retryCount <= maxRetries {
+                        messageQueue.append(queuedMessage)
+                    } else {
+                        logger.info("❌ [LanWebSocketTransport] Max retries reached, dropping message")
+                        _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                    }
                 }
             }
         }

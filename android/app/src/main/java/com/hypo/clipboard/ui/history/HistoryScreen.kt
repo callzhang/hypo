@@ -903,16 +903,18 @@ private fun ClipboardDetailContent(
                 if (content != null && content.isNotEmpty()) {
                     loadedContent = content
                 } else {
-                    // Check if it's a size issue
-                    val sizeFromMetadata = item.metadata?.get("size")?.toLongOrNull() ?: 0L
-                    if (sizeFromMetadata > 2 * 1024 * 1024) { // > 2MB
-                        loadError = "Content is too large to display (${formatBytes(sizeFromMetadata)}). Please copy to clipboard instead."
-                    } else {
-                        loadError = "Failed to load content"
-                    }
+                    // Content is null - this could be due to size or other reasons
+                    // Only show size error if we know the size is definitely too large
+                    loadError = "Failed to load content"
                 }
             } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
-                loadError = "Content is too large to display. Please copy to clipboard instead."
+                // SQLite CursorWindow limit exceeded - get size from metadata if available
+                val sizeFromMetadata = item.metadata?.get("size")?.toLongOrNull() ?: 0L
+                if (sizeFromMetadata > 0) {
+                    loadError = "Content is too large to display (${formatBytes(sizeFromMetadata)}). Please copy to clipboard instead."
+                } else {
+                    loadError = "Content is too large to display. Please copy to clipboard instead."
+                }
             } catch (e: Exception) {
                 loadError = "Error loading content: ${e.message}"
             } finally {
@@ -964,16 +966,18 @@ private fun ClipboardDetailContent(
                                         if (content != null && content.isNotEmpty()) {
                                             loadedContent = content
                                         } else {
-                                            // Check if it's a size issue
-                                            val sizeFromMetadata = item.metadata?.get("size")?.toLongOrNull() ?: 0L
-                                            if (sizeFromMetadata > 2 * 1024 * 1024) { // > 2MB
-                                                loadError = "Content is too large to display (${formatBytes(sizeFromMetadata)}). Please copy to clipboard instead."
-                                            } else {
-                                                loadError = "Failed to load content"
-                                            }
+                                            // Content is null - this could be due to size or other reasons
+                                            // Only show size error if we know the size is definitely too large
+                                            loadError = "Failed to load content"
                                         }
                                     } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
-                                        loadError = "Content is too large to display. Please copy to clipboard instead."
+                                        // SQLite CursorWindow limit exceeded - get size from metadata if available
+                                        val sizeFromMetadata = item.metadata?.get("size")?.toLongOrNull() ?: 0L
+                                        if (sizeFromMetadata > 0) {
+                                            loadError = "Content is too large to display (${formatBytes(sizeFromMetadata)}). Please copy to clipboard instead."
+                                        } else {
+                                            loadError = "Content is too large to display. Please copy to clipboard instead."
+                                        }
                                     } catch (e: Exception) {
                                         loadError = "Error loading content: ${e.message}"
                                     } finally {

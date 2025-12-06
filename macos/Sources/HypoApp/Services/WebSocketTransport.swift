@@ -371,18 +371,41 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 let errorDescription = error.localizedDescription
                 let nsError = error as NSError
                 
+                // Check if this is a cancellation error (Operation canceled)
+                let isCancellationError = error is CancellationError ||
+                                         errorDescription.contains("Operation canceled") ||
+                                         errorDescription.contains("cancelled") ||
+                                         (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled)
+                
                 // Check if this is a "Socket is not connected" error
                 let isSocketNotConnected = errorDescription.contains("Socket is not connected") || 
                                           errorDescription.contains("not connected") ||
                                           (nsError.domain == "NSPOSIXErrorDomain" && nsError.code == 57)
                 
-                if isSocketNotConnected {
-                    self.logger.info("⚠️ [WebSocketTransport] Socket closed during send (likely during large payload transmission), requeuing message")
-                    // Don't increment retry count for socket closure during send - this is expected for large payloads
-                    // The reconnection logic will handle reconnecting, and we'll retry the send once connected
+                // Treat cancellation and socket closure as transient errors - requeue without incrementing retry count
+                // This is especially important for large payloads (images/files) that may take time to send
+                if isCancellationError || isSocketNotConnected {
+                    let errorType = isCancellationError ? "cancellation" : "socket closure"
+                    self.logger.info("⚠️ [WebSocketTransport] \(errorType.capitalized) during send (likely during large payload transmission), requeuing message")
+                    // Don't increment retry count for transient errors - this is expected for large payloads
                     messageQueue.append(queuedMessage)
-                    // Trigger reconnection if not already in progress
-                    reconnectWithBackoff()
+                    
+                    // Only trigger reconnection if socket is actually not connected
+                    // For cancellation errors, the connection might still be valid - just retry the send
+                    if isSocketNotConnected {
+                        // Socket is closed - need to reconnect
+                        reconnectWithBackoff()
+                    } else if isCancellationError {
+                        // Cancellation error but connection might still be valid
+                        // Check if we're still connected - if not, trigger reconnection
+                        if case .connected = state {
+                            // Still connected - just retry without reconnecting
+                            self.logger.debug("🔄 [WebSocketTransport] Connection still valid, will retry send")
+                        } else {
+                            // Not connected - trigger reconnection
+                            reconnectWithBackoff()
+                        }
+                    }
                 } else {
                     self.logger.info("❌ [WebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(errorDescription)")
                     queuedMessage.retryCount += 1

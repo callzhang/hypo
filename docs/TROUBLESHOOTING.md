@@ -90,20 +90,20 @@ log stream --predicate 'processID == <PID>' --level debug
 **⚠️ Always filter MIUIInput** - Add `| grep -v "MIUIInput"` to all `adb logcat` commands:
 
 ```bash
-# Filter by PID (excludes MIUIInput, SKIA, VRI, RenderThread)
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -vE "MIUIInput|SKIA|VRI|RenderThread"
+# Filter by PID (excludes Verbose logs and system noise) with color
+adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
 
-# Simple usage (shows app logs only, no MIUIInput)
-adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep -v "MIUIInput"
+# Simple usage (shows app logs only, filters system noise)
+adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
 
-# With custom grep filters (excludes multiple patterns)
-adb -s $device_id logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep -E "SyncEngine|transport"
+# With custom grep filters (excludes system noise, shows only SyncEngine/transport)
+adb -s $device_id logcat | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "SyncEngine|transport"
 
-# View recent logs (filters MIUIInput, SKIA, VRI, RenderThread)
-adb -s $device_id logcat -d -t 300 | grep -vE "MIUIInput|SKIA|VRI|RenderThread"
+# View recent logs (filters system noise)
+adb -s $device_id logcat -d -t 300 | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
 
-# Find message by content (filters MIUIInput, SKIA, VRI, RenderThread)
-adb -s $device_id logcat -d | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep -F "content: Case 1:"
+# Find message by content (filters system noise)
+adb -s $device_id logcat -d | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -F "content: Case 1:"
 ```
 
 **Query database (most reliable, no filtering needed)**:

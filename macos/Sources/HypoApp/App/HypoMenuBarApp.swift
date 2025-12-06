@@ -2071,17 +2071,22 @@ private struct SettingsSectionView: View {
     private var versionString: String {
         let bundle = Bundle.main
         
+        // Determine build configuration (Debug or Release) by checking bundle path
+        // Release builds use HypoApp-release.app, debug builds use HypoApp.app
+        let bundlePath = bundle.bundlePath
+        let buildConfig = bundlePath.contains("-release") ? "Release" : "Debug"
+        
         if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String,
            let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
-            return "Version \(version) (Build \(build))"
+            return "Version \(version)-\(buildConfig) (Build \(build))"
         } else if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String {
-            return "Version \(version)"
+            return "Version \(version)-\(buildConfig)"
         } else if let build = bundle.infoDictionary?["CFBundleVersion"] as? String {
-            return "Build \(build)"
+            return "Build \(build) (\(buildConfig))"
         } else {
-            // Fallback: log warning only if version info is missing (unexpected)
+            // Log warning only if version info is missing (unexpected)
             logger.warning("⚠️ [SettingsSectionView] Version info missing from bundle: path=\(bundle.bundlePath), identifier=\(bundle.bundleIdentifier ?? "nil")")
-            return "Version 1.0.0"
+            return "Version 1.0.0-\(buildConfig)"
         }
     }
 

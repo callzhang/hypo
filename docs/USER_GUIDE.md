@@ -232,10 +232,12 @@ launchctl load ~/Library/LaunchAgents/com.hypo.agent.plist
 
 4. **Grant Permissions**
    - **Required Immediately**: Storage, Network
-   - **Required for Sync**: Accessibility (for clipboard monitoring)
+   - **Required for Sync**: Clipboard access (granted when app is in foreground on Android 10+)
    - **Optional but Recommended**: SMS (for SMS auto-sync feature)
    - **Android 13+**: Notification permission (for foreground service)
    - **Critical**: Disable battery optimization for reliable sync
+   
+   **Note**: On Android 10+, clipboard access is only available when the app is in the foreground. The notification ("Click to sync") allows quick access to sync clipboard content.
 
 5. **Battery Optimization (Critical)**
    ```
@@ -419,7 +421,7 @@ Google Play Store → Search "Hypo Clipboard" → Install
 # Check if app is running
 ps aux | grep Hypo
 
-# Check accessibility permission
+# Check accessibility permission (required for macOS clipboard access)
 sqlite3 /Library/Application\ Support/com.apple.TCC/TCC.db \
   "SELECT * FROM access WHERE service='kTCCServiceAccessibility';"
 
@@ -611,7 +613,7 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 - Drag items from history to paste elsewhere
 
 **Android**:
-- Notification shows sync status
+- Notification titled "Click to sync" provides quick access to sync clipboard
 - Open app to view clipboard history
 - Swipe to refresh history
 - Tap items to copy them back to clipboard
@@ -718,11 +720,11 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 - **Pull to Refresh**: Sync with other devices
 - **Text Selection Context Menu**: Select text in any app → "Copy to Hypo" appears first in menu → Automatically copies and syncs to other devices
 
-**Notification Actions**:
-- **Pause Sync**: Temporarily stop clipboard monitoring
-- **Resume Sync**: Restart clipboard monitoring
-- **Open History**: Quick access to app
-- **Connection Status**: Shows LAN/cloud status
+**Notification**:
+- **Title**: "Click to sync" - Tap to open app and sync clipboard
+- **Content**: Shows latest clipboard content or status message
+- **Tap Notification**: Opens app for quick clipboard sync
+- **Note**: On Android 10+, clipboard access requires app to be in foreground. The notification provides quick access to sync content.
 
 ### Settings Configuration
 
@@ -790,10 +792,12 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 **Symptoms**: macOS cannot read/write clipboard  
 **Solutions**:
 1. System Settings → Privacy & Security → Accessibility
-2. Add Hypo to accessibility apps
+2. Add Hypo to accessibility apps (required for macOS clipboard access)
 3. Restart Hypo after granting permission
 4. Check System Integrity Protection not blocking
 5. Try running from Applications folder
+
+**Note**: macOS requires Accessibility permission for clipboard access. Android does not use Accessibility service (it doesn't provide background clipboard access on Android 10+).
 
 ### Error Messages
 
@@ -846,7 +850,10 @@ A: Yes. All data is encrypted end-to-end with AES-256-GCM. Even our relay server
 A: Yes, if both devices are on the same Wi-Fi network, they can sync directly without internet.
 
 **Q: How much battery does Hypo use on Android?**  
-A: Typically less than 2% per day with optimized settings. The foreground service is designed to be battery-efficient.
+A: Typically less than 2% per day with optimized settings. The foreground service is designed to be battery-efficient. Battery drain is reduced by 60-80% when screen is off.
+
+**Q: Why does the notification say "Click to sync"?**  
+A: On Android 10+, clipboard access is only available when the app is in the foreground. The notification provides quick access to open the app and sync clipboard content. Tap the notification to open Hypo and sync your clipboard.
 
 **Q: Can I sync between more than 2 devices?**  
 A: Currently, Hypo supports pairing between 2 devices. Multi-device support is planned for a future release.

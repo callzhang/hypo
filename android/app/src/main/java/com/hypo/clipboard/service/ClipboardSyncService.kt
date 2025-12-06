@@ -402,7 +402,6 @@ class ClipboardSyncService : Service() {
             .setStyle(
                 NotificationCompat.BigTextStyle()
                     .bigText(previewText)
-                    .setSummaryText(statusText)
             )
 
         // Show action buttons based on state

@@ -614,8 +614,8 @@ class ClipboardSyncService : Service() {
     
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Hypo Clipboard Sync")
-            .setContentText("Syncing clipboard with macOS")
+            .setContentTitle("Click to sync")
+            .setContentText(previewText)  // Shows latest clipboard content or status message
             .setSmallIcon(R.drawable.ic_sync)
             .setOngoing(true)
             .addAction(R.drawable.ic_pause, "Pause", pausePendingIntent)
@@ -626,10 +626,13 @@ class ClipboardSyncService : Service() {
 
 **Notification Channel Configuration**:
 - **Importance**: `IMPORTANCE_DEFAULT` (ensures notification is visible in notification list)
-- **Purpose**: Persistent foreground service notification showing latest clipboard item preview
+- **Purpose**: Persistent foreground service notification providing quick access to sync clipboard
+- **Title**: "Click to sync" - reflects that clipboard access on Android 10+ requires app to be in foreground
+- **Content**: Shows latest clipboard item preview or status message (permission required, paused, etc.)
 - **Behavior**: Updates automatically when latest clipboard item changes via `observeLatestItem()`
 - **Visibility**: Always visible in notification list (not minimized like `IMPORTANCE_LOW`)
 - **Sound**: Disabled (`setSound(null, null)`) to avoid intrusive alerts for persistent notification
+- **User Interaction**: Tapping notification opens app for quick clipboard sync (required for Android 10+ clipboard access)
 
 #### 4.2.3 Room Database Schema
 ```kotlin

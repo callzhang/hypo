@@ -12,18 +12,33 @@ plugins {
 
 // Read version from centralized VERSION file
 val versionFile = rootProject.file("../VERSION")
-val projectVersion = if (versionFile.exists()) {
-    versionFile.readText().trim()
-} else {
-    "1.0.5" // Fallback version
+require(versionFile.exists()) {
+    "VERSION file not found at ${versionFile.absolutePath}. Create it with the current version (e.g., 1.0.5)."
+}
+
+val projectVersion = versionFile.readText().trim()
+require(projectVersion.isNotEmpty()) {
+    "VERSION file is empty. Set a valid version (e.g., 1.0.5)."
 }
 
 // Parse version to get versionCode (e.g., 1.0.5 -> 5)
+// versionCode must be >= 1 for Android apps
 val versionParts = projectVersion.split(".")
-val versionCodeValue = if (versionParts.size >= 3) {
-    versionParts[2].toIntOrNull() ?: 5
-} else {
-    5
+require(versionParts.size >= 3) {
+    "Invalid version format: '$projectVersion'. Expected format: MAJOR.MINOR.PATCH (e.g., 1.0.5)."
+}
+
+val patchVersionStr = versionParts[2]
+val patchVersion = patchVersionStr.toIntOrNull()
+require(patchVersion != null) {
+    "Invalid patch version: '$patchVersionStr'. Patch version must be a number."
+}
+
+// Validate versionCode >= 1 (Android requirement)
+// After require check, patchVersion is guaranteed non-null
+val versionCodeValue = patchVersion!!
+require(versionCodeValue >= 1) {
+    "Invalid versionCode: patch version is $versionCodeValue. Android versionCode must be >= 1. Use a version with patch >= 1 (e.g., 1.0.1 instead of 1.0.0)."
 }
 
 android {

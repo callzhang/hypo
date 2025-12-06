@@ -223,7 +223,8 @@ jobs:
           # Remove 'v' prefix if present and sanitize (replace slashes with dashes)
           VERSION="${VERSION#v}"
           SAFE_VERSION="${VERSION//\//-}"
-          zip -r ../Hypo-${SAFE_VERSION}.zip HypoApp.app
+          # Append -release for consistency with local build scripts
+          zip -r ../Hypo-${SAFE_VERSION}-release.zip HypoApp.app
       
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
@@ -286,17 +287,17 @@ jobs:
         run: |
           cd artifacts
           TAG_NAME="${{ steps.version.outputs.tag }}"
-          # Rename release APK (use hyphen separator: Hypo-1.0.2.apk)
+          # Rename release APK (append -release for consistency with local build scripts)
           if [ -f "app-release.apk" ]; then
-            mv app-release.apk Hypo-${TAG_NAME}.apk
+            mv app-release.apk Hypo-${TAG_NAME}-release.apk
           else
             echo "❌ Release APK not found!"
             exit 1
           fi
-          # Rename macOS zip to use tag name (not branch name) if needed
+          # Rename macOS zip to use tag name with -release suffix (for consistency with local build scripts)
           if [ -f "Hypo-"*.zip ]; then
             OLD_ZIP=$(ls Hypo-*.zip | head -1)
-            EXPECTED_NAME="Hypo-${TAG_NAME}.zip"
+            EXPECTED_NAME="Hypo-${TAG_NAME}-release.zip"
             if [ "$OLD_ZIP" != "$EXPECTED_NAME" ]; then
               mv "$OLD_ZIP" "$EXPECTED_NAME"
             else
@@ -450,8 +451,8 @@ jobs:
           
           ## 📦 Downloads
           
-          - **Android**: [\`Hypo-${TAG_NAME}.apk\`](Hypo-${TAG_NAME}.apk)
-          - **macOS**: [\`Hypo-${TAG_NAME}.zip\`](Hypo-${TAG_NAME}.zip)
+          - **Android**: [\`Hypo-${TAG_NAME}-release.apk\`](Hypo-${TAG_NAME}-release.apk)
+          - **macOS**: [\`Hypo-${TAG_NAME}-release.zip\`](Hypo-${TAG_NAME}-release.zip)
           
           ## 📖 Installation
           
@@ -459,7 +460,7 @@ jobs:
           
           ### 🍎 macOS Installation
           
-          1. Download and extract \`Hypo-${TAG_NAME}.zip\`
+          1. Download and extract \`Hypo-${TAG_NAME}-release.zip\`
           2. **Important**: After extracting, you may see a "damaged" error when trying to open the app. This is due to macOS quarantine.
           
           **Quick Fix:**
@@ -476,7 +477,7 @@ jobs:
           
           ### 🤖 Android Installation
           
-          1. Download \`Hypo-${TAG_NAME}.apk\` to your Android device
+          1. Download \`Hypo-${TAG_NAME}-release.apk\` to your Android device
           2. Open the APK file (you may need to enable "Install from unknown sources" in Settings)
           3. Follow the on-screen installation prompts
           4. Grant necessary permissions when prompted (clipboard access, network access, etc.)
@@ -549,8 +550,8 @@ jobs:
           name: Release ${{ steps.version.outputs.version }}
           body_path: ${{ steps.release-notes.outputs.notes_path }}
           files: |
-            artifacts/Hypo-*.apk
-            artifacts/Hypo-*.zip
+            artifacts/Hypo-*-release.apk
+            artifacts/Hypo-*-release.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
           generate_release_notes: true

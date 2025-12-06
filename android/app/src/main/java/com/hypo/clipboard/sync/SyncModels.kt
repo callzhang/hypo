@@ -40,7 +40,9 @@ data class Payload(
     val code: String? = null,
     val message: String? = null,
     @SerialName("original_message_id") val originalMessageId: String? = null,
-    @SerialName("target_device_id") val targetDeviceId: String? = null
+    @SerialName("target_device_id") val targetDeviceId: String? = null,
+    // Control message fields (when type is CONTROL)
+    val action: String? = null  // Control action (e.g., "query_connected_peers")
 )
 
 @Serializable

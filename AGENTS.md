@@ -1,9 +1,9 @@
 # Repository Guidelines
 
 **Project**: Hypo - Cross-Platform Clipboard Sync  
-**Version**: 1.0.1 (Production Release)  
+**Version**: See `VERSION` file (currently 1.0.5)  
 **Status**: Production-ready, all critical issues resolved  
-**Last Updated**: December 2, 2025
+**Last Updated**: December 6, 2025
 
 ## Project Structure & Module Organization
 - `macos/`: Swift 6/SwiftUI client; shared logic under `Sources`, unit suites in `Tests/HypoAppTests`.
@@ -63,7 +63,7 @@
 - Each PR must describe behaviour changes, list platforms touched, and note the commands executed (builds, tests, scripts).
 - Exclude secrets or generated artifacts (`HypoApp.app`, `*.apk`, `target/`, `.build/`) from commits and update docs when behaviour shifts.
 - **Documentation updates**: When merging feature docs into main docs (e.g., `docs/features/*.md` → `docs/prd.md`), delete the source file after merge.
-- **Version updates**: Update version numbers in all relevant files (Info.plist, build.gradle.kts, Cargo.toml, docs) when releasing.
+- **Version updates**: Use `./scripts/update-version.sh <version>` to update version across all platforms. The version is centralized in the `VERSION` file at the project root. See `docs/VERSION_MANAGEMENT.md` for details.
 
 ## Security & Configuration Tips
 - Copy secrets from `.env.example` and keep production values in the shared vault; never commit Fly.io or signing credentials.

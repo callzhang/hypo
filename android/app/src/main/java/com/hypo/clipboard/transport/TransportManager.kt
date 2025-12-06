@@ -131,7 +131,8 @@ class TransportManager(
         var key = "device_name_$normalizedId"
         var name = prefs.getString(key, null)
         if (name != null) {
-            android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (normalized: $normalizedId): $name")
+            // Log at verbose level since this is called frequently during UI updates
+            android.util.Log.v("TransportManager", "✅ Found device name for $deviceId (normalized: $normalizedId): $name")
             return name
         }
         
@@ -140,7 +141,7 @@ class TransportManager(
             key = "device_name_$deviceId"
             name = prefs.getString(key, null)
             if (name != null) {
-                android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (original case): $name")
+                android.util.Log.v("TransportManager", "✅ Found device name for $deviceId (original case): $name")
                 return name
             }
         }
@@ -153,7 +154,7 @@ class TransportManager(
             key = "device_name_$migratedId"
             name = prefs.getString(key, null)
             if (name != null) {
-                android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (migrated: $migratedId): $name")
+                android.util.Log.v("TransportManager", "✅ Found device name for $deviceId (migrated: $migratedId): $name")
                 return name
             }
         }
@@ -163,7 +164,7 @@ class TransportManager(
             key = "device_name_${prefix}$normalizedId"
             name = prefs.getString(key, null)
             if (name != null) {
-                android.util.Log.d("TransportManager", "✅ Found device name for $deviceId (with prefix $prefix): $name")
+                android.util.Log.v("TransportManager", "✅ Found device name for $deviceId (with prefix $prefix): $name")
                 return name
             }
         }
@@ -825,6 +826,29 @@ class TransportManager(
      */
     fun markDeviceConnected(deviceId: String, transport: ActiveTransport) {
         updateLastSuccessfulTransport(deviceId, transport)
+    }
+    
+    /**
+     * Get set of device IDs that have active LAN WebSocket connections.
+     */
+    fun getActiveLanConnections(): Set<String> {
+        return lanPeerConnectionManager?.getActiveLanConnections() ?: emptySet()
+    }
+    
+    /**
+     * Close all LAN connections (for screen-off optimization).
+     */
+    suspend fun closeAllLanConnections() {
+        android.util.Log.d("TransportManager", "🔌 Closing all LAN connections (screen-off)")
+        lanPeerConnectionManager?.closeAllConnections()
+    }
+    
+    /**
+     * Reconnect all LAN connections (for screen-on optimization).
+     */
+    suspend fun reconnectAllLanConnections() {
+        android.util.Log.d("TransportManager", "🔄 Reconnecting all LAN connections (screen-on)")
+        lanPeerConnectionManager?.reconnectAllConnections()
     }
     
     fun setPairingChallengeHandler(handler: (suspend (String) -> String?)) {

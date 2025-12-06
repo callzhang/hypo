@@ -1,18 +1,14 @@
 package com.hypo.clipboard.ui.settings
 
 import android.Manifest
-import android.accessibilityservice.AccessibilityServiceInfo
-import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.view.accessibility.AccessibilityManager
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hypo.clipboard.data.settings.SettingsRepository
 import com.hypo.clipboard.data.settings.UserSettings
-import com.hypo.clipboard.service.ClipboardAccessibilityService
 import com.hypo.clipboard.transport.ActiveTransport
 import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
@@ -37,19 +33,12 @@ class SettingsViewModel @Inject constructor(
     private val deviceKeyStore: com.hypo.clipboard.sync.DeviceKeyStore,
     private val lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
     private val syncCoordinator: SyncCoordinator,
+    private val connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
-    
-    // Flow that emits accessibility service status periodically (needed for UI updates)
-    private val accessibilityStatusFlow = flow {
-        while (true) {
-            delay(2_000L) // Check every 2 seconds
-            emit(checkAccessibilityServiceStatus())
-        }
-    }
     
     // Flow that emits SMS permission status periodically (needed for UI updates)
     private val smsPermissionStatusFlow = flow {
@@ -82,15 +71,12 @@ class SettingsViewModel @Inject constructor(
     private fun observeState() {
         viewModelScope.launch {
             // Event-driven: UI updates automatically when any of these flows emit
-            // The accessibilityStatusFlow and smsPermissionStatusFlow are already included in combine,
-            // so they will emit every 2 seconds and trigger UI updates automatically.
-            // No need for separate collectors - they would never execute anyway since collect() suspends indefinitely.
             combine(
                 settingsRepository.settings,
                 transportManager.peers,  // Emits when peers are discovered/lost
                 transportManager.lastSuccessfulTransport,  // Emits when transport status changes
                 transportManager.cloudConnectionState,  // Cloud-only connection state - tracks cloud state separately from LAN
-                accessibilityStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) }, // Emit immediately on start, then every 2 seconds
+                connectionStatusProber.deviceDualStatus,  // Dual status (LAN + Cloud) for each device
                 smsPermissionStatusFlow.onStart { emit(checkSmsPermissionStatus()) }, // Emit immediately on start, then every 2 seconds
                 notificationPermissionStatusFlow.onStart { emit(checkNotificationPermissionStatus()) }, // Emit immediately on start, then every 2 seconds
                 batteryOptimizationStatusFlow.onStart { emit(checkBatteryOptimizationStatus()) } // Emit immediately on start, then every 2 seconds
@@ -99,7 +85,7 @@ class SettingsViewModel @Inject constructor(
                 val peers = values[1] as List<DiscoveredPeer>
                 val lastTransport = values[2] as Map<String, com.hypo.clipboard.transport.ActiveTransport>
                 val cloudConnectionState = values[3] as com.hypo.clipboard.transport.ConnectionState
-                val isAccessibilityEnabled = values[4] as Boolean
+                val deviceDualStatus = values[4] as Map<String, com.hypo.clipboard.ui.components.DeviceDualStatus>
                 val isSmsPermissionGranted = values[5] as Boolean
                 val isNotificationPermissionGranted = values[6] as Boolean
                 val isBatteryOptimizationDisabled = values[7] as Boolean
@@ -145,34 +131,23 @@ class SettingsViewModel @Inject constructor(
                     )
                 }
                 
-                // Map paired devices to include connection status and transport info
+                // Map paired devices to include connection status using dual status from ConnectionStatusProber
                 val peerStatuses = pairedDevices.associate { device ->
                     val deviceId = device.deviceId
                     val serviceName = device.discoveredPeer?.serviceName ?: device.deviceName
-                    val isDiscovered = device.discoveredPeer != null
                     
-                    // Look up transport status using deviceId
-                    val transport = lastTransport[deviceId]
-                        ?: lastTransport.entries.firstOrNull { 
+                    // Get dual status from ConnectionStatusProber (checks both LAN and Cloud)
+                    val dualStatus = deviceDualStatus[deviceId]
+                        ?: deviceDualStatus.entries.firstOrNull { 
                             it.key.equals(deviceId, ignoreCase = true)
                         }?.value
+                        ?: com.hypo.clipboard.ui.components.DeviceDualStatus(
+                            isConnectedViaLan = false,
+                            isConnectedViaCloud = false
+                        )
                     
-                    val isServerConnected = cloudConnectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedCloud
-                    
-                    // Determine status: prioritize discovery status since LAN connections are on-demand
-                    val status = when {
-                        // Device is discovered on LAN → Connected via LAN (regardless of global connection state)
-                        // LAN connections are established on-demand, so discovery means the device is reachable
-                        isDiscovered -> DeviceConnectionStatus.ConnectedLan
-                        // Device has LAN transport → Connected via LAN (even if not currently discovered)
-                        transport == ActiveTransport.LAN -> DeviceConnectionStatus.ConnectedLan
-                        // Device has CLOUD transport AND server is connected → Connected via Cloud
-                        transport == ActiveTransport.CLOUD && isServerConnected -> DeviceConnectionStatus.ConnectedCloud
-                        // Device has CLOUD transport but server is offline → Disconnected
-                        transport == ActiveTransport.CLOUD && !isServerConnected -> DeviceConnectionStatus.Disconnected
-                        // Device is paired but not discovered and no transport record → Offline
-                        else -> DeviceConnectionStatus.Disconnected
-                    }
+                    // Convert dual status to DeviceConnectionStatus
+                    val status = dualStatus.toDeviceConnectionStatus()
                     
                     serviceName to status
                 }
@@ -209,7 +184,6 @@ class SettingsViewModel @Inject constructor(
                     discoveredPeers = pairedPeersForUi,
                     deviceStatuses = peerStatuses,
                     deviceTransports = peerTransports,
-                    isAccessibilityServiceEnabled = isAccessibilityEnabled,
                     isSmsPermissionGranted = isSmsPermissionGranted,
                     isNotificationPermissionGranted = isNotificationPermissionGranted,
                     isBatteryOptimizationDisabled = isBatteryOptimizationDisabled,
@@ -220,10 +194,6 @@ class SettingsViewModel @Inject constructor(
             }.collect { state ->
                 _state.value = state
             }
-            // Note: The separate collectors for accessibilityStatusFlow and smsPermissionStatusFlow
-            // were removed because they would never execute (collect() above suspends indefinitely).
-            // The flows are already included in the combine() above, so they will emit every 2 seconds
-            // and trigger UI updates automatically through the combine collector.
         }
     }
 
@@ -270,26 +240,6 @@ class SettingsViewModel @Inject constructor(
         val discoveredPeer: DiscoveredPeer? // null if not currently discovered on LAN
     )
     
-    private fun checkAccessibilityServiceStatus(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            return true // Not needed on older Android versions
-        }
-        
-        val accessibilityManager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
-        val enabledServices = accessibilityManager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-        val serviceClassName = ClipboardAccessibilityService::class.java.name
-        val serviceName = ComponentName(context.packageName, serviceClassName)
-        
-        // Check if our accessibility service is enabled
-        return enabledServices.any { serviceInfo ->
-            val componentName = ComponentName(
-                serviceInfo.resolveInfo.serviceInfo.packageName,
-                serviceInfo.resolveInfo.serviceInfo.name
-            )
-            componentName == serviceName || serviceInfo.resolveInfo.serviceInfo.name == serviceClassName
-        }
-    }
-    
     private fun checkSmsPermissionStatus(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             return true // Permission granted by default on older Android versions
@@ -309,6 +259,13 @@ class SettingsViewModel @Inject constructor(
     private fun checkBatteryOptimizationStatus(): Boolean {
         return com.hypo.clipboard.util.MiuiAdapter.isBatteryOptimizationDisabled(context)
     }
+    
+    /**
+     * Check peer status immediately (called when user clicks on peer list)
+     */
+    fun checkPeerStatus() {
+        connectionStatusProber.probeNow()
+    }
 }
 
 data class SettingsUiState(
@@ -319,7 +276,6 @@ data class SettingsUiState(
         val discoveredPeers: List<DiscoveredPeer> = emptyList(),
         val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap(),
         val deviceTransports: Map<String, ActiveTransport?> = emptyMap(),
-        val isAccessibilityServiceEnabled: Boolean = false,
         val isSmsPermissionGranted: Boolean = false,
         val isNotificationPermissionGranted: Boolean = false,
         val isBatteryOptimizationDisabled: Boolean = false,

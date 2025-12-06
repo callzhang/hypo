@@ -1,13 +1,11 @@
 package com.hypo.clipboard.service
 
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.app.PendingIntent
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -16,14 +14,12 @@ import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.util.Log
-import android.view.accessibility.AccessibilityManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.hypo.clipboard.MainActivity
 import com.hypo.clipboard.R
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
-import com.hypo.clipboard.service.ClipboardAccessibilityService
 import com.hypo.clipboard.sync.ClipboardListener
 import com.hypo.clipboard.sync.ClipboardParser
 import com.hypo.clipboard.sync.DeviceIdentity
@@ -74,7 +70,6 @@ class ClipboardSyncService : Service() {
     private var isScreenOff: Boolean = false
     private var awaitingClipboardPermission: Boolean = false
     private var isAppInForeground: Boolean = false
-    private var isAccessibilityServiceEnabled: Boolean = false
     private lateinit var screenStateReceiver: ScreenStateReceiver
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private lateinit var connectivityManager: android.net.ConnectivityManager
@@ -193,7 +188,7 @@ class ClipboardSyncService : Service() {
         registerNetworkChangeCallback()
         connectionStatusProber.start()
         
-        // Monitor app foreground state and accessibility service status
+        // Monitor app foreground state
         scope.launch {
             while (isActive) {
                 val wasForeground = isAppInForeground
@@ -202,7 +197,6 @@ class ClipboardSyncService : Service() {
                 if (!wasForeground && isAppInForeground) {
                     connectionStatusProber.probeNow()
                 }
-                checkAccessibilityServiceStatus()
                 delay(2_000) // Check every 2 seconds
             }
         }
@@ -226,7 +220,6 @@ class ClipboardSyncService : Service() {
             ACTION_PAUSE -> pauseListener()
             ACTION_RESUME -> resumeListener()
             ACTION_OPEN_CLIPBOARD_SETTINGS -> openClipboardSettings()
-            ACTION_OPEN_ACCESSIBILITY_SETTINGS -> openAccessibilitySettings()
             ACTION_FORCE_PROCESS_CLIPBOARD -> {
                 Log.d(TAG, "🔄 Force processing clipboard from ProcessTextActivity")
                 // Get text from intent if available (avoids timing issues with clipboard access)
@@ -260,29 +253,26 @@ class ClipboardSyncService : Service() {
                             syncCoordinator.onClipboardEvent(event)
                             Log.d(TAG, "✅ Processed text from ProcessTextActivity and synced to peers")
                         } catch (e: Exception) {
-                            Log.e(TAG, "❌ Error processing text from intent: ${e.message}", e)
-                            // Fallback: try to process from clipboard
+                            Log.e(TAG, "❌ Error processing text from intent: ${e.message}. Attempting fallback to clipboard.", e)
+                            // Fallback: try to process from clipboard (may have timing issues)
                             listener.forceProcessCurrentClipboard()
                         }
                     }
                 } else {
-                    // Fallback: process from clipboard (may have timing issues)
+                    // No URI in intent - process from clipboard directly
+                    // Note: This may have timing issues if clipboard changes between intent and processing
+                    Log.d(TAG, "⚠️ No URI in intent, processing from clipboard (may have timing issues)")
                     if (!listener.isListening) {
                         Log.d(TAG, "⚠️ Listener not started, attempting to start it first...")
-                        if (!isAccessibilityServiceEnabled) {
-                            scope.launch {
-                                val allowed = clipboardAccessChecker.canReadClipboard()
-                                if (allowed) {
-                                    listener.start()
-                                    Log.d(TAG, "✅ Listener started, now processing clipboard")
-                                    listener.forceProcessCurrentClipboard()
-                                } else {
-                                    Log.w(TAG, "⚠️ Cannot process: clipboard permission not granted")
-                                }
+                        scope.launch {
+                            val allowed = clipboardAccessChecker.canReadClipboard()
+                            if (allowed) {
+                                listener.start()
+                                Log.d(TAG, "✅ Listener started, now processing clipboard")
+                                listener.forceProcessCurrentClipboard()
+                            } else {
+                                Log.w(TAG, "⚠️ Cannot process: clipboard permission not granted")
                             }
-                        } else {
-                            Log.d(TAG, "ℹ️ Accessibility service is enabled - it should handle clipboard changes")
-                            listener.forceProcessCurrentClipboard()
                         }
                     } else {
                         listener.forceProcessCurrentClipboard()
@@ -378,14 +368,12 @@ class ClipboardSyncService : Service() {
         val statusText = when {
             awaitingClipboardPermission -> getString(R.string.service_notification_status_permission)
             isPaused -> getString(R.string.service_notification_status_paused)
-            !isAccessibilityServiceEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAppInForeground -> "Enable accessibility for background access"
             !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> "Background (clipboard access limited)"
             else -> getString(R.string.service_notification_status_active)
         }
         val previewText = when {
             awaitingClipboardPermission -> getString(R.string.service_notification_permission_body)
-            !isAccessibilityServiceEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAppInForeground -> "Enable accessibility service in Settings → Accessibility → Hypo for background clipboard access"
-            !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAccessibilityServiceEnabled -> "App must be in foreground for clipboard access on Android 10+"
+            !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> "App must be in foreground for clipboard access on Android 10+"
             else -> latestPreview ?: getString(R.string.service_notification_text)
         }
 
@@ -423,13 +411,6 @@ class ClipboardSyncService : Service() {
                 R.drawable.ic_notification,
                 getString(R.string.action_grant_clipboard_access),
                 pendingIntentForAction(ACTION_OPEN_CLIPBOARD_SETTINGS)
-            )
-        } else if (!isAccessibilityServiceEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAppInForeground) {
-            // Show accessibility enable button when app is in background and accessibility is not enabled
-            builder.addAction(
-                R.drawable.ic_notification,
-                getString(R.string.accessibility_enable_button),
-                pendingIntentForAction(ACTION_OPEN_ACCESSIBILITY_SETTINGS)
             )
         }
 
@@ -596,20 +577,7 @@ class ClipboardSyncService : Service() {
     }
 
     private fun pendingIntentForAction(action: String): PendingIntent {
-        // For accessibility settings, open directly instead of going through service
-        // This ensures it works even when service is already running
         val intent = when (action) {
-            ACTION_OPEN_ACCESSIBILITY_SETTINGS -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                } else {
-                    Intent(Settings.ACTION_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                }
-            }
             ACTION_OPEN_CLIPBOARD_SETTINGS -> {
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                     data = android.net.Uri.fromParts("package", packageName, null)
@@ -622,7 +590,7 @@ class ClipboardSyncService : Service() {
             }
         }
         
-        return if (action == ACTION_OPEN_ACCESSIBILITY_SETTINGS || action == ACTION_OPEN_CLIPBOARD_SETTINGS) {
+        return if (action == ACTION_OPEN_CLIPBOARD_SETTINGS) {
             // Use getActivity for settings intents
             PendingIntent.getActivity(
                 this,
@@ -759,22 +727,27 @@ class ClipboardSyncService : Service() {
     private fun handleScreenOff() {
         if (isScreenOff) return
         isScreenOff = true
-        Log.d(TAG, "Screen OFF - idling WebSocket connections to save battery")
-        // Transport Manager will let idle timeout trigger faster
-        // WebSocket watchdog will close idle connections
-        transportManager.stopConnectionSupervisor()
+        Log.d(TAG, "Screen OFF - closing LAN connections to save battery")
+        scope.launch {
+            // Close all LAN connections to save battery
+            transportManager.closeAllLanConnections()
+            // Stop connection supervisor (already stops cloud connection supervision)
+            transportManager.stopConnectionSupervisor()
+        }
     }
 
     private fun handleScreenOn() {
         if (!isScreenOff) return
         isScreenOff = false
-        Log.d(TAG, "Screen ON - resuming WebSocket connections")
-        // Restart transport will reconnect when needed
-        transportManager.start(buildLanRegistrationConfig())
-        // Restart cloud connection to ensure it reconnects after screen was off
-        // The connection loop should handle reconnection automatically, but calling startReceiving()
-        // ensures the connection job is active if it was stopped
-        relayWebSocketClient.startReceiving()
+        Log.d(TAG, "Screen ON - reconnecting LAN connections")
+        scope.launch {
+            // Reconnect all LAN connections
+            transportManager.reconnectAllLanConnections()
+            // Restart cloud connection to ensure it reconnects after screen was off
+            // The connection loop should handle reconnection automatically, but calling startReceiving()
+            // ensures the connection job is active if it was stopped
+            relayWebSocketClient.startReceiving()
+        }
     }
     
     private fun checkAppForegroundState() {
@@ -800,65 +773,18 @@ class ClipboardSyncService : Service() {
             isAppInForeground = isForeground
             val status = if (isForeground) "FOREGROUND" else "BACKGROUND"
             Log.d(TAG, "📱 App state: $status")
-            if (!isForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isAccessibilityServiceEnabled) {
-                Log.w(TAG, "⚠️ Clipboard access BLOCKED in background. Enable accessibility service for background access.")
-            }
-            updateNotification()
-        }
-    }
-    
-    private fun checkAccessibilityServiceStatus() {
-        val accessibilityManager = getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return
-        val enabledServices = accessibilityManager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-        val serviceClassName = ClipboardAccessibilityService::class.java.name
-        val serviceName = ComponentName(packageName, serviceClassName)
-        
-        // Check if our accessibility service is enabled
-        val isEnabled = enabledServices.any { serviceInfo ->
-            val componentName = ComponentName(
-                serviceInfo.resolveInfo.serviceInfo.packageName,
-                serviceInfo.resolveInfo.serviceInfo.name
-            )
-            componentName == serviceName || serviceInfo.resolveInfo.serviceInfo.name == serviceClassName
-        }
-        
-        if (isEnabled != isAccessibilityServiceEnabled) {
-            isAccessibilityServiceEnabled = isEnabled
-            val status = if (isEnabled) "ENABLED" else "DISABLED"
-            Log.i(TAG, "♿ Accessibility service: $status (allows background clipboard access on Android 10+)")
-            if (isEnabled) {
-                Log.i(TAG, "✅ Background clipboard access is now available via accessibility service!")
-                // Stop ClipboardListener to prevent duplicates - accessibility service will handle clipboard monitoring
-                Log.i(TAG, "🛑 Stopping ClipboardListener to prevent duplicates (accessibility service will handle monitoring)")
-                listener.stop()
-            } else {
-                // Accessibility service disabled - start ClipboardListener if not already running
-                if (!listener.isListening) {
-                    Log.i(TAG, "🔄 Accessibility service disabled - starting ClipboardListener")
-                    ensureClipboardPermissionAndStartListener()
-                }
+            if (!isForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                Log.w(TAG, "⚠️ Clipboard access BLOCKED in background on Android 10+. App must be in foreground.")
             }
             updateNotification()
         }
     }
 
     private fun ensureClipboardPermissionAndStartListener() {
-        // Don't start ClipboardListener if accessibility service is enabled (prevents duplicates)
-        if (isAccessibilityServiceEnabled) {
-            Log.i(TAG, "⏭️ Skipping ClipboardListener start - accessibility service is enabled and will handle clipboard monitoring")
-            return
-        }
-        
         clipboardPermissionJob?.cancel()
         clipboardPermissionJob = scope.launch {
             Log.i(TAG, "🔍 Starting clipboard permission check loop...")
             while (isActive) {
-                // Check again if accessibility service was enabled while waiting
-                if (isAccessibilityServiceEnabled) {
-                    Log.i(TAG, "⏭️ Accessibility service enabled during permission check - stopping ClipboardListener setup")
-                    return@launch
-                }
-                
                 val allowed = clipboardAccessChecker.canReadClipboard()
                 awaitingClipboardPermission = !allowed
                 Log.d(TAG, "📋 Clipboard permission status: allowed=$allowed, awaiting=$awaitingClipboardPermission")
@@ -911,44 +837,6 @@ class ClipboardSyncService : Service() {
         }
     }
     
-    private fun openAccessibilitySettings() {
-        val intent = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            } else {
-                // Fallback for older Android versions
-                Intent(Settings.ACTION_SETTINGS).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to create accessibility settings intent: ${e.message}")
-            Intent(Settings.ACTION_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        }
-        
-        Log.i(TAG, "♿ Opening accessibility settings...")
-        try {
-            startActivity(intent)
-            Log.i(TAG, "✅ Accessibility settings activity started")
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Failed to open accessibility settings: ${e.message}", e)
-            // Fallback: try opening general settings
-            try {
-                val fallbackIntent = Intent(Settings.ACTION_SETTINGS).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                startActivity(fallbackIntent)
-                Log.i(TAG, "✅ Opened general settings as fallback")
-            } catch (e2: Exception) {
-                Log.e(TAG, "❌ Failed to open fallback settings: ${e2.message}", e2)
-            }
-        }
-    }
-
     private fun buildLanRegistrationConfig(): LanRegistrationConfig {
         val version = runCatching {
             val packageInfo = packageManager.getPackageInfo(packageName, 0)
@@ -1077,7 +965,6 @@ class ClipboardSyncService : Service() {
         private const val ACTION_PAUSE = "com.hypo.clipboard.action.PAUSE"
         private const val ACTION_RESUME = "com.hypo.clipboard.action.RESUME"
         private const val ACTION_OPEN_CLIPBOARD_SETTINGS = "com.hypo.clipboard.action.OPEN_CLIPBOARD_SETTINGS"
-        private const val ACTION_OPEN_ACCESSIBILITY_SETTINGS = "com.hypo.clipboard.action.OPEN_ACCESSIBILITY_SETTINGS"
         private const val ACTION_STOP = "com.hypo.clipboard.action.STOP"
         const val ACTION_FORCE_PROCESS_CLIPBOARD = "com.hypo.clipboard.action.FORCE_PROCESS_CLIPBOARD"
     }

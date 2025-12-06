@@ -16,6 +16,9 @@ kill_timeout = 5
   RATE_LIMIT_PER_MIN = "120"
   MESSAGE_SIZE_LIMIT = "2097152"
 
+[http_service]
+  http_options = { idle_timeout = 900 }  # 15 minutes (max allowed by Fly.io) - allows longer ping intervals for battery savings
+
 [[services]]
   protocol = "tcp"
   internal_port = 8080

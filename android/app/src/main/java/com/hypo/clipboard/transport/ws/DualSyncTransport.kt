@@ -15,8 +15,10 @@ import kotlin.coroutines.cancellation.CancellationException
  * A SyncTransport that sends to both LAN (all peers) and cloud simultaneously for maximum reliability.
  * Maintains separate connections for each peer, mirroring macOS architecture.
  * At least one transport must succeed, but all are attempted in parallel.
+ * 
+ * Note: This is a dual-send transport (not a fallback). Both LAN and cloud are attempted simultaneously.
  */
-class FallbackSyncTransport(
+class DualSyncTransport(
     private val lanPeerConnectionManager: LanPeerConnectionManager,
     private val cloudTransport: RelayWebSocketClient,
     private val transportManager: TransportManager
@@ -90,12 +92,12 @@ class FallbackSyncTransport(
             cloudSuccess -> "✅ Cloud (LAN failed: ${lanError?.message?.take(30)})"
             else -> "❌ Both failed"
         }
-        android.util.Log.d("FallbackSyncTransport", "📡 Dual-send to $targetDeviceId → $result")
+        android.util.Log.d("DualSyncTransport", "📡 Dual-send to $targetDeviceId → $result")
         
         // At least one must succeed
         if (!lanSuccess && !cloudSuccess) {
             val error = cloudError ?: lanError ?: Exception("Both LAN and cloud transports failed")
-            android.util.Log.e("FallbackSyncTransport", "❌ Dual-send failed: ${error.message}", error)
+            android.util.Log.e("DualSyncTransport", "❌ Dual-send failed: ${error.message}", error)
             throw error
         }
     }

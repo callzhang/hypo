@@ -1,5 +1,6 @@
 package com.hypo.clipboard.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +14,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -52,7 +52,6 @@ import com.hypo.clipboard.util.MiuiAdapter
 @Composable
 fun SettingsRoute(
     onOpenBatterySettings: () -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
     onRequestSmsPermission: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onStartPairing: () -> Unit,
@@ -65,11 +64,11 @@ fun SettingsRoute(
         onAutoDeleteDaysChanged = viewModel::onAutoDeleteDaysChanged,
         onPlainTextModeChanged = viewModel::onPlainTextModeChanged,
         onOpenBatterySettings = onOpenBatterySettings,
-        onOpenAccessibilitySettings = onOpenAccessibilitySettings,
         onRequestSmsPermission = onRequestSmsPermission,
         onRequestNotificationPermission = onRequestNotificationPermission,
         onStartPairing = onStartPairing,
-        onRemoveDevice = viewModel::removeDevice
+        onRemoveDevice = viewModel::removeDevice,
+        onCheckPeerStatus = { viewModel.checkPeerStatus() }
     )
 }
 
@@ -81,11 +80,11 @@ fun SettingsScreen(
     onAutoDeleteDaysChanged: (Int) -> Unit,
     onPlainTextModeChanged: (Boolean) -> Unit,
     onOpenBatterySettings: () -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
     onRequestSmsPermission: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit,
+    onCheckPeerStatus: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Scaffold(
@@ -128,13 +127,6 @@ fun SettingsScreen(
             }
 
             item {
-                AccessibilitySection(
-                    isEnabled = state.isAccessibilityServiceEnabled,
-                    onOpenAccessibilitySettings = onOpenAccessibilitySettings
-                )
-            }
-
-            item {
                 SmsPermissionSection(
                     isGranted = state.isSmsPermissionGranted,
                     onRequestSmsPermission = onRequestSmsPermission
@@ -157,6 +149,7 @@ fun SettingsScreen(
                     connectionState = state.connectionState,
                     onStartPairing = onStartPairing,
                     onRemoveDevice = onRemoveDevice,
+                    onCheckPeerStatus = onCheckPeerStatus,
                     peerDeviceNames = state.peerDeviceNames
                 )
             }
@@ -377,61 +370,6 @@ private fun BatterySection(
 }
 
 @Composable
-private fun AccessibilitySection(
-    isEnabled: Boolean,
-    onOpenAccessibilitySettings: () -> Unit
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Filled.Accessibility, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(id = R.string.settings_accessibility),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            Text(
-                text = stringResource(id = R.string.settings_accessibility_description),
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (isEnabled) {
-                        stringResource(id = R.string.settings_accessibility_status_enabled)
-                    } else {
-                        stringResource(id = R.string.settings_accessibility_status_disabled)
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (isEnabled) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    }
-                )
-                if (!isEnabled) {
-                    Button(onClick = onOpenAccessibilitySettings) {
-                        Text(text = stringResource(id = R.string.settings_accessibility_open_button))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun SmsPermissionSection(
     isGranted: Boolean,
     onRequestSmsPermission: () -> Unit
@@ -564,6 +502,7 @@ private fun DevicesSection(
     connectionState: com.hypo.clipboard.transport.ConnectionState,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit,
+    onCheckPeerStatus: () -> Unit = {},
     peerDeviceNames: Map<String, String?> = emptyMap()
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -597,6 +536,7 @@ private fun DevicesSection(
                         isDiscovered = isDiscovered,
                         isServerConnected = connectionState == com.hypo.clipboard.transport.ConnectionState.ConnectedCloud,
                         onRemove = { onRemoveDevice(peer) },
+                        onCheckStatus = onCheckPeerStatus,
                         deviceName = deviceName
                     )
                 }
@@ -616,6 +556,7 @@ private fun DeviceRow(
     isDiscovered: Boolean,
     isServerConnected: Boolean,
     onRemove: () -> Unit,
+    onCheckStatus: () -> Unit = {},
     deviceName: String? = null
 ) {
     // transport parameter is kept for API compatibility but not currently used in UI
@@ -623,7 +564,9 @@ private fun DeviceRow(
     val displayName = deviceName ?: peer.attributes["device_name"] ?: peer.serviceName
     
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onCheckStatus),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Row(
@@ -648,29 +591,33 @@ private fun DeviceRow(
                     DeviceStatusBadge(status = status)
                 }
                 // Display detailed connection status or last seen based on connection status
-                val addressText = when {
-                    // Connected via both LAN and server
-                    status == DeviceConnectionStatus.ConnectedLan && isDiscovered && isServerConnected && peer.host != "unknown" -> {
-                        "Connected via ${peer.host}:${peer.port} and server"
+                val addressText = when (status) {
+                    DeviceConnectionStatus.ConnectedBoth -> {
+                        // Connected via both LAN and Cloud
+                        if (isDiscovered && peer.host != "unknown") {
+                            "LAN ✓ · Cloud ✓ (${peer.host}:${peer.port} + server)"
+                        } else {
+                            "LAN ✓ · Cloud ✓"
+                        }
                     }
-                    // Connected via LAN only
-                    status == DeviceConnectionStatus.ConnectedLan && isDiscovered && peer.host != "unknown" -> {
-                        "Connected via ${peer.host}:${peer.port}"
+                    DeviceConnectionStatus.ConnectedLan -> {
+                        // Connected via LAN only
+                        if (isDiscovered && peer.host != "unknown") {
+                            "LAN ✓ (${peer.host}:${peer.port})"
+                        } else {
+                            "LAN ✓"
+                        }
                     }
-                    // Connected via server only
-                    status == DeviceConnectionStatus.ConnectedCloud && isServerConnected -> {
-                        "Connected via server"
-                    }
-                    // Connected but no detailed info
-                    status == DeviceConnectionStatus.ConnectedLan || status == DeviceConnectionStatus.ConnectedCloud -> {
-                        "Connected"
+                    DeviceConnectionStatus.ConnectedCloud -> {
+                        // Connected via Cloud only
+                        "Cloud ✓"
                     }
                     else -> {
                         // Show last seen timestamp for disconnected devices
                         val lastSeen = peer.lastSeen
                         val formatter = java.time.format.DateTimeFormatter.ofPattern("M/d/yyyy h:mm a")
                         val zonedDateTime = lastSeen.atZone(java.time.ZoneId.systemDefault())
-                        "Last seen ${formatter.format(zonedDateTime)}"
+                        "Offline · Last seen ${formatter.format(zonedDateTime)}"
                     }
                 }
                 Text(

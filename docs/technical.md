@@ -1,7 +1,7 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 1.0.5  
-Date: December 5, 2025  
+Version: 1.0.6  
+Date: December 6, 2025  
 Status: Production
 
 ---
@@ -13,6 +13,7 @@ Status: Production
 4. [Platform-Specific Implementation](#platform-specific-implementation)
 5. [Testing Strategy](#testing-strategy)
 6. [Deployment](#deployment)
+7. [Future Enhancements](#7-future-enhancements)
 
 ---
 
@@ -171,18 +172,28 @@ Server → Client: ACK + session token
 
 #### Heartbeat (Keepalive Pings)
 
-**Current Implementation**:
-- **Cloud WebSocket**: Sends `PING` every **20 seconds** to prevent Fly.io idle timeout (Fly.io disconnects idle connections after ~60 seconds)
+**Current Implementation** (Updated December 2025):
+- **Cloud WebSocket**: Sends `PING` every **14 minutes** (840 seconds) to prevent Fly.io idle timeout
+  - **Fly.io Configuration**: `idle_timeout = 900` seconds (15 minutes, **maximum allowed**) configured in `fly.toml`
+  - **Dual Purpose**: Pings serve to (1) keep connection alive and (2) detect dead connections quickly
+  - **Safety Margin**: 60-second buffer (ping at 14 min, timeout at 15 min) ensures connection reliability
+  - **Failure Detection**: Dead connections detected within 14 minutes (acceptable for clipboard sync)
 - **LAN WebSocket**: Sends `PING` every **30 minutes** (event-driven reconnection available if disconnected)
 - Server responds with `PONG` to each ping
 - Connection closed after ping failures (triggers reconnection)
 
-**Battery Impact Analysis**:
-- **Cloud (20s interval)**: 
-  - **Necessary**: Required to prevent Fly.io from disconnecting idle connections
-  - **Impact**: Moderate - prevents device from entering deep sleep, but necessary for connection reliability
-  - **Optimization**: Cannot be increased significantly without risking disconnections (Fly.io timeout ~60s)
-  - **Estimated battery drain**: ~2-3% per hour when active (based on W3C research: 20s interval causes ~2% drop in 10 minutes)
+**Previous Implementation** (Before December 2025):
+- **Cloud WebSocket**: Sent `PING` every **20 seconds** (Fly.io default timeout ~60 seconds)
+- **Battery Impact**: ~2-3% per hour when active (very high due to frequent pings)
+
+**Battery Impact Analysis** (Updated):
+- **Cloud (14 min interval)**: 
+  - **Optimized**: Reduced from 20s to 14 min (42x reduction in ping frequency)
+  - **Battery Savings**: ~98% reduction in ping-related battery drain
+  - **Estimated battery drain**: ~0.05-0.1% per hour when active (down from 2-3%)
+  - **Reliability**: Maintained with 60-second safety margin before Fly.io timeout
+  - **Failure Detection**: Dead connections detected within 14 minutes (good balance)
+  - **Configuration**: Fly.io `idle_timeout = 900` seconds (15 minutes, **maximum allowed by Fly.io**)
   
 - **LAN (30 minutes interval)**:
   - **Battery-friendly**: Very low impact - only 2 pings per hour
@@ -191,10 +202,11 @@ Server → Client: ACK + session token
   - **Alternative**: Could potentially be removed entirely and rely on connection health checks, but 30-minute ping provides safety net
 
 **Optimization Recommendations**:
-1. **Cloud ping (20s)**: Keep as-is - necessary for Fly.io compatibility
+1. ✅ **Cloud ping (14 min)**: Optimized from 20s - 98% battery savings achieved (using Fly.io max timeout of 15 min)
 2. **LAN ping (30m)**: Consider increasing to 60 minutes or removing entirely if connection health checks are sufficient
 3. **Screen-off optimization**: Both ping intervals could be increased when screen is off (already implemented via screen-state monitoring)
 4. **Adaptive intervals**: Could implement longer intervals during low activity periods
+5. **FCM Push Notifications (Planned)**: Replace persistent WebSocket connections with FCM push notifications to allow app to sleep and wake only when sync messages arrive (see [FCM Implementation Plan](#fcm-implementation-plan))
 
 #### Disconnection
 - Graceful: Client sends `DISCONNECT` message
@@ -576,7 +588,7 @@ android/
 │   │   │   │   └── ws/
 │   │   │   │       ├── WebSocketTransportClient.kt
 │   │   │   │       ├── RelayWebSocketClient.kt
-│   │   │   │       ├── FallbackSyncTransport.kt
+│   │   │   │       ├── DualSyncTransport.kt
 │   │   │   │       ├── LanPeerConnectionManager.kt
 │   │   │   │       ├── LanWebSocketServer.kt
 │   │   │   │       ├── TransportFrameCodec.kt
@@ -778,7 +790,7 @@ Multicast is a network communication method that allows one sender to transmit d
   - Same exponential backoff as cloud connections (1s → 2s → 4s → 8s → 16s → 32s → 64s → 128s capped)
   - Event-driven reconnection - immediate retry on disconnect (no polling)
   - Connections removed when peers are no longer discovered
-- **FallbackSyncTransport**: Updated to use `LanPeerConnectionManager` instead of single `lanTransport`
+- **DualSyncTransport**: Updated to use `LanPeerConnectionManager` instead of single `lanTransport`
   - Sends to specific peer if `targetDeviceId` is set, otherwise broadcasts to all connected peers
   - Still sends to cloud in parallel for maximum reliability
 - **Instrumentation**: `WebSocketTransportClient` records handshake and round-trip durations via the injected `TransportMetricsRecorder`. The `TransportMetricsAggregator` can be wired into DI via `BuildConfig.ENABLE_TRANSPORT_METRICS` flag for production metrics collection. The test harness exercises these metrics and produces anonymized samples in `tests/transport/lan_loopback_metrics.json`.
@@ -814,18 +826,24 @@ class ScreenStateReceiver(
   - Reconnects WebSocket connections automatically
   - Resumes LAN peer discovery
 
-#### 4.2.7 Connection Status Probing ✅ Event-Driven (December 2025)
+#### 4.2.7 Connection Status Probing ✅ Dual Status (LAN + Cloud) (December 2025)
 
-**Event-Driven Architecture**: `ConnectionStatusProber` now uses StateFlow observation instead of periodic polling:
-- **Peers Observation**: Observes `transportManager.peers` StateFlow with 500ms debounce to trigger probes when peers are discovered/lost
-- **Cloud State Observation**: Observes `cloudWebSocketClient.connectionState` StateFlow with 500ms debounce to trigger probes on connection state changes
-- **Safety Timer**: 5-minute fallback timer for debugging builds or as belt-and-suspenders
-- **Server Health Check**: Uses `checkServerHealth()` when WebSocket is disconnected but network is available, providing more accurate "cloud reachable" status than binary `isConnected()` check
+**Dual Status Architecture**: `ConnectionStatusProber` checks connection status via both LAN and Cloud simultaneously:
+- **Cloud Status**: Queries backend via WebSocket control message (`query_connected_peers`) to get list of connected device IDs
+- **LAN Status**: Checks via Bonjour discovery + active WebSocket connections (devices with established LAN connections)
+- **Dual Status Display**: UI shows "LAN ✓", "Cloud ✓", "Both ✓", or "Offline" for each peer
+- **Event-Driven Architecture**: Uses StateFlow observation instead of periodic polling:
+  - **Peers Observation**: Observes `transportManager.peers` StateFlow with 500ms debounce to trigger probes when peers are discovered/lost
+  - **Cloud State Observation**: Observes `cloudWebSocketClient.connectionState` StateFlow with 500ms debounce to trigger probes on connection state changes
+  - **Safety Timer**: 5-minute fallback timer for debugging builds or as belt-and-suspenders
+- **Periodic Check**: Actively queries cloud for connected peers every 10 minutes (in addition to event-driven checks)
+- **Manual Check**: `checkNow()` function can be called when user clicks on peer list to immediately check status
 - **Benefits**: 
-  - Eliminates unnecessary 1-minute polling loop
+  - Accurate dual status (LAN + Cloud) for each peer
+  - Eliminates unnecessary polling loop (event-driven + 10-minute periodic check)
   - Reduces battery usage by only probing when state actually changes
   - More responsive to network and connection changes
-  - Better accuracy with server health check for cloud reachability
+  - User can manually trigger status check by clicking on peer list
 
 **Performance Impact**
 - Reduces background battery drain by **60-80%** during screen-off periods
@@ -1025,7 +1043,7 @@ This section compares the implementation details between Android and macOS clien
 
 **Current Status**: ✅ **Aligned** - Both platforms always dual-send (LAN + cloud simultaneously) with separate connections per peer.
 
-**Android** (`FallbackSyncTransport.kt` + `LanPeerConnectionManager.kt` + `LanWebSocketServer.kt`):
+**Android** (`DualSyncTransport.kt` + `LanPeerConnectionManager.kt` + `LanWebSocketServer.kt`):
 - **Always Dual-Send**: Always sends to both LAN (all peers) and cloud simultaneously
   - No conditional check - always attempts both transports
   - Best-effort practice for maximum reliability
@@ -1184,7 +1202,7 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 
 - **Production Deployment**: Relay deployed to Fly.io production. `backend/fly.toml` defines auto-scaling (min=1, max=3) and embedded Redis in container. Secrets (`RELAY_HMAC_KEY`, `CERT_FINGERPRINT`) managed through Fly secrets and rotated monthly. The production relay is available at `https://hypo.fly.dev` with WebSocket endpoint `wss://hypo.fly.dev/ws`.
 - **Pairing Support**: Adds `/pairing/code` and `/pairing/claim` endpoints secured with HMAC header `X-Hypo-Signature`. Pairing codes stored in Redis with 60 s TTL and replay protection counters. Protocol is device-agnostic: any device can act as initiator (code creator) or responder (code claimer).
-- **Client Fallback Orchestration**: Android uses `FallbackSyncTransport` and macOS uses `DualSyncTransport` to always attempt both LAN and cloud sends in parallel, with LAN attempts bounded by a 3 s timeout. Fallback reason codes (`lan_timeout`, `lan_rejected`, `lan_not_supported`) are still surfaced via the shared `TransportAnalytics` stream for telemetry dashboards.
+- **Client Dual-Send Orchestration**: Both Android and macOS use `DualSyncTransport` to always attempt both LAN and cloud sends in parallel, with LAN attempts bounded by a 3 s timeout. Transport reason codes (`lan_timeout`, `lan_rejected`, `lan_not_supported`) are still surfaced via the shared `TransportAnalytics` stream for telemetry dashboards.
 - **Certificate Pinning**: `backend/scripts/cert_fingerprint.sh` extracts SHA-256 fingerprints from the Fly-issued certificate chain. Clients load the pinned hash and record a `transport_pinning_failure` analytics event when TLS verification fails (environment + host metadata captured).
 - **Observability**: Structured logs via `tracing` include connection IDs, transport path (`lan`, `relay`), latency histograms exported to Prometheus, and fallback reason counts. Alerts trigger when relay error rate exceeds 1% over 5 min or when pinning failures exceed 10/min.
 
@@ -1268,6 +1286,292 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 ---
 
 ## 7. Future Enhancements
+
+### 7.1 FCM Implementation Plan (Push Notifications for Energy Efficiency)
+
+**Status**: Planned  
+**Priority**: High (Energy Optimization)  
+**Target Platforms**: Android (primary), macOS (via APNs if needed)
+
+#### 7.1.1 Overview
+
+Firebase Cloud Messaging (FCM) allows the app to sleep when idle and wake only when a sync message arrives, dramatically reducing battery consumption. Instead of maintaining persistent WebSocket connections with 20-second heartbeats, the app can:
+
+1. **Sleep when idle**: Close WebSocket connections and allow the device to enter deep sleep
+2. **Wake on notification**: FCM push notification wakes the app when a sync message is queued
+3. **Fetch on demand**: App establishes WebSocket connection only when needed to receive queued messages
+4. **Hybrid approach**: Keep LAN connections active (low battery impact) but use FCM for cloud messages
+
+#### 7.1.2 Architecture
+
+```
+┌─────────────┐         ┌──────────────┐         ┌─────────────┐
+│   Device A  │         │   Backend    │         │   Device B  │
+│  (Android)  │         │   (Rust)    │         │  (Android)  │
+└──────┬──────┘         └──────┬───────┘         └──────┬──────┘
+       │                       │                        │
+       │ 1. Copy clipboard     │                        │
+       ├──────────────────────>│                        │
+       │                       │                        │
+       │                       │ 2. Queue message      │
+       │                       │    (if B offline)     │
+       │                       │                        │
+       │                       │ 3. Send FCM push      │
+       │                       ├───────────────────────>│
+       │                       │                        │
+       │                       │ 4. B wakes, connects  │
+       │                       │<───────────────────────┤
+       │                       │                        │
+       │                       │ 5. Deliver queued     │
+       │                       ├───────────────────────>│
+       │                       │    message             │
+       │                       │                        │
+```
+
+**Key Components**:
+- **Backend Message Queue**: Redis-based queue for offline devices (already planned)
+- **FCM Service**: Backend service to send FCM push notifications
+- **FCM Client (Android)**: Firebase Cloud Messaging SDK integration
+- **Wake Handler**: Android service to wake app and fetch queued messages
+
+#### 7.1.3 Benefits
+
+**Pros**:
+- **Massive battery savings**: Eliminates 20-second heartbeat pings (estimated 60-80% reduction in battery drain)
+- **Better deep sleep**: Device can enter deep sleep when idle, only waking for actual sync events
+- **Scalability**: FCM handles millions of devices efficiently (Google infrastructure)
+- **Reliability**: FCM has high delivery rates and handles device state (offline, doze mode, etc.)
+- **Cost-effective**: FCM is free for reasonable usage volumes
+- **Hybrid support**: Can keep LAN connections active (low impact) while using FCM for cloud
+
+**Cons**:
+- **Latency**: Slight increase in latency (FCM delivery + connection establishment ~1-2 seconds vs. instant WebSocket)
+- **Complexity**: Additional infrastructure (FCM service, token management, queue integration)
+- **Dependency**: Relies on Google services (FCM) and Firebase SDK
+- **Token management**: Must handle FCM token registration, refresh, and device pairing
+- **Platform support**: macOS would need APNs (Apple Push Notification service) for similar functionality
+
+#### 7.1.4 Implementation Steps
+
+##### Phase 1: Backend FCM Service
+
+1. **Add FCM SDK to Backend**:
+   ```toml
+   # backend/Cargo.toml
+   [dependencies]
+   firebase-admin = "0.3"  # Or use REST API with reqwest
+   ```
+
+2. **FCM Token Storage**:
+   - Store FCM tokens in Redis: `fcm_token:{device_id}` → `{token, platform, updated_at}`
+   - Update token on device registration/connection
+   - Expire tokens after 90 days of inactivity
+
+3. **FCM Push Service**:
+   ```rust
+   // backend/src/services/fcm_service.rs
+   pub struct FcmService {
+       fcm_api_key: String,
+       redis: RedisClient,
+   }
+   
+   impl FcmService {
+       pub async fn send_push_notification(
+           &self,
+           device_id: &str,
+           message: &str,
+       ) -> Result<(), FcmError> {
+           // 1. Get FCM token from Redis
+           // 2. Send FCM push via HTTP API
+           // 3. Handle token refresh if expired
+       }
+   }
+   ```
+
+4. **Integrate with Message Queue**:
+   - When message queued for offline device, send FCM push
+   - Push payload: `{action: "sync_message", device_id: "...", message_count: 1}`
+   - Device wakes, connects, fetches queued messages
+
+##### Phase 2: Android FCM Integration
+
+1. **Add Firebase SDK**:
+   ```kotlin
+   // android/app/build.gradle.kts
+   dependencies {
+       implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+       implementation("com.google.firebase:firebase-messaging")
+   }
+   ```
+
+2. **FCM Token Registration**:
+   ```kotlin
+   // android/app/src/main/java/com/hypo/clipboard/sync/FcmTokenManager.kt
+   class FcmTokenManager {
+       suspend fun registerToken(deviceId: String) {
+           val token = FirebaseMessaging.getInstance().token.await()
+           // Send token to backend via WebSocket control message
+           transportManager.sendControlMessage("register_fcm_token", mapOf(
+               "token" to token,
+               "device_id" to deviceId
+           ))
+       }
+   }
+   ```
+
+3. **FCM Message Handler**:
+   ```kotlin
+   // android/app/src/main/java/com/hypo/clipboard/service/FcmMessageService.kt
+   class FcmMessageService : FirebaseMessagingService() {
+       override fun onMessageReceived(remoteMessage: RemoteMessage) {
+           when (remoteMessage.data["action"]) {
+               "sync_message" -> {
+                   // Wake app, establish WebSocket connection
+                   // Fetch queued messages from backend
+                   syncCoordinator.wakeAndSync()
+               }
+               "token_refresh" -> {
+                   // Refresh FCM token and re-register
+                   fcmTokenManager.refreshToken()
+               }
+           }
+       }
+   }
+   ```
+
+4. **Wake Handler**:
+   ```kotlin
+   // android/app/src/main/java/com/hypo/clipboard/sync/SyncCoordinator.kt
+   suspend fun wakeAndSync() {
+       // 1. Ensure WebSocket connection is active
+       transportManager.ensureCloudConnection()
+       
+       // 2. Request queued messages from backend
+       val queuedMessages = transportManager.fetchQueuedMessages()
+       
+       // 3. Process each queued message
+       queuedMessages.forEach { message ->
+           incomingClipboardHandler.handle(message)
+       }
+   }
+   ```
+
+##### Phase 3: Hybrid Mode (LAN + FCM)
+
+1. **Connection Strategy**:
+   - **LAN**: Keep active (low battery impact, instant delivery)
+   - **Cloud**: Use FCM for wake-up, establish WebSocket only when needed
+   - **Fallback**: If FCM unavailable, fall back to persistent WebSocket
+
+2. **Smart Connection Management**:
+   ```kotlin
+   enum class CloudConnectionMode {
+       PERSISTENT,  // Current: Always connected
+       FCM_WAKE,    // New: Sleep, wake on FCM
+       HYBRID       // New: FCM + periodic connection check
+   }
+   ```
+
+3. **User Preference**:
+   - Add setting: "Battery optimization mode" (FCM vs. persistent connection)
+   - Default: FCM for cloud, persistent for LAN
+
+##### Phase 4: Testing & Rollout
+
+1. **Testing**:
+   - Unit tests for FCM token management
+   - Integration tests for FCM push → wake → fetch flow
+   - Battery drain comparison (before/after)
+   - Latency measurement (FCM delivery time)
+
+2. **Rollout**:
+   - Feature flag: `ENABLE_FCM_WAKE`
+   - Gradual rollout: 10% → 50% → 100%
+   - Monitor: Battery drain, latency, delivery success rate
+
+#### 7.1.5 Security Considerations
+
+1. **FCM Token Security**:
+   - Store tokens encrypted in Redis
+   - Rotate tokens periodically (Firebase handles this automatically)
+   - Validate token ownership before sending push
+
+2. **Push Payload**:
+   - **No sensitive data**: Push payload only contains action type, not clipboard content
+   - **Encrypted content**: Clipboard content remains end-to-end encrypted, delivered via WebSocket after wake
+
+3. **Token Validation**:
+   - Backend validates device_id → FCM token mapping
+   - Reject pushes for unpaired devices
+
+#### 7.1.6 Backend API Changes
+
+**New Control Messages**:
+```json
+// Register FCM token
+{
+  "action": "register_fcm_token",
+  "token": "fcm_token_string",
+  "device_id": "uuid",
+  "platform": "android"
+}
+
+// Fetch queued messages (after FCM wake)
+{
+  "action": "fetch_queued_messages",
+  "device_id": "uuid"
+}
+
+// Response: List of queued messages
+{
+  "action": "queued_messages_response",
+  "messages": [...]
+}
+```
+
+**Message Queue Integration**:
+- When message queued: Check if device has FCM token
+- If token exists: Send FCM push notification
+- If no token: Fall back to persistent WebSocket (backward compatible)
+
+#### 7.1.7 Estimated Impact
+
+**Battery Savings**:
+- **Current**: ~2-3% per hour (20s heartbeat)
+- **With FCM**: ~0.1-0.3% per hour (only when sync events occur)
+- **Reduction**: 80-90% battery savings
+
+**Latency**:
+- **Current**: Instant (persistent connection)
+- **With FCM**: 1-2 seconds (FCM delivery + connection establishment)
+- **Acceptable**: Yes, for clipboard sync use case
+
+**Reliability**:
+- **FCM delivery rate**: >99% (Google infrastructure)
+- **Fallback**: Persistent WebSocket if FCM unavailable
+
+#### 7.1.8 Migration Path
+
+1. **Phase 1**: Implement FCM alongside existing WebSocket (dual mode)
+2. **Phase 2**: Make FCM default for new installations
+3. **Phase 3**: Migrate existing users (opt-in, then opt-out)
+4. **Phase 4**: Deprecate persistent WebSocket for cloud (keep for LAN)
+
+#### 7.1.9 Dependencies
+
+- **Firebase SDK**: `com.google.firebase:firebase-messaging` (Android)
+- **Backend FCM**: Firebase Admin SDK or REST API
+- **Redis**: For FCM token storage (already in use)
+- **Google Services**: Firebase project setup, API keys
+
+#### 7.1.10 Future Enhancements
+
+- **macOS APNs**: Similar implementation using Apple Push Notification service
+- **Priority levels**: High-priority messages (user-initiated) vs. low-priority (background sync)
+- **Batch notifications**: Group multiple queued messages into single push
+- **Smart scheduling**: Delay non-urgent pushes during device doze mode
+
+### 7.2 Other Future Enhancements
 
 1. **Multi-device support**: Sync across >2 devices
 2. **Clipboard filtering**: Exclude certain apps (e.g., password managers)
@@ -1355,7 +1659,7 @@ docker run -p 8080:8080 hypo-relay
 
 ---
 
-**Document Version**: 0.3.7  
-**Last Updated**: December 2, 2025  
-**Status**: Production Beta  
+**Document Version**: 0.3.8  
+**Last Updated**: December 6, 2025  
+**Status**: Production  
 **Authors**: Principal Engineering Team

@@ -353,6 +353,17 @@ Last Updated: December 5, 2025
 
 ## Future Enhancements (Post-Launch)
 
+### Backend Message Queue (Planned)
+- [ ] Implement message queue for failed deliveries
+  - [ ] Queue messages when target device is offline (`DeviceNotConnected`)
+  - [ ] Store queued messages in Redis (persist across server restarts)
+  - [ ] Exponential backoff retry: 1s → 2s → 4s → 8s → 16s → 32s → 64s → 128s → 256s → 512s → 1024s → 2048s (max)
+  - [ ] Message expiration: Remove messages after 2048 seconds timeout
+  - [ ] Background worker to process queue and retry delivery
+  - [ ] Deliver queued messages when device reconnects
+  - [ ] Add queue metrics to `/status` endpoint (pending messages, queued per device)
+  - [ ] Update status handler to report queue statistics
+
 ### Multi-Device Support
 - [ ] Support >2 devices per account
 - [ ] Device group management

@@ -240,6 +240,50 @@ public final class LanSyncTransport: SyncTransport {
         }
     }
     
+    /// Close all LAN connections (for sleep optimization).
+    /// Connections will be re-established when reconnectAllConnections() is called.
+    public func closeAllConnections() async {
+        #if canImport(os)
+        logger.info("🔌 [LanSyncTransport] Closing all LAN connections (sleep optimization)")
+        #endif
+        
+        // Disconnect all peer connections but keep the transport objects
+        for (deviceId, transport) in clientTransports {
+            do {
+                await transport.disconnect()
+                #if canImport(os)
+                logger.debug("   [LanSyncTransport] Disconnected peer \(deviceId)")
+                #endif
+            } catch {
+                #if canImport(os)
+                logger.warning("⚠️ [LanSyncTransport] Error disconnecting peer \(deviceId): \(error.localizedDescription)")
+                #endif
+            }
+        }
+        
+        // Cancel all connection maintenance tasks
+        for (deviceId, task) in connectionTasks {
+            task.cancel()
+            #if canImport(os)
+            logger.debug("   [LanSyncTransport] Cancelled connection maintenance for peer \(deviceId)")
+            #endif
+        }
+        connectionTasks.removeAll()
+        
+        // Keep clientTransports and peerURLs intact - we'll reconnect to the same peers
+    }
+    
+    /// Reconnect all LAN connections (for wake optimization).
+    /// Re-establishes connections to all discovered peers.
+    public func reconnectAllConnections() async {
+        #if canImport(os)
+        logger.info("🔄 [LanSyncTransport] Reconnecting all LAN connections (wake optimization)")
+        #endif
+        
+        // Re-sync peer connections to re-establish connections
+        await syncPeerConnections()
+    }
+    
     public func disconnect() async {
         isConnected = false
         

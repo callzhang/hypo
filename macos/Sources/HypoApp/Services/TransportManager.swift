@@ -985,6 +985,30 @@ public func updateConnectionState(_ newState: ConnectionState) {
             connectionStatusProber?.probeNow()
         }
     }
+    
+    /// Close all LAN connections (for sleep optimization).
+    /// Connections will be re-established when reconnectAllLanConnections() is called.
+    public func closeAllLanConnections() async {
+        #if canImport(os)
+        logger.info("🔌 [TransportManager] Closing all LAN connections (sleep optimization)")
+        #endif
+        
+        if let provider = provider as? DefaultTransportProvider {
+            await provider.getLanTransport().closeAllConnections()
+        }
+    }
+    
+    /// Reconnect all LAN connections (for wake optimization).
+    /// Re-establishes connections to all discovered peers.
+    public func reconnectAllLanConnections() async {
+        #if canImport(os)
+        logger.info("🔄 [TransportManager] Reconnecting all LAN connections (wake optimization)")
+        #endif
+        
+        if let provider = provider as? DefaultTransportProvider {
+            await provider.getLanTransport().reconnectAllConnections()
+        }
+    }
 
     private static func defaultLanConfiguration() -> BonjourPublisher.Configuration {
         let hostName = ProcessInfo.processInfo.hostName

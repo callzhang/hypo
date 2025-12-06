@@ -196,15 +196,16 @@ public extension ClipboardEntry {
         case .link(let url):
             return url.absoluteString.data(using: .utf8)
         case .image(let metadata):
+            // Return data if available (from pasteboard), otherwise nil (will be loaded async in preview)
             return metadata.data
         case .file(let metadata):
+            // Only return base64 data if available (from remote origin)
+            // Don't read from URL synchronously - let preview view handle async loading
             if let base64 = metadata.base64,
                let data = Data(base64Encoded: base64) {
                 return data
             }
-            if let url = metadata.url {
-                return try? Data(contentsOf: url)
-            }
+            // Return nil for local files - preview will load async
             return nil
         }
     }

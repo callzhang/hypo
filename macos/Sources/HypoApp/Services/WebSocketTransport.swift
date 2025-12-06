@@ -558,13 +558,17 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     private func startWatchdog(for task: WebSocketTasking) {
         watchdogTask?.cancel()
         // For cloud relay connections, use ping/pong keepalive instead of idle timeout
+        // Fly.io idle_timeout is configured to 900 seconds (15 minutes, max allowed) in fly.toml
+        // We send pings every 14 minutes (840 seconds) to:
+        // 1. Keep connection alive (well before 15-minute timeout)
+        // 2. Detect dead connections quickly (within 14 minutes)
         if configuration.environment == "cloud" || configuration.url.scheme == "wss" {
             logger.debug("⏰ [WebSocketTransport] Starting ping/pong keepalive")
-            // Send ping every 20 seconds to keep connection alive
+            logger.debug("   Sending ping every 14 minutes (840s) - Fly.io timeout: 900s (max)")
             watchdogTask = Task.detached { [weak self] in
                 guard let self else { return }
                 while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 20_000_000_000) // 20 seconds
+                    try? await Task.sleep(nanoseconds: 840_000_000_000) // 14 minutes (840 seconds)
                     if Task.isCancelled { return }
                     // Access state directly since WebSocketTransport is a class, not an actor
                     guard case .connected(let currentTask) = self.state, currentTask === task else {

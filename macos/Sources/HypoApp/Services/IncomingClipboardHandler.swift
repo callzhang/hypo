@@ -259,11 +259,33 @@ public final class IncomingClipboardHandler {
             }
             
         case .image:
+            // Extract filename from metadata if available
+            let fileName = payload.metadata?["file_name"]
+            
+            // Try to get actual image dimensions from the image data
+            var pixelSize = CGSizeValue(width: 0, height: 0)
+            if let image = NSImage(data: payload.data) {
+                let size = image.size
+                pixelSize = CGSizeValue(width: Int(size.width), height: Int(size.height))
+            }
+            
+            // Extract format from metadata - log warning if missing (should be required in protocol)
+            let format: String
+            if let metadataFormat = payload.metadata?["format"], !metadataFormat.isEmpty {
+                format = metadataFormat
+            } else {
+                #if canImport(os)
+                logger.warning("⚠️ [IncomingClipboardHandler] Image format missing from metadata, defaulting to 'png'. This indicates a protocol issue.")
+                #endif
+                // TODO: Make format required in protocol
+                format = "png"
+            }
+            
             let metadata = ImageMetadata(
-                pixelSize: CGSizeValue(width: 0, height: 0),
+                pixelSize: pixelSize,
                 byteSize: payload.data.count,
-                format: "png",
-                altText: nil,
+                format: format,
+                altText: fileName, // Include filename from metadata
                 data: payload.data,
                 thumbnail: nil
             )

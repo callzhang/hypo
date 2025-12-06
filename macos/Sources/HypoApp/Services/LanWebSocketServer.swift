@@ -995,12 +995,13 @@ public final class LanWebSocketServer {
             }
         case .clipboard:
             // This case should not be reached if frame decoding succeeded above
-            // But keep it as fallback for non-frame-encoded clipboard messages
+            // If we reach here, it means frame decoding failed but we still got a clipboard frame type
+            // This indicates a protocol error - reject the message
             #if canImport(os)
-            logger.info("✅ CLIPBOARD MESSAGE RECEIVED (fallback): forwarding to delegate, \(data.count) bytes")
+            logger.error("❌ [LanWebSocketServer] Invalid frame: clipboard type reached but frame decoding should have failed. Rejecting message (\(data.count) bytes)")
             #endif
-            logger.info("✅  CLIPBOARD MESSAGE RECEIVED (fallback): \(data.count) bytes, forwarding to delegate")
-            delegate?.server(self, didReceiveClipboardData: data, from: connectionId)
+            // Don't process invalid messages - fail fast
+            return
         case .unknown:
             #if canImport(os)
             logger.warning("⚠️ CLIPBOARD UNKNOWN MESSAGE TYPE from \(connectionId.uuidString.prefix(8)), \(data.count) bytes")

@@ -900,11 +900,19 @@ private fun ClipboardDetailContent(
             loadError = null
             try {
                 val content = viewModel.loadFullContent(item.id)
-                if (content != null) {
+                if (content != null && content.isNotEmpty()) {
                     loadedContent = content
                 } else {
-                    loadError = "Failed to load content"
+                    // Check if it's a size issue
+                    val sizeFromMetadata = item.metadata?.get("size")?.toLongOrNull() ?: 0L
+                    if (sizeFromMetadata > 2 * 1024 * 1024) { // > 2MB
+                        loadError = "Content is too large to display (${formatBytes(sizeFromMetadata)}). Please copy to clipboard instead."
+                    } else {
+                        loadError = "Failed to load content"
+                    }
                 }
+            } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
+                loadError = "Content is too large to display. Please copy to clipboard instead."
             } catch (e: Exception) {
                 loadError = "Error loading content: ${e.message}"
             } finally {
@@ -953,11 +961,19 @@ private fun ClipboardDetailContent(
                                 coroutineScope.launch {
                                     try {
                                         val content = viewModel.loadFullContent(item.id)
-                                        if (content != null) {
+                                        if (content != null && content.isNotEmpty()) {
                                             loadedContent = content
                                         } else {
-                                            loadError = "Failed to load content"
+                                            // Check if it's a size issue
+                                            val sizeFromMetadata = item.metadata?.get("size")?.toLongOrNull() ?: 0L
+                                            if (sizeFromMetadata > 2 * 1024 * 1024) { // > 2MB
+                                                loadError = "Content is too large to display (${formatBytes(sizeFromMetadata)}). Please copy to clipboard instead."
+                                            } else {
+                                                loadError = "Failed to load content"
+                                            }
                                         }
+                                    } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
+                                        loadError = "Content is too large to display. Please copy to clipboard instead."
                                     } catch (e: Exception) {
                                         loadError = "Error loading content: ${e.message}"
                                     } finally {

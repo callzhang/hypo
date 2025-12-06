@@ -102,6 +102,39 @@ class RelayWebSocketClient @Inject constructor(
     }
     
     /**
+     * Query connected peers from the cloud relay server.
+     * Sends a control message and returns the list of connected device IDs.
+     * Returns empty list if query fails or connection is not established.
+     */
+    suspend fun queryConnectedPeers(): List<String> {
+        if (!isConnected()) {
+            android.util.Log.d("RelayWebSocketClient", "⚠️ Cannot query connected peers: not connected")
+            return emptyList()
+        }
+        
+        return try {
+            val response = delegate.sendControlMessage("query_connected_peers", timeoutMs = 5000)
+            if (response != null) {
+                val devicesArray = response.optJSONArray("connected_devices")
+                val devices = mutableListOf<String>()
+                if (devicesArray != null) {
+                    for (i in 0 until devicesArray.length()) {
+                        devices.add(devicesArray.getString(i))
+                    }
+                }
+                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${devices.size} devices")
+                devices
+            } else {
+                android.util.Log.w("RelayWebSocketClient", "⚠️ No response from query_connected_peers")
+                emptyList()
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("RelayWebSocketClient", "⚠️ Failed to query connected peers: ${e.message}", e)
+            emptyList()
+        }
+    }
+    
+    /**
      * Force reconnection by closing existing connection and starting a new one.
      * Used when network changes to ensure connection uses new IP address.
      * Only reconnects if connection is already established (not in progress).

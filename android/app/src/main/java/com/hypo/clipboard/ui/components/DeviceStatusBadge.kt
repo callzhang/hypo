@@ -27,9 +27,27 @@ import com.hypo.clipboard.transport.ActiveTransport
 enum class DeviceConnectionStatus {
     ConnectedLan,
     ConnectedCloud,
+    ConnectedBoth,  // Connected via both LAN and Cloud
     Paired,
     Disconnected,
     Failed
+}
+
+/**
+ * Represents the connection status of a device via both LAN and Cloud.
+ */
+data class DeviceDualStatus(
+    val isConnectedViaLan: Boolean,
+    val isConnectedViaCloud: Boolean
+) {
+    fun toDeviceConnectionStatus(): DeviceConnectionStatus {
+        return when {
+            isConnectedViaLan && isConnectedViaCloud -> DeviceConnectionStatus.ConnectedBoth
+            isConnectedViaLan -> DeviceConnectionStatus.ConnectedLan
+            isConnectedViaCloud -> DeviceConnectionStatus.ConnectedCloud
+            else -> DeviceConnectionStatus.Disconnected
+        }
+    }
 }
 
 @Composable
@@ -48,6 +66,12 @@ fun DeviceStatusBadge(
             icon = Icons.Filled.Cloud,
             textRes = R.string.device_status_cloud,
             containerColor = Color(0xFF2196F3), // Blue
+            contentColor = Color.White
+        )
+        DeviceConnectionStatus.ConnectedBoth -> DeviceStatusVisuals(
+            icon = Icons.Filled.Wifi,  // Show LAN icon for "both" (primary connection)
+            textRes = R.string.device_status_both,
+            containerColor = Color(0xFF4CAF50), // Green (LAN color)
             contentColor = Color.White
         )
         DeviceConnectionStatus.Paired -> DeviceStatusVisuals(
@@ -95,6 +119,7 @@ fun DeviceStatusIndicator(
     val color = when (status) {
         DeviceConnectionStatus.ConnectedLan -> Color(0xFF4CAF50) // Green
         DeviceConnectionStatus.ConnectedCloud -> Color(0xFF2196F3) // Blue
+        DeviceConnectionStatus.ConnectedBoth -> Color(0xFF4CAF50) // Green (LAN color)
         DeviceConnectionStatus.Paired -> MaterialTheme.colorScheme.primary
         DeviceConnectionStatus.Disconnected -> MaterialTheme.colorScheme.onSurfaceVariant
         DeviceConnectionStatus.Failed -> MaterialTheme.colorScheme.error

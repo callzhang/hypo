@@ -53,6 +53,57 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         
         // Start clipboard monitoring immediately so local copies are captured even before UI appears
         startClipboardMonitorIfNeeded()
+        
+        // Setup sleep/wake detection for LAN connection optimization
+        setupSleepWakeDetection()
+    }
+    
+    private func setupSleepWakeDetection() {
+        #if canImport(AppKit)
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        
+        // Listen for sleep notification
+        notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleSleep()
+        }
+        
+        // Listen for wake notification
+        notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleWake()
+        }
+        
+        logger.info("✅ [HypoAppDelegate] Sleep/wake detection registered")
+        #endif
+    }
+    
+    private func handleSleep() {
+        logger.info("😴 [HypoAppDelegate] System going to sleep - closing LAN connections")
+        Task { @MainActor in
+            // Access TransportManager through AppContext
+            if let viewModel = AppContext.shared.historyViewModel,
+               let transportManager = viewModel.transportManager {
+                await transportManager.closeAllLanConnections()
+            }
+        }
+    }
+    
+    private func handleWake() {
+        logger.info("🌅 [HypoAppDelegate] System woke up - reconnecting LAN connections")
+        Task { @MainActor in
+            // Access TransportManager through AppContext
+            if let viewModel = AppContext.shared.historyViewModel,
+               let transportManager = viewModel.transportManager {
+                await transportManager.reconnectAllLanConnections()
+            }
+        }
     }
     
     func setupCarbonHotkey() {
@@ -814,22 +865,17 @@ extension HypoMenuBarApp {
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 16, height: 16)
-        } else if let iconPath = Bundle.main.path(forResource: "AppIcon", ofType: "iconset"),
-                  let iconImage = NSImage(contentsOfFile: "\(iconPath)/icon_16x16.png") {
-            // Fallback: Use AppIcon but convert to template
-            Image(nsImage: makeTemplateImage(iconImage))
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 16, height: 16)
-        } else if let iconImage = NSImage(named: "AppIcon") {
-            // Fallback: Try loading from icns file
-            Image(nsImage: makeTemplateImage(iconImage))
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 16, height: 16)
         } else {
-            // Final fallback: Use system clipboard icon
+            // Fallback: Use system clipboard icon
+            // Log error if primary icon is missing (build/packaging issue)
+            // Note: Logging happens in onAppear to avoid ViewBuilder issues
             Image(systemName: "clipboard")
+                .onAppear {
+                    #if canImport(os)
+                    let iconLogger = HypoLogger(category: "HypoMenuBarApp")
+                    iconLogger.error("❌ [HypoMenuBarApp] MenuBarIcon.iconset not found in bundle. This is a build/packaging issue.")
+                    #endif
+                }
         }
     }
 }
@@ -1408,9 +1454,14 @@ private struct ClipboardCard: View {
         switch entry.content {
         case .text(let text):
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.count > 100
+            // Check if preview text is shorter than full text (preview adds "…" when truncated)
+            let preview = entry.previewText
+            return preview.count < trimmed.count || preview.hasSuffix("…")
         case .link(let url):
-            return url.absoluteString.count > 100
+            let urlString = url.absoluteString
+            let preview = entry.previewText
+            // Check if preview text is shorter than full URL (preview adds "…" when truncated)
+            return preview.count < urlString.count || preview.hasSuffix("…")
         case .image:
             return true  // Images always show detail view
         case .file:
@@ -1443,7 +1494,11 @@ private struct ClipboardCard: View {
         case .link(let url):
             return url.absoluteString
         case .image(let metadata):
-            return "Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+            if let fileName = metadata.altText {
+                return "\(fileName) · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+            } else {
+                return "Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+            }
         case .file(let metadata):
             return "\(metadata.fileName) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
         }
@@ -1619,9 +1674,14 @@ private struct ClipboardRow: View {
         switch entry.content {
         case .text(let text):
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.count > 100
+            // Check if preview text is shorter than full text (preview adds "…" when truncated)
+            let preview = entry.previewText
+            return preview.count < trimmed.count || preview.hasSuffix("…")
         case .link(let url):
-            return url.absoluteString.count > 100
+            let urlString = url.absoluteString
+            let preview = entry.previewText
+            // Check if preview text is shorter than full URL (preview adds "…" when truncated)
+            return preview.count < urlString.count || preview.hasSuffix("…")
         case .image:
             return true  // Images always show detail view
         case .file:
@@ -1654,7 +1714,11 @@ private struct ClipboardRow: View {
         case .link(let url):
             return url.absoluteString
         case .image(let metadata):
-            return "Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+            if let fileName = metadata.altText {
+                return "\(fileName) · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+            } else {
+                return "Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
+            }
         case .file(let metadata):
             return "\(metadata.fileName) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))"
         }
@@ -2599,30 +2663,7 @@ private struct ClipboardDetailWindow: View {
                             .padding()
                         
                     case .image(let metadata):
-                        if let imageData = metadata.data {
-                            // Try to create NSImage from raw data
-                            if let nsImage = NSImage(data: imageData) {
-                                Image(nsImage: nsImage)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 800, maxHeight: 600)
-                                    .padding()
-                            } else {
-                                // Failed to decode - show error with format info
-                                VStack(spacing: 8) {
-                                    Text("⚠️ Failed to display image")
-                                        .font(.headline)
-                                    Text("Format: \(metadata.format.uppercased())")
-                                    Text("Size: \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
-                                    Text("Data length: \(imageData.count) bytes")
-                                }
-                                .padding()
-                            }
-                        } else {
-                            // No image data available
-                            Text("Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
-                                .padding()
-                        }
+                        ImageDetailView(metadata: metadata)
                         
                     case .file(let metadata):
                         FileDetailView(metadata: metadata)
@@ -2635,27 +2676,70 @@ private struct ClipboardDetailWindow: View {
     }
 }
 
-// File detail view with save functionality
+// Image detail view with async loading for image files
+private struct ImageDetailView: View {
+    let metadata: ImageMetadata
+    
+    var body: some View {
+        Group {
+            if let imageData = metadata.data {
+                // Try to create NSImage from raw data
+                if let nsImage = NSImage(data: imageData) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 800, maxHeight: 600)
+                        .padding()
+                } else {
+                    // Failed to decode - show error with format info
+                    VStack(spacing: 8) {
+                        Text("⚠️ Failed to display image")
+                            .font(.headline)
+                        Text("Format: \(metadata.format.uppercased())")
+                        Text("Size: \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
+                        Text("Data length: \(imageData.count) bytes")
+                    }
+                    .padding()
+                }
+            } else {
+                // No image data available (shouldn't happen for pasteboard images, but handle gracefully)
+                VStack(spacing: 16) {
+                    if let fileName = metadata.altText {
+                        Text("\(fileName) · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
+                            .font(.headline)
+                    } else {
+                        Text("Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
+                            .font(.headline)
+                    }
+                    if let thumbnail = metadata.thumbnail,
+                       let thumbnailImage = NSImage(data: thumbnail) {
+                        Image(nsImage: thumbnailImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 200, maxHeight: 200)
+                            .padding()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            }
+        }
+    }
+}
+
+// File detail view with save functionality and async loading
 private struct FileDetailView: View {
     let metadata: FileMetadata
     @State private var isSaving = false
     @State private var saveError: String?
+    @State private var fileData: Data? = nil
+    @State private var isLoading = false
+    @State private var loadError: String? = nil
     
     private var isTextFile: Bool {
         let fileName = metadata.fileName.lowercased()
         let textExtensions = ["txt", "md", "json", "xml", "html", "css", "js", "py", "swift", "kt", "java", "c", "cpp", "h", "hpp", "sh", "yaml", "yml", "log", "csv"]
         return textExtensions.contains { fileName.hasSuffix(".\($0)") }
-    }
-    
-    private var fileData: Data? {
-        if let base64 = metadata.base64,
-           let data = Data(base64Encoded: base64) {
-            return data
-        }
-        if let url = metadata.url {
-            return try? Data(contentsOf: url)
-        }
-        return nil
     }
     
     private var fileContent: String? {
@@ -2671,6 +2755,56 @@ private struct FileDetailView: View {
             }
         }
         return nil
+    }
+    
+    private func loadFileAsync() {
+        // If we already have base64 data, use it immediately
+        if let base64 = metadata.base64,
+           let data = Data(base64Encoded: base64) {
+            fileData = data
+            return
+        }
+        
+        // If we have a URL, load it async
+        guard let url = metadata.url else {
+            loadError = "No file URL available"
+            return
+        }
+        
+        // Already loading or loaded
+        if isLoading || fileData != nil {
+            return
+        }
+        
+        isLoading = true
+        loadError = nil
+        
+        Task {
+            do {
+                // Use async file reading to avoid blocking on iCloud files
+                let data = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        do {
+                            // Use mappedIfSafe for better performance with large files
+                            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+                            continuation.resume(returning: data)
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                }
+                
+                await MainActor.run {
+                    self.fileData = data
+                    self.isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.loadError = error.localizedDescription
+                    self.isLoading = false
+                }
+            }
+        }
     }
     
     var body: some View {
@@ -2712,36 +2846,72 @@ private struct FileDetailView: View {
             
             Divider()
             
-            // Content display
-            if let content = fileContent, isTextFile {
-                // Text file - show content
-                ScrollView {
-                    Text(content)
-                        .textSelection(.enabled)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else if let data = fileData {
-                // Binary file - show hex preview
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Binary file content (hex preview):")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            // Content display with async loading
+            Group {
+                if isLoading {
+                    // Loading state
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading file from iCloud...")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding()
+                } else if let error = loadError {
+                    // Error state
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("⚠️ Failed to load file")
+                            .font(.headline)
+                            .foregroundStyle(.red)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Retry") {
+                            loadFileAsync()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding()
+                } else if let content = fileContent, isTextFile {
+                    // Text file - show content
                     ScrollView {
-                        Text(hexDump(data: data, maxBytes: 1024))
+                        Text(content)
                             .textSelection(.enabled)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.system(.body, design: .monospaced))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if data.count > 1024 {
-                        Text("(Showing first 1KB of \(data.count) bytes)")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                } else if let data = fileData {
+                    // Binary file - show hex preview
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Binary file content (hex preview):")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        ScrollView {
+                            Text(hexDump(data: data, maxBytes: 1024))
+                                .textSelection(.enabled)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        if data.count > 1024 {
+                            Text("(Showing first 1KB of \(data.count) bytes)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
+                } else {
+                    // No data loaded yet - show load button or auto-load
+                    Button("Load File") {
+                        loadFileAsync()
+                    }
+                    .buttonStyle(.bordered)
                 }
-            } else {
-                Text("Unable to decode file data")
-                    .foregroundStyle(.secondary)
+            }
+            .onAppear {
+                // Auto-load when preview opens
+                if fileData == nil && !isLoading && loadError == nil {
+                    loadFileAsync()
+                }
             }
         }
         .padding()

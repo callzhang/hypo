@@ -216,6 +216,7 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
   - Embedded Redis 7+ for session management
   - Zero-downtime deployments
 - **Stateless design**: Relays only encrypted payloads, never stores clipboard content.
+- **Message Queue (Planned)**: When target device is offline, messages are queued with exponential backoff retry (1s → 2s → 4s → ... → 2048s max). Messages expire after 2048 seconds. Queue stored in Redis for persistence across server restarts.
 - **Protocol**: See [`docs/protocol.md`](./protocol.md) for complete message format specification.
 - **Observability**: Structured logging with tracing, Prometheus metrics endpoint.
 

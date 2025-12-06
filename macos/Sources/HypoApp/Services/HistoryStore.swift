@@ -645,6 +645,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             )
         case .image(let metadata):
             // Extract image data from ImageMetadata
+            // For images from pasteboard, data is available immediately
+            // For image files stored as files, they'll be handled in the .file case
             guard let imageData = metadata.data else {
 #if canImport(os)
                 logger.warning("⚠️ [HistoryStore] Image entry has no data, skipping sync")
@@ -696,16 +698,35 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             // Extract file data for sync.
             // Prefer base64 (for remote-origin entries); fall back to local file URL
             // for entries that originated on this device where we only stored a pointer.
+            // Load file content async to avoid blocking on iCloud files
             let fileData: Data
             if let base64String = metadata.base64,
                let decoded = Data(base64Encoded: base64String) {
                 fileData = decoded
-            } else if let url = metadata.url,
-                      let data = try? Data(contentsOf: url) {
-                fileData = data
+            } else if let url = metadata.url {
+                // Load file content async to avoid blocking
+                do {
+                    // Use async file reading with timeout to prevent hanging on iCloud files
+                    fileData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                        Task.detached(priority: .userInitiated) {
+                            do {
+                                // Use mappedIfSafe for better performance with large files
+                                let data = try Data(contentsOf: url, options: .mappedIfSafe)
+                                continuation.resume(returning: data)
+                            } catch {
+                                continuation.resume(throwing: error)
+                            }
+                        }
+                    }
+                } catch {
+#if canImport(os)
+                    logger.warning("⚠️ [HistoryStore] Failed to load file from URL: \(error.localizedDescription), skipping sync")
+#endif
+                    return
+                }
             } else {
 #if canImport(os)
-                logger.warning("⚠️ [HistoryStore] File entry has no data, skipping sync")
+                logger.warning("⚠️ [HistoryStore] File entry has no data or URL, skipping sync")
 #endif
                 return
             }

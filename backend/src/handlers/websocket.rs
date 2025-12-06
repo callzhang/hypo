@@ -194,6 +194,30 @@ fn decode_binary_frame(data: &[u8]) -> Result<String, &'static str> {
 }
 
 /// Encode JSON string to binary frame (4-byte big-endian length + JSON payload)
+/// Decode base64 string with fallback to NO_PAD (Android uses Base64.withoutPadding())
+/// Returns decoded bytes or error message
+fn decode_base64_with_fallback(encoded: &str, field_name: &str) -> Result<Vec<u8>, &'static str> {
+    BASE64
+        .decode(encoded.as_bytes())
+        .or_else(|_| BASE64_NO_PAD.decode(encoded.as_bytes()))
+        .map_err(|e| {
+            error!(
+                "Failed to decode {}: {} (string: '{}', length: {}, first 20 chars: '{}')",
+                field_name,
+                e,
+                encoded,
+                encoded.len(),
+                if encoded.len() > 20 { &encoded[..20] } else { encoded }
+            );
+            match field_name {
+                "nonce" => "invalid nonce encoding",
+                "tag" => "invalid tag encoding",
+                "data" | "ciphertext" => "invalid data encoding",
+                _ => "invalid base64 encoding",
+            }
+        })
+}
+
 fn encode_binary_frame(json_str: &str) -> Vec<u8> {
     let json_bytes = json_str.as_bytes();
     let length = json_bytes.len() as u32;
@@ -240,7 +264,7 @@ async fn handle_binary_message(
     let payload: &Value = &parsed.payload;
 
     if parsed.msg_type == crate::models::message::MessageType::Control {
-        handle_control_message(sender_id, payload, key_store).await;
+        handle_control_message(sender_id, &parsed.id, payload, key_store, sessions, sender_session).await;
         return Ok(());
     }
 
@@ -338,7 +362,7 @@ async fn handle_text_message(
     let payload: &Value = &parsed.payload;
 
     if parsed.msg_type == crate::models::message::MessageType::Control {
-        handle_control_message(sender_id, payload, key_store).await;
+        handle_control_message(sender_id, &parsed.id, payload, key_store, sessions, sender_session).await;
         return Ok(());
     }
 
@@ -423,8 +447,11 @@ struct RegisterKeyPayload {
 
 async fn handle_control_message(
     sender_id: &str,
+    original_message_id: &uuid::Uuid,
     payload: &Value,
     key_store: &crate::services::device_key_store::DeviceKeyStore,
+    sessions: &crate::services::session_manager::SessionManager,
+    sender_session: &mut actix_ws::Session,
 ) {
     let Ok(registration) = serde_json::from_value::<RegisterKeyPayload>(payload.clone()) else {
         warn!("Invalid control payload from {}", sender_id);
@@ -458,6 +485,27 @@ async fn handle_control_message(
             key_store.remove(sender_id).await;
             info!("Deregistered symmetric key for device {}", sender_id);
         }
+        "query_connected_peers" => {
+            let connected_devices = sessions.get_connected_devices().await;
+            let response = serde_json::json!({
+                "id": uuid::Uuid::new_v4(),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "version": "1.0",
+                "type": "control",
+                "payload": {
+                    "action": "query_connected_peers",
+                    "connected_devices": connected_devices,
+                    "original_message_id": original_message_id
+                }
+            });
+            
+            let response_frame = encode_binary_frame(&response.to_string());
+            if let Err(e) = sender_session.binary(response_frame).await {
+                warn!("Failed to send connected peers response to {}: {:?}", sender_id, e);
+            } else {
+                info!("Sent connected peers list to {} ({} devices)", sender_id, connected_devices.len());
+            }
+        }
         other => {
             warn!("Unhandled control action '{}' from {}", other, sender_id);
         }
@@ -488,47 +536,20 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
             .ok_or("missing data/ciphertext field")?;
         
         // Android uses Base64.withoutPadding(), so we need to handle unpadded base64
-        // Try STANDARD first (handles both padded and unpadded), fallback to NO_PAD if needed
-        BASE64
-            .decode(data.as_bytes())
-            .or_else(|_| BASE64_NO_PAD.decode(data.as_bytes()))
-            .map_err(|e| {
-                error!("Plaintext data base64 decode failed: {} (data length: {}, first 50 chars: '{}')", 
-                    e, data.len(),
-                    if data.len() > 50 { &data[..50] } else { data });
-                "invalid data encoding"
-            })
-            .map(|_| ())?;
+        decode_base64_with_fallback(data, "data").map(|_| ())?;
         
         return Ok(());
     }
 
     // Encrypted message - validate nonce and tag
     // Android uses Base64.withoutPadding(), so we need to handle unpadded base64
-    // Try STANDARD first (handles both padded and unpadded), fallback to NO_PAD if needed
-    let nonce_decoded = BASE64
-        .decode(nonce.as_bytes())
-        .or_else(|_| BASE64_NO_PAD.decode(nonce.as_bytes()))
-        .map_err(|e| {
-            error!("Failed to decode nonce: {} (nonce string: '{}', length: {}, first 20 chars: '{}')", 
-                e, nonce, nonce.len(),
-                if nonce.len() > 20 { &nonce[..20] } else { nonce });
-            "invalid nonce encoding"
-        })?;
+    let nonce_decoded = decode_base64_with_fallback(nonce, "nonce")?;
     if nonce_decoded.len() != 12 {
         error!("Nonce decoded length is {} bytes, expected 12 bytes (nonce string: '{}')", nonce_decoded.len(), nonce);
         return Err("nonce must be 12 bytes");
     }
 
-    let tag_decoded = BASE64
-        .decode(tag.as_bytes())
-        .or_else(|_| BASE64_NO_PAD.decode(tag.as_bytes()))
-        .map_err(|e| {
-            error!("Failed to decode tag: {} (tag string: '{}', length: {}, first 20 chars: '{}')", 
-                e, tag, tag.len(),
-                if tag.len() > 20 { &tag[..20] } else { tag });
-            "invalid tag encoding"
-        })?;
+    let tag_decoded = decode_base64_with_fallback(tag, "tag")?;
     if tag_decoded.len() != 16 {
         error!("Tag decoded length is {} bytes, expected 16 bytes (tag string: '{}')", tag_decoded.len(), tag);
         return Err("tag must be 16 bytes");
@@ -542,17 +563,9 @@ fn validate_encryption_block(payload: &Value) -> Result<(), &'static str> {
         .ok_or("missing data/ciphertext field")?;
 
     // Android uses Base64.withoutPadding(), so we need to handle unpadded base64
-    // Try STANDARD first (handles both padded and unpadded), fallback to NO_PAD if needed
-    BASE64
-        .decode(data.as_bytes())
-        .or_else(|_| BASE64_NO_PAD.decode(data.as_bytes()))
-        .map_err(|e| {
-            error!("Encrypted data base64 decode failed: {} (data length: {}, first 50 chars: '{}')", 
-                e, data.len(),
-                if data.len() > 50 { &data[..50] } else { data });
-            "invalid data encoding"
-        })
-        .map(|_| ())
+    decode_base64_with_fallback(data, "ciphertext").map(|_| ())?;
+    
+    Ok(())
 }
 
 #[cfg(test)]
@@ -612,12 +625,14 @@ mod tests {
     #[actix_rt::test]
     async fn register_key_control_message_stores_key() {
         let store = crate::services::device_key_store::DeviceKeyStore::new();
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let mut sender_session = create_test_session().await;
         let payload = json!({
             "action": "register_key",
             "symmetric_key": BASE64.encode([0u8; 32])
         });
 
-        handle_control_message("device-1", &payload, &store).await;
+        handle_control_message("device-1", &uuid::Uuid::new_v4(), &payload, &store, &sessions, &mut sender_session).await;
 
         assert!(store.is_registered("device-1").await);
     }
@@ -625,12 +640,14 @@ mod tests {
     #[actix_rt::test]
     async fn register_key_control_message_rejects_bad_base64() {
         let store = crate::services::device_key_store::DeviceKeyStore::new();
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let mut sender_session = create_test_session().await;
         let payload = json!({
             "action": "register_key",
             "symmetric_key": "not-base64!!"
         });
 
-        handle_control_message("device-err", &payload, &store).await;
+        handle_control_message("device-err", &uuid::Uuid::new_v4(), &payload, &store, &sessions, &mut sender_session).await;
 
         assert!(!store.is_registered("device-err").await);
     }
@@ -638,12 +655,14 @@ mod tests {
     #[actix_rt::test]
     async fn register_key_control_message_rejects_wrong_length() {
         let store = crate::services::device_key_store::DeviceKeyStore::new();
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let mut sender_session = create_test_session().await;
         let payload = json!({
             "action": "register_key",
             "symmetric_key": BASE64.encode([0u8; 8])
         });
 
-        handle_control_message("device-short", &payload, &store).await;
+        handle_control_message("device-short", &uuid::Uuid::new_v4(), &payload, &store, &sessions, &mut sender_session).await;
 
         assert!(!store.is_registered("device-short").await);
     }
@@ -651,6 +670,8 @@ mod tests {
     #[actix_rt::test]
     async fn deregister_key_control_message_removes_key() {
         let store = crate::services::device_key_store::DeviceKeyStore::new();
+        let sessions = crate::services::session_manager::SessionManager::new();
+        let mut sender_session = create_test_session().await;
         store.store("device-1".into(), vec![1; 32]).await;
         assert!(store.is_registered("device-1").await);
 
@@ -658,7 +679,7 @@ mod tests {
             "action": "deregister_key"
         });
 
-        handle_control_message("device-1", &payload, &store).await;
+        handle_control_message("device-1", &uuid::Uuid::new_v4(), &payload, &store, &sessions, &mut sender_session).await;
 
         assert!(!store.is_registered("device-1").await);
     }

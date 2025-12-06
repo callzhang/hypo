@@ -31,6 +31,7 @@ class LanRegistrationManager(
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var connectivityReceiver: BroadcastReceiver? = null
     private var retryJob: Job? = null
+    private var refreshJob: Job? = null
     private var attempts = 0
     private var currentConfig: LanRegistrationConfig? = null
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
@@ -63,16 +64,32 @@ class LanRegistrationManager(
     }
     
     private fun scheduleMulticastLockRefresh() {
+        // Cancel any existing refresh job
+        refreshJob?.cancel()
+        refreshJob = null
+        
         val refreshInterval = MiuiAdapter.getRecommendedMulticastLockRefreshInterval()
         if (refreshInterval != null) {
-            scope.launch(dispatcher) {
+            refreshJob = scope.launch(dispatcher) {
                 while (currentConfig != null) {
                     delay(refreshInterval)
-                    if (currentConfig != null && multicastLock?.isHeld == true) {
-                        // Release and re-acquire to refresh the lock
-                        android.util.Log.d("LanRegistrationManager", "🔄 Refreshing multicast lock (MIUI/HyperOS workaround)")
-                        multicastLock?.release()
-                        multicastLock?.acquire()
+                    // Double-check conditions before refreshing (lock might have been released by stop())
+                    val lock = multicastLock
+                    if (currentConfig != null && lock != null && lock.isHeld) {
+                        try {
+                            // Release and re-acquire to refresh the lock
+                            android.util.Log.d("LanRegistrationManager", "🔄 Refreshing multicast lock (MIUI/HyperOS workaround)")
+                            lock.release()
+                            lock.acquire()
+                        } catch (e: RuntimeException) {
+                            // Lock might have been released by another thread (e.g., stop())
+                            // Log and exit the refresh loop
+                            android.util.Log.w("LanRegistrationManager", "⚠️ Multicast lock refresh failed (lock may have been released): ${e.message}")
+                            break
+                        }
+                    } else {
+                        // Config is null or lock is not held - exit the refresh loop
+                        break
                     }
                 }
             }
@@ -91,6 +108,8 @@ class LanRegistrationManager(
     override fun stop() {
         retryJob?.cancel()
         retryJob = null
+        refreshJob?.cancel()
+        refreshJob = null
         currentConfig = null
         registrationListener?.let { listener ->
             runCatching { nsdManager.unregisterService(listener) }

@@ -44,6 +44,7 @@ import okio.ByteString.Companion.of
 import kotlin.math.max
 import kotlin.math.min
 import java.util.concurrent.TimeUnit
+import org.json.JSONObject
 
 interface WebSocketConnector {
     fun connect(listener: WebSocketListener): WebSocket
@@ -193,6 +194,7 @@ class WebSocketTransportClient @Inject constructor(
     private var onPairingAck: ((String) -> Unit)? = null  // ACK as JSON string
     private var onPairingChallenge: (suspend (String) -> String?)? = null  // Challenge as JSON string -> ACK JSON or null
     private var onSyncError: ((String, String) -> Unit)? = null  // Error handler: (deviceName, errorMessage) -> Unit
+    private val pendingControlQueries = mutableMapOf<String, CompletableDeferred<org.json.JSONObject>>()
     @Volatile private var connectionSignal = CompletableDeferred<Unit>()
     @Volatile private var currentConnector: WebSocketConnector? = connector // Nullable for LAN (created after discovery)
     @Volatile private var lastKnownUrl: String? = null  // Use only lastKnownUrl - updated when peer is discovered
@@ -351,6 +353,65 @@ class WebSocketTransportClient @Inject constructor(
         } catch (e: Exception) {
             android.util.Log.e("WebSocketTransportClient", "❌ Failed to queue envelope: ${e.message}", e)
             throw e
+        }
+    }
+    
+    /**
+     * Send a control message and wait for response.
+     * Returns the response payload as JSONObject, or null if timeout or error.
+     */
+    suspend fun sendControlMessage(action: String, timeoutMs: Long = 5000): org.json.JSONObject? {
+        if (!isConnected()) {
+            android.util.Log.w("WebSocketTransportClient", "⚠️ Cannot send control message: not connected")
+            return null
+        }
+        
+        val queryId = java.util.UUID.randomUUID().toString()
+        val responseDeferred = CompletableDeferred<org.json.JSONObject>()
+        pendingControlQueries[queryId] = responseDeferred
+        
+        try {
+            // Create SyncEnvelope with proper Payload structure for control messages
+            // Note: deviceId and devicePlatform are optional for control messages
+            // The server identifies the device from WebSocket headers (X-Device-Id, X-Device-Platform)
+            val envelope = com.hypo.clipboard.sync.SyncEnvelope(
+                id = queryId,
+                timestamp = java.time.Instant.now().toString(),
+                version = "1.0",
+                type = com.hypo.clipboard.sync.MessageType.CONTROL,
+                payload = com.hypo.clipboard.sync.Payload(
+                    deviceId = null,  // Optional for control messages - server uses WebSocket headers
+                    devicePlatform = null,  // Optional for control messages - server uses WebSocket headers
+                    target = null,  // Control messages don't target specific devices
+                    action = action,  // Use action field for control messages
+                    message = "Control message: $action",
+                    originalMessageId = queryId
+                )
+            )
+            
+            // Encode as binary frame (4-byte length + JSON) to match server expectations
+            val frame = frameCodec.encode(envelope)
+            
+            mutex.withLock {
+                val socket = webSocket ?: throw IllegalStateException("WebSocket not connected")
+                val sent = socket.send(okio.ByteString.of(*frame))
+                if (!sent) {
+                    throw IOException("websocket send failed")
+                }
+                touch()
+            }
+            
+            return withTimeout(timeoutMs) {
+                responseDeferred.await()
+            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            android.util.Log.w("WebSocketTransportClient", "⚠️ Control message query timed out: $action")
+            pendingControlQueries.remove(queryId)
+            return null
+        } catch (e: Exception) {
+            android.util.Log.w("WebSocketTransportClient", "⚠️ Failed to send control message: ${e.message}", e)
+            pendingControlQueries.remove(queryId)
+            return null
         }
     }
     
@@ -526,6 +587,11 @@ class WebSocketTransportClient @Inject constructor(
                             runConnectionLoop()
                             // runConnectionLoop() exits when connection closes - event-driven reconnection will handle restart
                             android.util.Log.d("WebSocketTransportClient", "🔌 runConnectionLoop() exited normally")
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            // Cancellation is expected when reconnecting or shutting down
+                            // Don't log as error - this is normal lifecycle behavior
+                            android.util.Log.d("WebSocketTransportClient", "🔌 Connection loop cancelled (expected during reconnect/shutdown)")
+                            throw e // Re-throw to properly propagate cancellation
                         } catch (e: Exception) {
                             android.util.Log.e("WebSocketTransportClient", "❌ Error in connection loop: ${e.message}", e)
                             // Don't increment failure count here - onFailure callback already handles it
@@ -907,13 +973,61 @@ class WebSocketTransportClient @Inject constructor(
                     
                     // Decode the binary frame first (handles 4-byte length prefix)
                     // Then check if it's a pairing message or clipboard message
+                    // Extract raw JSON first to check for control responses before decoding
+                    // (control responses may contain fields not in Payload struct)
+                    val frameJson: String? = try {
+                        if (bytes.size >= 4) {
+                            val length = java.nio.ByteBuffer.wrap(bytes.toByteArray(), 0, 4).order(java.nio.ByteOrder.BIG_ENDIAN).int
+                            if (bytes.size >= 4 + length) {
+                                String(bytes.toByteArray(), 4, length, Charsets.UTF_8)
+                            } else {
+                                android.util.Log.e("WebSocketTransportClient", "❌ Frame size mismatch: expected ${4 + length} bytes, got ${bytes.size}")
+                                null
+                            }
+                        } else {
+                            android.util.Log.e("WebSocketTransportClient", "❌ Frame too small: ${bytes.size} bytes, expected at least 4")
+                            null
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("WebSocketTransportClient", "❌ Failed to extract JSON from frame: ${e.message}", e)
+                        null
+                    }
+                    
+                    if (frameJson == null) {
+                        return
+                    }
+                    
+                    // Check if this is a control message response (before decoding as SyncEnvelope)
+                    // Control responses may contain fields not in Payload struct (e.g., connected_devices)
+                    try {
+                        val fullJson = org.json.JSONObject(frameJson)
+                        val msgType = fullJson.optString("type", "")
+                        if (msgType == "control") {
+                            val payloadObj = fullJson.optJSONObject("payload")
+                            if (payloadObj != null) {
+                                val action = payloadObj.optString("action", "")
+                                if (action == "query_connected_peers") {
+                                    val originalMessageId = payloadObj.optString("original_message_id", "")
+                                    if (originalMessageId.isNotEmpty()) {
+                                        pendingControlQueries[originalMessageId]?.complete(payloadObj)
+                                        pendingControlQueries.remove(originalMessageId)
+                                        android.util.Log.d("WebSocketTransportClient", "✅ Received control message response for query $originalMessageId")
+                                        return
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // Not a control response or parse failed, continue to normal decoding
+                    }
+                    
                     try {
                         val envelope = frameCodec.decode(bytes.toByteArray())
                         android.util.Log.d("WebSocketTransportClient", "📥 Received: ${envelope.type} (${bytes.size} bytes, id: ${envelope.id.take(8)}...)")
                         
                         // Check if this is a pairing challenge by looking at envelope payload
                         // Re-encode to JSON string to check for pairing message structure
-                        val payloadJson = try {
+                        val payloadJson: String? = try {
                             // Re-encode the envelope to get JSON string (for pairing check)
                             val tempFrame = frameCodec.encode(envelope)
                             // Extract JSON from frame (skip 4-byte length prefix)
@@ -922,14 +1036,23 @@ class WebSocketTransportClient @Inject constructor(
                                 if (tempFrame.size >= 4 + length) {
                                     String(tempFrame, 4, length, Charsets.UTF_8)
                                 } else {
-                                    envelope.payload.toString() // Fallback
+                                    android.util.Log.e("WebSocketTransportClient", "❌ Frame size mismatch: expected ${4 + length} bytes, got ${tempFrame.size}")
+                                    null
                                 }
                             } else {
-                                envelope.payload.toString() // Fallback
+                                android.util.Log.e("WebSocketTransportClient", "❌ Frame too small: ${tempFrame.size} bytes, expected at least 4")
+                                null
                             }
                         } catch (e: Exception) {
-                            envelope.payload.toString() // Fallback
+                            android.util.Log.e("WebSocketTransportClient", "❌ Failed to extract JSON from frame for pairing check: ${e.message}. Rejecting message.", e)
+                            null
                         }
+                        
+                        // Fail fast if we couldn't extract JSON
+                        if (payloadJson == null) {
+                            return
+                        }
+                        
                         val isPairingChallenge = payloadJson.contains("initiator_device_id") && 
                                                 payloadJson.contains("initiator_pub_key")
                         
@@ -956,11 +1079,12 @@ class WebSocketTransportClient @Inject constructor(
                         }
                         
                         // Not a pairing message, handle as clipboard envelope
+                        // (Control messages are already handled before decoding)
                         handleIncoming(bytes)
                     } catch (e: Exception) {
-                        android.util.Log.e("WebSocketTransportClient", "❌ Failed to decode frame in onMessage: ${e.message}", e)
-                        // Fallback: try to handle as raw bytes (might be legacy format)
-                    handleIncoming(bytes)
+                        android.util.Log.e("WebSocketTransportClient", "❌ Failed to decode frame in onMessage: ${e.message}. Rejecting message.", e)
+                        // Don't process invalid messages - fail fast
+                        // If this is a legacy format, it should be updated to use proper frame encoding
                     }
                 }
 
@@ -1053,39 +1177,21 @@ class WebSocketTransportClient @Inject constructor(
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    // Detailed error logging - use outer scope variables to avoid shadowing
-                    val connUrl = if (isCloudConnection) {
-                        config.url ?: "unknown"
-                    } else {
-                        lastKnownUrl ?: "unknown"
-                    }
-                    val errorMsg = buildString {
-                        append("❌ Connection failed to $connUrl: ${t.message}")
-                        append(" (${t.javaClass.simpleName})")
-                        if (response != null) {
-                            append(" - HTTP ${response.code} ${response.message}")
-                            try {
-                                val body = response.body?.string()
-                                if (body != null && body.length < 200) {
-                                    append(" - $body")
-                                }
-                            } catch (e: Exception) {
-                                // Ignore body read errors
-                            }
-                        }
-                    }
-                    android.util.Log.e("WebSocketTransportClient", errorMsg, t)
-                    
-                    // Check if socket was already open when failure occurred
+                    // Check if socket was already open when failure occurred (connection reset scenario)
                     val wasOpen = isOpen.get()
-                    android.util.Log.e("WebSocketTransportClient", "   Socket state: isOpen=$wasOpen, isClosed=${isClosed.get()}")
-                    android.util.Log.e("WebSocketTransportClient", "   Handshake state: handshakeStarted=${handshakeStarted != null}")
+                    val isSocketClosed = t is java.net.SocketException && t.message?.contains("closed", ignoreCase = true) == true
                     
                     // If socket was open, this is a connection reset (RST packet) rather than a normal close
                     // OkHttp reports connection resets as onFailure even after onOpen
                     // Treat this as a normal close (similar to onClosed) to avoid unnecessary error handling
-                    if (wasOpen) {
-                        android.util.Log.w("WebSocketTransportClient", "   ⚠️ Connection reset by server (RST packet) - treating as normal close")
+                    if (wasOpen || isSocketClosed) {
+                        // Simplified log for normal connection resets
+                        val connUrl = if (isCloudConnection) {
+                            config.url ?: "unknown"
+                        } else {
+                            lastKnownUrl ?: "unknown"
+                        }
+                        android.util.Log.d("WebSocketTransportClient", "🔌 Connection reset: $connUrl (${t.javaClass.simpleName}) - reconnecting...")
                         
                         // Mark as closed and complete closedSignal so connection loop exits cleanly
                         isOpen.set(false)
@@ -1103,10 +1209,7 @@ class WebSocketTransportClient @Inject constructor(
                             transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectingCloud)
                         }
                         
-                        android.util.Log.w("WebSocketTransportClient", 
-                            "📢 onFailure (RST): completed closedSignal (wasCompleted=$signalWasCompleted), " +
-                            "updated TransportManager=${transportManager != null && isCloudConnection}, " +
-                            "event-driven reconnection will be triggered")
+                        // Simplified log - reconnection will be triggered automatically
                         
                         // Event-driven: immediately trigger reconnection for cloud connections
                         // Only trigger if not already reconnecting (prevents duplicate calls)
@@ -1116,29 +1219,32 @@ class WebSocketTransportClient @Inject constructor(
                                 // This allows ensureConnection() to start a new connection attempt
                                 mutex.withLock {
                                     if (connectionJob?.isActive == true) {
-                                        android.util.Log.d("WebSocketTransportClient", "🛑 Cancelling connection job to allow reconnection")
                                         connectionJob?.cancel()
                                         connectionJob = null
                                     }
                                 }
-                                // Small delay to ensure cleanup completes and connection job's finally block runs
                                 delay(200)
-                                android.util.Log.d("WebSocketTransportClient", "🔄 Event-driven: triggering ensureConnection() after onFailure (RST)")
                                 ensureConnection()
                             }
-                        } else if (isCloudConnection && isReconnecting) {
-                            android.util.Log.d("WebSocketTransportClient", "⏸️ Skipping ensureConnection() after onFailure (RST) - already reconnecting")
                         }
                         
                         // Return early - don't execute the rest of onFailure logic
                         return@onFailure
                     }
                     
+                    // Actual connection failure (not a normal reset) - log with details
+                    val connUrl = if (isCloudConnection) {
+                        config.url ?: "unknown"
+                    } else {
+                        lastKnownUrl ?: "unknown"
+                    }
+                    android.util.Log.w("WebSocketTransportClient", "❌ Connection failed: $connUrl - ${t.message} (${t.javaClass.simpleName})")
+                    
                     // For LAN connections, if connection is refused, clear lastKnownUrl to force re-discovery
                     // This handles cases where the peer's IP has changed but we haven't re-discovered it yet
                     if (!isCloudConnection && t is ConnectException) {
                         val failedUrl = lastKnownUrl
-                        android.util.Log.w("WebSocketTransportClient", "🔍 Connection refused to $failedUrl - clearing lastKnownUrl to force re-discovery")
+                        android.util.Log.d("WebSocketTransportClient", "🔍 Connection refused to $failedUrl - clearing lastKnownUrl to force re-discovery")
                         // Launch coroutine to use suspending mutex
                         scope.launch {
                             mutex.withLock {
@@ -1159,38 +1265,25 @@ class WebSocketTransportClient @Inject constructor(
                     handshakeStarted = null
                     
                     // Notify TransportManager of connection state change (event-driven)
-                    // isCloudConnection already declared above
-                    if (transportManager != null) {
-                        // Only update for cloud connections - LAN connections might still have other peers available
-                        if (isCloudConnection) {
-                            // Set state to ConnectingCloud immediately (event-driven reconnection)
-                            transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectingCloud)
-                            // Increment failure count for exponential backoff (both cloud and LAN)
-                            consecutiveFailures++
-                            android.util.Log.w("WebSocketTransportClient", "📈 Connection failed, consecutive failures: $consecutiveFailures (cloud=$isCloudConnection)")
-                        }
+                    if (transportManager != null && isCloudConnection) {
+                        transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectingCloud)
+                        consecutiveFailures++
+                        android.util.Log.d("WebSocketTransportClient", "📈 Consecutive failures: $consecutiveFailures")
                     }
                     
                     // Event-driven: immediately trigger reconnection for cloud connections
                     // Only trigger if not already reconnecting (prevents duplicate calls)
                     if (isCloudConnection && !sendQueue.isClosedForReceive && !isReconnecting) {
                         scope.launch {
-                            // Cancel connection job to ensure runConnectionLoop() exits quickly
-                            // This allows ensureConnection() to start a new connection attempt
                             mutex.withLock {
                                 if (connectionJob?.isActive == true) {
-                                    android.util.Log.d("WebSocketTransportClient", "🛑 Cancelling connection job to allow reconnection")
                                     connectionJob?.cancel()
                                     connectionJob = null
                                 }
                             }
-                            // Small delay to ensure cleanup completes and connection job's finally block runs
                             delay(200)
-                            android.util.Log.d("WebSocketTransportClient", "🔄 Event-driven: triggering ensureConnection() after onFailure")
                             ensureConnection()
                         }
-                    } else if (isCloudConnection && isReconnecting) {
-                        android.util.Log.d("WebSocketTransportClient", "⏸️ Skipping ensureConnection() after onFailure - already reconnecting")
                     }
                     
                     // Re-throw to propagate error
@@ -1463,15 +1556,18 @@ class WebSocketTransportClient @Inject constructor(
         val observedJob = connectionJob
         
         // For cloud relay connections, send ping/pong keepalive to prevent Fly.io idle timeout
-        // Fly.io can disconnect idle WebSocket connections after ~60 seconds, so we send pings every 20 seconds
+        // Fly.io idle_timeout is configured to 900 seconds (15 minutes, max allowed) in fly.toml
+        // We send pings every 14 minutes (840 seconds) to:
+        // 1. Keep connection alive (well before 15-minute timeout)
+        // 2. Detect dead connections quickly (within 14 minutes)
         val isCloudRelay = config.environment == "cloud"
         
         if (isCloudRelay) {
             android.util.Log.d("WebSocketTransportClient", "⏰ Starting ping/pong keepalive for cloud relay connection")
-            android.util.Log.d("WebSocketTransportClient", "   Sending ping every 20 seconds to prevent Fly.io idle timeout")
+            android.util.Log.d("WebSocketTransportClient", "   Sending ping every 14 minutes (840s) - Fly.io timeout: 900s (max)")
             watchdogJob = scope.launch {
                 while (isActive) {
-                    delay(20_000) // Send ping every 20 seconds to keep connection alive
+                    delay(840_000) // Send ping every 14 minutes (840 seconds) to keep connection alive and detect failures
                     if (!isActive) return@launch
                     val socket = mutex.withLock { webSocket }
                     val isOpenState = isOpen.get()

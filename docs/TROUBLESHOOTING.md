@@ -581,14 +581,133 @@ adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipb
 - API 29+: Use OnPrimaryClipChangedListener
 - API 28-: Polling required (less efficient)
 
-**Solutions**:
+**Standard Solutions**:
 ```bash
 # Check API level
 adb shell getprop ro.build.version.sdk
 
 # Grant clipboard permission (if available)
 adb shell pm grant com.hypo.clipboard android.permission.READ_CLIPBOARD
+# For debug builds:
+adb shell pm grant com.hypo.clipboard.debug android.permission.READ_CLIPBOARD
 ```
+
+**Background Clipboard Access via ADB (Advanced/Experimental)**:
+
+⚠️ **Warning**: These methods are **not officially supported** by Android and may:
+- Not work on Android 12+ due to enhanced security
+- Pose security risks
+- Be reset after app updates or system updates
+- Violate some app store policies
+
+**Method 1: AppOps Permission (Android 10-11, may work on 12+)**
+
+**What is AppOps?**
+
+AppOps (Application Operations) is Android's **granular permission control system** that operates at a lower level than standard runtime permissions. It was introduced in Android 4.3 but became more prominent in Android 10+.
+
+**Key Concepts:**
+- **Standard Permissions** (`pm grant`): High-level permissions declared in AndroidManifest.xml (e.g., `READ_CLIPBOARD`, `ACCESS_FINE_LOCATION`)
+- **AppOps**: Fine-grained operations that control what apps can actually *do* (e.g., `READ_CLIPBOARD`, `SYSTEM_ALERT_WINDOW`, `READ_LOGS`)
+- **Why Both Matter**: An app can have a permission granted, but AppOps can still deny the operation
+
+**How Method 1 Works:**
+
+This method uses a **workaround** discovered by clipboard manager apps (like Clip Stack, Kata) that exploits how Android handles certain permissions:
+
+1. **`SYSTEM_ALERT_WINDOW allow`**: 
+   - Grants the app permission to draw overlays (floating windows)
+   - **Why needed**: Some clipboard access workarounds require overlay permissions
+   - **What it does**: Allows the app to display content over other apps
+
+2. **`READ_LOGS allow`**:
+   - Grants permission to read system logs
+   - **Why needed**: This is the **key workaround** - some clipboard managers discovered that having `READ_LOGS` permission can bypass clipboard restrictions on Android 10-11
+   - **How it works**: Android's security model sometimes treats apps with log access as "system-like" and grants them additional privileges
+   - **Note**: This is a **hack/workaround**, not an official feature
+
+3. **`force-stop`**:
+   - Restarts the app so it picks up the new permission state
+   - **Why needed**: Apps cache their permission state; restart forces a refresh
+
+**The Commands Explained:**
+
+```bash
+# Replace with your package name (com.hypo.clipboard or com.hypo.clipboard.debug)
+PACKAGE="com.hypo.clipboard.debug"
+
+# Grant SYSTEM_ALERT_WINDOW permission (allows overlay)
+# This uses AppOps to set the operation mode to "allow"
+adb shell appops set $PACKAGE SYSTEM_ALERT_WINDOW allow
+
+# Grant READ_LOGS permission (workaround for clipboard access)
+# This uses PackageManager (pm) to grant a standard permission
+adb shell pm grant $PACKAGE android.permission.READ_LOGS
+
+# Restart the app to apply changes
+# This kills the app process so it restarts with new permissions
+adb shell am force-stop $PACKAGE
+```
+
+**Why This Might Work:**
+
+On Android 10-11, the combination of `READ_LOGS` + `SYSTEM_ALERT_WINDOW` can sometimes trick the system into allowing background clipboard access. This is likely because:
+- Apps with log access are sometimes treated as "debugging/system" apps
+- System apps have fewer restrictions
+- The overlay permission might be checked alongside clipboard access in some code paths
+
+**Why It Often Doesn't Work on Android 12+:**
+
+Google tightened security in Android 12:
+- Stricter enforcement of background clipboard restrictions
+- Better separation between permission types
+- The workaround was likely patched/blocked
+
+**Method 2: Direct AppOps Clipboard Permission (Android 10-11 only)**
+
+```bash
+PACKAGE="com.hypo.clipboard.debug"
+
+# Try to set clipboard read permission directly
+adb shell appops set $PACKAGE READ_CLIPBOARD allow
+adb shell appops set $PACKAGE android:read_clipboard allow
+adb shell appops set $PACKAGE android:read_clipboard_in_background allow
+
+# Restart the app
+adb shell am force-stop $PACKAGE
+```
+
+**Method 3: Check Current AppOps Status**
+
+```bash
+PACKAGE="com.hypo.clipboard.debug"
+
+# Check all AppOps for the package
+adb shell dumpsys appops $PACKAGE | grep -i clipboard
+
+# Check specific clipboard operations
+adb shell appops get $PACKAGE READ_CLIPBOARD
+adb shell appops get $PACKAGE android:read_clipboard
+adb shell appops get $PACKAGE android:read_clipboard_in_background
+```
+
+**Limitations**:
+- **Android 12+**: These methods are increasingly ineffective due to enhanced security
+- **System Updates**: Permissions may be reset after Android system updates
+- **App Updates**: Some permissions may be reset after app updates
+- **Manufacturer ROMs**: MIUI, OneUI, etc. may have additional restrictions
+
+**Recommended Approach**:
+Instead of ADB workarounds, use the **official Android method**:
+1. Open Hypo app
+2. Go to **Settings** → **Permissions**
+3. Enable **"Allow clipboard access in background"** toggle (if available on your device)
+4. Some devices require: **Settings** → **Apps** → **Hypo** → **Other permissions** → **Clipboard access**
+
+**Alternative Solutions**:
+- Keep the app in foreground (use split-screen or picture-in-picture)
+- Use the app's foreground service (already implemented)
+- Wait for Android to provide official background clipboard API (future Android versions)
 
 #### Problem: "Sync Not Working"
 

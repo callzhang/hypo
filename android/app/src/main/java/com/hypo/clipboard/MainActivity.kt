@@ -139,7 +139,6 @@ class MainActivity : ComponentActivity() {
                         composable(AppDestination.Settings.route) {
                             SettingsRoute(
                                 onOpenBatterySettings = ::openBatterySettings,
-                                onOpenAccessibilitySettings = ::openAccessibilitySettings,
                                 onRequestSmsPermission = ::requestSmsPermission,
                                 onRequestNotificationPermission = ::requestNotificationPermission,
                                 onStartPairing = { navController.navigate("pairing") }
@@ -181,17 +180,6 @@ class MainActivity : ComponentActivity() {
             runCatching {
                 startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             }
-        }
-    }
-    
-    private fun openAccessibilitySettings() {
-        runCatching {
-            val intent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            } else {
-                Intent(Settings.ACTION_SETTINGS)
-            }
-            startActivity(intent)
         }
     }
     

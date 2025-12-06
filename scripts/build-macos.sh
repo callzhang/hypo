@@ -10,6 +10,21 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MACOS_DIR="$PROJECT_ROOT/macos"
 BINARY_NAME="HypoMenuBar"
 
+# Read version from centralized VERSION file
+VERSION_FILE="$PROJECT_ROOT/VERSION"
+if [ -f "$VERSION_FILE" ]; then
+    APP_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
+else
+    APP_VERSION="1.0.5" # Fallback version
+    log_warn "VERSION file not found, using fallback: $APP_VERSION"
+fi
+
+# Parse version to get build number (e.g., 1.0.5 -> 5)
+BUILD_NUMBER=$(echo "$APP_VERSION" | awk -F. '{print $3}')
+if [ -z "$BUILD_NUMBER" ]; then
+    BUILD_NUMBER="5" # Fallback
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -91,9 +106,9 @@ if [ ! -d "$APP_BUNDLE" ]; then
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>$BUILD_NUMBER</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.2</string>
+    <string>$APP_VERSION</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -233,7 +248,8 @@ else
     exit 1
 fi
 
-# Ensure Info.plist exists (create if missing)
+# Update Info.plist with current version (create if missing)
+log_info "Updating Info.plist with version $APP_VERSION (build $BUILD_NUMBER)..."
 if [ ! -f "$APP_BUNDLE/Contents/Info.plist" ]; then
     log_info "Creating Info.plist..."
     cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
@@ -250,9 +266,9 @@ if [ ! -f "$APP_BUNDLE/Contents/Info.plist" ]; then
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>$BUILD_NUMBER</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.2</string>
+    <string>$APP_VERSION</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -267,6 +283,18 @@ if [ ! -f "$APP_BUNDLE/Contents/Info.plist" ]; then
 </plist>
 EOF
     log_success "Created Info.plist"
+else
+    # Update existing Info.plist with current version
+    if command -v plutil &> /dev/null; then
+        plutil -replace CFBundleShortVersionString -string "$APP_VERSION" "$APP_BUNDLE/Contents/Info.plist"
+        plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP_BUNDLE/Contents/Info.plist"
+        log_success "Updated Info.plist with version $APP_VERSION (build $BUILD_NUMBER)"
+    else
+        # Fallback: use sed if plutil is not available
+        sed -i '' "s/<string>.*<\/string>.*CFBundleShortVersionString/<string>$APP_VERSION<\/string>/" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+        sed -i '' "s/<string>.*<\/string>.*CFBundleVersion/<string>$BUILD_NUMBER<\/string>/" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+        log_success "Updated Info.plist with version $APP_VERSION (build $BUILD_NUMBER) using sed"
+    fi
 fi
 
 # Ensure icon is up to date (check if icon generation script is newer than icon)

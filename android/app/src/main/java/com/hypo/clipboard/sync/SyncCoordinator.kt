@@ -207,8 +207,8 @@ class SyncCoordinator @Inject constructor(
                         android.util.Log.d(TAG, "✅ Successfully removed old item and created new one at top: ${newItem.preview.take(50)}")
                         newItem
                     } catch (e: Exception) {
-                        android.util.Log.e(TAG, "❌ Error removing/creating item: ${e.message}", e)
-                        // Fallback: use existing item
+                        android.util.Log.e(TAG, "❌ Error removing/creating item: ${e.message}. Duplicate detection will not move item to top.", e)
+                        // Continue with existing item - duplicate detection failed but item exists
                         latestEntry
                     }
                 } else {
@@ -244,8 +244,8 @@ class SyncCoordinator @Inject constructor(
                             android.util.Log.d(TAG, "✅ Successfully removed old history item and created new one at top: ${newItem.preview.take(50)}")
                             newItem
                         } catch (e: Exception) {
-                            android.util.Log.e(TAG, "❌ Error removing/creating history item: ${e.message}", e)
-                            // Fallback: use existing item
+                            android.util.Log.e(TAG, "❌ Error removing/creating history item: ${e.message}. Duplicate detection will not move item to top.", e)
+                            // Continue with existing item - duplicate detection failed but item exists
                             matchingEntry
                         }
                     } else {

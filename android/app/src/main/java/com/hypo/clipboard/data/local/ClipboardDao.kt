@@ -167,6 +167,7 @@ interface ClipboardDao {
     suspend fun findByIdWithoutContent(id: String): ClipboardEntity?
     
     // Load only the content field for a specific item (for large IMAGE/FILE items)
+    // Note: This may still fail for very large content (>2MB) due to CursorWindow limits
     @Query("SELECT content FROM clipboard_items WHERE id = :id LIMIT 1")
     suspend fun findContentById(id: String): String?
     

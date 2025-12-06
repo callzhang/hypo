@@ -322,14 +322,17 @@ jobs:
             echo "📝 Generating commit summary..."
             
             # Find the previous tag (if any)
-            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            # Try to find the most recent tag before current HEAD
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git tag --sort=-version:refname | head -1 || echo "")
             
-            if [ -n "$PREV_TAG" ]; then
+            if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$VERSION" ]; then
               # Get commits since last tag
               COMMIT_RANGE="${PREV_TAG}..HEAD"
+              echo "📝 Comparing commits from ${PREV_TAG} to HEAD"
             else
-              # Get last 20 commits if no previous tag
-              COMMIT_RANGE="HEAD~20..HEAD"
+              # Get last 30 commits if no previous tag or same tag
+              COMMIT_RANGE="HEAD~30..HEAD"
+              echo "📝 Using last 30 commits (no previous tag found)"
             fi
             
             # Generate categorized commit summary
@@ -437,7 +440,7 @@ jobs:
             if [ -n "$COMMIT_SUMMARY" ]; then
               CHANGELOG_SECTION="$COMMIT_SUMMARY"
             else
-              CHANGELOG_SECTION="No significant changes detected."
+              CHANGELOG_SECTION="### 📝 Changes\n\nNo significant changes detected in this release."
             fi
           fi
           
@@ -445,18 +448,19 @@ jobs:
           cat > release-notes.md << EOF
           # Release $VERSION
           
-          ## Downloads
+          ## 📦 Downloads
           
-          - **Android**: \`Hypo-${TAG_NAME}.apk\`
-          - **macOS**: \`Hypo-${TAG_NAME}.zip\`
+          - **Android**: [\`Hypo-${TAG_NAME}.apk\`](Hypo-${TAG_NAME}.apk)
+          - **macOS**: [\`Hypo-${TAG_NAME}.zip\`](Hypo-${TAG_NAME}.zip)
           
-          ## Installation
+          ## 📖 Installation
           
-          See [INSTALLATION.md](docs/INSTALLATION.md) for detailed installation instructions.
+          For detailed installation instructions, see the [User Guide](docs/USER_GUIDE.md#installation).
           
-          ### macOS First Launch
+          ### 🍎 macOS Installation
           
-          **Important**: After downloading and extracting the macOS app, you may see a "damaged" error. This is due to macOS quarantine (see explanation below).
+          1. Download and extract \`Hypo-${TAG_NAME}.zip\`
+          2. **Important**: After extracting, you may see a "damaged" error when trying to open the app. This is due to macOS quarantine.
           
           **Quick Fix:**
           \`\`\`bash
@@ -468,20 +472,26 @@ jobs:
           
           You'll see a "cannot be verified" warning - this is normal for ad-hoc signed apps. Click **Open** to proceed.
           
-          **Why this happens**: macOS automatically adds a quarantine attribute to files downloaded from the internet (via Safari, Chrome, curl, etc.). This is a security feature called Gatekeeper. The attribute is stored as an extended attribute (`com.apple.quarantine`) and contains metadata about where the file came from.
+          **Why this happens**: macOS automatically adds a quarantine attribute to files downloaded from the internet. This is a security feature called Gatekeeper. Our app uses ad-hoc signing (free, no Apple Developer account required), so macOS requires manual approval on first launch.
           
-          **Important distinction**: Our app IS signed (ad-hoc signature), but macOS treats ad-hoc signatures differently:
-          - **Ad-hoc signed + quarantined** → Shows "damaged" error (ad-hoc is not a trusted developer signature)
-          - **Developer ID signed + quarantined + not notarized** → Shows "cannot be verified" warning
-          - **Developer ID signed + notarized** → Opens normally
+          ### 🤖 Android Installation
           
-          **Why other projects don't show "damaged"**: They use Developer ID signatures (\$99/year Apple Developer Program) and notarize their apps. This makes macOS trust them automatically. Since we use free ad-hoc signing (no \$99/year Apple Developer account), macOS considers it "untrusted" when quarantined. Removing the quarantine attribute allows the app to run, but you'll still need to bypass the "cannot be verified" warning by right-clicking → Open.
+          1. Download \`Hypo-${TAG_NAME}.apk\` to your Android device
+          2. Open the APK file (you may need to enable "Install from unknown sources" in Settings)
+          3. Follow the on-screen installation prompts
+          4. Grant necessary permissions when prompted (clipboard access, network access, etc.)
           
-          ## Changes
+          **Note**: On MIUI/HyperOS devices, you may need to enable additional permissions in Settings → Apps → Hypo → Other permissions.
+          
+          ## 🆕 What's New
           
           ${CHANGELOG_SECTION}
           
-          ## Checksums
+          ## 🔐 Security & Verification
+          
+          ### SHA256 Checksums
+          
+          Verify the integrity of downloaded files using these checksums:
           
           \`\`\`
           SHA256 checksums:
@@ -493,7 +503,7 @@ jobs:
           for file in *.apk *.zip; do
             if [ -f "$file" ]; then
               SHA256=$(sha256sum "$file" | awk '{print $1}')
-              echo "  $SHA256  $file" >> ../release-notes.md
+              echo "  \`$SHA256\`  \`$file\`" >> ../release-notes.md
             fi
           done
           cd ..

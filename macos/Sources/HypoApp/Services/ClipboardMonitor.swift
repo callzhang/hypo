@@ -158,6 +158,16 @@ public final class ClipboardMonitor {
 
     private func captureImage(types: [NSPasteboard.PasteboardType]) -> ClipboardEntry? {
         
+        // Check if there's a file URL - if so, extract filename for image metadata
+        // Images copied from files have both image types AND .fileURL types
+        var imageFileName: String? = nil
+        if types.contains(.fileURL) {
+            let fileObjects = pasteboard.readObjects(forClasses: [NSURL.self], options: nil).compactMap { $0 as? URL }
+            if let fileURL = fileObjects.first {
+                imageFileName = fileURL.lastPathComponent
+            }
+        }
+        
         // Priority order for image types (most specific first)
         // Read raw data directly from pasteboard to preserve original format
         // NOTE: TIFF is intentionally excluded - macOS pasteboard often includes TIFF as a fallback
@@ -241,12 +251,12 @@ public final class ClipboardMonitor {
                 }
                 
                 // Store processed image data
-                // Note: altText is nil for clipboard images (no filename available)
+                // Include filename if available (from file URL)
                 let metadata = ImageMetadata(
                     pixelSize: processedPixels,
                     byteSize: processedData.count,
                     format: processedData.count < rawData.count ? "jpeg" : format, // Use jpeg if we re-encoded
-                    altText: nil,
+                    altText: imageFileName, // Include filename if available
                     data: processedData,
                     thumbnail: thumbnail
                 )
@@ -280,98 +290,52 @@ public final class ClipboardMonitor {
         ]
         
         if imageUTIs.contains(uti) || uti.hasPrefix("public.image") {
-            // This is an image file - try to read it as an image
+            // This is an image file - store as file with URL pointer (lazy loading)
+            // Don't read binary content here to avoid blocking on iCloud files
+            // Content will be loaded async when:
+            // 1. User clicks preview button
+            // 2. Syncing to other devices
+            let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+            let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+            guard size <= SizeConstants.maxAttachmentBytes else { return nil }
             
-            // Try to read as image
-            if let imageData = try? Data(contentsOf: fileURL),
-               let image = NSImage(data: imageData) {
-                let size = image.size
-                let pixels = CGSizeValue(width: Int(size.width), height: Int(size.height))
-                let thumbnail = image.thumbnail(maxPixelSize: 128)
-                
-                // Determine format from UTI or file extension
-                let format: String = {
-                    if uti.contains("png") || fileURL.pathExtension.lowercased() == "png" {
-                        return "png"
-                    } else if uti.contains("jpeg") || uti.contains("jpg") || fileURL.pathExtension.lowercased() == "jpg" || fileURL.pathExtension.lowercased() == "jpeg" {
-                        return "jpeg"
-                    } else if uti.contains("heic") || uti.contains("heif") || fileURL.pathExtension.lowercased() == "heic" {
-                        return "heic"
-                    } else if uti.contains("gif") || fileURL.pathExtension.lowercased() == "gif" {
-                        return "gif"
-                    } else if uti.contains("webp") || fileURL.pathExtension.lowercased() == "webp" {
-                        return "webp"
-                    } else if uti.contains("bmp") || fileURL.pathExtension.lowercased() == "bmp" {
-                        return "bmp"
-                    } else if uti.contains("tiff") || fileURL.pathExtension.lowercased() == "tiff" || fileURL.pathExtension.lowercased() == "tif" {
-                        return "tiff"
-                    } else {
-                        return "unknown"
-                    }
-                }()
-                
-                // Compress image if too large (similar to Android's approach)
-                let maxRawSize = SizeConstants.maxRawSizeForCompression
-                var processedData = imageData
-                var processedImage = image
-                var processedPixels = pixels
-                
-                if processedData.count > maxRawSize {
-                    logger.info("📐 [ClipboardMonitor] Image file too large: \(processedData.count) bytes, compressing...")
-                    
-                    // Scale down to reasonable size
-                    let maxDimension = SizeConstants.maxImageDimensionPx
-                    let longestSide = max(size.width, size.height)
-                    
-                    if longestSide > maxDimension {
-                        let scale = maxDimension / longestSide
-                        let newSize = NSSize(width: size.width * scale, height: size.height * scale)
-                        if let scaledImage = image.resized(to: newSize) {
-                            processedImage = scaledImage
-                            processedPixels = CGSizeValue(width: Int(newSize.width), height: Int(newSize.height))
-                            logger.info("📐 [ClipboardMonitor] Scaled image file: \(Int(size.width))×\(Int(size.height)) -> \(Int(newSize.width))×\(Int(newSize.height))")
-                        }
-                    }
-                    
-                    // Re-encode with compression (use JPEG for better compression)
-                    if let compressedData = processedImage.jpegData(compressionQuality: 0.85) {
-                        processedData = compressedData
-                        logger.info("🗜️ [ClipboardMonitor] Re-encoded image file as JPEG: \(processedData.count) bytes")
-                    }
-                    
-                    // Further compress if still too large
-                    if processedData.count > maxRawSize {
-                        var quality: CGFloat = 0.75
-                        while processedData.count > maxRawSize && quality >= 0.4 {
-                            if let furtherCompressed = processedImage.jpegData(compressionQuality: quality) {
-                                processedData = furtherCompressed
-                                logger.info("🗜️ [ClipboardMonitor] Further compressed image file (quality: \(Int(quality * 100))%): \(processedData.count) bytes")
-                            }
-                            quality -= 0.1
-                        }
-                    }
+            // Determine format from UTI or file extension (without reading file)
+            let format: String = {
+                if uti.contains("png") || fileURL.pathExtension.lowercased() == "png" {
+                    return "png"
+                } else if uti.contains("jpeg") || uti.contains("jpg") || fileURL.pathExtension.lowercased() == "jpg" || fileURL.pathExtension.lowercased() == "jpeg" {
+                    return "jpeg"
+                } else if uti.contains("heic") || uti.contains("heif") || fileURL.pathExtension.lowercased() == "heic" {
+                    return "heic"
+                } else if uti.contains("gif") || fileURL.pathExtension.lowercased() == "gif" {
+                    return "gif"
+                } else if uti.contains("webp") || fileURL.pathExtension.lowercased() == "webp" {
+                    return "webp"
+                } else if uti.contains("bmp") || fileURL.pathExtension.lowercased() == "bmp" {
+                    return "bmp"
+                } else if uti.contains("tiff") || fileURL.pathExtension.lowercased() == "tiff" || fileURL.pathExtension.lowercased() == "tif" {
+                    return "tiff"
+                } else {
+                    return "unknown"
                 }
-                
-                // Final check - if still too large, skip
-                if processedData.count > SizeConstants.maxAttachmentBytes {
-                    logger.warning("⚠️ [ClipboardMonitor] Image file exceeds \(SizeConstants.maxAttachmentBytes / (1024 * 1024))MB limit after compression: \(processedData.count) bytes, skipping")
-                    return nil
-                }
-                
-                // Store filename in altText for image files
-                let fileName = fileURL.lastPathComponent
-                let metadata = ImageMetadata(
-                    pixelSize: processedPixels,
-                    byteSize: processedData.count,
-                    format: processedData.count < imageData.count ? "jpeg" : format, // Use jpeg if we re-encoded
-                    altText: fileName,
-                    data: processedData,
-                    thumbnail: thumbnail
-                )
-                
-                
-                return ClipboardEntry(deviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .image(metadata), isEncrypted: false, transportOrigin: nil)
-            }
+            }()
+            
+            // Store as file with URL pointer - content loaded lazily
+            let metadata = FileMetadata(
+                fileName: fileURL.lastPathComponent,
+                byteSize: size,
+                uti: uti,
+                url: fileURL,
+                base64: nil  // No binary read during capture
+            )
+            return ClipboardEntry(
+                deviceId: deviceId.uuidString,
+                originPlatform: platform,
+                originDeviceName: deviceName,
+                content: .file(metadata),
+                isEncrypted: false,
+                transportOrigin: nil
+            )
         }
         
         // Not an image file, or failed to read as image - treat as regular file.

@@ -61,6 +61,11 @@ pub async fn status_handler(data: web::Data<AppState>) -> HttpResponse {
         "performance": {
             "avg_request_duration_ms": avg_request_duration_ms,
             "description": "Average request duration in milliseconds (last 1000 requests)"
+        },
+        "message_queue": {
+            "pending_messages": 0,
+            "queued_per_device": {},
+            "description": "Message queue statistics (planned feature: queue messages when device offline, retry with exponential backoff up to 2048s timeout)"
         }
     }))
 }

@@ -42,6 +42,16 @@ class LanPeerConnectionManager(
     private val mutex = Mutex()
     
     /**
+     * Get set of device IDs that have active LAN WebSocket connections.
+     */
+    fun getActiveLanConnections(): Set<String> {
+        return peerConnections.entries
+            .filter { (_, client) -> client.isConnected() }
+            .map { (deviceId, _) -> deviceId }
+            .toSet()
+    }
+    
+    /**
      * Sync peer connections: create connections for newly discovered peers,
      * remove connections for peers that are no longer discovered.
      * Called when peers are discovered/removed (event-driven).
@@ -203,6 +213,43 @@ class LanPeerConnectionManager(
             }
         }
         return successCount
+    }
+    
+    /**
+     * Close all LAN connections (for screen-off optimization).
+     * Connections will be re-established when reconnectAll() is called.
+     */
+    suspend fun closeAllConnections() {
+        mutex.withLock {
+            android.util.Log.d("LanPeerConnectionManager", "🔌 Closing all LAN connections (screen-off optimization)")
+            for ((deviceId, client) in peerConnections) {
+                try {
+                    // Use disconnect() instead of close() - closes socket but keeps client ready for reconnection
+                    client.disconnect()
+                    android.util.Log.d("LanPeerConnectionManager", "   Disconnected peer $deviceId")
+                } catch (e: Exception) {
+                    android.util.Log.w("LanPeerConnectionManager", "⚠️ Error disconnecting peer $deviceId: ${e.message}")
+                }
+            }
+            // Cancel connection maintenance jobs
+            for ((_, job) in connectionJobs) {
+                job.cancel()
+            }
+            connectionJobs.clear()
+            // Keep peerConnections map intact - we'll reconnect to the same peers
+        }
+    }
+    
+    /**
+     * Reconnect all LAN connections (for screen-on optimization).
+     * Re-establishes connections to all discovered peers.
+     */
+    suspend fun reconnectAllConnections() {
+        mutex.withLock {
+            android.util.Log.d("LanPeerConnectionManager", "🔄 Reconnecting all LAN connections (screen-on optimization)")
+            // Re-sync peer connections to re-establish connections
+            syncPeerConnections()
+        }
     }
     
     /**

@@ -211,7 +211,7 @@ object AppModule {
         lanPeerConnectionManager: com.hypo.clipboard.transport.ws.LanPeerConnectionManager,
         relayWebSocketClient: RelayWebSocketClient,
         transportManager: com.hypo.clipboard.transport.TransportManager
-    ): SyncTransport = com.hypo.clipboard.transport.ws.FallbackSyncTransport(
+    ): SyncTransport = com.hypo.clipboard.transport.ws.DualSyncTransport(
         lanPeerConnectionManager = lanPeerConnectionManager,
         cloudTransport = relayWebSocketClient,
         transportManager = transportManager

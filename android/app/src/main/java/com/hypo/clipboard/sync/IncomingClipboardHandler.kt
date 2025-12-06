@@ -139,7 +139,12 @@ class IncomingClipboardHandler @Inject constructor(
                                 val width = enhancedMetadata!!["width"] ?: "?"
                                 val height = enhancedMetadata!!["height"] ?: "?"
                                 val format = enhancedMetadata!!["format"] ?: "image"
-                                "Image ${width}×${height} (${formatBytes(size)})"
+                                val fileName = enhancedMetadata!!["file_name"]
+                                if (fileName != null) {
+                                    "$fileName · ${width}×${height} (${formatBytes(size)})"
+                                } else {
+                                    "Image ${width}×${height} (${formatBytes(size)})"
+                                }
                             }
                             com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
                                 val filename = enhancedMetadata!!["file_name"] ?: "file"

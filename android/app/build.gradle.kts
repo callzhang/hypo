@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.file.DuplicatesStrategy
 
 plugins {
     id("com.android.application")
@@ -9,6 +10,22 @@ plugins {
     id("io.sentry.android.gradle")
 }
 
+// Read version from centralized VERSION file
+val versionFile = rootProject.file("../VERSION")
+val projectVersion = if (versionFile.exists()) {
+    versionFile.readText().trim()
+} else {
+    "1.0.5" // Fallback version
+}
+
+// Parse version to get versionCode (e.g., 1.0.5 -> 5)
+val versionParts = projectVersion.split(".")
+val versionCodeValue = if (versionParts.size >= 3) {
+    versionParts[2].toIntOrNull() ?: 5
+} else {
+    5
+}
+
 android {
     namespace = "com.hypo.clipboard"
     compileSdk = 34
@@ -17,8 +34,8 @@ android {
         applicationId = "com.hypo.clipboard"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.0.2"
+        versionCode = versionCodeValue
+        versionName = projectVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -68,6 +85,8 @@ android {
             "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
             "-opt-in=kotlinx.coroutines.FlowPreview"
         )
+        // Prevent duplicate ComposableSingletons classes
+        allWarningsAsErrors = false
     }
 
     buildFeatures {

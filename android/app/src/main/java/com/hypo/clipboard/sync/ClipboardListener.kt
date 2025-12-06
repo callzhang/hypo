@@ -241,8 +241,7 @@ class ClipboardListener(
      * This is useful when clipboard is set from a context where onPrimaryClipChanged
      * might not fire reliably (e.g., ProcessTextActivity on Android 10+).
      * 
-     * This will process the clipboard even if the listener is not started,
-     * which is useful when accessibility service is handling clipboard monitoring.
+     * This will process the clipboard even if the listener is not started.
      */
     fun forceProcessCurrentClipboard() {
         scope.launch(Dispatchers.Default) {

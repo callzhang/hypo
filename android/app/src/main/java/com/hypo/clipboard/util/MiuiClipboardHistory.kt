@@ -293,7 +293,7 @@ object MiuiClipboardHistory {
      * Try accessing clipboard history via database.
      * MIUI might store clipboard history in a database we can query.
      */
-    private fun tryReadViaDatabase(context: Context): List<MiuiClipboardItem> {
+    private fun tryReadViaDatabase(@Suppress("UNUSED_PARAMETER") context: Context): List<MiuiClipboardItem> {
         val items = mutableListOf<MiuiClipboardItem>()
         
         // Possible database paths for MIUI clipboard history
@@ -358,7 +358,7 @@ object MiuiClipboardHistory {
      * Log all available ContentProviders on the device.
      * This can help discover if MIUI exposes clipboard history via ContentProvider.
      */
-    fun logAvailableContentProviders(context: Context) {
+    fun logAvailableContentProviders(@Suppress("UNUSED_PARAMETER") context: Context) {
         if (!MiuiAdapter.isMiuiOrHyperOS()) {
             return
         }
@@ -369,6 +369,7 @@ object MiuiClipboardHistory {
         try {
             val activityThread = Class.forName("android.app.ActivityThread")
             val currentApplication = activityThread.getMethod("currentApplication").invoke(null) as? Context
+            @Suppress("UNUSED_VARIABLE")
             val packageManager = currentApplication?.packageManager
             
             // This is complex and may not work, but worth trying

@@ -11,6 +11,7 @@
     <string name="service_notification_status_paused">Sync paused</string>
     <string name="service_notification_status_permission">Permission required</string>
     <string name="service_notification_permission_body">Enable \"Allow clipboard access\" in Settings → Apps → Hypo → Permissions to sync in background.</string>
+    <string name="accessibility_service_description">Monitors clipboard changes to sync with paired devices</string>
 
     <!-- Actions -->
     <string name="action_pause">Pause</string>

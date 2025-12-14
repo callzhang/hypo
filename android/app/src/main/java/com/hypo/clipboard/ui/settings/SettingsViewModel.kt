@@ -81,10 +81,14 @@ class SettingsViewModel @Inject constructor(
                 notificationPermissionStatusFlow.onStart { emit(checkNotificationPermissionStatus()) }, // Emit immediately on start, then every 2 seconds
                 batteryOptimizationStatusFlow.onStart { emit(checkBatteryOptimizationStatus()) } // Emit immediately on start, then every 2 seconds
             ) { values ->
+                @Suppress("UNCHECKED_CAST")
                 val settings = values[0] as UserSettings
+                @Suppress("UNCHECKED_CAST")
                 val peers = values[1] as List<DiscoveredPeer>
+                @Suppress("UNCHECKED_CAST")
                 val lastTransport = values[2] as Map<String, com.hypo.clipboard.transport.ActiveTransport>
                 val cloudConnectionState = values[3] as com.hypo.clipboard.transport.ConnectionState
+                @Suppress("UNCHECKED_CAST")
                 val deviceDualStatus = values[4] as Map<String, com.hypo.clipboard.ui.components.DeviceDualStatus>
                 val isSmsPermissionGranted = values[5] as Boolean
                 val isNotificationPermissionGranted = values[6] as Boolean

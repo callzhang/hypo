@@ -50,6 +50,7 @@ class LanDiscoveryRepository(
                 // Log own IPs before resolution to help debug why NSD resolves to wrong IP
                 val ownIPsBeforeResolve = getLocalIPAddresses()
                 android.util.Log.d("LanDiscoveryRepository", "   Own IPs before resolve: [${ownIPsBeforeResolve.joinToString()}]")
+                @Suppress("DEPRECATION")
                 nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                         android.util.Log.w("LanDiscoveryRepository", "❌ Failed to resolve service ${serviceInfo.serviceName}: errorCode=$errorCode")
@@ -57,12 +58,16 @@ class LanDiscoveryRepository(
                     }
 
                     override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                        @Suppress("DEPRECATION")
                         val resolvedIP = serviceInfo.host?.hostAddress
+                        @Suppress("DEPRECATION")
                         val resolvedHostname = serviceInfo.host?.hostName
                         val ownIPs = getLocalIPAddresses()
                         
                         // Log comprehensive resolution details for debugging
+                        @Suppress("DEPRECATION")
                         val addressBytes = serviceInfo.host?.address?.contentToString() ?: "null"
+                        @Suppress("DEPRECATION")
                         val canonicalName = serviceInfo.host?.canonicalHostName ?: "null"
                         val isOwnIP = resolvedIP != null && resolvedIP in ownIPs
                         android.util.Log.w("LanDiscoveryRepository", 
@@ -181,6 +186,7 @@ class LanDiscoveryRepository(
                 kotlinx.coroutines.delay(100)
             }
             runCatching {
+            @Suppress("DEPRECATION")
             nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener)
                 isDiscoveryActive = true
             }

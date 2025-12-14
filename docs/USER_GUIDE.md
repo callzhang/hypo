@@ -1,8 +1,8 @@
 # Hypo User Guide
 
 **Cross-Platform Clipboard Synchronization**  
-**Version**: 1.0.5  
-**Last Updated**: December 5, 2025
+**Version**: 1.0.6  
+**Last Updated**: December 13, 2025
 
 ---
 
@@ -962,7 +962,20 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ## 📝 Changelog
 
-**Version 1.0.2** (Current - Build & Release Improvements)
+**Version 1.0.6** (Current - Nonce Reuse Fix for Dual-Send Transport)
+- Fixed decryption failures when sending to both LAN and cloud simultaneously
+- macOS now creates separate envelopes with unique nonces for each transport
+- Prevents `AEADBadTagException` errors on Android when receiving same message twice
+- Enhanced diagnostic logging for cloud message reception
+
+**Version 1.0.5** (Text Selection Context Menu & Clipboard Processing Improvements)
+- Android text selection context menu: "Copy to Hypo" appears first
+- Force clipboard processing for immediate sync from context menu
+- Fixed history item copying for images/files
+- Universal toast notification for all item types
+- Reduced logging verbosity across all platforms
+
+**Version 1.0.2** (Build & Release Improvements)
 - macOS app signing for free distribution (ad-hoc signing)
 - Automatic release notes generation
 - Android build optimizations (faster CI/CD builds)
@@ -995,6 +1008,6 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ---
 
-**Last Updated**: December 5, 2025  
-**Version**: 1.0.5  
+**Last Updated**: December 13, 2025  
+**Version**: 1.0.6  
 **For Technical Support**: support@hypo.app

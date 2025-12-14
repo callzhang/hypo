@@ -388,6 +388,7 @@ private fun SmsPermissionSection(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                @Suppress("DEPRECATION")
                 Icon(imageVector = Icons.Filled.Message, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
@@ -450,6 +451,7 @@ private fun NotificationPermissionSection(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                @Suppress("DEPRECATION")
                 Icon(imageVector = Icons.Filled.Message, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
@@ -556,14 +558,14 @@ private fun DevicesSection(
 private fun DeviceRow(
     peer: DiscoveredPeer,
     status: DeviceConnectionStatus,
-    transport: com.hypo.clipboard.transport.ActiveTransport?,
+    @Suppress("UNUSED_PARAMETER") transport: com.hypo.clipboard.transport.ActiveTransport?,
     isDiscovered: Boolean,
-    isServerConnected: Boolean,
+    @Suppress("UNUSED_PARAMETER") isServerConnected: Boolean,
     onRemove: () -> Unit,
     onCheckStatus: () -> Unit = {},
     deviceName: String? = null
 ) {
-    // transport parameter is kept for API compatibility but not currently used in UI
+    // transport and isServerConnected parameters are kept for API compatibility but not currently used in UI
     // Use stored device name if available, otherwise fall back to serviceName (Bonjour hostname)
     val displayName = deviceName ?: peer.attributes["device_name"] ?: peer.serviceName
     

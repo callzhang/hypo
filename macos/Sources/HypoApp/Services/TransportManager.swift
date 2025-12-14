@@ -139,7 +139,6 @@ public final class TransportManager {
         if let defaultProvider = provider as? DefaultTransportProvider,
            let handler = incomingHandler {
            defaultProvider.setCloudIncomingMessageHandler { [weak handler] data, transportOrigin in
-               NSLog("☁️ [TransportManager] Cloud relay message received: \(data.count) bytes, origin: \(transportOrigin.rawValue)")
                await handler?.handle(data, transportOrigin: transportOrigin)
            }
             logger.info("✅ [TransportManager] Cloud relay incoming message handler set")

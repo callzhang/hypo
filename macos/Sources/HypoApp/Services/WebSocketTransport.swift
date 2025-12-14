@@ -351,17 +351,43 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 self.logger.debug("📤 [WebSocketTransport] Message in-flight: type=\(contentType), size=\(frameSize) bytes, id=\(messageId.uuidString.prefix(8))")
                 
                 // Set up timeout to handle cases where server doesn't respond
-                // If no error response is received within timeout, assume success (server may not send explicit ack)
+                // If no error response is received within timeout, check connection state:
+                // - If connection is valid, assume success (server may not send explicit ack)
+                // - If connection is invalid, requeue message for retry
                 let timeoutDuration: TimeInterval = frameSize > 100_000 ? 10.0 : 5.0 // Longer timeout for large messages
                 Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(timeoutDuration * 1_000_000_000))
                     guard let strongSelf = self else { return }
                     await MainActor.run {
-                        // If still in-flight after timeout and no error was received, assume success
-                        if strongSelf.inFlightMessages.removeValue(forKey: messageId) != nil {
-                            strongSelf.logger.debug("✅ [WebSocketTransport] Message confirmed (timeout): id=\(messageId.uuidString.prefix(8))")
+                        // Check if message is still in-flight
+                        guard let queuedMessage = strongSelf.inFlightMessages.removeValue(forKey: messageId) else {
+                            // Message was already removed (either confirmed or failed)
+                            return
+                        }
+                        
+                        // Check connection state before assuming success
+                        let isConnected: Bool
+                        switch strongSelf.state {
+                        case .connected:
+                            isConnected = true
+                        default:
+                            isConnected = false
+                        }
+                        
+                        if isConnected {
+                            // Connection is valid - assume message was sent successfully
+                            strongSelf.logger.debug("✅ [WebSocketTransport] Message confirmed (timeout, connection valid): id=\(messageId.uuidString.prefix(8))")
                             Task {
                                 _ = await strongSelf.pendingRoundTrips.remove(id: messageId)
+                            }
+                        } else {
+                            // Connection is invalid - requeue message for retry
+                            strongSelf.logger.warning("⚠️ [WebSocketTransport] Message timeout but connection invalid, requeuing: id=\(messageId.uuidString.prefix(8)), frame=\(queuedMessage.data.count) bytes")
+                            // Don't increment retry count - this is a connection issue, not a message issue
+                            strongSelf.messageQueue.append(queuedMessage)
+                            // Trigger queue processing to retry
+                            Task {
+                                await strongSelf.triggerQueueProcessingIfNeeded()
                             }
                         }
                     }
@@ -401,11 +427,17 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                         if case .connected = state {
                             // Still connected - just retry without reconnecting
                             self.logger.debug("🔄 [WebSocketTransport] Connection still valid, will retry send")
+                            // CRITICAL: Restart queue processor if it stopped
+                            await triggerQueueProcessingIfNeeded()
                         } else {
                             // Not connected - trigger reconnection
                             reconnectWithBackoff()
                         }
                     }
+                    
+                    // CRITICAL: Always restart queue processor after requeuing, regardless of error type
+                    // The processor may have exited while we were handling the error
+                    await triggerQueueProcessingIfNeeded()
                 } else {
                     self.logger.info("❌ [WebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(errorDescription)")
                     queuedMessage.retryCount += 1
@@ -419,12 +451,22 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             }
         }
         
-        // Queue is empty, stop processing
-        queueProcessingTask = nil
-        logger.debug("✅ [WebSocketTransport] Message queue empty, stopping processor")
+        // Check if queue is actually empty before stopping
+        // Messages may have been requeued while we were processing (e.g., after cancellation)
+        if messageQueue.isEmpty {
+            queueProcessingTask = nil
+            logger.debug("✅ [WebSocketTransport] Message queue empty, stopping processor")
+        } else {
+            // Queue has new messages (possibly requeued), continue processing
+            // Don't set queueProcessingTask to nil - let it continue
+        }
     }
 
     public func disconnect() async {
+        await disconnect(clearQueue: true)
+    }
+    
+    private func disconnect(clearQueue: Bool) async {
         watchdogTask?.cancel()
         watchdogTask = nil
         queueProcessingTask?.cancel()
@@ -449,14 +491,22 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         session = nil
         handshakeStartedAt = nil
         
-        // Clear message queue on disconnect
-        let queueSize = messageQueue.count
-        if queueSize > 0 {
-            logger.debug("🧹 [WebSocketTransport] Clearing \(queueSize) queued messages on disconnect")
-            for queuedMessage in messageQueue {
-                _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+        // Only clear message queue on intentional disconnect (not during reconnection)
+        // During reconnection, we want to preserve requeued messages for retry
+        if clearQueue {
+            let queueSize = messageQueue.count
+            if queueSize > 0 {
+                logger.debug("🧹 [WebSocketTransport] Clearing \(queueSize) queued messages on disconnect")
+                for queuedMessage in messageQueue {
+                    _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                }
+                messageQueue.removeAll()
             }
-            messageQueue.removeAll()
+        } else {
+            let queueSize = messageQueue.count
+            if queueSize > 0 {
+                logger.debug("🔄 [WebSocketTransport] Preserving \(queueSize) queued messages during reconnection")
+            }
         }
         
         await pendingRoundTrips.removeAll()
@@ -552,8 +602,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 return
             }
             
-            // Disconnect first
-            await self.disconnect()
+            // Disconnect first, but preserve message queue for retry
+            await self.disconnect(clearQueue: false)
             
             // Check again if cancelled
             guard !Task.isCancelled else {
@@ -749,7 +799,9 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     }
     
     private func triggerQueueProcessingIfNeeded() async {
-        guard !messageQueue.isEmpty else { return }
+        guard !messageQueue.isEmpty else {
+            return
+        }
         if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
             queueProcessingTask = Task { [weak self] in
                 await self?.processMessageQueue()
@@ -926,6 +978,25 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                 // Log at debug level instead of warning
                 if isSocketNotConnected {
                     logger.debug("ℹ️ [WebSocketTransport] Receive failed: Socket is not connected (expected when socket is closed)")
+                    
+                    // Check for in-flight messages - if socket closes during large payload transmission, requeue them
+                    if !inFlightMessages.isEmpty {
+                        let inFlightCount = inFlightMessages.count
+                        logger.info("⚠️ [WebSocketTransport] Socket disconnected with \(inFlightCount) in-flight message(s) - requeuing for retry")
+                        for (messageId, queuedMessage) in inFlightMessages {
+                            logger.info("🔄 [WebSocketTransport] Requeuing in-flight message: id=\(messageId.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), frame=\(queuedMessage.data.count) bytes")
+                            messageQueue.append(queuedMessage)
+                        }
+                        inFlightMessages.removeAll()
+                        
+                        // Trigger queue processing after reconnection
+                        Task { [weak self] in
+                            guard let self else { return }
+                            // Wait a bit for reconnection, then trigger queue processing
+                            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                            await self.triggerQueueProcessingIfNeeded()
+                        }
+                    }
                 } else {
                     logger.warning("❌ [WebSocketTransport] Receive failed: \(errorDescription)")
                     // Only trigger reconnection for real failures, not expected disconnections
@@ -1076,12 +1147,11 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             // Determine transport origin based on configuration
             let transportOrigin: TransportOrigin = (configuration.environment == "cloud" || configuration.url.scheme == "wss") ? .cloud : .lan
             if let handler = onIncomingMessage {
-                logger.info("📤 [WebSocketTransport] Forwarding to onIncomingMessage handler (origin: \(transportOrigin.rawValue))")
                 Task {
                     await handler(data, transportOrigin)
                 }
             } else {
-                logger.warning("⚠️ [WebSocketTransport] No onIncomingMessage handler set")
+                logger.warning("⚠️ [WebSocketTransport] No onIncomingMessage handler set - message will be dropped!")
             }
         } catch let decodingError as DecodingError {
             logger.error("❌ [WebSocketTransport] Failed to decode incoming data: \(decodingError)")

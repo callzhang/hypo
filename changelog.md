@@ -2,6 +2,32 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [1.0.6] - 2025-12-13 - Nonce Reuse Fix for Dual-Send Transport
+
+### Fixed
+- **macOS Nonce Reuse in Dual-Send**: Fixed decryption failures when sending to both LAN and cloud
+  - `DualSyncTransport` now creates separate envelopes with unique nonces for each transport
+  - Prevents `AEADBadTagException: BAD_DECRYPT` errors on Android when receiving same message twice
+  - AES-GCM requires unique nonces per encryption with the same key
+  - Same message ID used for both envelopes to enable Android deduplication
+  - Resolves issue where Android received same encrypted message on both connections and second decryption failed
+- **macOS Cloud Message Reception**: Added diagnostic logging for incoming cloud messages
+  - Enhanced logging in `WebSocketTransport` and `IncomingClipboardHandler` to trace message flow
+  - Helps diagnose issues with cloud relay message delivery
+
+### Changed
+- **macOS DualSyncTransport Architecture**: Enhanced to support unique nonce generation
+  - Added optional `cryptoService` and `keyProvider` parameters to `DualSyncTransport`
+  - Decrypts original envelope and re-encrypts with new nonce for second transport
+  - Maintains same message ID for both envelopes to preserve deduplication behavior
+  - Configured automatically when `SyncEngine` is created via `HistoryStore`
+
+### Technical Details
+- Nonce reuse in AES-GCM breaks authentication tag verification, causing decryption to fail
+- Fix ensures each transport (LAN and cloud) receives envelope with unique nonce
+- Android's message ID deduplication still works correctly with same message ID
+- Cached payload mechanism allows duplicate message IDs to move items to top without re-decryption
+
 ## [1.0.5] - 2025-12-05 - Text Selection Context Menu & Clipboard Processing Improvements
 
 ### Added
@@ -845,13 +871,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 **Changelog Maintained By**: Principal Engineering Team
-**Last Updated**: December 3, 2025
+**Last Updated**: December 13, 2025
 
 ---
 
 ## Project Status Summary
 
-**Current Version**: 1.0.2  
+**Current Version**: 1.0.6  
 **Project Phase**: Production Release  
 **Overall Progress**: 100%  
 **Status**: Production-ready, all critical issues resolved

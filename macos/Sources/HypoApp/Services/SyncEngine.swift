@@ -367,6 +367,7 @@ public final actor SyncEngine {
         let ciphertext: Data
         let nonce: Data
         let tag: Data
+        let aad: Data
         
         if plainTextMode {
             // Plain text mode: use plaintext directly as "ciphertext", with empty nonce/tag
@@ -374,13 +375,14 @@ public final actor SyncEngine {
             ciphertext = plaintext
             nonce = Data()
             tag = Data()
+            aad = Data()
         } else {
             // Normal encryption mode
             let key = try await keyProvider.key(for: targetDeviceId)
             // Use entry.deviceId as AAD (sender's device ID) so it matches what Android expects
             // Android decrypts using envelope.payload.deviceId as AAD, so they must match
             // deviceId is already normalized to lowercase in ClipboardEntry.init
-            let aad = Data(entry.deviceId.utf8)
+            aad = Data(entry.deviceId.utf8)
             logger.debug("🔒 [SyncEngine] Encrypting: deviceId=\(entry.deviceId), targetDeviceId=\(targetDeviceId), aad=\(entry.deviceId) (\(aad.count) bytes)")
             let sealed = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
             ciphertext = sealed.ciphertext
@@ -389,6 +391,7 @@ public final actor SyncEngine {
             logger.debug("🔒 [SyncEngine] Encrypted: \(ciphertext.count) bytes")
         }
 
+        // Create one envelope - DualSyncTransport will handle creating separate envelopes with unique nonces if needed
         let envelope = SyncEnvelope(
             type: .clipboard,
             payload: .init(

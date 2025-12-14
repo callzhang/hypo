@@ -283,30 +283,6 @@ class PairingHandshakeManager @Inject constructor(
         return jsonObject.toString().toByteArray()
     }
 
-    private suspend fun CryptoService.encrypt(
-        plaintext: ByteArray,
-        key: ByteArray,
-        aad: ByteArray
-    ): EncryptedData = run {
-        runCatching { encrypt(plaintext, key, aad) }.getOrElse {
-            throw PairingException("Encryption failed")
-        }
-    }
-
-    private suspend fun CryptoService.decrypt(
-        encrypted: EncryptedData,
-        key: ByteArray,
-        aad: ByteArray
-    ): ByteArray = run {
-        runCatching { decrypt(encrypted, key, aad) }.getOrElse {
-            throw PairingException("Decryption failed")
-        }
-    }
-
-    private suspend fun CryptoService.deriveKey(privateKey: ByteArray, publicKey: ByteArray): ByteArray =
-        runCatching { deriveKey(privateKey, publicKey) }.getOrElse {
-            throw PairingException("Key agreement failed")
-        }
 
     private fun hash(data: ByteArray): ByteArray {
         val digest = java.security.MessageDigest.getInstance("SHA-256")

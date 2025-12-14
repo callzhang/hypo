@@ -223,7 +223,7 @@ class ClipboardSyncService : Service() {
             ACTION_FORCE_PROCESS_CLIPBOARD -> {
                 Log.d(TAG, "🔄 Force processing clipboard from ProcessTextActivity")
                 // Get text from intent if available (avoids timing issues with clipboard access)
-                val textFromIntent = intent?.getStringExtra("text")
+                val textFromIntent = intent.getStringExtra("text")
                 if (textFromIntent != null) {
                     Log.d(TAG, "📝 Processing text from intent (${textFromIntent.length} chars)")
                     // Create a ClipboardEvent directly from the text
@@ -365,12 +365,6 @@ class ClipboardSyncService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val statusText = when {
-            awaitingClipboardPermission -> getString(R.string.service_notification_status_permission)
-            isPaused -> getString(R.string.service_notification_status_paused)
-            !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> "Background (clipboard access limited)"
-            else -> getString(R.string.service_notification_status_active)
-        }
         val previewText = when {
             awaitingClipboardPermission -> getString(R.string.service_notification_permission_body)
             !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> "App must be in foreground for clipboard access on Android 10+"

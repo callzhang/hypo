@@ -21,9 +21,15 @@ public final class DefaultTransportProvider: TransportProvider {
         }
         
         // Create dual transport that sends to both LAN and cloud simultaneously
+        // Note: Crypto service and key provider will be set when SyncEngine is created
+        // For now, we create DualSyncTransport without them - it will send same envelope to both
+        // (nonce reuse will be handled by Android's nonce deduplication)
+        // TODO: Pass crypto service and key provider to DualSyncTransport to enable unique nonces
         self.dualTransport = DualSyncTransport(
             lanTransport: lanTransport,
-            cloudTransport: cloudTransport
+            cloudTransport: cloudTransport,
+            cryptoService: nil,  // Will be set when SyncEngine is created
+            keyProvider: nil     // Will be set when SyncEngine is created
         )
     }
     

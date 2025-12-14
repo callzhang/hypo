@@ -36,7 +36,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Image
@@ -651,7 +651,7 @@ private fun ClipboardCard(
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.OpenInBrowser,
+                                imageVector = Icons.Filled.Link,
                                 contentDescription = "Visit in Browser",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
@@ -700,7 +700,7 @@ private val ClipboardType.iconVector: androidx.compose.ui.graphics.vector.ImageV
     }
 
 @Composable
-private fun FileDetailContent(item: ClipboardItem, onDismiss: () -> Unit = {}) {
+private fun FileDetailContent(item: ClipboardItem) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isSaving by remember { mutableStateOf(false) }
@@ -1025,7 +1025,7 @@ private fun ClipboardDetailContent(
                 )
             }
             ClipboardType.FILE -> {
-                FileDetailContent(item = item, onDismiss = onDismiss)
+                FileDetailContent(item = item)
             }
         }
     }

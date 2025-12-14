@@ -164,12 +164,26 @@ build_apk() {
     local capitalized_variant=$(echo "$variant" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')
     local task="assemble$capitalized_variant"  # assembleDebug or assembleRelease
     
+    # Create temp file for build output
+    local build_log=$(mktemp /tmp/hypo-build-XXXXXX.log)
+    
     echo ""
     echo -e "${YELLOW}Building $variant APK...${NC}"
     set +e  # Temporarily disable exit on error to handle return codes
-    ./gradlew "$task" --stacktrace
-    local build_result=$?
+    ./gradlew "$task" --stacktrace 2>&1 | tee "$build_log"
+    local build_result=${PIPESTATUS[0]}
     set -e  # Re-enable exit on error
+    
+    # Check for duplicate class errors (Hilt annotation processor issue)
+    if [ $build_result -ne 0 ] && grep -q "is defined multiple times\|duplicate class" "$build_log"; then
+        echo -e "${YELLOW}⚠️  Duplicate class error detected, cleaning build...${NC}"
+        ./gradlew clean 2>&1 | tee -a "$build_log"
+        echo -e "${YELLOW}Rebuilding after clean...${NC}"
+        set +e
+        ./gradlew "$task" --stacktrace 2>&1 | tee -a "$build_log"
+        build_result=${PIPESTATUS[0]}
+        set -e
+    fi
     
     # Determine APK path based on variant
     if [ "$variant" = "debug" ]; then
@@ -189,15 +203,21 @@ build_apk() {
         echo "   APK: android/$APK_PATH"
         echo "   Size: $APK_SIZE"
         echo "   SHA-256: $APK_SHA"
+        rm -f "$build_log"
         return 0
     else
+        echo ""
         echo -e "${RED}❌ $variant build failed${NC}"
         if [ $build_result -ne 0 ]; then
             echo "   Gradle build returned error code: $build_result"
+            echo ""
+            echo -e "${YELLOW}Last 30 lines of build output:${NC}"
+            tail -n 30 "$build_log" | sed 's/^/   /'
         fi
         if [ ! -f "$APK_PATH" ]; then
             echo "   APK not found at: $APK_PATH"
         fi
+        rm -f "$build_log"
         return 1
     fi
 }

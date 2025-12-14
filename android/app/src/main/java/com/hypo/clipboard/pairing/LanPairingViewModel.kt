@@ -241,11 +241,39 @@ class LanPairingViewModel @Inject constructor(
                             }
                         }
                         
-                        // Step 4: Ensure connection is established before sending challenge
-                        wsClient?.let { _ ->
+                        // Step 4: Start the WebSocket connection and wait for it to be established
+                        try {
+                            Log.d(TAG, "⏳ Pairing: Starting WebSocket connection...")
+                            // For pairing, we have a specific URL in the config
+                            // Set handlers before starting (not needed for pairing, but set to avoid null pointer)
+                            wsClient?.setIncomingClipboardHandler { _, _ -> } // Empty handler for pairing
+                            
+                            // For pairing connections, we need to ensure the connector is set
+                            // The connector is passed in constructor and currentConnector is initialized to it
+                            // For LAN connections without transportManager, startReceiving() will check config.url
+                            // Since we have config.url set, it should work. The runConnectionLoop() will use
+                            // config.url if lastKnownUrl is null for LAN connections (line 819: lastKnownUrl ?: config.url)
+                            // And currentConnector should already be set from constructor (line 199)
+                            // So we just need to call startReceiving() which will call ensureConnection()
+                            wsClient?.startReceiving()
+                            
+                            Log.d(TAG, "⏳ Pairing: Waiting for WebSocket connection to be established...")
                             withContext(Dispatchers.IO) {
-                                delay(100)
+                                var attempts = 0
+                                val maxAttempts = 100 // 10 seconds total (100 * 100ms) - increased for slower networks
+                                while (attempts < maxAttempts && wsClient?.isConnected() != true) {
+                                    delay(100)
+                                    attempts++
+                                }
+                                if (wsClient?.isConnected() != true) {
+                                    throw java.util.concurrent.TimeoutException("WebSocket connection not established after ${maxAttempts * 100}ms")
+                                }
                             }
+                            Log.d(TAG, "✅ Pairing: WebSocket connection established")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "❌ Pairing: Failed to establish WebSocket connection - ${e.message}", e)
+                            _state.value = LanPairingUiState.Error("Failed to connect to peer device: ${e.message ?: "Connection timeout"}")
+                            return@launch
                         }
                         
                         // Step 5: Send pairing challenge as raw JSON (not wrapped in SyncEnvelope)
@@ -261,16 +289,16 @@ class LanPairingViewModel @Inject constructor(
                             return@launch
                         }
                         
-                        // Step 6: Wait for ACK with timeout
+                        // Step 6: Wait for ACK with timeout (increased to 60s to match roundTripTimeout)
                         val ackJson = try {
                             withContext(Dispatchers.IO) {
-                                withTimeout(30_000) {
+                                withTimeout(60_000) {
                                     ackReceived.await()
                                 }
                             }
                         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                            Log.e(TAG, "❌ Pairing: Timeout waiting for ACK (30s)")
-                            _state.value = LanPairingUiState.Error("Pairing timeout: Peer device did not respond. Please ensure the other device is running Hypo and try again.")
+                            Log.e(TAG, "❌ Pairing: Timeout waiting for ACK (60s)")
+                            _state.value = LanPairingUiState.Error("Pairing timeout: Peer device did not respond within 60 seconds. Please ensure the other device is running Hypo and try again.")
                             return@launch
                         } catch (e: Exception) {
                             Log.e(TAG, "❌ Pairing: Error waiting for ACK - ${e.message}", e)

@@ -23,11 +23,14 @@ public enum SizeConstants {
     ///   4. Base64 encode ciphertext: 13.3MB × 4/3 = ~17.8MB
     ///   5. JSON SyncEnvelope: ~17.8MB + envelope fields ≈ 18MB
     ///
-    /// Set to 25MB to provide safety margin for metadata and JSON structure overhead.
+    /// Set to 20MB to accommodate 10MB images that become ~18MB after encoding/encryption.
+    /// OkHttp WebSocket handles fragmentation automatically, but we enforce this limit
+    /// to ensure compatibility with WebSocket implementations that may have frame size limits.
     ///
-    /// Note: Previously was 40MB to account for both `data` (array) and `data_base64`,
-    /// but we now only encode `data_base64` for efficiency (~50-70% reduction).
-    public static let maxTransportPayloadBytes = 25 * 1024 * 1024 // 25MB
+    /// Note: 15MB was too small for 10MB images (~18MB after encoding). Increased to 20MB
+    /// to provide safety margin while staying within reasonable WebSocket frame size limits.
+    /// macOS now only encodes `data_base64` for efficiency (~50-70% reduction).
+    public static let maxTransportPayloadBytes = 20 * 1024 * 1024 // 20MB
     
     /// Target raw size for image compression (75% of maxAttachmentBytes).
     /// Images larger than this will be compressed to stay under 10MB after base64 + JSON overhead.

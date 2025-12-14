@@ -87,23 +87,103 @@ log stream --predicate 'processID == <PID>' --level debug
 
 ### Android Logs
 
-**⚠️ Always filter MIUIInput** - Add `| grep -v "MIUIInput"` to all `adb logcat` commands:
+**⚠️ Always filter MIUIInput** - All commands below include filtering for system noise.
 
+**Step 1: Get your device ID**
 ```bash
-# Filter by PID (excludes Verbose logs and system noise) with color
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
+# List connected devices
+adb devices -l
 
-# Simple usage (shows app logs only, filters system noise)
-adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
+# Automatically get the first connected device ID
+device_id=$(adb devices | grep -E "device$" | head -1 | awk '{print $1}' | tr -d '\r')
 
-# With custom grep filters (excludes system noise, shows only SyncEngine/transport)
-adb -s $device_id logcat | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "SyncEngine|transport"
+if [ -z "$device_id" ]; then
+    echo "❌ No Android device connected. Please connect a device and try again."
+    exit 1
+fi
 
-# View recent logs (filters system noise)
-adb -s $device_id logcat -d -t 300 | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
+echo "✅ Using device: $device_id"
+```
 
-# Find message by content (filters system noise)
-adb -s $device_id logcat -d | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -F "content: Case 1:"
+**Step 2: View logs (auto-detects PID on each run)**
+```bash
+# System noise patterns to filter (stored in variable to avoid duplication)
+NOISE_PATTERNS=" V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
+
+# Get PID and stream logs in one command (PID is refreshed on each run)
+# Note: Use "*:D" to show DEBUG level logs (required for detailed debugging like hex values)
+# Remove -d flag for streaming (use -d only to dump current buffer and exit)
+APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
+echo "✅ Using APP_PID: $APP_PID"
+adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE "$NOISE_PATTERNS"
+```
+
+**Debugging Focus Options:**
+
+**Network Issues** (WebSocket connections, LAN discovery, cloud relay):
+```bash
+# Get PID and filter for network-related logs
+APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
+if [ -n "$APP_PID" ]; then
+    adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "WebSocket|Connection|Network|LAN|Cloud|Discovery|mDNS|Bonjour|Transport"
+else
+    adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "WebSocket|Connection|Network|LAN|Cloud|Discovery|mDNS|Bonjour|Transport"
+fi
+```
+
+**Message Syncing Issues** (clipboard detection, sending, receiving):
+```bash
+# Get PID and filter for sync-related logs
+APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
+if [ -n "$APP_PID" ]; then
+    adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "Clipboard|Sync|Received|Sent|transport\.send|onPrimaryClipChanged|ClipboardListener"
+else
+    adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "Clipboard|Sync|Received|Sent|transport\.send|onPrimaryClipChanged|ClipboardListener"
+fi
+```
+
+**Pairing Issues** (device discovery, handshake, encryption):
+```bash
+# Get PID and filter for pairing-related logs
+APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
+if [ -n "$APP_PID" ]; then
+    adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "Pairing|Handshake|Challenge|ACK|Key|Encryption|Decryption|Device|discovered"
+else
+    adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "Pairing|Handshake|Challenge|ACK|Key|Encryption|Decryption|Device|discovered"
+fi
+```
+
+**Database/Storage Issues** (SQLite errors, content too large):
+```bash
+# Get PID and filter for database-related logs
+APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
+if [ -n "$APP_PID" ]; then
+    adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "SQLite|Database|BlobTooBig|CursorWindow|Content.*too.*large"
+else
+    adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "SQLite|Database|BlobTooBig|CursorWindow|Content.*too.*large"
+fi
+```
+
+**View Recent Logs** (last 300 lines, filtered):
+```bash
+# Get PID and view recent logs
+APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
+if [ -n "$APP_PID" ]; then
+    adb -s $device_id logcat -d -t 300 "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
+else
+    adb -s $device_id logcat -d -t 300 -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
+fi
+```
+
+**Find Specific Content** (search for specific message):
+```bash
+# Get PID and search for specific content (replace "Case 1:" with your search term)
+APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
+if [ -n "$APP_PID" ]; then
+    adb -s $device_id logcat -d "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -F "content: Case 1:"
+else
+    adb -s $device_id logcat -d -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -F "content: Case 1:"
+fi
 ```
 
 **Query database (most reliable, no filtering needed)**:
@@ -226,8 +306,7 @@ All log messages use `.public` privacy level, meaning they're fully visible in l
    # Backend health
    curl -s https://hypo.fly.dev/health | jq '.connected_devices'
    
-   # Android WebSocket (filter MIUIInput)
-   adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -E "WebSocket|connected|disconnected"
+   # Android WebSocket: See [Android Logs](#android-logs) section above, then filter for WebSocket
    
    # macOS WebSocket
    log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "WebSocket|connected"
@@ -300,7 +379,7 @@ curl -I https://hypo.fly.dev/health
 **Size Limits** (defined in `SizeConstants` on both platforms):
 - **Sync Limit**: 10MB - Maximum size for items synced between devices (raw content before base64 encoding)
 - **Copy Limit**: 50MB - Maximum size for copying items to clipboard
-- **Transport Frame**: 25MB - Maximum frame payload size (accounts for base64 encoding, JSON structure, and encryption overhead)
+- **Transport Frame**: 20MB - Maximum frame payload size (accounts for base64 encoding, JSON structure, and encryption overhead. 10MB images become ~18MB after encoding, so 20MB provides safety margin)
 - **Compression Target**: 7.5MB - Target raw size for image compression (75% of sync limit)
 - **Max Image Dimension**: 2560px - Images with longest side >2560px are automatically scaled down
 
@@ -321,7 +400,8 @@ curl -I https://hypo.fly.dev/health
 **Diagnostic Steps**:
 ```bash
 # Check for SQLiteBlobTooBigException errors
-adb logcat -d | grep -E "SQLiteBlobTooBigException|CursorWindow"
+# Use Android logs from [Android Logs](#android-logs) section above, then filter:
+# | grep -E "SQLiteBlobTooBigException|CursorWindow"
 ```
 
 ### Problem: "Disk Space Being Consumed by Temp Files"
@@ -354,10 +434,7 @@ ls -la ~/Library/Caches/ | grep hypo_
 ```bash
 # Check pairing completion (filter MIUIInput)
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 10m | grep "PairingCompleted"
-adb -s $device_id logcat | grep -v "MIUIInput" | grep "Key saved for device"
-
-# Check device ID format
-adb -s $device_id logcat | grep -v "MIUIInput" | grep "Key saved for device"
+# For Android logs, see [Android Logs](#android-logs) section above, then filter for "Key saved for device"
 ```
 
 **Common Causes**:
@@ -569,8 +646,7 @@ adb shell cmd notification allow_listener com.hypo.clipboard
 adb shell pm revoke com.hypo.clipboard android.permission.POST_NOTIFICATIONS
 adb shell pm grant com.hypo.clipboard android.permission.POST_NOTIFICATIONS
 
-# Check notification logs (filter MIUIInput)
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep -E "Notification|ClipboardSyncService"
+# Check notification logs: See [Android Logs](#android-logs) section above, then filter for "Notification|ClipboardSyncService"
 ```
 
 #### Problem: "ClipboardManager Access Issues"
@@ -711,23 +787,11 @@ Instead of ADB workarounds, use the **official Android method**:
 
 #### Problem: "Sync Not Working"
 
-**Debugging** (filter by PID):
-```bash
-# View all logs (excluding MIUIInput)
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput"
-
-# Check clipboard events detected
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep -E "ClipboardListener|onPrimaryClipChanged"
-
-# Check sync targets
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep "Target devices now"
-
-# Check transport.send() called
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep "transport.send()"
-
-# Check WebSocket connection
-adb -s $device_id logcat --pid=$(adb -s $device_id shell pidof -s com.hypo.clipboard.debug) | grep -v "MIUIInput" | grep -E "WebSocket|Connection"
-```
+**Debugging**: See [Android Logs](#android-logs) section above, then filter for:
+- Clipboard events: `| grep -E "ClipboardListener|onPrimaryClipChanged"`
+- Sync targets: `| grep "Target devices now"`
+- Transport: `| grep "transport.send()"`
+- WebSocket: `| grep -E "WebSocket|Connection"`
 
 **Emulating Clipboard Copy for Testing**:
 ```bash
@@ -770,7 +834,7 @@ security find-generic-password -w -s 'com.hypo.clipboard.keys' -a $device_id
 
 # Check decryption errors (filter MIUIInput)
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "Decryption failed|BAD_DECRYPT"
-adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -E "BAD_DECRYPT|MissingKey"
+# For Android logs, see [Android Logs](#android-logs) section above, then filter for "BAD_DECRYPT|MissingKey"
 ```
 
 **Solutions**:
@@ -809,7 +873,7 @@ adb shell pm clear com.hypo.clipboard
 **Verification**:
 1. On macOS, check actual IP: `ifconfig | grep "inet "` (should show `10.0.0.146`)
 2. On macOS, check Bonjour advertisement: `dns-sd -G v4 dereks-macbook-air-13.local` (should show `10.0.0.146`)
-3. Check Android logs: `adb logcat | grep "Service resolved"` (may show wrong IP like `10.0.0.137`)
+3. Check Android logs: See [Android Logs](#android-logs) section above, then filter for "Service resolved" (may show wrong IP like `10.0.0.137`)
 
 **Solution**:
 - NSD cache will eventually expire and refresh (usually within a few minutes)
@@ -870,7 +934,7 @@ The `test-sync-matrix.sh` script detects messages by:
 2. **Log Content Search**
    - Searches for `content: <message>` in logs
    - macOS: `log show --predicate 'subsystem == "com.hypo.clipboard"'`
-   - Android: `adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -F "content:"`
+   - Android: See [Android Logs](#android-logs) section above, then filter for "content:"
 
 3. **Handler Success Logs**
    - macOS: `Received clipboard` or `Inserted entry`
@@ -908,10 +972,7 @@ python3 scripts/simulate-android-copy.py --text "Test message" --target-device-i
 python3 scripts/simulate-android-relay.py --text "Test message" --target-device-id <device_id>
 ```
 
-**Note**: All Android log commands should filter MIUIInput noise:
-```bash
-adb -s $device_id logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread"
-```
+**Note**: All Android log commands should filter MIUIInput noise. See [Android Logs](#android-logs) section above for the proper filtering commands.
 
 ### Manual Testing Procedures
 
@@ -933,8 +994,7 @@ adb -s $device_id logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread"
 # Copy text on Android
 adb shell input text "Test from Android"
 
-# Monitor logs (filter MIUIInput)
-adb -s $device_id logcat | grep -v "MIUIInput" | grep -E "Clipboard|Sync|transport"
+# Monitor logs: See [Android Logs](#android-logs) section above, then filter for "Clipboard|Sync|transport"
 log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep -E "Received clipboard|content:"
 ```
 
@@ -943,8 +1003,7 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep 
 # Copy text on macOS
 echo "Test from macOS" | pbcopy
 
-# Monitor Android logs (filter MIUIInput)
-adb -s $device_id logcat | grep -v "MIUIInput" | grep -E "Clipboard|Sync|Received"
+# Monitor Android logs: See [Android Logs](#android-logs) section above, then filter for "Clipboard|Sync|Received"
 ```
 
 **Android → macOS (Emulate System Copy via ADB)**:
@@ -1057,7 +1116,7 @@ adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/c
 
 # Check logs by content (filter MIUIInput)
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -F "content: Case X:"
-adb -s $device_id logcat -d | grep -v "MIUIInput" | grep -F "content: Case X:"
+# For Android logs, see [Android Logs](#android-logs) section above, then filter for "content: Case X:"
 ```
 
 **Solution**: Test script may need time window adjustment or log query refinement
@@ -1188,13 +1247,13 @@ adb shell am start -n com.hypo.clipboard/.MainActivity
 **Android** (filter MIUIInput):
 ```bash
 # View recent clipboard content from logs and database
-adb -s $device_id logcat -d -t 500 | grep -v "MIUIInput" | grep -F "content:" && \
+# For Android logs, see [Android Logs](#android-logs) section above, then filter for "content:"
 adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 5;'"
 
 # Emulate clipboard copy and monitor
 adb -s $device_id shell "service call clipboard 2 s16 'Test clipboard'" && \
 adb -s $device_id logcat -c && \
-adb -s $device_id logcat | grep -v "MIUIInput" | grep -E "ClipboardListener|content:"
+# Then use [Android Logs](#android-logs) section above, filter for "ClipboardListener|content:"
 
 # Check SMS-to-clipboard functionality
 ./scripts/test-sms-clipboard.sh <device_id>
@@ -1219,7 +1278,7 @@ curl -s https://hypo.fly.dev/health | jq '.connected_devices'
 
 - **macOS crash reports**: `~/Library/Logs/DiagnosticReports/HypoMenuBar-*.ips`
 - **macOS unified logs**: `log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug`
-- **Android logs**: `adb logcat` (always filter MIUIInput)
+- **Android logs**: See [Android Logs](#android-logs) section above (always filter MIUIInput)
 - **Pairing flow**: `macos/Sources/HypoApp/Services/TransportManager.swift`
 - **Sync flow**: `macos/Sources/HypoApp/Services/HistoryStore.swift`
 - **Incoming handler**: `macos/Sources/HypoApp/Services/IncomingClipboardHandler.swift`

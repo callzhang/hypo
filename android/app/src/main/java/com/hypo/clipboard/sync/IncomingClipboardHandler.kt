@@ -3,8 +3,19 @@ package com.hypo.clipboard.sync
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.util.concurrent.locks.ReentrantLock
 import javax.inject.Inject
 import javax.inject.Singleton
+
+// Extension function for ReentrantLock to use withLock syntax
+private inline fun <T> ReentrantLock.withLock(action: () -> T): T {
+    lock()
+    return try {
+        action()
+    } finally {
+        unlock()
+    }
+}
 
 /**
  * Handles incoming clipboard sync messages from remote devices (e.g., macOS).
@@ -28,7 +39,126 @@ class IncomingClipboardHandler @Inject constructor(
      */
     var onDecryptionWarning: ((deviceId: String, deviceName: String, reason: String) -> Unit)? = null
     
+    // Track processed message IDs to prevent duplicate processing
+    // Same message may arrive on multiple WebSocket connections (LAN send/receive, cloud, etc.)
+    // AES-GCM nonces must be unique - same encrypted message can only be decrypted once
+    private val processedMessageIds = mutableSetOf<String>()
+    private val processedMessageIdsLock = java.util.concurrent.locks.ReentrantLock()
+    private val processedMessageIdsTtl = java.time.Duration.ofMinutes(5) // Keep IDs for 5 minutes
+    private var lastCleanupTime = java.time.Instant.now()
+    
+    // Cache decrypted payloads for duplicate message IDs
+    // When same message ID arrives again, reuse cached payload to move item to top (without re-decrypting)
+    private data class CachedPayload(
+        val clipboardPayload: ClipboardPayload,
+        val senderDeviceId: String,
+        val senderDeviceName: String?,
+        val transportOrigin: com.hypo.clipboard.domain.model.TransportOrigin,
+        val cachedAt: java.time.Instant
+    )
+    private val cachedPayloads = mutableMapOf<String, CachedPayload>()
+    private val cachedPayloadsLock = java.util.concurrent.locks.ReentrantLock()
+    private val cachedPayloadsTtl = java.time.Duration.ofMinutes(5) // Keep cached payloads for 5 minutes
+    
+    // Track processed nonces to prevent duplicate decryption attempts
+    // macOS may send the same content multiple times with different message IDs but same nonce
+    // Format: "deviceId:nonceHex" -> timestamp
+    private val processedNonces = mutableMapOf<String, java.time.Instant>()
+    private val processedNoncesLock = java.util.concurrent.locks.ReentrantLock()
+    private val processedNoncesTtl = java.time.Duration.ofMinutes(5) // Keep nonces for 5 minutes
+    
     fun handle(envelope: SyncEnvelope, transportOrigin: com.hypo.clipboard.domain.model.TransportOrigin = com.hypo.clipboard.domain.model.TransportOrigin.LAN) {
+        // Check for duplicate message ID BEFORE launching coroutine
+        // Same message may arrive on multiple WebSocket connections
+        // This must be synchronous to prevent race conditions
+        val messageId = envelope.id
+        val shouldProcess = processedMessageIdsLock.withLock {
+            // Periodic cleanup of old message IDs
+            val now = java.time.Instant.now()
+            if (java.time.Duration.between(lastCleanupTime, now) > java.time.Duration.ofMinutes(1)) {
+                // Cleanup happens implicitly - we only keep recent IDs
+                // For simplicity, we'll just clear if set gets too large (>1000)
+                if (processedMessageIds.size > 1000) {
+                    processedMessageIds.clear()
+                    Log.d(TAG, "🧹 Cleared processed message IDs cache (size exceeded 1000)")
+                }
+                lastCleanupTime = now
+            }
+            
+            // Check if we've already processed this message
+            val isDuplicate = processedMessageIds.contains(messageId)
+            if (isDuplicate) {
+                // Duplicate detected - will check for cached payload below
+                false // Don't mark as processed yet, we'll check cache
+            } else {
+                // Mark as processed before attempting decryption
+                // This prevents multiple decryption attempts for the same message
+                processedMessageIds.add(messageId)
+                true
+            }
+        }
+        
+        // Check if we have a cached payload for this duplicate message ID
+        // If yes, we'll use it to move the item to the top without re-decrypting
+        val cachedPayload = if (!shouldProcess) {
+            cachedPayloadsLock.withLock {
+                val now = java.time.Instant.now()
+                // Cleanup old cached payloads
+                val cutoff = now.minus(cachedPayloadsTtl)
+                cachedPayloads.entries.removeAll { it.value.cachedAt.isBefore(cutoff) }
+                
+                cachedPayloads[messageId]
+            }
+        } else {
+            null
+        }
+        
+        // If duplicate and no cached payload, skip (can't decrypt again due to nonce reuse)
+        if (!shouldProcess && cachedPayload == null) {
+            return
+        }
+        
+        // Check for duplicate nonce BEFORE attempting decryption (synchronously, outside coroutine)
+        // macOS may send same content with different message IDs but reuse nonces
+        // Also handles race condition: same message arriving on multiple connections simultaneously
+        val encryption = envelope.payload.encryption
+        val senderDeviceId = envelope.payload.deviceId
+        val isDuplicateNonce = if (encryption != null && !encryption.nonce.isEmpty() && senderDeviceId != null) {
+            val nonceBytes = try {
+                java.util.Base64.getDecoder().decode(encryption.nonce)
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Failed to decode nonce for duplicate check: ${e.message}")
+                null
+            }
+            val nonceHex = nonceBytes?.joinToString("") { "%02x".format(it) } ?: ""
+            val nonceKey = "${senderDeviceId.lowercase()}:$nonceHex"
+            processedNoncesLock.withLock {
+                val now = java.time.Instant.now()
+                // Cleanup old nonces
+                val cutoff = now.minus(processedNoncesTtl)
+                processedNonces.entries.removeAll { it.value.isBefore(cutoff) }
+                
+                val existing = processedNonces[nonceKey]
+                if (existing != null) {
+                    Log.w(TAG, "⚠️ Duplicate nonce detected: deviceId=${senderDeviceId.take(20)}..., nonce=${nonceHex.take(16)}..., first seen at $existing, skipping decryption")
+                    true
+                } else {
+                    processedNonces[nonceKey] = now
+                    false
+                }
+            }
+        } else {
+            false
+        }
+        
+        if (isDuplicateNonce) {
+            Log.w(TAG, "⏭️ Skipping message with duplicate nonce: id=${messageId.take(8)}...")
+            return
+        }
+        
+        // Capture cached payload before launching coroutine
+        val cachedPayloadForThisMessage = cachedPayload
+        
         scope.launch {
             try {
                 val senderDeviceId = envelope.payload.deviceId
@@ -47,28 +177,70 @@ class IncomingClipboardHandler @Inject constructor(
                     return@launch
                 }
                 
-                // Also check if senderDeviceId is null - this shouldn't happen but handle it gracefully
-                if (senderDeviceId == null) {
-                    Log.w(TAG, "⚠️ Received clipboard with null deviceId, skipping")
-                    return@launch
+                // Use cached payload if available (for duplicate message IDs), otherwise decrypt
+                val clipboardPayload: ClipboardPayload
+                val finalSenderDeviceId: String
+                val finalSenderDeviceName: String?
+                val finalTransportOrigin: com.hypo.clipboard.domain.model.TransportOrigin
+                val isEncrypted: Boolean
+                
+                if (cachedPayloadForThisMessage != null) {
+                    Log.d(TAG, "🔄 Using cached payload for duplicate message ID: id=${messageId.take(8)}... (to move item to top)")
+                    clipboardPayload = cachedPayloadForThisMessage.clipboardPayload
+                    finalSenderDeviceId = cachedPayloadForThisMessage.senderDeviceId
+                    finalSenderDeviceName = cachedPayloadForThisMessage.senderDeviceName
+                    finalTransportOrigin = cachedPayloadForThisMessage.transportOrigin
+                    // Check if message was encrypted (non-empty nonce and tag)
+                    val encryption = envelope.payload.encryption
+                    isEncrypted = encryption != null && encryption.nonce.isNotEmpty() && encryption.tag.isNotEmpty()
+                    Log.d(TAG, "📥 Using cached clipboard from deviceId=${finalSenderDeviceId.take(20)}, deviceName=$finalSenderDeviceName, origin=${finalTransportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
+                } else {
+                    // Also check if senderDeviceId is null - this shouldn't happen but handle it gracefully
+                    if (senderDeviceId == null) {
+                        Log.w(TAG, "⚠️ Received clipboard with null deviceId, skipping")
+                        return@launch
+                    }
+                    
+                    Log.d(TAG, "📥 Received clipboard from deviceId=${senderDeviceId.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
+                    
+                    // Check if message was encrypted (non-empty nonce and tag)
+                    val encryption = envelope.payload.encryption
+                    isEncrypted = encryption != null && encryption.nonce.isNotEmpty() && encryption.tag.isNotEmpty()
+                    
+                    // Decode the encrypted clipboard payload using key fetched by UUID (device ID)
+                    // The syncEngine.decode() will fetch the key using envelope.payload.deviceId
+                    val deviceIdPreview = senderDeviceId.take(20)
+                    val payloadSize = envelope.payload.ciphertext?.length ?: 0
+                    Log.d(TAG, "🔓 Starting decryption for deviceId=$deviceIdPreview, type=${envelope.type}, payloadSize=$payloadSize")
+                    clipboardPayload = try {
+                        syncEngine.decode(envelope)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Decryption failed in syncEngine.decode(): ${e.javaClass.simpleName}: ${e.message}", e)
+                        throw e // Re-throw to be caught by outer catch block
+                    }
+                    Log.d(TAG, "✅ Decryption successful: contentType=${clipboardPayload.contentType}, dataSize=${clipboardPayload.dataBase64.length}")
+                    
+                    // Cache the decrypted payload for future duplicate message IDs
+                    cachedPayloadsLock.withLock {
+                        val now = java.time.Instant.now()
+                        // Cleanup old cached payloads
+                        val cutoff = now.minus(cachedPayloadsTtl)
+                        cachedPayloads.entries.removeAll { it.value.cachedAt.isBefore(cutoff) }
+                        
+                        cachedPayloads[messageId] = CachedPayload(
+                            clipboardPayload = clipboardPayload,
+                            senderDeviceId = senderDeviceId,
+                            senderDeviceName = senderDeviceName,
+                            transportOrigin = transportOrigin,
+                            cachedAt = now
+                        )
+                        Log.d(TAG, "💾 Cached payload for message ID: id=${messageId.take(8)}..., cache size=${cachedPayloads.size}")
+                    }
+                    
+                    finalSenderDeviceId = senderDeviceId
+                    finalSenderDeviceName = senderDeviceName
+                    finalTransportOrigin = transportOrigin
                 }
-                
-                Log.d(TAG, "📥 Received clipboard from deviceId=${senderDeviceId.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
-                
-                // Check if message was encrypted (non-empty nonce and tag)
-                val encryption = envelope.payload.encryption
-                val isEncrypted = encryption != null && encryption.nonce.isNotEmpty() && encryption.tag.isNotEmpty()
-                
-                // Decode the encrypted clipboard payload using key fetched by UUID (device ID)
-                // The syncEngine.decode() will fetch the key using envelope.payload.deviceId
-                Log.d(TAG, "🔓 Starting decryption for deviceId=${senderDeviceId?.take(20)}, type=${envelope.type}, payloadSize=${envelope.payload.ciphertext?.length ?: 0}")
-                val clipboardPayload = try {
-                    syncEngine.decode(envelope)
-                } catch (e: Exception) {
-                    Log.e(TAG, "❌ Decryption failed in syncEngine.decode(): ${e.javaClass.simpleName}: ${e.message}", e)
-                    throw e // Re-throw to be caught by outer catch block
-                }
-                Log.d(TAG, "✅ Decryption successful: contentType=${clipboardPayload.contentType}, dataSize=${clipboardPayload.dataBase64.length}")
                 
                 // For images and files, keep content as base64 string (binary data)
                 // For text and links, decode base64 to get the actual text
@@ -124,11 +296,11 @@ class IncomingClipboardHandler @Inject constructor(
                         
                         // Add hash and size to metadata if not present (for duplication detection and size display)
                         enhancedMetadata = clipboardPayload.metadata?.toMutableMap() ?: mutableMapOf()
-                        if (contentHash != null && !enhancedMetadata!!.containsKey("hash")) {
-                            enhancedMetadata!!["hash"] = contentHash
+                        if (contentHash != null && !enhancedMetadata.containsKey("hash")) {
+                            enhancedMetadata["hash"] = contentHash
                         }
-                        if (size > 0 && !enhancedMetadata!!.containsKey("size")) {
-                            enhancedMetadata!!["size"] = size.toString()
+                        if (size > 0 && !enhancedMetadata.containsKey("size")) {
+                            enhancedMetadata["size"] = size.toString()
                         }
                         
                         // Debug logging
@@ -136,10 +308,9 @@ class IncomingClipboardHandler @Inject constructor(
                         
                         preview = when (clipboardPayload.contentType) {
                             com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
-                                val width = enhancedMetadata!!["width"] ?: "?"
-                                val height = enhancedMetadata!!["height"] ?: "?"
-                                val format = enhancedMetadata!!["format"] ?: "image"
-                                val fileName = enhancedMetadata!!["file_name"]
+                                val width = enhancedMetadata["width"] ?: "?"
+                                val height = enhancedMetadata["height"] ?: "?"
+                                val fileName = enhancedMetadata["file_name"]
                                 if (fileName != null) {
                                     "$fileName · ${width}×${height} (${formatBytes(size)})"
                                 } else {
@@ -147,7 +318,7 @@ class IncomingClipboardHandler @Inject constructor(
                                 }
                             }
                             com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
-                                val filename = enhancedMetadata!!["file_name"] ?: "file"
+                                val filename = enhancedMetadata["file_name"] ?: "file"
                                 "$filename (${formatBytes(size)})"
                             }
                             else -> "Binary data (${formatBytes(size)})"
@@ -163,7 +334,7 @@ class IncomingClipboardHandler @Inject constructor(
                         // Use enhancedMetadata that was created in the when block above
                         enhancedMetadata ?: clipboardPayload.metadata?.toMutableMap() ?: mutableMapOf()
                     }
-                    else -> clipboardPayload.metadata
+                    else -> clipboardPayload.metadata ?: emptyMap()
                 }
                 
                 val event = ClipboardEvent(
@@ -173,11 +344,11 @@ class IncomingClipboardHandler @Inject constructor(
                     preview = preview,
                     metadata = finalMetadata,
                     createdAt = java.time.Instant.now(),
-                    deviceId = senderDeviceId.lowercase(), // ✅ Normalize to lowercase for consistent matching
-                    deviceName = senderDeviceName,
+                    deviceId = finalSenderDeviceId.lowercase(), // ✅ Normalize to lowercase for consistent matching
+                    deviceName = finalSenderDeviceName,
                     skipBroadcast = true, // ✅ Don't re-broadcast received clipboard
                     isEncrypted = isEncrypted,
-                    transportOrigin = transportOrigin
+                    transportOrigin = finalTransportOrigin
                 )
                 
                 // Extract message content for logging

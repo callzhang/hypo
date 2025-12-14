@@ -52,6 +52,32 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
             if bundleURL.pathExtension == "app" || bundleURL.path.contains(".app/") {
                 // We're in a proper app bundle, safe to use .current()
                 notificationCenter = .current()
+                
+                // Verify app icon is accessible
+                #if canImport(AppKit)
+                #if canImport(os)
+                let logger = HypoLogger(category: "ClipboardNotificationController")
+                if let iconFile = Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") as? String {
+                    logger.debug("📱 [ClipboardNotificationController] Icon file from Info.plist: \(iconFile)")
+                    if let iconPath = Bundle.main.path(forResource: iconFile, ofType: "icns") {
+                        logger.debug("✅ [ClipboardNotificationController] Icon file found at: \(iconPath)")
+                    } else if let iconPath = Bundle.main.path(forResource: iconFile.replacingOccurrences(of: ".icns", with: ""), ofType: "icns") {
+                        logger.debug("✅ [ClipboardNotificationController] Icon file found (without extension) at: \(iconPath)")
+                    } else {
+                        logger.warning("⚠️ [ClipboardNotificationController] Icon file not found: \(iconFile)")
+                    }
+                } else {
+                    logger.warning("⚠️ [ClipboardNotificationController] CFBundleIconFile not set in Info.plist")
+                }
+                
+                // Check if NSApplication can access the icon
+                if let appIcon = NSApplication.shared.applicationIconImage {
+                    logger.debug("✅ [ClipboardNotificationController] NSApplication.applicationIconImage accessible: \(appIcon.size)")
+                } else {
+                    logger.warning("⚠️ [ClipboardNotificationController] NSApplication.applicationIconImage is nil")
+                }
+                #endif
+                #endif
             } else {
                 // For debug builds running from .build directory, we can't use .current()
                 // Return nil to indicate notifications aren't available
@@ -108,35 +134,66 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
     }
 
     public func deliverNotification(for entry: ClipboardEntry) {
+        #if canImport(os)
+        let logger = HypoLogger(category: "ClipboardNotificationController")
+        logger.debug("📢 [ClipboardNotificationController] deliverNotification called for entry: \(entry.previewText.prefix(50))")
+        #endif
+        
         center.getNotificationSettings { [weak self] settings in
-            guard let self else { return }
-            let status = settings.authorizationStatus
-            guard status == .authorized || status == .provisional else {
+            guard let self else {
                 #if canImport(os)
                 let logger = HypoLogger(category: "ClipboardNotificationController")
-                logger.debug("⚠️ Cannot deliver notification: authorization status is \(String(describing: status))")
+                logger.warning("⚠️ [ClipboardNotificationController] Self deallocated in getNotificationSettings callback")
                 #endif
                 return
             }
-#if canImport(AppKit)
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard !NSApplication.shared.isActive else { return }
-                self.enqueueNotification(for: entry)
+            
+            #if canImport(os)
+            let logger = HypoLogger(category: "ClipboardNotificationController")
+            #endif
+            
+            let status = settings.authorizationStatus
+            #if canImport(os)
+            logger.debug("📢 [ClipboardNotificationController] Authorization status: \(String(describing: status))")
+            #endif
+            
+            guard status == .authorized || status == .provisional else {
+                #if canImport(os)
+                logger.warning("⚠️ [ClipboardNotificationController] Cannot deliver notification: authorization status is \(String(describing: status))")
+                #endif
+                return
             }
-#else
+            
+            // For menu bar apps, we always show notifications regardless of app active state
+            // Menu bar apps are background apps and should notify users of incoming clipboard items
+            #if canImport(os)
+            logger.debug("✅ [ClipboardNotificationController] Enqueuing notification")
+            #endif
             self.enqueueNotification(for: entry)
-#endif
         }
     }
 
     private func enqueueNotification(for entry: ClipboardEntry) {
+        #if canImport(os)
+        let logger = HypoLogger(category: "ClipboardNotificationController")
+        logger.debug("📢 [ClipboardNotificationController] enqueueNotification: \(entry.previewText.prefix(50))")
+        #endif
+        
         let identifier = entry.id.uuidString
         let content = buildContent(for: entry)
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
 
         center.removeDeliveredNotifications(withIdentifiers: [identifier])
-        center.add(request, withCompletionHandler: nil)
+        center.add(request) { error in
+            #if canImport(os)
+            let logger = HypoLogger(category: "ClipboardNotificationController")
+            if let error = error {
+                logger.error("❌ [ClipboardNotificationController] Failed to add notification: \(error.localizedDescription)")
+            } else {
+                logger.debug("✅ [ClipboardNotificationController] Notification added successfully")
+            }
+            #endif
+        }
     }
 
     private func registerCategories() {
@@ -172,6 +229,8 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
         content.categoryIdentifier = Constants.categoryIdentifier
         content.userInfo = ["entryID": entry.id.uuidString]
 
+        // Only add image thumbnail attachment for image entries
+        // The app icon on the left is automatically provided by macOS from the app bundle
         if let attachment = attachment(for: entry) {
             content.attachments = [attachment]
         }
@@ -225,6 +284,15 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
 }
 
 extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
+    public func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Always show notification even when app is in foreground
+        completionHandler([.banner, .sound, .badge])
+    }
+    
     public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,

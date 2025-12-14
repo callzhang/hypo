@@ -186,6 +186,7 @@ class SyncEngine @Inject constructor(
         val encryption = envelope.payload.encryption
         val ciphertext = envelope.payload.ciphertext
         if (encryption == null || ciphertext == null) {
+            android.util.Log.e("SyncEngine", "❌ [DEBUG] Missing encryption or ciphertext: encryption=${encryption != null}, ciphertext=${ciphertext != null}")
             throw IllegalArgumentException("Missing encryption or ciphertext in payload")
         }
         
@@ -221,9 +222,24 @@ class SyncEngine @Inject constructor(
             
             android.util.Log.d("SyncEngine", "✅ Key loaded: ${key.size} bytes for device: $deviceId")
 
-            val ciphertextBytes = ciphertext.fromBase64()
-            val nonce = encryption.nonce.fromBase64()
-            val tag = encryption.tag.fromBase64()
+            val ciphertextBytes = try {
+                ciphertext.fromBase64()
+            } catch (e: Exception) {
+                android.util.Log.e("SyncEngine", "❌ [DEBUG] Base64 decode failed for ciphertext: ${e.message}", e)
+                throw e
+            }
+            val nonce = try {
+                encryption.nonce.fromBase64()
+            } catch (e: Exception) {
+                android.util.Log.e("SyncEngine", "❌ [DEBUG] Base64 decode failed for nonce: ${e.message}", e)
+                throw e
+            }
+            val tag = try {
+                encryption.tag.fromBase64()
+            } catch (e: Exception) {
+                android.util.Log.e("SyncEngine", "❌ [DEBUG] Base64 decode failed for tag: ${e.message}", e)
+                throw e
+            }
             
             android.util.Log.d("SyncEngine", "🔓 Decryption params: ciphertext=${ciphertextBytes.size} bytes, nonce=${nonce.size} bytes, tag=${tag.size} bytes")
             

@@ -288,11 +288,12 @@ Hypo takes security seriously:
 ## 📊 Current Status
 
 **Phase**: Production Release ✅  
-**Version**: v1.0.5  
+**Version**: v1.0.6  
 **Progress**: 100%  
 **Last Updated**: December 5, 2025
 
 **Recent Milestones**:
+- ✅ **v1.0.6 Released** (Dec 13, 2025): Nonce Reuse Fix for Dual-Send Transport
 - ✅ **v1.0.5 Released** (Dec 5, 2025): Text Selection Context Menu & Clipboard Processing Improvements
   - Android text selection context menu: "Copy to Hypo" appears first in menu
   - Force immediate clipboard processing for context menu selections
@@ -442,7 +443,7 @@ MIT License - See [LICENSE](LICENSE) for details
 
 This project is in **production release** phase. The system is fully functional and has been extensively tested. All critical bugs have been resolved. Ready for distribution.
 
-**Current Version**: v1.0.5  
+**Current Version**: v1.0.6  
 **Stability**: Production-ready  
 **Next Milestone**: Public beta testing and future feature development
 

@@ -741,12 +741,13 @@ class WebSocketTransportClient @Inject constructor(
                 }
             }
             
-            // For LAN connections, only connect if we have a discovered peer URL
-            // For cloud connections, use config.url
+            // For LAN connections, use lastKnownUrl if available (from discovery), otherwise fall back to config.url (for pairing)
+            // For cloud connections, always use config.url
             val urlToUse = if (isCloudConnection) {
                 config.url ?: throw IllegalStateException("Cloud connection config URL cannot be null")
             } else {
-                lastKnownUrl
+                // For LAN: prefer lastKnownUrl (from discovery), but allow config.url for pairing connections
+                lastKnownUrl ?: config.url
             }
             
             if (urlToUse == null || urlToUse.isBlank()) {
@@ -1196,7 +1197,6 @@ class WebSocketTransportClient @Inject constructor(
                         // Mark as closed and complete closedSignal so connection loop exits cleanly
                         isOpen.set(false)
                         isClosed.set(true)
-                        val signalWasCompleted = closedSignal.isCompleted
                         if (!closedSignal.isCompleted) {
                             closedSignal.complete(Unit)
                         }
@@ -1444,12 +1444,17 @@ class WebSocketTransportClient @Inject constructor(
                                 prunePendingLocked(now)
                                 pendingRoundTrips[event.envelope.id] = now
                             }
-                            val sent = socket.send(of(*payload))
-                            if (!sent) {
-                                android.util.Log.w("WebSocketTransportClient", "⚠️ WebSocket send failed, closing connection loop")
+                            try {
+                                val sent = socket.send(of(*payload))
+                                if (!sent) {
+                                    android.util.Log.w("WebSocketTransportClient", "⚠️ WebSocket send failed, closing connection loop")
+                                    break@loop
+                                }
+                                android.util.Log.d("WebSocketTransportClient", "✅ Frame sent successfully: ${payload.size} bytes")
+                            } catch (e: Exception) {
+                                android.util.Log.e("WebSocketTransportClient", "❌ WebSocket send exception: ${e.message}", e)
                                 break@loop
                             }
-                            android.util.Log.d("WebSocketTransportClient", "✅ Frame sent successfully: ${payload.size} bytes")
                             touch()
                         }
                     }
@@ -1669,6 +1674,11 @@ class WebSocketTransportClient @Inject constructor(
         val now = clock.instant()
         android.util.Log.d("WebSocketTransportClient", "🔍 handleIncoming: ${bytes.size} bytes, handler=${onIncomingClipboard != null}, transportOrigin=$transportOrigin")
         
+        // Early return if no handler registered - don't decode unnecessarily
+        if (onIncomingClipboard == null) {
+            return
+        }
+        
         val messageString = bytes.utf8()
         
         // Try to detect if this is a pairing ACK message (JSON with challenge_id and responder_device_id)
@@ -1773,11 +1783,6 @@ class WebSocketTransportClient @Inject constructor(
 
 }
 
-private sealed interface LoopEvent {
-    data object ChannelClosed : LoopEvent
-    data object ConnectionClosed : LoopEvent
-    data class Envelope(val envelope: SyncEnvelope) : LoopEvent
-}
 
 private fun fingerprintToPin(hex: String): String {
     val normalized = hex.replace(Regex("[^0-9a-fA-F]"), "").lowercase()

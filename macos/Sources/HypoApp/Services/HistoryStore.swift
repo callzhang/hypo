@@ -598,8 +598,12 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     private func syncToPairedDevices(_ entry: ClipboardEntry) async {
 #if canImport(os)
         logger.debug("🔄 [HistoryStore] syncToPairedDevices: \(entry.previewText.prefix(30)), devices=\(pairedDevices.count)")
+        logger.debug("🔍 [DEBUG] syncToPairedDevices - entry type: \(entry.content.title)")
 #endif
         guard transportManager != nil else {
+#if canImport(os)
+            logger.error("🔍 [DEBUG] syncToPairedDevices - transportManager is nil!")
+#endif
 #if canImport(os)
             logger.warning("⏭️ [HistoryStore] Skipping sync - transportManager is nil")
 #endif
@@ -885,8 +889,12 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 // Note: Each device is processed independently - failure for one doesn't affect others
 #if canImport(os)
             logger.debug("🔄 [HistoryStore] Processing message for device \(message.targetDeviceId.prefix(8))")
+            logger.debug("🔍 [DEBUG] Processing message - type: \(message.entry.content.title), target: \(message.targetDeviceId.prefix(8))")
 #endif
                 if await trySendMessage(message, transportManager: transportManager) {
+#if canImport(os)
+                    logger.debug("🔍 [DEBUG] Message sent successfully to device \(message.targetDeviceId.prefix(8))")
+#endif
                     // Success - message cleared from queue
                     successCount += 1
 #if canImport(os)
@@ -962,22 +970,46 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         do {
         // Get sync engine with transport
         let transport = transportManager.loadTransport()
+#if canImport(os)
+        logger.debug("🔍 [DEBUG] trySendMessage - transport loaded, type: \(type(of: transport))")
+#endif
         let keyProvider = KeychainDeviceKeyProvider()
+        let cryptoService = CryptoService()
+        
+        // If transport is DualSyncTransport, configure it with crypto service and key provider
+        // so it can create separate envelopes with unique nonces for LAN and cloud
+        if let dualTransport = transport as? DualSyncTransport {
+            dualTransport.configure(cryptoService: cryptoService, keyProvider: keyProvider)
+        }
+        
         let syncEngine = SyncEngine(
             transport: transport,
+            cryptoService: cryptoService,
             keyProvider: keyProvider,
                 localDeviceId: deviceIdentity.deviceId.uuidString,
                 localPlatform: deviceIdentity.platform
         )
         
         // Ensure transport is connected
+#if canImport(os)
+        logger.debug("🔍 [DEBUG] trySendMessage - establishing connection...")
+#endif
         await syncEngine.establishConnection()
+#if canImport(os)
+        logger.debug("🔍 [DEBUG] trySendMessage - connection established, transmitting...")
+#endif
         
         // Attempt to send (best-effort - try regardless of device online status)
+        let payloadSize = message.payload.data.count
+        let contentType = message.payload.contentType.rawValue
+#if canImport(os)
+        logger.debug("🔍 [DEBUG] trySendMessage - About to transmit: contentType=\(contentType), payloadSize=\(payloadSize) bytes, targetDeviceId=\(message.targetDeviceId.prefix(8))...")
+#endif
         try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
         
 #if canImport(os)
         logger.debug("✅ [HistoryStore] Sent to device \(message.targetDeviceId.prefix(8))")
+        logger.debug("🔍 [DEBUG] trySendMessage - transmit completed successfully: contentType=\(contentType), payloadSize=\(payloadSize) bytes")
 #endif
             // Update lastSeen timestamp after successful sync
             if let device = pairedDevices.first(where: { $0.id == message.targetDeviceId }) {
@@ -988,9 +1020,11 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             } catch {
 #if canImport(os)
             logger.error("❌ [HistoryStore] Failed to send queued message to \(message.targetDeviceId): \(error.localizedDescription)")
-            logger.error("❌ [HistoryStore] Error type: \(String(describing: type(of: error)))")
+            logger.error("🔍 [DEBUG] trySendMessage - error type: \(String(describing: type(of: error)))")
+            logger.error("🔍 [DEBUG] trySendMessage - error details: \(error)")
             if let nsError = error as NSError? {
                 logger.error("❌ [HistoryStore] NSError domain: \(nsError.domain), code: \(nsError.code)")
+                logger.error("🔍 [DEBUG] trySendMessage - NSError userInfo: \(nsError.userInfo)")
             }
 #endif
             return false // Failed, will retry

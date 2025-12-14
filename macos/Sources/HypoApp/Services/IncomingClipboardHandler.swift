@@ -42,11 +42,9 @@ public final class IncomingClipboardHandler {
     ///   - data: The clipboard data (frame-encoded)
     ///   - transportOrigin: Whether the message came via LAN or cloud relay
     public func handle(_ data: Data, transportOrigin: TransportOrigin = .lan) async {
-        logger.info("📥 [IncomingClipboardHandler] handle() called: \(data.count) bytes, origin=\(transportOrigin.rawValue)")
         do {
             // Decode envelope to get device info
             let envelope = try frameCodec.decode(data)
-            logger.info("📥 [IncomingClipboardHandler] Decoded envelope: id=\(envelope.id.uuidString.prefix(8))..., type=\(envelope.type.rawValue), deviceId=\(envelope.payload.deviceId.prefix(8))...")
             let deviceId = envelope.payload.deviceId  // UUID string (pure UUID)
             let devicePlatform = envelope.payload.devicePlatform  // Platform string
             let deviceName = envelope.payload.deviceName

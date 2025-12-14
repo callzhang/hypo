@@ -213,7 +213,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         )
         messageQueue.append(queuedMessage)
         
-        logger.info("📥 [LanWebSocketTransport] Queued message (queue size: \(messageQueue.count))")
+        logger.debug("📥 [LanWebSocketTransport] Queued message (queue size: \(messageQueue.count))")
         
         // Start queue processor if not already running
         if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
@@ -788,34 +788,29 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func handleIncoming(data: Data) {
-        logger.info("📥 [LanWebSocketTransport] handleIncoming: \(data.count) bytes")
-        
         do {
-            // Debug: Log the raw data structure
+            // Check for control messages before decoding as SyncEnvelope
             if data.count >= 4 {
                 let lengthBytes = data.prefix(4)
                 let lengthValue = lengthBytes.withUnsafeBytes { buffer -> UInt32 in
                     buffer.load(as: UInt32.self)
                 }
                 let length = Int(UInt32(bigEndian: lengthValue))
-                logger.info("🔍 [LanWebSocketTransport] Frame header: length=\(length) bytes, total data=\(data.count) bytes")
                 if data.count >= 4 + length {
                     let jsonData = data.subdata(in: 4..<(4 + length))
                     if let jsonString = String(data: jsonData, encoding: .utf8) {
-                        logger.info("🔍 [LanWebSocketTransport] JSON payload (first 200 chars): \(jsonString.prefix(200))")
-                        
                         // Check if this is a control message (from cloud relay) before trying to decode as SyncEnvelope
                         // Control messages have structure: {"msg_type":"control","payload":{...}}
                         // They don't have an "id" field, so decoding as SyncEnvelope will fail
                         if jsonString.contains("\"msg_type\"") && jsonString.contains("\"control\"") {
-                            logger.info("📋 [LanWebSocketTransport] Received control message from cloud relay - handling separately")
+                            logger.debug("📋 [LanWebSocketTransport] Received control message from cloud relay")
                             // Try to parse as control message
                             if let jsonDict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                                let msgType = jsonDict["msg_type"] as? String,
                                msgType == "control",
                                let payload = jsonDict["payload"] as? [String: Any],
                                let action = payload["action"] as? String {
-                                logger.info("📋 [LanWebSocketTransport] Control message action: \(action)")
+                                logger.debug("📋 [LanWebSocketTransport] Control message action: \(action)")
                                 if action == "routing_failure" {
                                     if let reason = payload["reason"] as? String {
                                         // Log as debug instead of warning - these are expected when devices are offline
@@ -835,7 +830,6 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
             }
             
             let envelope = try frameCodec.decode(data)
-            logger.info("✅ [LanWebSocketTransport] Successfully decoded envelope: id=\(envelope.id), type=\(envelope.type.rawValue)")
             Task { [metricsRecorder] in
                 let now = Date()
                 if let startedAt = await pendingRoundTrips.remove(id: envelope.id) {
@@ -849,7 +843,6 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
             // Determine transport origin based on configuration
             let transportOrigin: TransportOrigin = (configuration.environment == "cloud" || configuration.url.scheme == "wss") ? .cloud : .lan
             if let handler = onIncomingMessage {
-                logger.info("📤 [LanWebSocketTransport] Forwarding to onIncomingMessage handler (origin: \(transportOrigin.rawValue))")
                 Task {
                     await handler(data, transportOrigin)
                 }

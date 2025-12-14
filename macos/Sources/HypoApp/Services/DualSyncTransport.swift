@@ -53,7 +53,6 @@ public final class DualSyncTransport: SyncTransport {
     }
     
     public func send(_ envelope: SyncEnvelope) async throws {
-        logger.debug("📡 [DualSyncTransport] Sending to LAN and cloud")
         
         // Check if this is an encrypted message (has nonce and tag)
         let isEncrypted = !envelope.payload.encryption.nonce.isEmpty && !envelope.payload.encryption.tag.isEmpty
@@ -133,7 +132,7 @@ public final class DualSyncTransport: SyncTransport {
             }
         } else {
             // Plain text mode or no crypto service - send same envelope to both (nonce reuse not an issue)
-            logger.debug("📡 [DualSyncTransport] Sending same envelope to both (plain text or no crypto service)")
+            logger.debug("📡 [DualSyncTransport] Sending same envelope to both transports")
             
             // Send to both transports in parallel
             async let lanSend = sendViaLAN(envelope)

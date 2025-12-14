@@ -556,7 +556,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     public func add(_ entry: ClipboardEntry) async {
-        logger.debug("📥 [ClipboardHistoryViewModel] add() called for entry: \(entry.previewText.prefix(50))")
         
         if autoDeleteAfterHours > 0 {
             let expireDate = Date().addingTimeInterval(TimeInterval(autoDeleteAfterHours) * 3600)
@@ -795,7 +794,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         // Each device gets its own message, so failures for one device don't affect others
         for device in devicesWithKeys {
 #if canImport(os)
-            logger.debug("📤 [HistoryStore] Queuing for \(device.name)")
 #endif
             let queuedMessage = QueuedSyncMessage(
                 entry: entry,

@@ -1326,25 +1326,13 @@ extension TransportManager: LanWebSocketServerDelegate {
             logger.info("✅ [TransportManager] Generated ACK with challengeId: \(ack.challengeId.uuidString)")
             
             #if canImport(os)
-            logger.info("📤 Sending ACK to Android device...")
-            #endif
-            logger.info("📤 [TransportManager] About to send ACK to connection: \(connectionId.uuidString.prefix(8))")
             // Send ACK back to Android - let errors propagate
-            logger.info("📤 [TransportManager] Calling webSocketServer.sendPairingAck()...")
             try webSocketServer.sendPairingAck(ack, to: connectionId)
-            logger.info("✅ [TransportManager] sendPairingAck() completed successfully")
-            
-            #if canImport(os)
-            logger.info("✅ Pairing completed with \(challenge.initiatorDeviceName)")
-            #endif
             
             // Update connection metadata with device ID
             webSocketServer.updateConnectionMetadata(connectionId: connectionId, deviceId: challenge.initiatorDeviceId)
-            logger.info("✅ [TransportManager] Updated connection metadata: connectionId=\(connectionId.uuidString.prefix(8)), deviceId=\(challenge.initiatorDeviceId)")
             
-            // Notify about successful pairing (for UI/history updates)
-            logger.info("📤 [TransportManager] Posting PairingCompleted notification")
-            logger.info("   deviceId: \(challenge.initiatorDeviceId)")
+            logger.info("✅ [TransportManager] Pairing completed: \(challenge.initiatorDeviceName) (\(challenge.initiatorDeviceId.prefix(8)))")
             logger.info("   deviceName: \(challenge.initiatorDeviceName)")
             
             // Write to debug log

@@ -308,7 +308,7 @@ public final class LanSyncTransport: SyncTransport {
         let envelope = try decoder.decode(SyncEnvelope.self, from: data)
         
         #if canImport(os)
-        logger.info("Received clipboard envelope (type: \(envelope.type.rawValue), from: \(envelope.payload.deviceId))")
+        logger.debug("📥 [LanSyncTransport] Received clipboard envelope: type=\(envelope.type.rawValue), from=\(envelope.payload.deviceId.prefix(8))")
         #endif
         
         // Notify any registered handlers

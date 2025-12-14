@@ -433,10 +433,7 @@ public final class LanWebSocketServer {
 
         logger.info("✅  processHandshakeBuffer: All headers valid, sending handshake response")
         let response = handshakeResponse(for: key)
-        logger.info("📤 [LanWebSocketServer] Sending HTTP 101 response (\(response.count) bytes) for connection \(connectionId.uuidString.prefix(8))")
-        if let responseString = String(data: response, encoding: .utf8) {
-            logger.info("📤 [LanWebSocketServer] Response content: \(responseString)")
-        }
+        logger.debug("📤 [LanWebSocketServer] Sending HTTP 101 response (\(response.count) bytes) for connection \(connectionId.uuidString.prefix(8))")
         
         // Use .contentProcessed to ensure the response is fully sent before starting frame reception
         // Mark as upgraded BEFORE sending so connection is ready to receive frames immediately
@@ -507,13 +504,7 @@ public final class LanWebSocketServer {
                     return
                 }
                 if let data, !data.isEmpty {
-                    #if canImport(os)
-                    self.logger.info("📥 FRAME RECEIVED: \(data.count) bytes from connection \(connectionId.uuidString.prefix(8))")
-                    #endif
-                    self.logger.info("📥 [LanWebSocketServer] FRAME RECEIVED: \(data.count) bytes from \(connectionId.uuidString.prefix(8))")
-                    self.logger.info("📥 [LanWebSocketServer] Appending \(data.count) bytes to buffer for \(connectionId.uuidString.prefix(8))")
                     context.appendToBuffer(data)
-                    self.logger.info("📦 [LanWebSocketServer] Calling processFrameBuffer for \(connectionId.uuidString.prefix(8))")
                     self.processFrameBuffer(for: connectionId, context: context)
                     // Continue receiving only if connection still exists (might have been closed by close frame)
                     guard self.connections[connectionId] != nil else {
@@ -799,13 +790,13 @@ public final class LanWebSocketServer {
         
         // Skip empty data (should have been caught in handleFrame, but double-check here)
         guard !data.isEmpty else {
-            logger.info("⏭️ [LanWebSocketServer] Skipping empty data in handleReceivedData from \(connectionId.uuidString.prefix(8))")
+            logger.debug("⏭️ [LanWebSocketServer] Skipping empty data from \(connectionId.uuidString.prefix(8))")
             return
         }
         
         // Skip frames that are too small to contain a valid frame header (4 bytes minimum)
         guard data.count >= 4 else {
-            logger.info("⏭️ [LanWebSocketServer] Skipping truncated frame in handleReceivedData from \(connectionId.uuidString.prefix(8)) (\(data.count) bytes < 4)")
+            logger.debug("⏭️ [LanWebSocketServer] Skipping truncated frame from \(connectionId.uuidString.prefix(8)) (\(data.count) bytes < 4)")
             return
         }
         
@@ -1025,7 +1016,7 @@ public final class LanWebSocketServer {
         #if canImport(os)
         // Log the raw JSON for debugging
         if let jsonString = String(data: data, encoding: .utf8) {
-            logger.info("📥 Received JSON: \(jsonString)")
+            logger.debug("📥 [LanWebSocketServer] Received JSON: \(jsonString.prefix(100))")
         }
         logger.info("📋 JSON keys: \(Array(json.keys).sorted().joined(separator: ", "))")
         #endif
@@ -1067,21 +1058,7 @@ public final class LanWebSocketServer {
     private func handlePairingMessage(_ data: Data, from connectionId: UUID) throws {
         logger.info("🔵  handlePairingMessage called: \(data.count) bytes from \(connectionId.uuidString.prefix(8))")
         #if canImport(os)
-        logger.info("📥 Received pairing message: \(data.count) bytes from \(connectionId.uuidString)")
-        if let jsonString = String(data: data, encoding: .utf8) {
-            logger.info("📥 Raw JSON (full): \(jsonString)")
-            // Also try to parse as dictionary to see what keys are present
-            if let jsonDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                logger.info("📥 JSON keys found: \(Array(jsonDict.keys).sorted().joined(separator: ", "))")
-                for (key, value) in jsonDict {
-                    if let strValue = value as? String {
-                        logger.info("📥   \(key): \(strValue.prefix(50))...")
-                    } else {
-                        logger.info("📥   \(key): \(type(of: value))")
-                    }
-                }
-            }
-        }
+        logger.debug("📥 [LanWebSocketServer] Received pairing message: \(data.count) bytes from \(connectionId.uuidString.prefix(8))")
         #endif
         
         let decoder = JSONDecoder()

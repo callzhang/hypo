@@ -1067,16 +1067,10 @@ public final class LanWebSocketServer {
         
         // Let decode errors propagate
         let challenge = try decoder.decode(PairingChallengeMessage.self, from: data)
-        #if canImport(os)
-        logger.info("✅ Decoded pairing challenge from device: \(challenge.initiatorDeviceName)")
-        #endif
-        logger.info("🔵  About to call delegate?.server(didReceivePairingChallenge:)")
         if let delegate = delegate {
-            logger.info("✅  Delegate exists, calling didReceivePairingChallenge")
             delegate.server(self, didReceivePairingChallenge: challenge, from: connectionId)
-            logger.info("✅  delegate.server(didReceivePairingChallenge:) called")
         } else {
-            logger.info("❌  Delegate is nil! Cannot process pairing challenge")
+            logger.warning("⚠️ [LanWebSocketServer] Delegate is nil! Cannot process pairing challenge")
         }
     }
     

@@ -1333,7 +1333,6 @@ extension TransportManager: LanWebSocketServerDelegate {
             webSocketServer.updateConnectionMetadata(connectionId: connectionId, deviceId: challenge.initiatorDeviceId)
             
             logger.info("✅ [TransportManager] Pairing completed: \(challenge.initiatorDeviceName) (\(challenge.initiatorDeviceId.prefix(8)))")
-            logger.info("   deviceName: \(challenge.initiatorDeviceName)")
             
             // Write to debug log
             

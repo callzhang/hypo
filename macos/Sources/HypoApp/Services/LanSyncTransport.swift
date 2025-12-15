@@ -249,16 +249,10 @@ public final class LanSyncTransport: SyncTransport {
         
         // Disconnect all peer connections but keep the transport objects
         for (deviceId, transport) in clientTransports {
-            do {
-                await transport.disconnect()
-                #if canImport(os)
-                logger.debug("   [LanSyncTransport] Disconnected peer \(deviceId)")
-                #endif
-            } catch {
-                #if canImport(os)
-                logger.warning("⚠️ [LanSyncTransport] Error disconnecting peer \(deviceId): \(error.localizedDescription)")
-                #endif
-            }
+            await transport.disconnect()
+            #if canImport(os)
+            logger.debug("   [LanSyncTransport] Disconnected peer \(deviceId)")
+            #endif
         }
         
         // Cancel all connection maintenance tasks

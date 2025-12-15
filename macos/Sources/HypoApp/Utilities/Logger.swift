@@ -122,6 +122,9 @@ public struct HypoLogger {
     }
 }
 
+// Safe to mark unchecked: wraps os.Logger (value type) and immutable strings
+extension HypoLogger: @unchecked Sendable {}
+
 // MARK: - Extension for String appendToFile (to be removed)
 extension String {
     @discardableResult
@@ -130,4 +133,3 @@ extension String {
         return true
     }
 }
-

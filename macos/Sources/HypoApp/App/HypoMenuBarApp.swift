@@ -10,8 +10,9 @@ import ApplicationServices
 
 #if canImport(AppKit)
 // Check if accessibility permissions are granted (required for CGEvent to work)
-private func checkAccessibilityPermissions() -> Bool {
-    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+private func checkAccessibilityPermissions(prompt: Bool = false) -> Bool {
+    // Default to non‑prompting to avoid triggering the system permission dialog
+    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt]
     return AXIsProcessTrustedWithOptions(options as CFDictionary)
 }
 #endif
@@ -68,7 +69,9 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleSleep()
+            Task { @MainActor in
+                self?.handleSleep()
+            }
         }
         
         // Listen for wake notification
@@ -77,7 +80,9 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleWake()
+            Task { @MainActor in
+                self?.handleWake()
+            }
         }
         
         logger.info("✅ [HypoAppDelegate] Sleep/wake detection registered")
@@ -446,10 +451,10 @@ private func typeTextAtCursor(_ text: String) {
 private func pasteToCursorAtCurrentPosition(entry: ClipboardEntry? = nil) {
     let logger = HypoLogger(category: "pasteToCursor")
     
-    // Check accessibility permissions (required for CGEvent to work)
-    if !checkAccessibilityPermissions() {
-        logger.error("❌ Accessibility permissions not granted - CGEvent will not work")
-        logger.error("   Please grant accessibility permissions in System Settings > Privacy & Security > Accessibility")
+    // Check accessibility permissions (required for CGEvent to work).
+    // Do NOT prompt the user; if unavailable, fall back to “copy only” and let the user press Cmd+V.
+    if !checkAccessibilityPermissions(prompt: true) {
+        logger.notice("⚠️ Accessibility permission missing – copied item is ready, ask user to press Cmd+V")
         return
     }
     
@@ -783,27 +788,7 @@ public struct HypoMenuBarApp: App {
         }
         globalShortcutMonitor = localMonitor
         
-        // Global monitor (works system-wide, requires accessibility permissions)
-        _ = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
-            let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-            if event.modifierFlags.contains(.command) &&
-               event.modifierFlags.contains(.shift) &&
-               key == "v" {
-                logger.debug("🎯 [NSEvent Global] Intercepted Shift+Cmd+V - showing popup")
-                
-                DispatchQueue.main.async {
-                    // CRITICAL: Save frontmost app BEFORE activating Hypo
-                    HistoryPopupPresenter.shared.saveFrontmostAppBeforeActivation()
-                    
-                    NSApp.activate(ignoringOtherApps: true)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        self.showHistoryPopup()
-                    }
-                }
-            }
-        }
-        
-        logger.debug("✅ [HypoMenuBarApp] NSEvent shortcut registered: Shift+Cmd+V")
+        logger.debug("✅ [HypoMenuBarApp] NSEvent shortcut registered (local only): Shift+Cmd+V")
     }
     
     private func showHistoryPopup() {
@@ -1881,7 +1866,11 @@ private struct ClipboardRow: View {
             isHovered = hovering
         }
         .onTapGesture {
+            // Copy then auto-paste (will prompt Accessibility once; falls back to copy-only if denied)
             viewModel.copyToPasteboard(entry)
+            HistoryPopupPresenter.shared.hideAndRestoreFocus {
+                pasteToCursorAtCurrentPosition(entry: entry)
+            }
         }
         .onDrag {
             if let provider = viewModel.itemProvider(for: entry) {

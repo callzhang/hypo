@@ -155,36 +155,6 @@ struct MenuBarIconRightClickHandler: NSViewRepresentable {
         // Store menu globally for access from monitors
         globalRightClickMenu = menu
         
-        // Global monitor - works even when app is not active
-        // Note: This requires accessibility permissions, but will work when app is active
-        // This is critical for right-click to work without left-clicking first
-        if let globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.rightMouseDown], handler: { event in
-            guard let menu = globalRightClickMenu else { return }
-            // Check if click is in status bar area (top of screen)
-            let location = NSEvent.mouseLocation
-            let screenFrame = NSScreen.main?.frame ?? .zero
-            // Status bar is at the top ~25 pixels
-            if location.y > screenFrame.height - 25 {
-                // Check if any status bar window contains this point
-                for window in NSApplication.shared.windows {
-                    if window.className.contains("NSStatusBarWindow") {
-                        // Convert screen coordinates to window coordinates
-                        let windowFrame = window.frame
-                        // Check if location is within window bounds
-                        if windowFrame.contains(location) {
-                            // Show menu at mouse location
-                            DispatchQueue.main.async {
-                                menu.popUp(positioning: nil, at: location, in: nil)
-                            }
-                            break
-                        }
-                    }
-                }
-            }
-        }) {
-            Self.eventMonitors.append(globalMonitor)
-        }
-        
         // Local monitor - works when app is active (more reliable, lower latency)
         if let localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown], handler: { event in
             guard let menu = globalRightClickMenu else { return event }

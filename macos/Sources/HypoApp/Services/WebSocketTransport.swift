@@ -146,14 +146,10 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         // If a reconnection is in progress, wait for it to complete
         if let reconnecting = reconnectingTask, !reconnecting.isCancelled {
             logger.debug("⏳ [WebSocketTransport] Reconnection in progress, waiting...")
-            do {
-                await reconnecting.value
-                // After reconnection completes, check if we're now connected
-                if case .connected = state {
-                    return
-                }
-            } catch {
-                logger.debug("⚠️ [WebSocketTransport] Reconnection task failed, proceeding with direct connect")
+            await reconnecting.value
+            // After reconnection completes, check if we're now connected
+            if case .connected = state {
+                return
             }
         }
         
@@ -526,11 +522,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         // Wait for any in-progress reconnection to complete
         if let reconnecting = reconnectingTask, !reconnecting.isCancelled {
             logger.debug("⏳ [WebSocketTransport] Waiting for in-progress reconnection...")
-            do {
-                await reconnecting.value
-            } catch {
-                logger.debug("⚠️ [WebSocketTransport] Reconnection task completed with error")
-            }
+            await reconnecting.value
         }
         
         switch state {
@@ -541,11 +533,11 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             // But first check if a reconnection is scheduled (even if not started yet)
             if let reconnecting = reconnectingTask, !reconnecting.isCancelled {
                 logger.debug("⏳ [WebSocketTransport] Reconnection scheduled, waiting...")
-                do {
-                    await reconnecting.value
-                } catch {
-                    logger.debug("⚠️ [WebSocketTransport] Reconnection task failed")
-                    // If reconnection failed, try direct connect
+                await reconnecting.value
+                // After waiting, if still not connected, try direct connect
+                if case .connected = state {
+                    // already connected, nothing to do
+                } else {
                     try await connect()
                 }
             } else {

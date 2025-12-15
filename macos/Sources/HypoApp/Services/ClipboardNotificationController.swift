@@ -326,7 +326,8 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
     }
 }
 
-extension UNUserNotificationCenter: @unchecked Sendable {}
+// Retroactive Sendable conformance for SDK type – silence future-conformance warning
+extension UNUserNotificationCenter: @retroactive @unchecked Sendable {}
 
 #if canImport(AppKit)
 extension ClipboardNotificationController {

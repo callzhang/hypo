@@ -69,8 +69,9 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleSleep()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.handleSleep()
             }
         }
         
@@ -80,8 +81,9 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleWake()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.handleWake()
             }
         }
         

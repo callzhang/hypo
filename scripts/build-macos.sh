@@ -15,14 +15,14 @@ VERSION_FILE="$PROJECT_ROOT/VERSION"
 if [ -f "$VERSION_FILE" ]; then
     APP_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
 else
-    APP_VERSION="1.0.5" # Fallback version
+    APP_VERSION="1.0.6" # Fallback version
     log_warn "VERSION file not found, using fallback: $APP_VERSION"
 fi
 
 # Parse version to get build number (e.g., 1.0.5 -> 5)
 BUILD_NUMBER=$(echo "$APP_VERSION" | awk -F. '{print $3}')
 if [ -z "$BUILD_NUMBER" ]; then
-    BUILD_NUMBER="5" # Fallback
+    BUILD_NUMBER="6" # Fallback
 fi
 
 # Colors for output

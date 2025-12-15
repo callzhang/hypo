@@ -1356,6 +1356,7 @@ extension TransportManager: LanWebSocketServerDelegate {
                 ]
             )
             logger.info("✅ [TransportManager] PairingCompleted notification posted")
+            #endif
         } catch {
             #if canImport(os)
             let logger = HypoLogger(category: "pairing")
@@ -1453,7 +1454,11 @@ extension TransportManager: LanWebSocketServerDelegate {
             }
         }
     }
-    
+}
+
+// MARK: - IP Address Helper
+
+extension TransportManager {
     /// Get the current primary IP address for the active network interface
     private func getCurrentIPAddress() -> String? {
         var address: String?

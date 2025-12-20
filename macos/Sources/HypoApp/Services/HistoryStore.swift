@@ -765,7 +765,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         
         // Queue messages for all paired devices that have encryption keys
-        // Skip devices without keys to avoid unnecessary retries
+        // Send to all devices regardless of online status - relay server can queue messages
+        // and deliver them when devices come online
         let keyProvider = KeychainDeviceKeyProvider()
         var devicesWithKeys: [PairedDevice] = []
         var devicesWithoutKeys: [PairedDevice] = []
@@ -779,20 +780,28 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         
 #if canImport(os)
-        logger.debug("📤 [HistoryStore] Queuing for \(devicesWithKeys.count) device(s) with keys")
+        logger.info("📤 [HistoryStore] Queuing for \(devicesWithKeys.count) device(s) with keys (including offline devices - relay will queue)")
         if pairedDevices.isEmpty {
             logger.warning("⚠️ [HistoryStore] No paired devices found! Clipboard sync will not be sent to any peers.")
             logger.warning("⚠️ [HistoryStore] To sync clipboard, you need to pair with at least one device first.")
         }
         if !devicesWithoutKeys.isEmpty {
             for device in devicesWithoutKeys {
-                logger.warning("⏭️ [HistoryStore] Skipping device \(device.name) (id: \(device.id)) - no encryption key found. Device may need to be re-paired.")
+                logger.warning("⏭️ [HistoryStore] Skipping device \(device.name) (id: \(device.id.prefix(8))...) - no encryption key found. Device may need to be re-paired.")
+            }
+        }
+        // Log offline devices but still send to them
+        let offlineDevices = devicesWithKeys.filter { !$0.isOnline }
+        if !offlineDevices.isEmpty {
+            for device in offlineDevices {
+                logger.info("ℹ️ [HistoryStore] Device \(device.name) (id: \(device.id.prefix(8))...) is offline, but will queue message - relay will deliver when device comes online")
             }
         }
 #endif
         
-        // Queue a separate message for each device with a key
+        // Queue a separate message for each device with a key (including offline devices)
         // Each device gets its own message, so failures for one device don't affect others
+        // Relay server can queue messages for offline devices and deliver when they reconnect
         for device in devicesWithKeys {
 #if canImport(os)
 #endif
@@ -887,10 +896,14 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 // Try to send message to this specific device
                 // Note: Each device is processed independently - failure for one doesn't affect others
 #if canImport(os)
-            logger.debug("🔄 [HistoryStore] Processing message for device \(message.targetDeviceId.prefix(8))")
-            logger.debug("🔍 [DEBUG] Processing message - type: \(message.entry.content.title), target: \(message.targetDeviceId.prefix(8))")
+            logger.info("🔄 [HistoryStore] Processing message for device \(message.targetDeviceId.prefix(8))")
+            logger.info("🔍 [DEBUG] Processing message - type: \(message.entry.content.title), target: \(message.targetDeviceId.prefix(8)), queue size: \(syncMessageQueue.count)")
 #endif
-                if await trySendMessage(message, transportManager: transportManager) {
+                let sendResult = await trySendMessage(message, transportManager: transportManager)
+#if canImport(os)
+            logger.info("🔍 [DEBUG] trySendMessage result: \(sendResult ? "SUCCESS" : "FAILED") for device \(message.targetDeviceId.prefix(8))")
+#endif
+                if sendResult {
 #if canImport(os)
                     logger.debug("🔍 [DEBUG] Message sent successfully to device \(message.targetDeviceId.prefix(8))")
 #endif
@@ -1002,13 +1015,13 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         let payloadSize = message.payload.data.count
         let contentType = message.payload.contentType.rawValue
 #if canImport(os)
-        logger.debug("🔍 [DEBUG] trySendMessage - About to transmit: contentType=\(contentType), payloadSize=\(payloadSize) bytes, targetDeviceId=\(message.targetDeviceId.prefix(8))...")
+        logger.info("🔍 [DEBUG] trySendMessage - About to transmit: contentType=\(contentType), payloadSize=\(payloadSize) bytes, targetDeviceId=\(message.targetDeviceId.prefix(8))...")
 #endif
         try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
         
 #if canImport(os)
-        logger.debug("✅ [HistoryStore] Sent to device \(message.targetDeviceId.prefix(8))")
-        logger.debug("🔍 [DEBUG] trySendMessage - transmit completed successfully: contentType=\(contentType), payloadSize=\(payloadSize) bytes")
+        logger.info("✅ [HistoryStore] Sent to device \(message.targetDeviceId.prefix(8))")
+        logger.info("🔍 [DEBUG] trySendMessage - transmit completed successfully: contentType=\(contentType), payloadSize=\(payloadSize) bytes")
 #endif
             // Update lastSeen timestamp after successful sync
             if let device = pairedDevices.first(where: { $0.id == message.targetDeviceId }) {

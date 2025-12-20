@@ -151,10 +151,7 @@ public final class ConnectionStatusProber {
         isProbing = true
         defer { isProbing = false }
         
-        #if canImport(os)
-        logger.info("Probing connection status for paired devices")
-        #endif
-        logger.debug("probe", "🔍 [ConnectionStatusProber] Probing connection status...\n")
+        // Probing connection status - no logging needed
         
         // Get all paired devices from ViewModel
         guard let historyViewModel = historyViewModel else {
@@ -166,7 +163,6 @@ public final class ConnectionStatusProber {
         
         // Get active connections from WebSocket server
         let activeConnectionIds = webSocketServer.activeConnections()
-        logger.debug("found", "🔍 [ConnectionStatusProber] Found \(activeConnectionIds.count) active WebSocket connections\n")
         
         // Get device IDs from active connections
         var onlineDeviceIds = Set<String>()
@@ -186,51 +182,41 @@ public final class ConnectionStatusProber {
             let deviceIdentity = DeviceIdentity()
             let currentDeviceId = deviceIdentity.deviceId.uuidString.lowercased()
             
-            logger.debug("discovery", "🔍 [ConnectionStatusProber] Found \(discoveredPeers.count) discovered peers (all peers: \(discoveredPeers.map { "\($0.serviceName):\($0.endpoint.metadata["device_id"] ?? "none")" }.joined(separator: ", ")))\n")
-            logger.debug("self", "   🏠 Current device ID: \(currentDeviceId)\n")
-            
             for peer in discoveredPeers {
                 if let deviceId = peer.endpoint.metadata["device_id"] {
                     let peerDeviceIdLower = deviceId.lowercased()
                     
                     // Filter out self
                     if peerDeviceIdLower == currentDeviceId {
-                        logger.debug("self", "   ⏭️ Skipping self: \(peer.serviceName) (device_id=\(deviceId))\n")
                         continue
                     }
                     
                     discoveredDeviceIds.insert(deviceId)
-                    logger.debug("peer", "   ✅ Peer: \(peer.serviceName), device_id=\(deviceId)\n")
                     
                     // Also check if this device ID matches any paired device (case-insensitive)
                     for device in pairedDevices {
                         if device.id.lowercased() == peerDeviceIdLower {
-                            logger.debug("match", "   ✅ Matched discovered peer to paired device: \(device.name) (\(device.id) == \(deviceId))\n")
                             // Ensure we're using the paired device's ID (in case of case differences)
                             discoveredDeviceIds.insert(device.id)
                             break
                         }
                     }
                 } else {
-                    logger.debug("peer", "   ⚠️ Peer: \(peer.serviceName), no device_id attribute\n")
                     // Fallback: match by service name (but still filter out self by service name)
                     let serviceNameLower = peer.serviceName.lowercased()
                     let currentServiceName = deviceIdentity.deviceName.lowercased()
                     if serviceNameLower.contains(currentServiceName) || serviceNameLower == currentServiceName {
-                        logger.debug("self", "   ⏭️ Skipping self by service name: \(peer.serviceName)\n")
                         continue
                     }
                     
                     for device in pairedDevices {
                         if peer.serviceName.contains(device.id) || device.id.contains(peer.serviceName) {
                             discoveredDeviceIds.insert(device.id)
-                            logger.debug("match", "   ✅ Matched by service name: \(device.id)\n")
                             break
                         }
                     }
                 }
             }
-            logger.debug("discovered", "🔍 [ConnectionStatusProber] discoveredDeviceIds (after filtering self): \(discoveredDeviceIds)\n")
         }
         
         // Check network connectivity - update status immediately if disconnected
@@ -293,8 +279,6 @@ public final class ConnectionStatusProber {
         let currentConnectionState = transportManager?.connectionState ?? .disconnected
         
         // Update status for each paired device - MIRROR ANDROID LOGIC
-        logger.debug("checkDevices", "🔍 [ConnectionStatusProber] Checking \(pairedDevices.count) paired devices\n")
-        
         for device in pairedDevices {
             // Check for active connection (case-insensitive matching)
             let hasActiveConnection = onlineDeviceIds.contains(device.id) || 
@@ -319,7 +303,6 @@ public final class ConnectionStatusProber {
                     await MainActor.run {
                         historyViewModel.registerPairedDevice(updatedDevice)
                     }
-                    logger.debug("update", "   🔄 Updated device \(device.name) with discovery info: \(peer.endpoint.host):\(peer.endpoint.port)\n")
                 }
             }
             
@@ -366,17 +349,13 @@ public final class ConnectionStatusProber {
                 isOnline = false
             }
             
-            logger.debug("deviceStatus", "🔍 [ConnectionStatusProber] Device \(device.name) (\(device.id.prefix(20))...): hasConnection=\(hasActiveConnection), isDiscovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState) → isOnline=\(isOnline)\n")
-            
             // Only update if status changed
             if device.isOnline != isOnline {
                 logger.info("update", "🔄 [ConnectionStatusProber] Updating device \(device.name) status: \(device.isOnline) → \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n")
                 await historyViewModel.updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
-            } else {
-                logger.debug("unchanged", "ℹ️ [ConnectionStatusProber] Device \(device.name) status unchanged: \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n")
             }
         }
         
-        logger.debug("complete", "✅ [ConnectionStatusProber] Probe complete - \(onlineDeviceIds.count) devices with active LAN connections, \(discoveredDeviceIds.count) devices discovered, connectionState: \(currentConnectionState)\n")
+        // Probe complete - no logging needed
     }
 }

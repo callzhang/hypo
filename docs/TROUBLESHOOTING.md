@@ -89,6 +89,8 @@ log stream --predicate 'processID == <PID>' --level debug
 
 **⚠️ Always filter MIUIInput** - All commands below include filtering for system noise.
 
+**📝 Subsystem Name**: Android uses the same subsystem name `"com.hypo.clipboard"` as macOS for consistency. However, Android debug builds use application ID `com.hypo.clipboard.debug` (with `.debug` suffix) while release builds use `com.hypo.clipboard`. All logcat commands below filter for both tags to work with both build types.
+
 **Step 1: Get your device ID**
 ```bash
 # List connected devices
@@ -96,99 +98,25 @@ adb devices -l
 
 # Automatically get the first connected device ID
 device_id=$(adb devices | grep -E "device$" | head -1 | awk '{print $1}' | tr -d '\r')
-
-if [ -z "$device_id" ]; then
-    echo "❌ No Android device connected. Please connect a device and try again."
-    exit 1
-fi
-
 echo "✅ Using device: $device_id"
 ```
 
-**Step 2: View logs (auto-detects PID on each run)**
+**Step 2: View logs**
 ```bash
-# System noise patterns to filter (stored in variable to avoid duplication)
+# System noise patterns to filter
 NOISE_PATTERNS=" V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
 
 # Get PID and stream logs in one command (PID is refreshed on each run)
-# Note: Use "*:D" to show DEBUG level logs (required for detailed debugging like hex values)
-# Remove -d flag for streaming (use -d only to dump current buffer and exit)
-APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
+APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug")
 echo "✅ Using APP_PID: $APP_PID"
 adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE "$NOISE_PATTERNS"
 ```
 
-**Debugging Focus Options:**
 
-**Network Issues** (WebSocket connections, LAN discovery, cloud relay):
+**Query database**:
 ```bash
-# Get PID and filter for network-related logs
-APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
-if [ -n "$APP_PID" ]; then
-    adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "WebSocket|Connection|Network|LAN|Cloud|Discovery|mDNS|Bonjour|Transport"
-else
-    adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "WebSocket|Connection|Network|LAN|Cloud|Discovery|mDNS|Bonjour|Transport"
-fi
-```
-
-**Message Syncing Issues** (clipboard detection, sending, receiving):
-```bash
-# Get PID and filter for sync-related logs
-APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
-if [ -n "$APP_PID" ]; then
-    adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "Clipboard|Sync|Received|Sent|transport\.send|onPrimaryClipChanged|ClipboardListener"
-else
-    adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "Clipboard|Sync|Received|Sent|transport\.send|onPrimaryClipChanged|ClipboardListener"
-fi
-```
-
-**Pairing Issues** (device discovery, handshake, encryption):
-```bash
-# Get PID and filter for pairing-related logs
-APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
-if [ -n "$APP_PID" ]; then
-    adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "Pairing|Handshake|Challenge|ACK|Key|Encryption|Decryption|Device|discovered"
-else
-    adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "Pairing|Handshake|Challenge|ACK|Key|Encryption|Decryption|Device|discovered"
-fi
-```
-
-**Database/Storage Issues** (SQLite errors, content too large):
-```bash
-# Get PID and filter for database-related logs
-APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
-if [ -n "$APP_PID" ]; then
-    adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "SQLite|Database|BlobTooBig|CursorWindow|Content.*too.*large"
-else
-    adb -s $device_id logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -E "SQLite|Database|BlobTooBig|CursorWindow|Content.*too.*large"
-fi
-```
-
-**View Recent Logs** (last 300 lines, filtered):
-```bash
-# Get PID and view recent logs
-APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
-if [ -n "$APP_PID" ]; then
-    adb -s $device_id logcat -d -t 300 "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
-else
-    adb -s $device_id logcat -d -t 300 -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
-fi
-```
-
-**Find Specific Content** (search for specific message):
-```bash
-# Get PID and search for specific content (replace "Case 1:" with your search term)
-APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug" 2>/dev/null | tr -d '\r' | head -1)
-if [ -n "$APP_PID" ]; then
-    adb -s $device_id logcat -d "*:D" --pid="$APP_PID" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -F "content: Case 1:"
-else
-    adb -s $device_id logcat -d -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep --color=always -vE " V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon" | grep -F "content: Case 1:"
-fi
-```
-
-**Query database (most reliable, no filtering needed)**:
-```bash
-adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 10;'"
+# Try debug build first, then release
+adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 10;' 2>/dev/null || sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 10;'"
 ```
 
 ### Backend Logs

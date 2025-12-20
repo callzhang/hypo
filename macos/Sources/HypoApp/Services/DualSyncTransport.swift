@@ -120,13 +120,15 @@ public final class DualSyncTransport: SyncTransport {
             // Log results but don't throw errors (best-effort dual send)
             switch (lanResult, cloudResult) {
             case (.success, .success):
-                logger.debug("✅ [DualSyncTransport] Both succeeded")
-            case (.success, .failure):
-                logger.info("✅ [DualSyncTransport] LAN transport succeeded (cloud failed, but both were attempted)")
-            case (.failure, .success):
-                logger.info("✅ [DualSyncTransport] Cloud transport succeeded (LAN failed, but both were attempted)")
-            case (.failure(_), .failure(let cloudError)):
-                logger.info("❌ [DualSyncTransport] Both LAN and cloud transports failed (but both were attempted)")
+                logger.info("✅ [DualSyncTransport] Both LAN and cloud succeeded for encrypted message \(envelope.id.uuidString.prefix(8))")
+            case (.success, .failure(let cloudError)):
+                logger.warning("⚠️ [DualSyncTransport] LAN succeeded but cloud failed for encrypted message \(envelope.id.uuidString.prefix(8)): \(cloudError.localizedDescription)")
+            case (.failure(let lanError), .success):
+                logger.warning("⚠️ [DualSyncTransport] Cloud succeeded but LAN failed for encrypted message \(envelope.id.uuidString.prefix(8)): \(lanError.localizedDescription)")
+            case (.failure(let lanError), .failure(let cloudError)):
+                logger.error("❌ [DualSyncTransport] Both LAN and cloud failed for encrypted message \(envelope.id.uuidString.prefix(8))")
+                logger.error("   LAN error: \(lanError.localizedDescription)")
+                logger.error("   Cloud error: \(cloudError.localizedDescription)")
                 // Throw the cloud error (usually more informative) - but both were attempted
                 throw cloudError
             }
@@ -145,13 +147,15 @@ public final class DualSyncTransport: SyncTransport {
             // Log results but don't throw errors (best-effort dual send)
             switch (lanResult, cloudResult) {
             case (.success, .success):
-                logger.debug("✅ [DualSyncTransport] Both succeeded")
-            case (.success, .failure):
-                logger.info("✅ [DualSyncTransport] LAN transport succeeded (cloud failed, but both were attempted)")
-            case (.failure, .success):
-                logger.info("✅ [DualSyncTransport] Cloud transport succeeded (LAN failed, but both were attempted)")
-            case (.failure(_), .failure(let cloudError)):
-                logger.info("❌ [DualSyncTransport] Both LAN and cloud transports failed (but both were attempted)")
+                logger.info("✅ [DualSyncTransport] Both LAN and cloud succeeded for plain text message \(envelope.id.uuidString.prefix(8))")
+            case (.success, .failure(let cloudError)):
+                logger.warning("⚠️ [DualSyncTransport] LAN succeeded but cloud failed for plain text message \(envelope.id.uuidString.prefix(8)): \(cloudError.localizedDescription)")
+            case (.failure(let lanError), .success):
+                logger.warning("⚠️ [DualSyncTransport] Cloud succeeded but LAN failed for plain text message \(envelope.id.uuidString.prefix(8)): \(lanError.localizedDescription)")
+            case (.failure(let lanError), .failure(let cloudError)):
+                logger.error("❌ [DualSyncTransport] Both LAN and cloud failed for plain text message \(envelope.id.uuidString.prefix(8))")
+                logger.error("   LAN error: \(lanError.localizedDescription)")
+                logger.error("   Cloud error: \(cloudError.localizedDescription)")
                 // Throw the cloud error (usually more informative) - but both were attempted
                 throw cloudError
             }

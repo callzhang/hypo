@@ -20,8 +20,12 @@ private class NonFocusStealingPanel: NSPanel {
     // ESC key is handled via Carbon event listener, but we also handle it here as fallback
     override func keyDown(with event: NSEvent) {
         // Handle ESC key (keyCode 53) to close window
+        // If pinned, only dismiss if this window is the key window (focused)
         if event.keyCode == 53 {
-            HistoryPopupPresenter.shared.hide()
+            let presenter = HistoryPopupPresenter.shared
+            if !presenter.pinned || (presenter.pinned && self.isKeyWindow) {
+                presenter.hide()
+            }
             return
         }
         // Pass other keyboard events to super so TextField can receive input
@@ -59,12 +63,6 @@ final class HistoryPopupPresenter {
         // Only save if it's a valid non-Hypo application
         if let current = currentFrontmost, current.bundleIdentifier != hypoBundleId {
             previousFrontmostApp = current
-            logger.debug("💾 Saved frontmost app: \(current.localizedName ?? "unknown")")
-        } else {
-            // Current frontmost is nil or Hypo - preserve previous value
-            // This ensures focus restoration works even if show() is called multiple times
-            // or when currentFrontmost is nil (e.g., during app launch)
-            logger.debug("ℹ️ Current frontmost app is Hypo or nil, keeping previous saved app: \(previousFrontmostApp?.localizedName ?? "none")")
         }
         
         DispatchQueue.main.async {
@@ -83,15 +81,15 @@ final class HistoryPopupPresenter {
         // Only save if it's not Hypo itself
         if let current = currentFrontmost, current.bundleIdentifier != hypoBundleId {
             previousFrontmostApp = currentFrontmost
-            logger.debug("💾 Saved frontmost app (before activation): \(current.localizedName ?? "unknown")")
-        } else {
-            logger.debug("ℹ️ Current frontmost app is Hypo or nil, keeping previous saved app")
         }
     }
 
     func hide() {
         DispatchQueue.main.async {
             guard let window = self.window, window.isVisible else { return }
+            
+            // Don't hide if window is pinned
+            guard !self.isPinned else { return }
             
             // Restore focus to previous app when hiding (works for ESC key and click-outside)
             self.restorePreviousFocus()
@@ -132,7 +130,16 @@ final class HistoryPopupPresenter {
                 return
             }
             
-            self.logger.debug("🔄 hideAndRestoreFocus called")
+            // If window is pinned, don't hide it - just restore focus and paste
+            if self.isPinned {
+                // Restore focus to the previous frontmost app before pasting
+                self.restorePreviousFocus()
+                // Small delay to ensure focus is restored before pasting
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    completion()
+                }
+                return
+            }
             
             // Remove monitors first
             self.removeClickMonitor()
@@ -187,7 +194,7 @@ final class HistoryPopupPresenter {
         
         // Activate the previous app to restore focus
         previousApp.activate(options: [.activateIgnoringOtherApps])
-        logger.debug("🔄 Restoring focus to: \(previousApp.localizedName ?? "unknown")")
+        // Restoring focus - no logging needed
     }
     
     
@@ -198,6 +205,10 @@ final class HistoryPopupPresenter {
     
     func isWindowVisible() -> Bool {
         return window?.isVisible ?? false
+    }
+    
+    var isWindowKey: Bool {
+        return window?.isKeyWindow ?? false
     }
 
     // MARK: - Present helpers (must stay in-file to access privates)
@@ -214,9 +225,7 @@ final class HistoryPopupPresenter {
                 window.setFrame(expected, display: false, animate: false)
             }
 
-            let frameStr = NSStringFromRect(window.frame)
-            let expectedStr = NSStringFromRect(expected)
-            self.logger.debug("📍 Reuse frame: \(frameStr) expected: \(expectedStr) screen: \(target.localizedName) moved=\(needsMove)")
+            // Frame reuse - no logging needed
             
             window.alphaValue = 1.0
             applyWindowPresentation(for: window)
@@ -335,7 +344,7 @@ final class HistoryPopupPresenter {
         
         if err == noErr {
             escHotKeyRef = hotKeyRef
-            logger.debug("✅ ESC hotkey registered")
+            // ESC hotkey registered - no logging needed
         } else {
             logger.warning("⚠️ Failed to register ESC hotkey: \(err)")
         }

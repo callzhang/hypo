@@ -260,8 +260,12 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         let initialBackoff: TimeInterval = 1.0 // 1 second
         let maxTimeout: TimeInterval = 600.0 // 10 minutes
         
+        logger.info("🔄 [WebSocketTransport] processMessageQueue started: queue=\(messageQueue.count)")
+        
         while !messageQueue.isEmpty {
+            let queueSizeBefore = messageQueue.count
             var queuedMessage = messageQueue.removeFirst()
+            logger.info("📤 [WebSocketTransport] Processing message from queue: id=\(queuedMessage.envelope.id.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), size=\(queuedMessage.data.count) bytes, retry=\(queuedMessage.retryCount), queue remaining=\(queueSizeBefore - 1)")
             
             // Check timeout (10 minutes from queue time)
             if Date().timeIntervalSince(queuedMessage.queuedAt) > maxTimeout {
@@ -280,10 +284,12 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             }
             
             // Ensure connection before each attempt
+            logger.debug("🔍 [WebSocketTransport] Ensuring connection before send attempt \(queuedMessage.retryCount + 1)")
             do {
                 try await ensureConnected()
+                logger.debug("✅ [WebSocketTransport] Connection ensured successfully")
             } catch {
-                logger.info("⚠️ [WebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)")
+                logger.warning("⚠️ [WebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)")
                 queuedMessage.retryCount += 1
                 if queuedMessage.retryCount <= maxRetries {
                     messageQueue.append(queuedMessage)
@@ -1012,7 +1018,6 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                     if let jsonString = String(data: jsonData, encoding: .utf8) {
                         // Check for error messages with structure: {"type":"error","payload":{...}}
                         if jsonString.contains("\"type\"") && jsonString.contains("\"error\"") {
-                            logger.debug("⚠️ [WebSocketTransport] Received error message from relay")
                             // Try to parse as error message
                             if let jsonDict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                                let type = jsonDict["type"] as? String,
@@ -1022,9 +1027,30 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                                 let message = payload["message"] as? String ?? "Unknown error"
                                 let targetDeviceId = payload["target_device_id"] as? String
                                 let connectedDevices = payload["connected_devices"] as? [String]
+                                let originalMessageIdStr = payload["original_message_id"] as? String
+                                
+                                // Skip logging for expected errors when sending to offline devices
+                                // device_not_connected is expected when sending to offline peers (relay will queue)
+                                let isExpectedError = code == "device_not_connected" || code == "incorrect_device_id"
+                                
+                                // Only log unexpected errors
+                                if !isExpectedError {
+                                    logger.warning("⚠️ [WebSocketTransport] Received error from relay: code=\(code), message=\(message)")
+                                    if let targetDeviceId = targetDeviceId {
+                                        logger.warning("   Target device: \(targetDeviceId.prefix(8))...")
+                                    }
+                                    if let originalMessageIdStr = originalMessageIdStr {
+                                        logger.warning("   Original message ID: \(originalMessageIdStr.prefix(8))...")
+                                    }
+                                    if let connectedDevices = connectedDevices, !connectedDevices.isEmpty {
+                                        logger.warning("   Connected devices: \(connectedDevices.map { $0.prefix(8) + "..." }.joined(separator: ", "))")
+                                    } else {
+                                        logger.warning("   No devices currently connected to relay")
+                                    }
+                                }
                                 
                                 // Check if this error is for an in-flight message
-                                if let originalMessageIdStr = payload["original_message_id"] as? String,
+                                if let originalMessageIdStr = originalMessageIdStr,
                                    let originalMessageId = UUID(uuidString: originalMessageIdStr) {
                                     // Mark in-flight message as failed and requeue for retry
                                     if var failedMessage = self.inFlightMessages.removeValue(forKey: originalMessageId) {
@@ -1065,20 +1091,6 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                                             }
                                         }
                                     }
-                                }
-                                
-                                // Log error message (these are expected when target device is not connected)
-                                // Only log non-permanent errors here (permanent errors already logged above)
-                                if code != "device_not_connected" && code != "incorrect_device_id" {
-                                    logger.debug("⚠️ [WebSocketTransport] Server error: \(code) - \(message)")
-                                }
-                                if let targetDeviceId = targetDeviceId {
-                                    logger.debug("   Target device: \(targetDeviceId)")
-                                }
-                                if let connectedDevices = connectedDevices, !connectedDevices.isEmpty {
-                                    logger.debug("   Currently connected devices: \(connectedDevices.joined(separator: ", "))")
-                                } else {
-                                    logger.debug("   No devices currently connected to relay")
                                 }
                                 
                                 // Error messages are informational - don't try to decode as SyncEnvelope

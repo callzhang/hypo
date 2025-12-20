@@ -162,9 +162,13 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                         }
                     } else if hotKeyID.id == 999 {
                         // ESC key - Close history popup
+                        // If pinned, only dismiss if the popup window is the key window (focused)
                         NSLog("🎯 [HypoAppDelegate] HOTKEY TRIGGERED: ESC pressed")
                         DispatchQueue.main.async {
-                            HistoryPopupPresenter.shared.hide()
+                            let presenter = HistoryPopupPresenter.shared
+                            if !presenter.pinned || (presenter.pinned && presenter.isWindowKey) {
+                                presenter.hide()
+                            }
                         }
                     } else if hotKeyID.id >= 10 && hotKeyID.id <= 18 {
                         // Alt+1 through Alt+9 (id 10-18)

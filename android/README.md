@@ -659,14 +659,16 @@ adb -s <device_id> logcat | grep -v "MIUIInput"
 adb -s <device_id> logcat -v time "*:E" | grep -v "MIUIInput" | grep -E "clipboard|Hypo"
 
 # Filter by PID (excludes MIUIInput)
-APP_PID=$(adb -s <device_id> shell "pidof -s com.hypo.clipboard.debug 2>/dev/null || pgrep -f com.hypo.clipboard.debug 2>/dev/null || ps | grep com.hypo.clipboard.debug | grep -v grep | awk '{print \$2}'" 2>/dev/null | tr -d '\r' | head -1 || echo "")
+# Subsystem: "com.hypo.clipboard" (same as macOS, but Android uses different application IDs)
+APP_PID=$(adb -s <device_id> shell "pidof -s com.hypo.clipboard.debug 2>/dev/null || pidof -s com.hypo.clipboard 2>/dev/null || pgrep -f com.hypo.clipboard.debug 2>/dev/null || pgrep -f com.hypo.clipboard 2>/dev/null || ps | grep com.hypo.clipboard | grep -v grep | awk '{print \$2}'" 2>/dev/null | tr -d '\r' | head -1 || echo "")
 if [ -n "$APP_PID" ]; then
     adb -s <device_id> logcat --pid="$APP_PID" | grep -v "MIUIInput"
 else
-    adb -s <device_id> logcat -v time "*:S" "com.hypo.clipboard.debug:D" | grep -v "MIUIInput"
+    adb -s <device_id> logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep -v "MIUIInput"
 fi
 
-# Show app logs only (no MIUIInput)
+# Show app logs only (no MIUIInput) - filters for both debug and release builds
+# Subsystem: "com.hypo.clipboard" (same as macOS)
 adb -s <device_id> logcat -v time "*:S" "com.hypo.clipboard.debug:D" "com.hypo.clipboard:D" | grep -v "MIUIInput"
 
 # Clear logs before testing

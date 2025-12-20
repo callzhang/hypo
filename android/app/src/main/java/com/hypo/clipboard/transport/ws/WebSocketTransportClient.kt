@@ -1238,7 +1238,13 @@ class WebSocketTransportClient @Inject constructor(
                     } else {
                         lastKnownUrl ?: "unknown"
                     }
-                    android.util.Log.w("WebSocketTransportClient", "❌ Connection failed: $connUrl - ${t.message} (${t.javaClass.simpleName})")
+                    // For LAN connections, timeouts are expected when devices aren't on the same network
+                    // Log at debug level to reduce noise
+                    if (isCloudConnection) {
+                        android.util.Log.w("WebSocketTransportClient", "❌ Connection failed: $connUrl - ${t.message} (${t.javaClass.simpleName})")
+                    } else {
+                        android.util.Log.d("WebSocketTransportClient", "⏱️ LAN connection timeout (expected when not on same network): $connUrl - ${t.javaClass.simpleName}")
+                    }
                     
                     // For LAN connections, if connection is refused, clear lastKnownUrl to force re-discovery
                     // This handles cases where the peer's IP has changed but we haven't re-discovered it yet
@@ -1325,12 +1331,19 @@ class WebSocketTransportClient @Inject constructor(
                 val isCancellation = t is kotlinx.coroutines.CancellationException
                 val isTimeout = t is kotlinx.coroutines.TimeoutCancellationException
                 
-                android.util.Log.e("WebSocketTransportClient", "   ❌ Handshake exception caught")
-                android.util.Log.e("WebSocketTransportClient", "   Exception type: ${t.javaClass.simpleName}")
-                android.util.Log.e("WebSocketTransportClient", "   Exception message: ${t.message}")
-                android.util.Log.e("WebSocketTransportClient", "   Is cancellation: $isCancellation, Is timeout: $isTimeout")
-                android.util.Log.e("WebSocketTransportClient", "   Connection job state: active=${connectionJob?.isActive}, cancelled=${connectionJob?.isCancelled}")
-                android.util.Log.e("WebSocketTransportClient", "   Socket state: isOpen=${isOpen.get()}, isClosed=${isClosed.get()}")
+                // For LAN connections, timeouts are expected when devices aren't on the same network
+                // Log at debug level to reduce noise, but still log cloud connection failures as errors
+                if (isCloudConnection) {
+                    android.util.Log.e("WebSocketTransportClient", "   ❌ Handshake exception caught")
+                    android.util.Log.e("WebSocketTransportClient", "   Exception type: ${t.javaClass.simpleName}")
+                    android.util.Log.e("WebSocketTransportClient", "   Exception message: ${t.message}")
+                    android.util.Log.e("WebSocketTransportClient", "   Is cancellation: $isCancellation, Is timeout: $isTimeout")
+                    android.util.Log.e("WebSocketTransportClient", "   Connection job state: active=${connectionJob?.isActive}, cancelled=${connectionJob?.isCancelled}")
+                    android.util.Log.e("WebSocketTransportClient", "   Socket state: isOpen=${isOpen.get()}, isClosed=${isClosed.get()}")
+                } else {
+                    // LAN connection timeout - expected when devices aren't on same network
+                    android.util.Log.d("WebSocketTransportClient", "   ⏱️ LAN handshake timeout (expected when devices not on same network): ${t.javaClass.simpleName} - ${t.message}")
+                }
                 
                 if (isCancellation && !isTimeout) {
                     android.util.Log.w("WebSocketTransportClient", "   ⚠️ Handshake cancelled (connection job was cancelled externally)")
@@ -1347,7 +1360,11 @@ class WebSocketTransportClient @Inject constructor(
                 }
                 
                 // Timeout or other error - cancel socket to clean up
-                android.util.Log.e("WebSocketTransportClient", "   ❌ Handshake failed (timeout or error), cancelling socket")
+                if (isCloudConnection) {
+                    android.util.Log.e("WebSocketTransportClient", "   ❌ Handshake failed (timeout or error), cancelling socket")
+                } else {
+                    android.util.Log.d("WebSocketTransportClient", "   ⏱️ LAN handshake failed (timeout), cancelling socket")
+                }
                 try {
                     socket.cancel()
                     android.util.Log.d("WebSocketTransportClient", "   Socket cancelled successfully")

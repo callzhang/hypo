@@ -57,6 +57,34 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         
         // Setup sleep/wake detection for LAN connection optimization
         setupSleepWakeDetection()
+        
+        // Register NSServices handler
+        NSApp.servicesProvider = self
+    }
+    
+    // MARK: - NSServices Handler
+    
+    /// Handles "Copy to Hypo" service request from context menu
+    /// This method is called when user selects text and chooses "Copy to Hypo" from the Services menu
+    @objc func copyToHypo(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSError?>) -> Bool {
+        logger.info("📋 [HypoAppDelegate] Copy to Hypo service called")
+        
+        // Get the selected text from the pasteboard
+        guard let selectedText = pboard.string(forType: .string) ?? pboard.string(forType: NSPasteboard.PasteboardType("public.plain-text")) else {
+            logger.warning("⚠️ [HypoAppDelegate] No text found in pasteboard for Copy to Hypo service")
+            return false
+        }
+        
+        logger.info("✅ [HypoAppDelegate] Copying selected text to clipboard: \(selectedText.prefix(50))...")
+        
+        // Copy the selected text to the system clipboard
+        // This will trigger the clipboard monitor, which will sync it to other devices
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(selectedText, forType: .string)
+        
+        logger.info("✅ [HypoAppDelegate] Text copied to clipboard via Copy to Hypo service")
+        return true
     }
     
     private func setupSleepWakeDetection() {

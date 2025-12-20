@@ -119,6 +119,25 @@ if [ ! -d "$APP_BUNDLE" ]; then
     <string>AppIcon</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>Copy to Hypo</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>copyToHypo</string>
+            <key>NSPortName</key>
+            <string>com.hypo.clipboard</string>
+            <key>NSSendTypes</key>
+            <array>
+                <string>NSStringPboardType</string>
+                <string>public.plain-text</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 EOF

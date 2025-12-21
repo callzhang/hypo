@@ -27,7 +27,8 @@ jobs:
               - 'backend/**/*.rs'
             backend-cargo:
               - 'backend/Cargo.toml'
-              - 'backend/Cargo.lock'
+              # Note: Cargo.lock is excluded - it's auto-generated and shouldn't trigger deployment
+              # Only Cargo.toml or .rs file changes should trigger backend deployment
 
   build-and-deploy:
     needs: check-changes

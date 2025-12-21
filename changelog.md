@@ -2,6 +2,31 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [Unreleased] - Image Share Context Menu
+
+### Added
+- **Android Image Share Context Menu**: "Copy to Hypo" appears in share menu for images
+  - ShareImageActivity handles ACTION_SEND intent for images
+  - Users can long-press image in any app → Share → "Copy to Hypo" to sync immediately
+  - Supports all image formats (PNG, JPEG, WebP, GIF, etc.)
+  - Automatically detects image format and MIME type
+  - Uses FileProvider for secure file sharing (Android 10+)
+  - Processes images in background coroutine for smooth UX
+  - Forces immediate clipboard processing via service intent
+  - Works independently of main app (can be used even if app is not running)
+
+### Changed
+- **ProcessTextActivity Code Structure**: Improved error handling
+  - Removed nested try-catch blocks for cleaner code structure
+  - Separated clipboard copy and service start error handling
+  - Better error messages and logging
+
+### Technical Details
+- ShareImageActivity uses ACTION_SEND intent filter with image/* MIME type
+- High priority (1000) ensures "Copy to Hypo" appears prominently in share menu
+- Image data is read from URI, saved to temp file, then copied to clipboard via FileProvider
+- Service intent triggers immediate processing to avoid delays
+
 ## [1.0.6] - 2025-12-13 - Nonce Reuse Fix for Dual-Send Transport
 
 ### Fixed

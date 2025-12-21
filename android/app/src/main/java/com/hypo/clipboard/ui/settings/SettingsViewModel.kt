@@ -34,6 +34,7 @@ class SettingsViewModel @Inject constructor(
     private val lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
     private val syncCoordinator: SyncCoordinator,
     private val connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber,
+    private val accessibilityServiceChecker: com.hypo.clipboard.util.AccessibilityServiceChecker,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -63,6 +64,14 @@ class SettingsViewModel @Inject constructor(
             emit(checkBatteryOptimizationStatus())
         }
     }
+    
+    // Flow that emits accessibility service status periodically (needed for UI updates)
+    private val accessibilityServiceStatusFlow = flow {
+        while (true) {
+            delay(2_000L) // Check every 2 seconds
+            emit(checkAccessibilityServiceStatus())
+        }
+    }
 
     init {
         observeState()
@@ -79,7 +88,8 @@ class SettingsViewModel @Inject constructor(
                 connectionStatusProber.deviceDualStatus,  // Dual status (LAN + Cloud) for each device
                 smsPermissionStatusFlow.onStart { emit(checkSmsPermissionStatus()) }, // Emit immediately on start, then every 2 seconds
                 notificationPermissionStatusFlow.onStart { emit(checkNotificationPermissionStatus()) }, // Emit immediately on start, then every 2 seconds
-                batteryOptimizationStatusFlow.onStart { emit(checkBatteryOptimizationStatus()) } // Emit immediately on start, then every 2 seconds
+                batteryOptimizationStatusFlow.onStart { emit(checkBatteryOptimizationStatus()) }, // Emit immediately on start, then every 2 seconds
+                accessibilityServiceStatusFlow.onStart { emit(checkAccessibilityServiceStatus()) } // Emit immediately on start, then every 2 seconds
             ) { values ->
                 @Suppress("UNCHECKED_CAST")
                 val settings = values[0] as UserSettings
@@ -93,6 +103,7 @@ class SettingsViewModel @Inject constructor(
                 val isSmsPermissionGranted = values[5] as Boolean
                 val isNotificationPermissionGranted = values[6] as Boolean
                 val isBatteryOptimizationDisabled = values[7] as Boolean
+                val isAccessibilityServiceEnabled = values[8] as Boolean
                 // Load all paired devices directly from persistent storage
                 val allPairedDeviceIds = runCatching { 
                     deviceKeyStore.getAllDeviceIds() 
@@ -186,6 +197,7 @@ class SettingsViewModel @Inject constructor(
                     autoDeleteDays = settings.autoDeleteDays,
                     plainTextModeEnabled = settings.plainTextModeEnabled,
                     discoveredPeers = pairedPeersForUi,
+                    isAccessibilityServiceEnabled = isAccessibilityServiceEnabled,
                     deviceStatuses = peerStatuses,
                     deviceTransports = peerTransports,
                     isSmsPermissionGranted = isSmsPermissionGranted,
@@ -264,6 +276,16 @@ class SettingsViewModel @Inject constructor(
         return com.hypo.clipboard.util.MiuiAdapter.isBatteryOptimizationDisabled(context)
     }
     
+    private fun checkAccessibilityServiceStatus(): Boolean {
+        return accessibilityServiceChecker.isAccessibilityServiceEnabled()
+    }
+    
+    fun openAccessibilitySettings() {
+        val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        intent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+        context.startActivity(intent)
+    }
+    
     /**
      * Check peer status immediately (called when user clicks on peer list)
      */
@@ -283,6 +305,7 @@ data class SettingsUiState(
         val isSmsPermissionGranted: Boolean = false,
         val isNotificationPermissionGranted: Boolean = false,
         val isBatteryOptimizationDisabled: Boolean = false,
+        val isAccessibilityServiceEnabled: Boolean = false,
         val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Disconnected,
         val peerDiscoveryStatus: Map<String, Boolean> = emptyMap(), // Maps serviceName to isDiscovered
         val peerDeviceNames: Map<String, String?> = emptyMap() // Maps serviceName to device name

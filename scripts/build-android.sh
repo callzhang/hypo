@@ -186,13 +186,13 @@ build_apk() {
     fi
     
     # Determine APK path based on variant
+    # Note: Both debug and release use the same package name (com.hypo.clipboard)
     if [ "$variant" = "debug" ]; then
         APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-        PACKAGE_NAME="com.hypo.clipboard.debug"
     else
         APK_PATH="app/build/outputs/apk/release/app-release.apk"
-        PACKAGE_NAME="com.hypo.clipboard"
     fi
+    PACKAGE_NAME="com.hypo.clipboard"
     
     if [ $build_result -eq 0 ] && [ -f "$APK_PATH" ]; then
         APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
@@ -274,8 +274,8 @@ if [ "$BUILD_TYPE" = "debug" ] || [ "$BUILD_TYPE" = "both" ]; then
                     if "$ADB" -s "$DEVICE_ID" install -r "$PROJECT_ROOT/android/$DEBUG_APK_PATH" 2>/dev/null; then
                         echo -e "${GREEN}✅ Installed successfully on $DEVICE_ID${NC}"
                         
-                        # Launch the app
-                        PACKAGE_NAME="com.hypo.clipboard.debug"
+                        # Launch the app (both debug and release use the same package name)
+                        PACKAGE_NAME="com.hypo.clipboard"
                         echo -e "${YELLOW}Opening Hypo app on $DEVICE_ID...${NC}"
                         
                         if "$ADB" -s "$DEVICE_ID" shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" >/dev/null 2>&1; then

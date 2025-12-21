@@ -1,8 +1,15 @@
 package com.hypo.clipboard.sync
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.util.Log
+import androidx.core.content.FileProvider
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.locks.ReentrantLock
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -29,7 +36,9 @@ private inline fun <T> ReentrantLock.withLock(action: () -> T): T {
 class IncomingClipboardHandler @Inject constructor(
     private val syncEngine: SyncEngine,
     private val syncCoordinator: SyncCoordinator,
-    private val identity: DeviceIdentity
+    private val identity: DeviceIdentity,
+    private val accessibilityServiceChecker: com.hypo.clipboard.util.AccessibilityServiceChecker,
+    @ApplicationContext private val context: Context
 ) {
     private val scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     
@@ -360,6 +369,22 @@ class IncomingClipboardHandler @Inject constructor(
                 }
                 Log.d(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=$senderDeviceName, content: $contentPreview")
                 
+                // Always try to update system clipboard (same mechanism as macOS)
+                // If Accessibility Service is enabled, it will succeed in background
+                // If not enabled, it may fail in background (Android 10+ restriction) but will work in foreground
+                val clipboardItem = com.hypo.clipboard.domain.model.ClipboardItem(
+                    id = java.util.UUID.randomUUID().toString(),
+                    type = clipboardPayload.contentType,
+                    content = content,
+                    preview = preview,
+                    metadata = finalMetadata,
+                    deviceId = finalSenderDeviceId.lowercase(),
+                    deviceName = finalSenderDeviceName,
+                    createdAt = java.time.Instant.now(),
+                    isPinned = false
+                )
+                updateSystemClipboard(clipboardItem)
+                
                 // Forward to coordinator (will use source device info instead of local)
                 syncCoordinator.onClipboardEvent(event)
                 
@@ -415,6 +440,89 @@ class IncomingClipboardHandler @Inject constructor(
         if (mb < 1024) return String.format("%.1f MB", mb)
         val gb = mb / 1024.0
         return String.format("%.1f GB", gb)
+    }
+    
+    /**
+     * Update system clipboard with received item (same mechanism as macOS).
+     * Always attempts to update clipboard:
+     * - If Accessibility Service is enabled: uses Accessibility Service context (works in background)
+     * - If not enabled: uses regular context (works in foreground, may fail in background on Android 10+)
+     * 
+     * Uses "Hypo Remote" label to prevent ClipboardListener from processing this update.
+     */
+    private fun updateSystemClipboard(item: com.hypo.clipboard.domain.model.ClipboardItem) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                // Try Accessibility Service first if enabled (works in background)
+                if (accessibilityServiceChecker.isAccessibilityServiceEnabled()) {
+                    val updated = com.hypo.clipboard.service.ClipboardAccessibilityService.updateClipboard(item)
+                    if (updated) {
+                        Log.d(TAG, "✅ Updated system clipboard via Accessibility Service")
+                        return@launch
+                    }
+                }
+                
+                // Fallback to regular context update (works in foreground, may fail in background)
+                val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    ?: return@launch
+                
+                val clip = when (item.type) {
+                    com.hypo.clipboard.domain.model.ClipboardType.TEXT,
+                    com.hypo.clipboard.domain.model.ClipboardType.LINK -> {
+                        ClipData.newPlainText("Hypo Remote", item.content)
+                    }
+                    com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
+                        val imageBytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
+                        val format = item.metadata?.get("format") ?: "png"
+                        val mimeType = when (format.lowercase()) {
+                            "png" -> "image/png"
+                            "jpeg", "jpg" -> "image/jpeg"
+                            "webp" -> "image/webp"
+                            "gif" -> "image/gif"
+                            else -> "image/png"
+                        }
+                        val tempFile = java.io.File.createTempFile("hypo_image", ".$format", context.cacheDir)
+                        java.io.FileOutputStream(tempFile).use { it.write(imageBytes) }
+                        tempFile.setReadable(true, false)
+                        val uri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            tempFile
+                        )
+                        ClipData.newUri(context.contentResolver, mimeType, uri)
+                    }
+                    com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
+                        val fileBytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
+                        val filename = item.metadata?.get("file_name") ?: "file"
+                        val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
+                        val extension = filename.substringAfterLast('.', "").lowercase()
+                        val tempFile = java.io.File.createTempFile("hypo_file", if (extension.isNotEmpty()) ".$extension" else "", context.cacheDir)
+                        java.io.FileOutputStream(tempFile).use { it.write(fileBytes) }
+                        tempFile.setReadable(true, false)
+                        val uri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            tempFile
+                        )
+                        ClipData.newUri(context.contentResolver, mimeType, uri)
+                    }
+                }
+                
+                withContext(Dispatchers.Main) {
+                    try {
+                        clipboardManager.setPrimaryClip(clip)
+                        Log.d(TAG, "✅ Updated system clipboard: type=${item.type}, preview=${item.preview.take(50)}")
+                    } catch (e: SecurityException) {
+                        // Android 10+ may block clipboard access in background
+                        Log.d(TAG, "🔒 Failed to update clipboard in background (Android 10+ restriction). Enable Accessibility Service in Settings to allow background updates: ${e.message}")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⚠️ Failed to update system clipboard: ${e.message}", e)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Error updating system clipboard: ${e.message}", e)
+            }
+        }
     }
     
     companion object {

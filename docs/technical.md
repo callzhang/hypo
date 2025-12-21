@@ -89,6 +89,12 @@ See `docs/architecture.mermaid` for visual representation.
   - Forces immediate clipboard processing via service intent
   - Passes text directly in intent to avoid timing issues with clipboard access
   - Works even when ClipboardListener isn't started (e.g., accessibility service enabled)
+- **Image Share Context Menu** ✅ Implemented (December 2025): "Copy to Hypo" appears in share menu for images
+  - ShareImageActivity handles ACTION_SEND intent for images
+  - Supports all image formats (PNG, JPEG, WebP, GIF, etc.)
+  - Uses FileProvider for secure file sharing (Android 10+)
+  - Processes images in background coroutine for smooth UX
+  - Works independently of main app
 - **FileProvider Integration** ✅ Implemented (December 2025): Secure file sharing for images/files on Android 10+
   - Uses FileProvider for content:// URIs instead of file:// URIs
   - Resolves "FrameInsert open fail" errors when copying images/files from history

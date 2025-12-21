@@ -107,7 +107,7 @@ echo "✅ Using device: $device_id"
 NOISE_PATTERNS=" V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
 
 # Get PID and stream logs in one command (PID is refreshed on each run)
-APP_PID=$(adb -s $device_id shell "pidof -s com.hypo.clipboard.debug")
+APP_PID=$(adb -s $device_id shell "pgrep -f com.hypo.clipboard")
 echo "✅ Using APP_PID: $APP_PID"
 adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE "$NOISE_PATTERNS"
 ```
@@ -115,8 +115,8 @@ adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE "$NOIS
 
 **Query database**:
 ```bash
-# Try debug build first, then release
-adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 10;' 2>/dev/null || sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 10;'"
+# Query database (debug and release use the same application ID)
+adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 10;'"
 ```
 
 ### Backend Logs
@@ -322,7 +322,7 @@ curl -I https://hypo.fly.dev/health
 - Content is excluded from list queries and loaded on-demand when copying
 - If you still experience crashes, clear app data and restart:
   ```bash
-  adb shell pm clear com.hypo.clipboard.debug
+  adb shell pm clear com.hypo.clipboard
   ```
 
 **Diagnostic Steps**:
@@ -350,7 +350,7 @@ curl -I https://hypo.fly.dev/health
 **Verification**:
 ```bash
 # Android: Check temp file count
-adb shell ls -la /data/data/com.hypo.clipboard.debug/cache/ | grep hypo_
+adb shell ls -la /data/data/com.hypo.clipboard/cache/ | grep hypo_
 
 # macOS: Check temp directory
 ls -la ~/Library/Caches/ | grep hypo_
@@ -592,8 +592,6 @@ adb shell getprop ro.build.version.sdk
 
 # Grant clipboard permission (if available)
 adb shell pm grant com.hypo.clipboard android.permission.READ_CLIPBOARD
-# For debug builds:
-adb shell pm grant com.hypo.clipboard.debug android.permission.READ_CLIPBOARD
 ```
 
 **Background Clipboard Access via ADB (Advanced/Experimental)**:
@@ -637,8 +635,8 @@ This method uses a **workaround** discovered by clipboard manager apps (like Cli
 **The Commands Explained:**
 
 ```bash
-# Replace with your package name (com.hypo.clipboard or com.hypo.clipboard.debug)
-PACKAGE="com.hypo.clipboard.debug"
+# Package name (debug and release use the same application ID)
+PACKAGE="com.hypo.clipboard"
 
 # Grant SYSTEM_ALERT_WINDOW permission (allows overlay)
 # This uses AppOps to set the operation mode to "allow"
@@ -670,7 +668,7 @@ Google tightened security in Android 12:
 **Method 2: Direct AppOps Clipboard Permission (Android 10-11 only)**
 
 ```bash
-PACKAGE="com.hypo.clipboard.debug"
+PACKAGE="com.hypo.clipboard"
 
 # Try to set clipboard read permission directly
 adb shell appops set $PACKAGE READ_CLIPBOARD allow
@@ -684,7 +682,7 @@ adb shell am force-stop $PACKAGE
 **Method 3: Check Current AppOps Status**
 
 ```bash
-PACKAGE="com.hypo.clipboard.debug"
+PACKAGE="com.hypo.clipboard"
 
 # Check all AppOps for the package
 adb shell dumpsys appops $PACKAGE | grep -i clipboard
@@ -960,7 +958,7 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep 
 adb -s $device_id shell service call clipboard 1 | grep -oP "(?<=text=')[^']*"
 
 # Alternative: Check app's clipboard history database
-adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 1;'"
+adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 1;'"
 ```
 
 **Verification**:
@@ -1040,7 +1038,7 @@ cat ~/Library/Logs/DiagnosticReports/HypoMenuBar-*.ips | \
 **Debugging**:
 ```bash
 # Check database directly (most reliable)
-adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items WHERE preview LIKE \"%Case X:%\" LIMIT 1;'"
+adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT preview FROM clipboard_items WHERE preview LIKE \"%Case X:%\" LIMIT 1;'"
 
 # Check logs by content (filter MIUIInput)
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -F "content: Case X:"
@@ -1176,7 +1174,7 @@ adb shell am start -n com.hypo.clipboard/.MainActivity
 ```bash
 # View recent clipboard content from logs and database
 # For Android logs, see [Android Logs](#android-logs) section above, then filter for "content:"
-adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 5;'"
+adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT preview FROM clipboard_items ORDER BY created_at DESC LIMIT 5;'"
 
 # Emulate clipboard copy and monitor
 adb -s $device_id shell "service call clipboard 2 s16 'Test clipboard'" && \

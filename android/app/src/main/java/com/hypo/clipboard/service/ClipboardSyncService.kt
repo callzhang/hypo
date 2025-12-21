@@ -173,6 +173,18 @@ class ClipboardSyncService : Service() {
             incomingClipboardHandler.handle(envelope, origin)
         }
         
+        // Set handler for LAN peer connections (created by LanPeerConnectionManager)
+        // Get LanPeerConnectionManager from TransportManager's internal reference
+        val lanPeerConnectionManager = transportManager.getLanPeerConnectionManager()
+        if (lanPeerConnectionManager != null) {
+            lanPeerConnectionManager.setIncomingClipboardHandler { envelope, origin ->
+                incomingClipboardHandler.handle(envelope, origin)
+            }
+            Log.d(TAG, "✅ Set incoming clipboard handler for LAN peer connections")
+        } else {
+            Log.w(TAG, "⚠️ LanPeerConnectionManager not available, peer connections won't receive messages")
+        }
+        
         // Start receiving connections for both LAN and cloud
         // NOTE: relayWebSocketClient creates its own WebSocketTransportClient instance,
         // so calling startReceiving() on both creates TWO separate connections.
@@ -367,8 +379,11 @@ class ClipboardSyncService : Service() {
     private fun buildNotification(): Notification {
         val previewText = when {
             awaitingClipboardPermission -> getString(R.string.service_notification_permission_body)
+            // Always show latest clipboard preview if available (from database)
+            // Only show background warning if no preview is available
+            latestPreview != null -> latestPreview!!
             !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> "App must be in foreground for clipboard access on Android 10+"
-            else -> latestPreview ?: getString(R.string.service_notification_text)
+            else -> getString(R.string.service_notification_text)
         }
 
         // Create intent to open app when notification is tapped

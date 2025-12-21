@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import com.hypo.clipboard.util.MiuiAdapter
+import com.hypo.clipboard.sync.DeviceIdentity
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.time.Clock
@@ -26,6 +27,7 @@ class LanDiscoveryRepository(
     context: Context,
     private val nsdManager: NsdManager,
     private val wifiManager: WifiManager,
+    private val deviceIdentity: DeviceIdentity,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val clock: Clock = Clock.systemUTC(),
     private val networkEvents: Flow<Unit>? = null,
@@ -64,25 +66,41 @@ class LanDiscoveryRepository(
                         val resolvedHostname = serviceInfo.host?.hostName
                         val ownIPs = getLocalIPAddresses()
                         
+                        // Extract attributes to check device_id
+                        val attributes = serviceInfo.attributes.mapValues { entry ->
+                            entry.value?.let { String(it) } ?: ""
+                        }
+                        val deviceId = attributes["device_id"] ?: ""
+                        
                         // Log comprehensive resolution details for debugging
                         @Suppress("DEPRECATION")
                         val addressBytes = serviceInfo.host?.address?.contentToString() ?: "null"
                         @Suppress("DEPRECATION")
                         val canonicalName = serviceInfo.host?.canonicalHostName ?: "null"
                         val isOwnIP = resolvedIP != null && resolvedIP in ownIPs
+                        val isSelfDevice = deviceId == deviceIdentity.deviceId || 
+                                         serviceInfo.serviceName.startsWith(deviceIdentity.deviceId) ||
+                                         (deviceId.isEmpty() && serviceInfo.serviceName.contains(deviceIdentity.deviceId))
+                        
                         android.util.Log.w("LanDiscoveryRepository", 
                             "✅ Service resolved: ${serviceInfo.serviceName} -> IP=$resolvedIP:$serviceInfo.port, " +
                             "hostname=$resolvedHostname, canonical=$canonicalName, addressBytes=$addressBytes, " +
-                            "ownIPs=[${ownIPs.joinToString()}], isOwnIP=$isOwnIP")
+                            "ownIPs=[${ownIPs.joinToString()}], isOwnIP=$isOwnIP, deviceId=$deviceId, isSelfDevice=$isSelfDevice")
                         
-                        // Validate that resolved IP is not our own IP address
-                        // Android NSD sometimes incorrectly resolves services to the device's own IP
-                        // This is a known Android NSD bug where mDNS cache returns stale/wrong IPs
+                        // Validate that resolved service is not our own service
+                        // Check both IP address (Android NSD bug) and device_id (self-service detection)
                         if (isOwnIP) {
                             android.util.Log.w("LanDiscoveryRepository", 
                                 "⚠️ Rejecting service ${serviceInfo.serviceName}: resolved IP $resolvedIP matches own IP " +
                                 "(ownIPs=[${ownIPs.joinToString()}]) - NSD resolution bug, waiting for correct resolution")
                             return // Don't process this peer - wait for correct resolution
+                        }
+                        
+                        if (isSelfDevice) {
+                            android.util.Log.d("LanDiscoveryRepository", 
+                                "⏭️ Rejecting service ${serviceInfo.serviceName}: device_id $deviceId matches own device_id " +
+                                "(${deviceIdentity.deviceId}) - this is our own published service")
+                            return // Don't process our own service
                         }
                         
                         toPeer(serviceInfo)?.let { peer ->

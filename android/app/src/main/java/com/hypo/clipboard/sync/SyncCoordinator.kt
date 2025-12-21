@@ -1,9 +1,16 @@
 package com.hypo.clipboard.sync
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.net.Uri
 import android.util.Log
+import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,6 +22,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.util.Base64
 import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,7 +37,8 @@ class SyncCoordinator @Inject constructor(
     private val identity: DeviceIdentity,
     private val transportManager: com.hypo.clipboard.transport.TransportManager,
     private val deviceKeyStore: DeviceKeyStore,
-    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient
+    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
+    @ApplicationContext private val context: Context
 ) {
     private var eventChannel: Channel<ClipboardEvent>? = null
     private var job: Job? = null
@@ -276,6 +288,14 @@ class SyncCoordinator @Inject constructor(
                         newItem
                     }
                 }
+
+                // Note: We don't update system clipboard here because:
+                // 1. The item is already saved to database (above)
+                // 2. UI will update from database automatically
+                // 3. Notification already shows the latest content
+                // 4. Updating clipboard would trigger ClipboardListener.onPrimaryClipChanged(),
+                //    which could cause loops or overwrite the database entry
+                // If background clipboard update is needed, use Accessibility Service (see settings)
 
                 // Only broadcast if not a received item (prevent loops)
                 // IMPORTANT: Broadcast even if item matched history - user may have re-copied it

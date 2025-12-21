@@ -175,6 +175,14 @@ class ClipboardListener(
     
     private fun process(clip: ClipData) {
         try {
+            // Skip processing if this is a remote clipboard update (from other devices)
+            // Remote updates use "Hypo Remote" label to prevent loops
+            val description = clip.description
+            if (description.label == "Hypo Remote") {
+                Log.d(TAG, "⏭️ Skipping remote clipboard update (to prevent loops)")
+                return
+            }
+            
             val event = parser.parse(clip)
             if (event == null) {
                 return

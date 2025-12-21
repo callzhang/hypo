@@ -43,10 +43,10 @@ struct MenuBarIconRightClickHandler: NSViewRepresentable {
         // Version (disabled)
         let baseVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
         
-        // Determine build configuration (Debug or Release) by checking bundle path
-        // Release builds use HypoApp-release.app, debug builds use HypoApp.app
-        let bundlePath = Bundle.main.bundlePath
-        let buildConfig = bundlePath.contains("-release") ? "Release" : "Debug"
+        // Determine build configuration (Debug or Release) from Info.plist
+        // This is set during build: Release builds have HypoBuildConfiguration="Release"
+        // If not set, default to "Debug" for backwards compatibility
+        let buildConfig = Bundle.main.object(forInfoDictionaryKey: "HypoBuildConfiguration") as? String ?? "Debug"
         
         let versionString = "Version \(baseVersion) \(buildConfig)"
         let versionItem = NSMenuItem(title: versionString, action: nil, keyEquivalent: "")

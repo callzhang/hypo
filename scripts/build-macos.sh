@@ -67,12 +67,8 @@ for arg in "$@"; do
     esac
 done
 
-# Set app bundle name based on build configuration
-if [ "$BUILD_CONFIG" = "release" ]; then
-    APP_BUNDLE="$PROJECT_ROOT/macos/HypoApp-release.app"
-else
-    APP_BUNDLE="$PROJECT_ROOT/macos/HypoApp.app"
-fi
+# Set app bundle name (always use "Hypo.app" for consistency)
+APP_BUNDLE="$PROJECT_ROOT/macos/Hypo.app"
 
 # Clean build if requested
 if [ "$CLEAN_BUILD" = true ]; then
@@ -298,73 +294,45 @@ if [ ! -f "$APP_BUNDLE/Contents/Info.plist" ]; then
     <string>AppIcon</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>HypoBuildConfiguration</key>
+    <string>$([ "$BUILD_CONFIG" = "release" ] && echo "Release" || echo "Debug")</string>
 </dict>
 </plist>
 EOF
     log_success "Created Info.plist"
 else
     # Update existing Info.plist with current version
+    BUILD_CONFIG_VALUE="$([ "$BUILD_CONFIG" = "release" ] && echo "Release" || echo "Debug")"
     if command -v plutil &> /dev/null; then
         plutil -replace CFBundleShortVersionString -string "$APP_VERSION" "$APP_BUNDLE/Contents/Info.plist"
         plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP_BUNDLE/Contents/Info.plist"
-        log_success "Updated Info.plist with version $APP_VERSION (build $BUILD_NUMBER)"
+        plutil -replace HypoBuildConfiguration -string "$BUILD_CONFIG_VALUE" "$APP_BUNDLE/Contents/Info.plist"
+        log_success "Updated Info.plist with version $APP_VERSION (build $BUILD_NUMBER, config: $BUILD_CONFIG_VALUE)"
     else
         # Fallback: use sed if plutil is not available
         sed -i '' "s/<string>.*<\/string>.*CFBundleShortVersionString/<string>$APP_VERSION<\/string>/" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
         sed -i '' "s/<string>.*<\/string>.*CFBundleVersion/<string>$BUILD_NUMBER<\/string>/" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
-        log_success "Updated Info.plist with version $APP_VERSION (build $BUILD_NUMBER) using sed"
+        # Add or update HypoBuildConfiguration using sed
+        if grep -q "HypoBuildConfiguration" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null; then
+            sed -i '' "s/<string>.*<\/string>.*HypoBuildConfiguration/<string>$BUILD_CONFIG_VALUE<\/string>/" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+        else
+            # Insert before </dict>
+            sed -i '' "s|</dict>|    <key>HypoBuildConfiguration</key>\n    <string>$BUILD_CONFIG_VALUE</string>\n</dict>|" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+        fi
+        log_success "Updated Info.plist with version $APP_VERSION (build $BUILD_NUMBER, config: $BUILD_CONFIG_VALUE) using sed"
     fi
 fi
 
 # Ensure icon is up to date (check if icon generation script is newer than icon)
-# Icons are generated to HypoApp.app, so copy them to release bundle if needed
-DEBUG_ICON_ICNS="$PROJECT_ROOT/macos/HypoApp.app/Contents/Resources/AppIcon.icns"
-DEBUG_ICONSET_DIR="$PROJECT_ROOT/macos/HypoApp.app/Contents/Resources/AppIcon.iconset"
-DEBUG_MENUBAR_ICONSET="$PROJECT_ROOT/macos/HypoApp.app/Contents/Resources/MenuBarIcon.iconset"
-
-if [ "$BUILD_CONFIG" = "release" ]; then
-    # For release builds, copy icons from debug bundle if they exist
-    if [ -f "$DEBUG_ICON_ICNS" ] || [ -d "$DEBUG_ICONSET_DIR" ]; then
-        log_info "Copying icons from debug bundle to release bundle..."
-        mkdir -p "$APP_BUNDLE/Contents/Resources"
-        if [ -f "$DEBUG_ICON_ICNS" ]; then
-            cp -f "$DEBUG_ICON_ICNS" "$ICON_ICNS"
-        fi
-        if [ -d "$DEBUG_ICONSET_DIR" ]; then
-            cp -rf "$DEBUG_ICONSET_DIR" "$ICONSET_DIR"
-        fi
-        if [ -d "$DEBUG_MENUBAR_ICONSET" ]; then
-            cp -rf "$DEBUG_MENUBAR_ICONSET" "$APP_BUNDLE/Contents/Resources/MenuBarIcon.iconset"
-        fi
-        log_success "Icons copied to release bundle"
-    else
-        # Generate icons if they don't exist in debug bundle
-        log_info "Generating icons (they will be created in debug bundle)..."
-        python3 "$PROJECT_ROOT/scripts/generate-icons.py" 2>/dev/null || log_warn "Icon generation failed"
-        # Copy them to release bundle
-        if [ -f "$DEBUG_ICON_ICNS" ]; then
-            mkdir -p "$APP_BUNDLE/Contents/Resources"
-            cp -f "$DEBUG_ICON_ICNS" "$ICON_ICNS"
-            if [ -d "$DEBUG_ICONSET_DIR" ]; then
-                cp -rf "$DEBUG_ICONSET_DIR" "$ICONSET_DIR"
-            fi
-            if [ -d "$DEBUG_MENUBAR_ICONSET" ]; then
-                cp -rf "$DEBUG_MENUBAR_ICONSET" "$APP_BUNDLE/Contents/Resources/MenuBarIcon.iconset"
-            fi
-            log_success "Icons generated and copied to release bundle"
-        fi
+# Icons are generated to Hypo.app
+if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ] && [ -f "$ICON_ICNS" ]; then
+    if [ "$PROJECT_ROOT/scripts/generate-icons.py" -nt "$ICON_ICNS" ]; then
+        log_info "Icon generation script is newer than icon, regenerating..."
+        python3 "$PROJECT_ROOT/scripts/generate-icons.py" 2>/dev/null || log_warn "Icon regeneration failed, using existing icon"
     fi
-else
-    # For debug builds, use standard icon generation
-    if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ] && [ -f "$ICON_ICNS" ]; then
-        if [ "$PROJECT_ROOT/scripts/generate-icons.py" -nt "$ICON_ICNS" ]; then
-            log_info "Icon generation script is newer than icon, regenerating..."
-            python3 "$PROJECT_ROOT/scripts/generate-icons.py" 2>/dev/null || log_warn "Icon regeneration failed, using existing icon"
-        fi
-    elif [ ! -f "$ICON_ICNS" ] && [ ! -d "$ICONSET_DIR" ]; then
-        log_info "Icons not found, generating..."
-        python3 "$PROJECT_ROOT/scripts/generate-icons.py" 2>/dev/null || log_warn "Icon generation failed, continuing without icon"
-    fi
+elif [ ! -f "$ICON_ICNS" ] && [ ! -d "$ICONSET_DIR" ]; then
+    log_info "Icons not found, generating..."
+    python3 "$PROJECT_ROOT/scripts/generate-icons.py" 2>/dev/null || log_warn "Icon generation failed, continuing without icon"
 fi
 
 # Sign the app for local development (adhoc signature)
@@ -422,12 +390,30 @@ else
     log_info "No existing instances to stop"
 fi
 
+# Move app to /Applications folder
+APPLICATIONS_APP="/Applications/$(basename "$APP_BUNDLE")"
+log_info "Moving app to /Applications folder..."
+if [ -d "$APPLICATIONS_APP" ]; then
+    log_info "Removing existing app from /Applications..."
+    rm -rf "$APPLICATIONS_APP"
+fi
+
+# Copy app to /Applications (use cp -R to preserve permissions and extended attributes)
+if cp -R "$APP_BUNDLE" "/Applications/"; then
+    log_success "App moved to /Applications: $APPLICATIONS_APP"
+    # Update APP_BUNDLE to point to /Applications version for launching
+    APP_BUNDLE="$APPLICATIONS_APP"
+else
+    log_error "Failed to move app to /Applications"
+    log_warn "Continuing with local app bundle: $APP_BUNDLE"
+fi
+
 # macOS uses unified logging (os_log), not file-based logging
 # Logs are available via: log stream --predicate 'subsystem == "com.hypo.clipboard"'
 # Note: HistoryPopupPresenter may still write to /tmp/hypo_debug.log for legacy debug purposes
 
 # Launch the app
-log_info "Launching app..."
+log_info "Launching app from /Applications..."
 open "$APP_BUNDLE"
 
 # Wait for app to start (menu bar apps can take a moment to initialize)

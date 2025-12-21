@@ -106,20 +106,23 @@ jobs:
         run: pip install Pillow
       
       - name: Build macOS App
+        id: build-macos-app
         working-directory: macos
         run: |
           set -e
           BINARY_NAME="HypoMenuBar"
           
           # Build the Swift package
+          echo "🚀 Starting macOS build at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          START_TIME=$(date +%s)
           echo "Building Swift package..."
           swift build -c release
           
           # Create app bundle structure if it doesn't exist
-          if [ ! -d "HypoApp.app" ]; then
+          if [ ! -d "Hypo.app" ]; then
             echo "Creating app bundle structure..."
-            mkdir -p HypoApp.app/Contents/MacOS
-            mkdir -p HypoApp.app/Contents/Resources
+            mkdir -p Hypo.app/Contents/MacOS
+            mkdir -p Hypo.app/Contents/Resources
           fi
           
           # Find the built binary (product name is HypoMenuBar, target is HypoMenuBarApp)
@@ -162,7 +165,7 @@ jobs:
           fi
           
           # Copy binary to app bundle
-          APP_BINARY="HypoApp.app/Contents/MacOS/$BINARY_NAME"
+          APP_BINARY="Hypo.app/Contents/MacOS/$BINARY_NAME"
           cp "$BUILT_BINARY" "$APP_BINARY"
           chmod +x "$APP_BINARY"
           echo "✅ Binary copied successfully: $APP_BINARY"
@@ -179,18 +182,18 @@ jobs:
           if [ -z "$BUILD_NUMBER" ]; then
             BUILD_NUMBER="1"  # Fallback if version format is unexpected
           fi
-          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n    <key>CFBundleExecutable</key>\n    <string>HypoMenuBar</string>\n    <key>CFBundleIdentifier</key>\n    <string>com.hypo.clipboard</string>\n    <key>CFBundleName</key>\n    <string>Hypo</string>\n    <key>CFBundlePackageType</key>\n    <string>APPL</string>\n    <key>CFBundleVersion</key>\n    <string>%s</string>\n    <key>CFBundleShortVersionString</key>\n    <string>%s</string>\n    <key>LSMinimumSystemVersion</key>\n    <string>13.0</string>\n    <key>LSUIElement</key>\n    <true/>\n    <key>NSHighResolutionCapable</key>\n    <true/>\n    <key>CFBundleIconFile</key>\n    <string>AppIcon</string>\n    <key>NSPrincipalClass</key>\n    <string>NSApplication</string>\n    <key>NSServices</key>\n    <array>\n        <dict>\n            <key>NSMenuItem</key>\n            <dict>\n                <key>default</key>\n                <string>Copy to Hypo</string>\n            </dict>\n            <key>NSMessage</key>\n            <string>copyToHypo</string>\n            <key>NSPortName</key>\n            <string>com.hypo.clipboard</string>\n            <key>NSSendTypes</key>\n            <array>\n                <string>NSStringPboardType</string>\n                <string>public.plain-text</string>\n            </array>\n        </dict>\n    </array>\n</dict>\n</plist>\n' "${BUILD_NUMBER}" "${VERSION}" > HypoApp.app/Contents/Info.plist
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n    <key>CFBundleExecutable</key>\n    <string>HypoMenuBar</string>\n    <key>CFBundleIdentifier</key>\n    <string>com.hypo.clipboard</string>\n    <key>CFBundleName</key>\n    <string>Hypo</string>\n    <key>CFBundlePackageType</key>\n    <string>APPL</string>\n    <key>CFBundleVersion</key>\n    <string>%s</string>\n    <key>CFBundleShortVersionString</key>\n    <string>%s</string>\n    <key>LSMinimumSystemVersion</key>\n    <string>13.0</string>\n    <key>LSUIElement</key>\n    <true/>\n    <key>NSHighResolutionCapable</key>\n    <true/>\n    <key>CFBundleIconFile</key>\n    <string>AppIcon</string>\n    <key>NSPrincipalClass</key>\n    <string>NSApplication</string>\n    <key>HypoBuildConfiguration</key>\n    <string>Release</string>\n    <key>NSServices</key>\n    <array>\n        <dict>\n            <key>NSMenuItem</key>\n            <dict>\n                <key>default</key>\n                <string>Copy to Hypo</string>\n            </dict>\n            <key>NSMessage</key>\n            <string>copyToHypo</string>\n            <key>NSPortName</key>\n            <string>com.hypo.clipboard</string>\n            <key>NSSendTypes</key>\n            <array>\n                <string>NSStringPboardType</string>\n                <string>public.plain-text</string>\n            </array>\n        </dict>\n    </array>\n</dict>\n</plist>\n' "${BUILD_NUMBER}" "${VERSION}" > Hypo.app/Contents/Info.plist
           
           # Generate icons if script exists
           echo "Generating icons..."
           if [ -f "../scripts/generate-icons.py" ]; then
             # Ensure Resources directory exists
-            mkdir -p HypoApp.app/Contents/Resources
+            mkdir -p Hypo.app/Contents/Resources
             # Run icon generation and capture output
             if python3 ../scripts/generate-icons.py 2>&1; then
               echo "✅ Icons generated successfully"
               # Verify icon was created
-              if [ -f "HypoApp.app/Contents/Resources/AppIcon.icns" ] || [ -d "HypoApp.app/Contents/Resources/AppIcon.iconset" ]; then
+              if [ -f "Hypo.app/Contents/Resources/AppIcon.icns" ] || [ -d "Hypo.app/Contents/Resources/AppIcon.iconset" ]; then
                 echo "✅ Icon file verified"
               else
                 echo "⚠️  Warning: Icon generation reported success but icon file not found"
@@ -204,14 +207,25 @@ jobs:
             echo "⚠️  App will run without icon"
           fi
           
-          echo "macOS app build complete"
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          echo "✅ macOS build completed in ${DURATION} seconds"
+          echo "duration=${DURATION}" >> $GITHUB_OUTPUT
+      
+      - name: Build time summary
+        if: always()
+        run: |
+          if [ -n "${{ steps.build-macos-app.outputs.duration }}" ]; then
+            echo "### ⏱️ macOS Build Time" >> $GITHUB_STEP_SUMMARY
+            echo "Build completed in **${{ steps.build-macos-app.outputs.duration }} seconds**" >> $GITHUB_STEP_SUMMARY
+          fi
       
       - name: Sign macOS App
         working-directory: macos
         run: |
           echo "Signing macOS app with ad-hoc signature..."
           chmod +x ../scripts/sign-macos.sh
-          ../scripts/sign-macos.sh HypoApp.app
+          ../scripts/sign-macos.sh Hypo.app
           echo "✅ App signed successfully"
       
       - name: Create macOS ZIP
@@ -229,13 +243,14 @@ jobs:
           # Remove 'v' prefix if present and sanitize (replace slashes with dashes)
           VERSION="${VERSION#v}"
           SAFE_VERSION="${VERSION//\//-}"
+          
           # Append -release for consistency with local build scripts
-          zip -r ../Hypo-${SAFE_VERSION}-release.zip HypoApp.app
+          zip -r ../Hypo-${SAFE_VERSION}-release.zip Hypo.app
       
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
         with:
-          name: macos-app
+          name: Hypo
           path: Hypo-*.zip
           retention-days: 30
 
@@ -286,7 +301,7 @@ jobs:
       - name: Download macOS App
         uses: actions/download-artifact@v4
         with:
-          name: macos-app
+          name: Hypo
           path: ./artifacts
       
       - name: Rename artifacts with version
@@ -472,7 +487,7 @@ jobs:
           **Quick Fix:**
           \`\`\`bash
           # Remove quarantine attribute
-          xattr -d com.apple.quarantine HypoApp.app
+          xattr -d com.apple.quarantine Hypo.app
           
           # Then launch by right-clicking → Open → Open
           \`\`\`

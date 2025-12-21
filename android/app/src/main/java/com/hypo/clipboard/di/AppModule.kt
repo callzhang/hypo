@@ -246,8 +246,9 @@ object AppModule {
     fun provideLanDiscoveryRepository(
         @ApplicationContext context: Context,
         nsdManager: NsdManager,
-        wifiManager: WifiManager
-    ): LanDiscoveryRepository = LanDiscoveryRepository(context, nsdManager, wifiManager)
+        wifiManager: WifiManager,
+        deviceIdentity: DeviceIdentity
+    ): LanDiscoveryRepository = LanDiscoveryRepository(context, nsdManager, wifiManager, deviceIdentity)
 
     @Provides
     fun provideLanDiscoverySource(repository: LanDiscoveryRepository): LanDiscoverySource = repository

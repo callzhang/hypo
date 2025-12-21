@@ -129,6 +129,13 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
   - Forces immediate clipboard processing via service intent
   - Passes text directly in intent to avoid timing issues with clipboard access
   - Works even when ClipboardListener isn't started (e.g., accessibility service enabled)
+- **Image Share Context Menu** ✅ Implemented (December 2025):
+  - "Copy to Hypo" appears in share menu when sharing images
+  - ShareImageActivity handles ACTION_SEND intent for images
+  - Supports all image formats (PNG, JPEG, WebP, GIF, etc.)
+  - Uses FileProvider for secure file sharing (Android 10+)
+  - Processes images in background coroutine for smooth UX
+  - Works independently of main app
 - **History Item Copying** ✅ Improved (December 2025):
   - Items move to top when copied from history
   - Universal "Copied to clipboard" toast notification for all item types

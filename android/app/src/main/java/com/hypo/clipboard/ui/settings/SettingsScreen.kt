@@ -68,7 +68,8 @@ fun SettingsRoute(
         onRequestNotificationPermission = onRequestNotificationPermission,
         onStartPairing = onStartPairing,
         onRemoveDevice = viewModel::removeDevice,
-        onCheckPeerStatus = { viewModel.checkPeerStatus() }
+        onCheckPeerStatus = { viewModel.checkPeerStatus() },
+        onOpenAccessibilitySettings = { viewModel.openAccessibilitySettings() }
     )
 }
 
@@ -85,6 +86,7 @@ fun SettingsScreen(
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit,
     onCheckPeerStatus: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Scaffold(
@@ -137,6 +139,13 @@ fun SettingsScreen(
                 NotificationPermissionSection(
                     isGranted = state.isNotificationPermissionGranted,
                     onRequestNotificationPermission = onRequestNotificationPermission
+                )
+            }
+
+            item {
+                AccessibilityServiceSection(
+                    isEnabled = state.isAccessibilityServiceEnabled,
+                    onOpenAccessibilitySettings = onOpenAccessibilitySettings
                 )
             }
 
@@ -491,6 +500,64 @@ private fun NotificationPermissionSection(
             if (!isGranted) {
                 Text(
                     text = stringResource(id = R.string.settings_notification_permission_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccessibilityServiceSection(
+    isEnabled: Boolean,
+    onOpenAccessibilitySettings: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(imageVector = Icons.Filled.Devices, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(id = R.string.settings_accessibility_service),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                text = stringResource(id = R.string.settings_accessibility_service_description),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(
+                        id = if (isEnabled) R.string.settings_accessibility_service_status_enabled
+                        else R.string.settings_accessibility_service_status_disabled
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isEnabled) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error
+                )
+                if (!isEnabled) {
+                    Button(onClick = onOpenAccessibilitySettings) {
+                        Text(text = stringResource(id = R.string.settings_accessibility_service_enable_button))
+                    }
+                }
+            }
+            if (!isEnabled) {
+                Text(
+                    text = stringResource(id = R.string.settings_accessibility_service_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -40,6 +40,8 @@ class LanPeerConnectionManager(
     // Map of deviceId -> connection maintenance job
     private val connectionJobs = ConcurrentHashMap<String, Job>()
     private val mutex = Mutex()
+    // Handler for incoming clipboard messages from peer connections
+    private var onIncomingClipboard: ((com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit)? = null
     
     /**
      * Get set of device IDs that have active LAN WebSocket connections.
@@ -121,6 +123,12 @@ class LanPeerConnectionManager(
                         analytics = analytics,
                         transportManager = transportManager
                     )
+                    
+                    // Set incoming clipboard handler if available
+                    onIncomingClipboard?.let { handler ->
+                        client.setIncomingClipboardHandler(handler)
+                        android.util.Log.d("LanPeerConnectionManager", "✅ Set incoming clipboard handler for peer $deviceId")
+                    }
                     
                     peerConnections[deviceId] = client
                     
@@ -249,6 +257,19 @@ class LanPeerConnectionManager(
             android.util.Log.d("LanPeerConnectionManager", "🔄 Reconnecting all LAN connections (screen-on optimization)")
             // Re-sync peer connections to re-establish connections
             syncPeerConnections()
+        }
+    }
+    
+    /**
+     * Set handler for incoming clipboard messages from peer connections.
+     * This handler will be set on all existing and future peer connections.
+     */
+    fun setIncomingClipboardHandler(handler: (com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit) {
+        onIncomingClipboard = handler
+        // Set handler on all existing connections
+        for ((deviceId, client) in peerConnections) {
+            client.setIncomingClipboardHandler(handler)
+            android.util.Log.d("LanPeerConnectionManager", "✅ Set incoming clipboard handler for existing peer $deviceId")
         }
     }
     

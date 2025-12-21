@@ -615,6 +615,12 @@ public struct HypoMenuBarApp: App {
     public init() {
         logger.info("🚀 [HypoMenuBarApp] Initializing app (viewModel setup)")
         
+        // CRITICAL: Activate app immediately in init to ensure menu bar icon appears
+        // This must happen before MenuBarExtra is created
+        DispatchQueue.main.async {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+        
         // Create shared dependencies
         let historyStore = HistoryStore()
         let server = LanWebSocketServer()
@@ -662,8 +668,11 @@ public struct HypoMenuBarApp: App {
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)
                 .onAppear {
+                    logger.info("📱 [HypoMenuBarApp] MenuBarExtra content appeared")
+                    
                     // CRITICAL FALLBACK: If @NSApplicationDelegateAdaptor didn't work, set up delegate manually
                     if NSApplication.shared.delegate == nil || !(NSApplication.shared.delegate is HypoAppDelegate) {
+                        logger.warning("⚠️ [HypoMenuBarApp] AppDelegate not set, setting up manually")
                         let delegate = HypoAppDelegate()
                         globalAppDelegate = delegate
                         NSApplication.shared.delegate = delegate
@@ -674,12 +683,21 @@ public struct HypoMenuBarApp: App {
                     // CRITICAL: Activate app when MenuBarExtra appears to ensure status item is visible
                     // This is needed when app is launched by double-clicking (not via open command)
                     // Activate immediately and also with delays to catch different timing scenarios
+                    logger.debug("🔄 [HypoMenuBarApp] Activating app to ensure menu bar icon appears")
                     NSApplication.shared.activate(ignoringOtherApps: true)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         NSApplication.shared.activate(ignoringOtherApps: true)
+                        self.logger.debug("🔄 [HypoMenuBarApp] App activated again (0.1s delay)")
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         NSApplication.shared.activate(ignoringOtherApps: true)
+                        self.logger.debug("🔄 [HypoMenuBarApp] App activated again (0.5s delay)")
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        NSApplication.shared.activate(ignoringOtherApps: true)
+                        self.logger.debug("🔄 [HypoMenuBarApp] App activated again (1.0s delay)")
+                        // Verify status item is visible
+                        self.verifyStatusItemVisible()
                     }
                     
                     // CRITICAL: Ensure setHistoryViewModel is called when view appears
@@ -719,8 +737,31 @@ public struct HypoMenuBarApp: App {
                 .background(MenuBarIconRightClickHandler(viewModel: viewModel))
         }, label: {
             menuBarIcon()
+                .onAppear {
+                    logger.info("📊 [HypoMenuBarApp] MenuBarExtra label appeared - status item should be visible now")
+                    // Final activation attempt when MenuBarExtra label appears
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        NSApplication.shared.activate(ignoringOtherApps: true)
+                        self.logger.debug("🔄 [HypoMenuBarApp] App activated when MenuBarExtra label appeared")
+                        // Verify status item is visible
+                        self.verifyStatusItemVisible()
+                    }
+                }
         })
         .menuBarExtraStyle(.window)
+    }
+    
+    /// Verify that the status item is visible in the menu bar
+    private func verifyStatusItemVisible() {
+        // Check if status bar windows exist (indicates status items are present)
+        let statusBarWindows = NSApplication.shared.windows.filter { $0.className.contains("NSStatusBarWindow") }
+        if statusBarWindows.isEmpty {
+            logger.warning("⚠️ [HypoMenuBarApp] No status bar windows found - menu bar icon may not be visible")
+            // Try one more activation
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        } else {
+            logger.debug("✅ [HypoMenuBarApp] Found \(statusBarWindows.count) status bar window(s) - menu bar icon should be visible")
+        }
     }
     
     private func setupRightClickMenu() {
@@ -876,26 +917,35 @@ extension HypoMenuBarApp {
     /// Load the menu bar icon from the app bundle
     @ViewBuilder
     func menuBarIcon() -> some View {
+        // Always return a valid view to ensure MenuBarExtra always has a label
         // Try to load from MenuBarIcon.iconset (monochrome template version)
+        let iconView: AnyView
         if let iconPath = Bundle.main.path(forResource: "MenuBarIcon", ofType: "iconset"),
            let iconImage = NSImage(contentsOfFile: "\(iconPath)/icon_16x16.png") {
             // Menu bar icon is already designed as template
-            Image(nsImage: makeTemplateImage(iconImage))
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 16, height: 16)
+            iconView = AnyView(
+                Image(nsImage: makeTemplateImage(iconImage))
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
+            )
+            logger.debug("✅ [HypoMenuBarApp] MenuBarIcon loaded from bundle: \(iconPath)")
         } else {
             // Fallback: Use system clipboard icon
             // Log error if primary icon is missing (build/packaging issue)
-            // Note: Logging happens in onAppear to avoid ViewBuilder issues
-            Image(systemName: "clipboard")
-                .onAppear {
-                    #if canImport(os)
-                    let iconLogger = HypoLogger(category: "HypoMenuBarApp")
-                    iconLogger.error("❌ [HypoMenuBarApp] MenuBarIcon.iconset not found in bundle. This is a build/packaging issue.")
-                    #endif
-                }
+            iconView = AnyView(
+                Image(systemName: "clipboard")
+                    .frame(width: 16, height: 16)
+                    .onAppear {
+                        logger.error("❌ [HypoMenuBarApp] MenuBarIcon.iconset not found in bundle. Using fallback icon. Bundle path: \(Bundle.main.bundlePath)")
+                        // Log bundle contents for debugging
+                        if let resourcePath = Bundle.main.resourcePath {
+                            logger.debug("📦 [HypoMenuBarApp] Bundle resource path: \(resourcePath)")
+                        }
+                    }
+            )
         }
+        return iconView
     }
 }
 
@@ -2094,10 +2144,10 @@ private struct SettingsSectionView: View {
     private var versionString: String {
         let bundle = Bundle.main
         
-        // Determine build configuration (Debug or Release) by checking bundle path
-        // Release builds use HypoApp-release.app, debug builds use HypoApp.app
-        let bundlePath = bundle.bundlePath
-        let buildConfig = bundlePath.contains("-release") ? "Release" : "Debug"
+        // Determine build configuration (Debug or Release) from Info.plist
+        // This is set during build: Release builds have HypoBuildConfiguration="Release"
+        // If not set, default to "Debug" for backwards compatibility
+        let buildConfig = bundle.infoDictionary?["HypoBuildConfiguration"] as? String ?? "Debug"
         
         if let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String,
            let build = bundle.infoDictionary?["CFBundleVersion"] as? String {

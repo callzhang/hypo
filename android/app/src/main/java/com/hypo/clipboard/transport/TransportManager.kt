@@ -588,6 +588,14 @@ class TransportManager(
         lanPeerConnectionManager = manager
     }
     
+    /**
+     * Get the LanPeerConnectionManager instance.
+     * Returns null if not set (should be set during DI setup).
+     */
+    fun getLanPeerConnectionManager(): com.hypo.clipboard.transport.ws.LanPeerConnectionManager? {
+        return lanPeerConnectionManager
+    }
+    
     fun addPeer(peer: DiscoveredPeer) {
         // Cancel any pending removal job if peer is rediscovered
         val pendingRemoval = synchronized(stateLock) { pendingPeerRemovalJobs.remove(peer.serviceName) }

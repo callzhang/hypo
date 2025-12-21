@@ -3,6 +3,7 @@ package com.hypo.clipboard.transport.lan
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.wifi.WifiManager
+import com.hypo.clipboard.sync.DeviceIdentity
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -27,6 +28,7 @@ class LanDiscoveryRepositoryTest {
     private val context: Context = mockk(relaxed = true)
     private val nsdManager: NsdManager = mockk(relaxed = true)
     private val wifiManager: WifiManager = mockk(relaxed = true)
+    private val deviceIdentity: DeviceIdentity = mockk(relaxed = true)
     private val dispatcher = UnconfinedTestDispatcher()
     private val clock = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
     private val networkEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -38,10 +40,12 @@ class LanDiscoveryRepositoryTest {
         every { context.applicationContext } returns context
         every { nsdManager.stopServiceDiscovery(any()) } returns Unit
         every { nsdManager.resolveService(any(), any()) } answers {}
+        every { deviceIdentity.deviceId } returns "test-device-id"
         repository = LanDiscoveryRepository(
             context = context,
             nsdManager = nsdManager,
             wifiManager = wifiManager,
+            deviceIdentity = deviceIdentity,
             dispatcher = dispatcher,
             clock = clock,
             networkEvents = networkEvents,

@@ -44,27 +44,29 @@ class ProcessTextActivity : AppCompatActivity() {
             val clip = ClipData.newPlainText("Selected text", selectedText)
             clipboardManager.setPrimaryClip(clip)
             Log.i(TAG, "✅ Selected text copied to clipboard (${selectedText.length} chars) - will sync to other devices")
-            
-            // Force process the clipboard immediately to ensure it's processed even if
-            // onPrimaryClipChanged doesn't fire (Android 10+ background restrictions)
-            // Pass the text directly in the intent to avoid timing issues with clipboard access
-            val serviceIntent = Intent(this, com.hypo.clipboard.service.ClipboardSyncService::class.java).apply {
-                action = com.hypo.clipboard.service.ClipboardSyncService.ACTION_FORCE_PROCESS_CLIPBOARD
-                putExtra("text", selectedText.toString())
-            }
-            try {
-                startForegroundService(serviceIntent)
-                Log.d(TAG, "🔄 Triggered force process clipboard")
-            } catch (e: Exception) {
-                Log.w(TAG, "⚠️ Failed to trigger force process (service may not be running): ${e.message}")
-                // Continue anyway - polling will catch it within 2 seconds
-            }
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to copy selected text to clipboard: ${e.message}", e)
-        } finally {
-            // Finish immediately for seamless UX
             finish()
+            return
         }
+        
+        // Force process the clipboard immediately to ensure it's processed even if
+        // onPrimaryClipChanged doesn't fire (Android 10+ background restrictions)
+        // Pass the text directly in the intent to avoid timing issues with clipboard access
+        val serviceIntent = Intent(this, com.hypo.clipboard.service.ClipboardSyncService::class.java).apply {
+            action = com.hypo.clipboard.service.ClipboardSyncService.ACTION_FORCE_PROCESS_CLIPBOARD
+            putExtra("text", selectedText.toString())
+        }
+        try {
+            startForegroundService(serviceIntent)
+            Log.d(TAG, "🔄 Triggered force process clipboard")
+        } catch (e: Exception) {
+            Log.w(TAG, "⚠️ Failed to trigger force process (service may not be running): ${e.message}")
+            // Continue anyway - polling will catch it within 2 seconds
+        }
+        
+        // Finish immediately for seamless UX
+        finish()
     }
     
     companion object {

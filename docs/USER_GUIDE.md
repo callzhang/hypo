@@ -528,18 +528,15 @@ rm -rf ~/Library/Logs/Hypo
 #### Android Removal
 
 ```bash
-# Via ADB (debug build)
-adb uninstall com.hypo.clipboard.debug
-
-# Via ADB (release build)
+# Via ADB
 adb uninstall com.hypo.clipboard
 
 # Or manually: Settings → Apps → Hypo → Uninstall
 ```
 
 **Note**: 
-- Debug builds use package name: `com.hypo.clipboard.debug`
-- Release builds use package name: `com.hypo.clipboard`
+- Debug and release builds use the same package name: `com.hypo.clipboard`
+- They share the same database and preferences
 - All clipboard history and pairing keys will be permanently deleted
 
 ---
@@ -719,6 +716,7 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 - **Swipe Right**: Pin/unpin item
 - **Pull to Refresh**: Sync with other devices
 - **Text Selection Context Menu**: Select text in any app → "Copy to Hypo" appears first in menu → Automatically copies and syncs to other devices
+- **Image Share Menu**: Long-press image in any app → Share → "Copy to Hypo" → Automatically copies image to clipboard and syncs to other devices
 
 **Notification**:
 - **Title**: "Click to sync" - Tap to open app and sync clipboard
@@ -745,6 +743,7 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 - **Permissions**: View and manage app permissions (SMS, notifications)
 - **MIUI/HyperOS**: Automatic optimization settings (if detected)
 - **Text Selection**: "Copy to Hypo" context menu item (appears first in text selection menu)
+- **Image Sharing**: "Copy to Hypo" appears in share menu when sharing images (long-press image → Share)
 
 ---
 

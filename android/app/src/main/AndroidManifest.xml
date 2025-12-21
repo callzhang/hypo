@@ -63,12 +63,38 @@
             </intent-filter>
         </activity>
 
+        <!-- Share Image Activity - Adds "Copy to Hypo" to image share menu -->
+        <activity
+            android:name=".ShareImageActivity"
+            android:exported="true"
+            android:label="@string/share_image_label"
+            android:theme="@style/Theme.Hypo">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
         <!-- Clipboard Sync Foreground Service -->
         <service
             android:name=".service.ClipboardSyncService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Accessibility Service for clipboard access in background (Android 10+) -->
+        <service
+            android:name=".service.ClipboardAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
         <!-- SMS Receiver for auto-copying SMS to clipboard -->
         <receiver

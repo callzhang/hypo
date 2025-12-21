@@ -82,7 +82,8 @@ android {
         }
         debug {
             isDebuggable = true
-            applicationIdSuffix = ".debug"
+            // Removed applicationIdSuffix to allow debug and release builds to share the same database
+            // Note: This means debug and release cannot be installed simultaneously
             versionNameSuffix = "-debug"
             // Keep all ABIs for debug builds to support emulator testing
         }

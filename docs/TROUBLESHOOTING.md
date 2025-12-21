@@ -89,7 +89,7 @@ log stream --predicate 'processID == <PID>' --level debug
 
 **⚠️ Always filter MIUIInput** - All commands below include filtering for system noise.
 
-**📝 Subsystem Name**: Android uses the same subsystem name `"com.hypo.clipboard"` as macOS for consistency. However, Android debug builds use application ID `com.hypo.clipboard.debug` (with `.debug` suffix) while release builds use `com.hypo.clipboard`. All logcat commands below filter for both tags to work with both build types.
+**📝 Subsystem Name**: Android uses the same subsystem name `"com.hypo.clipboard"` as macOS for consistency. Debug and release builds use the same application ID (`com.hypo.clipboard`), allowing them to share the same database.
 
 **Step 1: Get your device ID**
 ```bash

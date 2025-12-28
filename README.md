@@ -288,11 +288,16 @@ Hypo takes security seriously:
 ## 📊 Current Status
 
 **Phase**: Production Release ✅  
-**Version**: v1.0.6  
+**Version**: v1.0.10  
 **Progress**: 100%  
-**Last Updated**: December 5, 2025
+**Last Updated**: December 28, 2025
 
 **Recent Milestones**:
+- ✅ **v1.0.10 Released** (Dec 28, 2025): Reliability & Connectivity Fixes
+  - Fixed race conditions in Android WebSocket client causing "Connecting..." hangs
+  - Ensured clipboard listener restarts after service crashes for long-term stability
+  - Improved history re-sync logic (distinguishes local vs remote items)
+  - Comprehensive documentation update for troubleshooting Android background access
 - ✅ **v1.0.6 Released** (Dec 13, 2025): Nonce Reuse Fix for Dual-Send Transport
 - ✅ **v1.0.5 Released** (Dec 5, 2025): Text Selection Context Menu & Clipboard Processing Improvements
   - Android text selection context menu: "Copy to Hypo" appears first in menu
@@ -443,7 +448,7 @@ MIT License - See [LICENSE](LICENSE) for details
 
 This project is in **production release** phase. The system is fully functional and has been extensively tested. All critical bugs have been resolved. Ready for distribution.
 
-**Current Version**: v1.0.6  
+**Current Version**: v1.0.10  
 **Stability**: Production-ready  
 **Next Milestone**: Public beta testing and future feature development
 

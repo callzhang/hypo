@@ -2,6 +2,16 @@
 
 All notable changes to the Hypo project will be documented in this file.
 
+## [Unreleased]
+
+## [1.0.10] - 2025-12-28
+
+### Fixed
+- **Android WebSocket Client**: Fixed race conditions in `isReconnecting` flag management that caused the UI to get stuck in "Connecting..." state during rapid network transitions.
+- **Android Stability**: Ensured `ClipboardListener` is re-initialized in `onStartCommand` of `ClipboardSyncService`, allowing it to persist through service restarts and system-initiated crashes.
+- **Android Sync Logic**: Refined clipboard label handling (`Hypo Remote` vs `Hypo Clipboard`) to allow manual re-syncing of local history items while maintaining loop prevention for remote items.
+- **Documentation**: Added comprehensive docstrings to complex connection management code and updated troubleshooting guides for Android 10+ background access.
+
 ## [Unreleased] - Image Share Context Menu
 
 ### Added

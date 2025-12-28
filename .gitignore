@@ -217,3 +217,4 @@ macos/HypoApp-release.app
 __pycache__/
 
 .secrets
+macos/Hypo.app/

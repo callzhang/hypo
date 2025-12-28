@@ -663,7 +663,11 @@ public struct HypoMenuBarApp: App {
     }
 
     public var body: some Scene {
-        MenuBarExtra(content: {
+        logger.info("📐 [HypoMenuBarApp] body property accessed - creating MenuBarExtra scene")
+        logger.info("📐 [HypoMenuBarApp] NSApp.activationPolicy() = \(NSApplication.shared.activationPolicy().rawValue)")
+        logger.info("📐 [HypoMenuBarApp] NSApp.isActive = \(NSApplication.shared.isActive)")
+        
+        return MenuBarExtra(content: {
             MenuBarContentView(viewModel: viewModel, applySwiftUIBackground: false)
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)

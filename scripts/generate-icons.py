@@ -310,7 +310,7 @@ def generate_macos_icons():
     """Generate macOS iconset."""
     print("🍎 Generating macOS icons...")
     
-    macos_res = PROJECT_ROOT / "macos" / "HypoApp.app" / "Contents" / "Resources"
+    macos_res = PROJECT_ROOT / "macos" / "Hypo.app" / "Contents" / "Resources"
     iconset_dir = macos_res / "AppIcon.iconset"
     iconset_dir.mkdir(parents=True, exist_ok=True)
     

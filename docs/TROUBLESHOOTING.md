@@ -91,18 +91,13 @@ log stream --predicate 'processID == <PID>' --level debug
 
 **📝 Subsystem Name**: Android uses the same subsystem name `"com.hypo.clipboard"` as macOS for consistency. Debug and release builds use the same application ID (`com.hypo.clipboard`), allowing them to share the same database.
 
-**Step 1: Get your device ID**
 ```bash
-# List connected devices
-adb devices -l
-
+# Step 1: Get your device ID
 # Automatically get the first connected device ID
 device_id=$(adb devices | grep -E "device$" | head -1 | awk '{print $1}' | tr -d '\r')
 echo "✅ Using device: $device_id"
-```
 
-**Step 2: View logs**
-```bash
+# Step 2: View logs
 # System noise patterns to filter
 NOISE_PATTERNS=" V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
 

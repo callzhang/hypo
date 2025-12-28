@@ -151,11 +151,13 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
 
 extension BonjourPublisher: NetServiceDelegate {
     public func netServiceDidStop(_ sender: NetService) {
-        queue.sync {
-            if sender === service {
-                service = nil
-                let completion = stopCompletion
-                stopCompletion = nil
+        // Use async instead of sync to avoid deadlock when this delegate is called
+        // during a sync operation (e.g., stop(completion:) calling service.stop())
+        queue.async {
+            if sender === self.service {
+                self.service = nil
+                let completion = self.stopCompletion
+                self.stopCompletion = nil
                 // Call completion on the queue to ensure it's called after service is nil
                 if let completion = completion {
                     completion()

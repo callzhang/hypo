@@ -459,6 +459,28 @@ class WebSocketTransportClient @Inject constructor(
     /**
      * Cancel the connection job without closing the socket.
      * Used when reconnecting during an in-progress connection to avoid "Socket closed" errors.
+     * 
+     * **CRITICAL: Race Condition Prevention**
+     * This function MUST reset `isReconnecting = false` to allow subsequent connection attempts.
+     * Without this reset, the flag would remain true and block all future `ensureConnection()` calls,
+     * causing the connection to be stuck indefinitely.
+     * 
+     * **When This Is Called:**
+     * - Network change during handshake (see `RelayWebSocketClient.reconnect()`)
+     * - Peer IP change during connection setup
+     * 
+     * **Flag Lifecycle:**
+     * 1. `ensureConnection()` sets `isReconnecting = true`
+     * 2. Connection job starts, handshake begins
+     * 3. Network change triggers this function
+     * 4. Job is cancelled, flag is reset here ← CRITICAL!
+     * 5. New `ensureConnection()` call can proceed
+     * 
+     * **Debugging:**
+     * If connections get stuck after network changes, check:
+     * - Is this function being called? (look for "🛑 Cancelling connection job")
+     * - Is `isReconnecting` being reset? (should see flag = false after cancel)
+     * - Is a new connection attempt happening? (should see "🔌 ensureConnection() starting")
      */
     suspend fun cancelConnectionJob() {
         mutex.withLock {
@@ -466,6 +488,9 @@ class WebSocketTransportClient @Inject constructor(
             connectionJob?.cancel()
             connectionJob = null
             handshakeStarted = null
+            // CRITICAL: Reset reconnecting flag to allow new connection attempts
+            // Without this, all future ensureConnection() calls will be blocked
+            isReconnecting = false
             // Don't close socket or set isClosed - let the connection job cleanup handle it
         }
     }
@@ -473,6 +498,35 @@ class WebSocketTransportClient @Inject constructor(
     /**
      * Disconnect the current connection without closing sendQueue.
      * Used for reconnection scenarios where we want to close the socket but keep the client alive.
+     * 
+     * **CRITICAL: Race Condition Prevention**
+     * This function MUST reset `isReconnecting = false` after cancelling the connection job.
+     * Without this reset, if `disconnect()` is called while a connection is active (e.g., due to
+     * network change), the flag would remain true and block all future connection attempts.
+     * 
+     * **Difference from `close()`:**
+     * - `disconnect()`: Closes socket, keeps sendQueue open (for reconnection)
+     * - `close()`: Closes socket AND sendQueue (permanent shutdown)
+     * 
+     * **When This Is Called:**
+     * - Network change on established connection (see `RelayWebSocketClient.reconnect()`)
+     * - Manual reconnect triggered by user or network monitor
+     * - Connection quality degradation requiring fresh connection
+     * 
+     * **Flag Lifecycle:**
+     * 1. Connection is established, `isReconnecting = false`
+     * 2. Network change detected, this function called
+     * 3. Connection job cancelled, waits for completion
+     * 4. `isReconnecting = false` reset here ← CRITICAL!
+     * 5. `isClosed = false` reset to allow reconnection
+     * 6. New `ensureConnection()` can proceed
+     * 
+     * **Debugging:**
+     * If reconnection fails after network changes, check:
+     * - Is `disconnect()` completing successfully? (look for "🔌 disconnect() called")
+     * - Is `connectionJob?.cancelAndJoin()` hanging? (job may be stuck)
+     * - Is `isReconnecting` being reset? (should be false after this function)
+     * - Is a new connection attempt happening? (should see ensureConnection() logs)
      */
     suspend fun disconnect() {
         android.util.Log.d("WebSocketTransportClient", "🔌 disconnect() called - closing socket but keeping sendQueue open for reconnection")
@@ -501,6 +555,9 @@ class WebSocketTransportClient @Inject constructor(
         connectionJob = null
         synchronized(pendingLock) { pendingRoundTrips.clear() }
         handshakeStarted = null
+        // CRITICAL: Reset flags for reconnection
+        // Without this, all future ensureConnection() calls will be blocked
+        isReconnecting = false  // Reset reconnecting flag to allow new connection attempts
         // Reset isClosed flag so we can reconnect
         isClosed.set(false)
     }
@@ -539,6 +596,73 @@ class WebSocketTransportClient @Inject constructor(
      * Ensure a connection is established. This is called when sending messages,
      * but can also be called proactively to maintain a connection for receiving messages.
      * Event-driven: for cloud connections, applies exponential backoff based on consecutive failures.
+     * 
+     * **CRITICAL: Concurrency Control with `isReconnecting` Flag**
+     * 
+     * This function uses the `isReconnecting` flag to prevent race conditions from concurrent calls.
+     * The flag lifecycle is:
+     * 1. Check if `isReconnecting == true` → if yes, SKIP (another attempt in progress)
+     * 2. Set `isReconnecting = true` (claim exclusive access)
+     * 3. Apply backoff delay if previous failures
+     * 4. Launch connection job within mutex lock
+     * 5. Connection job's `finally` block resets `isReconnecting = false`
+     * 
+     * **CRITICAL BUG THAT WAS FIXED:**
+     * Previous code incorrectly reset `isReconnecting = false` in the "connection already active"
+     * branch (line ~622). This created a race window:
+     * - Thread A: Sets flag=true, starts job
+     * - Thread B: Sees job active, skips, resets flag=false ❌
+     * - Thread C: Sees flag=false, starts DUPLICATE job ❌
+     * - Result: Multiple overlapping handshakes → stuck forever
+     * 
+     * **Fix:** Only reset flag in three places:
+     * 1. Connection job's `finally` block (normal completion/cancellation)
+     * 2. `disconnect()` after cancelling job
+     * 3. `cancelConnectionJob()` after cancelling job
+     * 4. Exception handler in this function
+     * 
+     * **Why Multiple Calls Happen:**
+     * - Network changes trigger callbacks (WiFi → cellular → WiFi)
+     * - App foregrounding/backgrounding
+     * - Sending messages while connection in progress
+     * - Periodic connection health checks
+     * 
+     * **Debugging Stuck Connections:**
+     * If connection gets stuck in "Connecting..." state:
+     * 1. Check if `isReconnecting` is stuck at `true`
+     *    → Log: "⏸️ ensureConnection() skipped - reconnection already in progress"
+     * 2. Check if connection job is active but not progressing
+     *    → Look for "🔌 Connection job started" without "onOpen" or "Handshake exception"
+     * 3. Check if network change cancels the stuck job
+     *    → Look for "🛑 Cancelling connection job" or "disconnect() called"
+     * 4. Verify flag is reset after cancellation
+     *    → Should see `isReconnecting = false` in disconnect/cancel logs
+     * 
+     * **Expected Log Sequence for Successful Connection:**
+     * ```
+     * 🔌 ensureConnection() starting new connection job
+     * 🔌 Connection job started, calling runConnectionLoop()
+     * 🚀 Connecting to: wss://hypo.fly.dev/ws (cloud)
+     * ☁️ Starting cloud connection - updating state to ConnectingCloud
+     * 🔌 Socket created, handshake in progress...
+     * ☁️ Cloud connection opened: wss://hypo.fly.dev/ws
+     * ☁️ Updating TransportManager state to ConnectedCloud
+     * ✅ Handshake signal received, connection established
+     * 🔌 Connection job completed and cleared  ← flag reset here
+     * ```
+     * 
+     * **Expected Log Sequence for Network Change During Connection:**
+     * ```
+     * 🔌 ensureConnection() starting new connection job
+     * 🔌 Socket created, handshake in progress...
+     * 🔄 Reconnecting cloud WebSocket due to network change  ← external trigger
+     * 🛑 Cancelling connection job (handshake may be in progress)  ← flag reset here
+     * ⚠️ Handshake cancelled (connection job was cancelled externally)
+     * 🔌 Connection loop cancelled (expected during reconnect/shutdown)
+     * [500ms delay]
+     * 🔌 ensureConnection() starting new connection job  ← new attempt
+     * ☁️ Cloud connection opened  ← success!
+     * ```
      */
     private suspend fun ensureConnection() {
         val isCloudConnection = config.environment == "cloud"
@@ -614,8 +738,8 @@ class WebSocketTransportClient @Inject constructor(
                     // This prevents duplicate ensureConnection() calls while connection is in progress
                 } else {
                     android.util.Log.d("WebSocketTransportClient", "⏸️ ensureConnection() skipped - connection job already active (isCloud=$isCloudConnection)")
-                    // Reset reconnecting flag since we're not starting a new connection
-                    isReconnecting = false
+                    // Don't reset isReconnecting here - let the active job's finally block handle it
+                    // Resetting here creates a race window where another ensureConnection() can slip through
                 }
             }
         } catch (e: Exception) {

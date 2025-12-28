@@ -178,6 +178,7 @@ class ClipboardListener(
             // Skip processing if this is a remote clipboard update (from other devices)
             // Remote updates use "Hypo Remote" label to prevent loops
             val description = clip.description
+            Log.d(TAG, "🔍 Processing clipboard: label='${description.label}', mimeType='${description.getMimeType(0)}'")
             if (description.label == "Hypo Remote") {
                 Log.d(TAG, "⏭️ Skipping remote clipboard update (to prevent loops)")
                 return
@@ -185,18 +186,22 @@ class ClipboardListener(
             
             val event = parser.parse(clip)
             if (event == null) {
+                Log.w(TAG, "⚠️ Parser returned null - clipboard content not supported or empty")
                 return
             }
+            Log.d(TAG, "✅ Parsed clipboard event: type=${event.type}, preview='${event.preview.take(30)}...'")
             val signature = event.signature()
             
             // Check for duplicate - use synchronized block to prevent race conditions
             synchronized(this) {
                 if (lastSignature == signature || processingSignature == signature) {
+                    Log.d(TAG, "⏭️ Skipping duplicate clipboard event (signature=$signature, lastSignature=$lastSignature, processingSignature=$processingSignature)")
                     return
                 }
                 // Mark as processing BEFORE launching coroutine to prevent race condition
                 processingSignature = signature
             }
+            Log.d(TAG, "📤 Launching coroutine to process clipboard event (signature=$signature)")
 
             job?.cancel()
             val exceptionHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->

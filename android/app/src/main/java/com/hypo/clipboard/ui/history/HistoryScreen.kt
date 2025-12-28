@@ -385,7 +385,10 @@ private fun ClipboardCard(
                     com.hypo.clipboard.domain.model.ClipboardType.TEXT,
                     com.hypo.clipboard.domain.model.ClipboardType.LINK -> {
                         // Text and links: use plain text
-                        ClipData.newPlainText("Hypo Clipboard", content)
+                        // Use "Hypo Remote" label for remote-origin items to prevent re-syncing loops
+                        // Use "Hypo Clipboard" for local-origin items to allow re-syncing
+                        val label = if (isLocal) "Hypo Clipboard" else "Hypo Remote"
+                        ClipData.newPlainText(label, content)
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
                         // Images: decode base64, save to temp file, create URI

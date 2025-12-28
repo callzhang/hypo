@@ -114,6 +114,28 @@ When copying text, should see:
 📋 Clipboard has content, processing...
 ```
 
-## Next Actions
+## Session Update (Dec 28, 2025) - Resolved Issues ✅
 
-Run the diagnostic steps above to determine which permission is missing, then enable the required permission/service.
+### 1. Connection Stuck in "Connecting..." UI State
+**Problem**: The cloud connection status would hang indefinitely at "Connecting..." especially after network changes.
+**Root Cause**: Race conditions in `WebSocketTransportClient` where the `isReconnecting` flag was not reset correctly during cancellations, or was reset prematurely in skip branches, causing deadlock.
+**Fixes**:
+- Reset `isReconnecting = false` in `disconnect()` and `cancelConnectionJob()`.
+- Removed premature `isReconnecting = false` from `ensureConnection()` skip branch.
+- Added extensive docstrings to `WebSocketTransportClient` explaining the synchronization logic.
+
+### 2. Clipboard Listener Dying After Service Crash
+**Problem**: After several days or system-initiated service restarts, the clipboard listener would stop working until the app was manually reopened.
+**Root Cause**: `onCreate()` is not always called when a service is restarted by the system (e.g. from `START_STICKY`). The listener initialization was only in `onCreate()`.
+**Fixes**:
+- Modified `ClipboardSyncService.onStartCommand()` to call `ensureClipboardListenerIsRunning()`.
+- This ensures the listener is checked and restarted every time the service is (re)started.
+
+### 3. Loop Prevention vs. History Re-sync
+**Problem**: Distinguishing between items copied from other devices (loop prevention) vs items manually re-synced from history.
+**Fixes**: 
+- Modified `HistoryScreen.kt` to use `"Hypo Remote"` label for items originating from other devices and `"Hypo Clipboard"` for local items.
+- Updated `ClipboardListener` to only skip items with the `"Hypo Remote"` label.
+
+### 4. Background Permission Visibility
+**Action**: Documented the requirement for the Accessibility Service on Android 10+ in `TROUBLESHOOTING.md` and added diagnostic commands to verify background clipboard operations.

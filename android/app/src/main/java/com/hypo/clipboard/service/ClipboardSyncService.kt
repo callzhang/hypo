@@ -299,6 +299,8 @@ class ClipboardSyncService : Service() {
 
         // Ensure LAN advertising is running (START_STICKY restarts may drop NSD registration)
         ensureLanAdvertising()
+        // Ensure clipboard listener is running (restarts may have stopped it)
+        ensureClipboardListenerIsRunning()
         return START_STICKY
     }
 
@@ -789,27 +791,48 @@ class ClipboardSyncService : Service() {
     }
 
     private fun ensureClipboardPermissionAndStartListener() {
+        Log.d(TAG, "🔍 ensureClipboardPermissionAndStartListener() CALLED")
+        Log.d(TAG, "   scope.isActive=${scope.isActive}, scope=$scope")
         clipboardPermissionJob?.cancel()
+        Log.d(TAG, "   About to launch clipboard permission check coroutine...")
         clipboardPermissionJob = scope.launch {
-            Log.i(TAG, "🔍 Starting clipboard permission check loop...")
-            while (isActive) {
-                val allowed = clipboardAccessChecker.canReadClipboard()
-                awaitingClipboardPermission = !allowed
-                Log.d(TAG, "📋 Clipboard permission status: allowed=$allowed, awaiting=$awaitingClipboardPermission")
-                updateNotification()
-                if (allowed) {
-                    Log.i(TAG, "✅ Clipboard permission granted! Starting ClipboardListener...")
-                    listener.start()
-                    Log.i(TAG, "✅ ClipboardListener started successfully")
-                    return@launch
-                } else {
-                    Log.w(TAG, "⚠️ Clipboard access denied. Waiting for user consent… (will retry in 5s)")
-                    delay(5_000)
+            try {
+                Log.i(TAG, "🔍 Starting clipboard permission check loop...")
+                while (isActive) {
+                    val allowed = clipboardAccessChecker.canReadClipboard()
+                    awaitingClipboardPermission = !allowed
+                    Log.d(TAG, "📋 Clipboard permission status: allowed=$allowed, awaiting=$awaitingClipboardPermission")
+                    updateNotification()
+                    if (allowed) {
+                        Log.i(TAG, "✅ Clipboard permission granted! Starting ClipboardListener...")
+                        listener.start()
+                        Log.i(TAG, "✅ ClipboardListener started successfully")
+                        return@launch
+                    } else {
+                        Log.w(TAG, "⚠️ Clipboard access denied. Waiting for user consent… (will retry in 5s)")
+                        delay(5_000)
+                    }
                 }
+                Log.w(TAG, "⚠️ Clipboard permission check loop ended (scope cancelled)")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Exception in clipboard permission check coroutine: ${e.message}", e)
             }
-            Log.w(TAG, "⚠️ Clipboard permission check loop ended (scope cancelled)")
         }
+        Log.d(TAG, "   Coroutine launched, job=$clipboardPermissionJob")
     }
+
+    private fun ensureClipboardListenerIsRunning() {
+        // Check if listener is already active
+        if (listener.isListening) {
+            Log.d(TAG, "✅ Clipboard listener is already running")
+            return
+        }
+        
+        Log.w(TAG, "⚠️ Clipboard listener is NOT running, attempting to restart...")
+        // Restart the permission check and listener startup process
+        ensureClipboardPermissionAndStartListener()
+    }
+
 
     private fun openClipboardSettings() {
         // Try to open AppOps settings directly for clipboard permission

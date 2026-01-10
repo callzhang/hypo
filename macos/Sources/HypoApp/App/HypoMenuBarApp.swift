@@ -412,6 +412,14 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         }
         altNumberHotKeys.removeAll()
     }
+    
+    // CRITICAL: Prevent macOS from auto-terminating menu bar app
+    // Menu bar apps run without windows and macOS asks if they should terminate
+    // We must explicitly return .terminateCancel to keep the app running
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        logger.info("🚫 [HypoAppDelegate] Application termination requested - denying to keep menu bar app running")
+        return .terminateCancel
+    }
 }
 
 // Global reference to prevent AppDelegate deallocation
@@ -919,7 +927,6 @@ extension HypoMenuBarApp {
     }
     
     /// Load the menu bar icon from the app bundle
-    @ViewBuilder
     func menuBarIcon() -> some View {
         // Always return a valid view to ensure MenuBarExtra always has a label
         // Try to load from MenuBarIcon.iconset (monochrome template version)

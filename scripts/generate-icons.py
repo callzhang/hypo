@@ -283,7 +283,7 @@ def create_menu_bar_icon(size):
     scale = size / 512.0
     
     def scale_val(v):
-        return int(v * scale)
+        return int(round(v * scale))
     
     # Draw simplified ripple design in white/black for template
     # Use white circles on transparent background (macOS will invert as needed)

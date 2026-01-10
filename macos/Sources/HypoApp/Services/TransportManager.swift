@@ -985,27 +985,41 @@ public func updateConnectionState(_ newState: ConnectionState) {
         }
     }
     
-    /// Close all LAN connections (for sleep optimization).
-    /// Connections will be re-established when reconnectAllLanConnections() is called.
-    public func closeAllLanConnections() async {
+    /// Enter sleep mode: Close all connections (LAN & Cloud) for optimization
+    /// Connections will be re-established when exitSleepMode() is called.
+    public func enterSleepMode() async {
         #if canImport(os)
-        logger.info("🔌 [TransportManager] Closing all LAN connections (sleep optimization)")
+        logger.info("💤 [TransportManager] Entering sleep mode (closing LAN & Cloud)")
         #endif
         
         if let provider = provider as? DefaultTransportProvider {
+            // Close LAN connections
             await provider.getLanTransport().closeAllConnections()
+            
+            // Close Cloud connection
+            let cloudTransport = provider.getCloudTransport()
+            if let wsTransport = cloudTransport as? WebSocketTransport {
+                await wsTransport.enterSleepMode()
+            }
         }
     }
     
-    /// Reconnect all LAN connections (for wake optimization).
-    /// Re-establishes connections to all discovered peers.
-    public func reconnectAllLanConnections() async {
+    /// Exit sleep mode: Reconnect all connections (LAN & Cloud)
+    /// Re-establishes connections to all discovered peers and relay.
+    public func exitSleepMode() async {
         #if canImport(os)
-        logger.info("🔄 [TransportManager] Reconnecting all LAN connections (wake optimization)")
+        logger.info("🌅 [TransportManager] Exiting sleep mode (reconnecting LAN & Cloud)")
         #endif
         
         if let provider = provider as? DefaultTransportProvider {
+            // Reconnect LAN connections
             await provider.getLanTransport().reconnectAllConnections()
+            
+            // Reconnect Cloud connection
+            let cloudTransport = provider.getCloudTransport()
+            if let wsTransport = cloudTransport as? WebSocketTransport {
+                await wsTransport.exitSleepMode()
+            }
         }
     }
 

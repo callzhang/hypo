@@ -1504,6 +1504,16 @@ extension ClipboardHistoryViewModel: ClipboardNotificationHandling {
             await self.remove(id: id)
         }
     }
+
+    public func handleNotificationClick(for id: UUID) {
+        Task { @MainActor in
+            NotificationCenter.default.post(
+                name: NSNotification.Name("ShowHistoryPopup"),
+                object: nil,
+                userInfo: ["itemId": id]
+            )
+        }
+    }
 }
 #endif
 

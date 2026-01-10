@@ -12,6 +12,7 @@ import os
 public protocol ClipboardNotificationHandling: AnyObject {
     func handleNotificationCopy(for id: UUID)
     func handleNotificationDelete(for id: UUID)
+    func handleNotificationClick(for id: UUID)
 }
 
 public protocol ClipboardNotificationScheduling: AnyObject {
@@ -306,11 +307,18 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
         guard let id = UUID(uuidString: identifier) else { return }
 
         switch actionIdentifier {
-        case Constants.copyActionIdentifier, UNNotificationDefaultActionIdentifier:
+        case Constants.copyActionIdentifier:
             Task { [weak self] in
                 guard let self else { return }
                 await MainActor.run {
                     self.handler?.handleNotificationCopy(for: id)
+                }
+            }
+        case UNNotificationDefaultActionIdentifier:
+            Task { [weak self] in
+                guard let self else { return }
+                await MainActor.run {
+                    self.handler?.handleNotificationClick(for: id)
                 }
             }
         case Constants.deleteActionIdentifier:

@@ -25,6 +25,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
     private var altNumberHotKeys: [Int: EventHotKeyRef] = [:]
     private static var eventHandlerInstalled = false
     private var clipboardMonitor: ClipboardMonitor?
+    private var showHistoryObserver: NSObjectProtocol?
     
     override init() {
         super.init()
@@ -60,6 +61,39 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         
         // Register NSServices handler
         NSApp.servicesProvider = self
+        
+        // Listen for "ShowHistoryPopup" notification (from notification user click)
+        showHistoryObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("ShowHistoryPopup"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            self.logger.info("🔔 [HypoAppDelegate] Received ShowHistoryPopup notification")
+            
+            // Show history popup
+            if let viewModel = AppContext.shared.historyViewModel {
+                // Determine previous app before ACTIVATE (to ensure we can restore focus)
+                HistoryPopupPresenter.shared.saveFrontmostAppBeforeActivation()
+                
+                // Activate Hypo
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                HistoryPopupPresenter.shared.show(with: viewModel)
+                
+                // Highlight item if ID provided
+                if let itemId = notification.userInfo?["itemId"] as? UUID {
+                    self.logger.info("🔔 [HypoAppDelegate] Highlighting item: \(itemId)")
+                    // Delay slightly to ensure UI is ready
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("HighlightHistoryItem"),
+                            object: nil,
+                            userInfo: ["itemId": itemId]
+                        )
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - NSServices Handler
@@ -125,7 +159,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             // Access TransportManager through AppContext
             if let viewModel = AppContext.shared.historyViewModel,
                let transportManager = viewModel.transportManager {
-                await transportManager.closeAllLanConnections()
+                await transportManager.enterSleepMode()
             }
         }
     }
@@ -136,7 +170,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             // Access TransportManager through AppContext
             if let viewModel = AppContext.shared.historyViewModel,
                let transportManager = viewModel.transportManager {
-                await transportManager.reconnectAllLanConnections()
+                await transportManager.exitSleepMode()
             }
         }
     }
@@ -411,6 +445,11 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             UnregisterEventHotKey(hotKey)
         }
         altNumberHotKeys.removeAll()
+        
+        if let observer = showHistoryObserver {
+            NotificationCenter.default.removeObserver(observer)
+            showHistoryObserver = nil
+        }
     }
     
     // CRITICAL: Prevent macOS from auto-terminating menu bar app

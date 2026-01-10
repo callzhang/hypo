@@ -232,6 +232,22 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         let data = try frameCodec.encode(envelope)
         await pendingRoundTrips.store(date: Date(), for: envelope.id)
         
+        // Queue Overflow Protection: Max 100 messages
+        // Drop oldest messages if queue is full
+        let maxQueueSize = 100
+        if messageQueue.count >= maxQueueSize {
+            // Drop oldest messages until we have space
+            // (Drop up to 10 messages at a time to create buffer)
+            let dropCount = min(10, messageQueue.count)
+            let dropped = messageQueue.prefix(dropCount)
+            messageQueue.removeFirst(dropCount)
+            
+            for msg in dropped {
+                _ = await pendingRoundTrips.remove(id: msg.envelope.id)
+            }
+            logger.warning("⚠️ [WebSocketTransport] Queue overflow: dropped \(dropCount) oldest messages to make room")
+        }
+        
         // Add to queue
         let queuedMessage = QueuedMessage(
             envelope: envelope,
@@ -258,17 +274,27 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     private func processMessageQueue() async {
         let maxRetries: UInt = 8
         let initialBackoff: TimeInterval = 1.0 // 1 second
-        let maxTimeout: TimeInterval = 600.0 // 10 minutes
+        let maxTimeout: TimeInterval = 600.0 // 10 minutes (connection timeout)
+        let messageExpiration: TimeInterval = 300.0 // 5 minutes (strict expiration)
         
         logger.info("🔄 [WebSocketTransport] processMessageQueue started: queue=\(messageQueue.count)")
         
         while !messageQueue.isEmpty {
             let queueSizeBefore = messageQueue.count
             var queuedMessage = messageQueue.removeFirst()
+            
+            // Check Message Expiration (5 min strict)
+            let timeInQueue = Date().timeIntervalSince(queuedMessage.queuedAt)
+            if timeInQueue > messageExpiration {
+                logger.info("❌ [WebSocketTransport] Message expired (queued \(Int(timeInQueue))s ago), dropping: id=\(queuedMessage.envelope.id.uuidString.prefix(8))")
+                _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                continue
+            }
+            
             logger.info("📤 [WebSocketTransport] Processing message from queue: id=\(queuedMessage.envelope.id.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), size=\(queuedMessage.data.count) bytes, retry=\(queuedMessage.retryCount), queue remaining=\(queueSizeBefore - 1)")
             
-            // Check timeout (10 minutes from queue time)
-            if Date().timeIntervalSince(queuedMessage.queuedAt) > maxTimeout {
+            // Check Connection Timeout (10 minutes from queue time - fallback)
+            if timeInQueue > maxTimeout {
                 logger.info("❌ [WebSocketTransport] Message timeout after \(queuedMessage.retryCount) retries (10 min elapsed), dropping")
                 _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 continue
@@ -464,6 +490,23 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
     }
 
+    /// Enter sleep mode: disconnect but preserve message queue (pause sync)
+    public func enterSleepMode() async {
+        logger.info("💤 [WebSocketTransport] Entering sleep mode - disconnecting but preserving queue")
+        await disconnect(clearQueue: false)
+    }
+    
+    /// Exit sleep mode: reconnect and resume sync
+    public func exitSleepMode() async {
+        logger.info("🌅 [WebSocketTransport] Exiting sleep mode - reconnecting")
+        // Check if we need to reconnect
+        if !isConnected() {
+            try? await connect()
+        }
+        // Trigger queue processing to resume sending
+        await triggerQueueProcessingIfNeeded()
+    }
+    
     public func disconnect() async {
         await disconnect(clearQueue: true)
     }

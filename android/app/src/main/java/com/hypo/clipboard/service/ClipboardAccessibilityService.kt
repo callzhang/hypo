@@ -29,6 +29,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     private lateinit var clipboardParser: ClipboardParser
     private var syncCoordinator: com.hypo.clipboard.sync.SyncCoordinator? = null
+    private lateinit var storageManager: com.hypo.clipboard.data.local.StorageManager
     
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var lastSignature: String? = null
@@ -41,24 +42,27 @@ class ClipboardAccessibilityService : AccessibilityService() {
         // Store instance reference for static access
         ClipboardAccessibilityService.instance = this
         
-        // Initialize dependencies
-        clipboardParser = ClipboardParser(contentResolver)
-        
-        // Get SyncCoordinator through Hilt EntryPoint
+        // Get dependencies through Hilt EntryPoint
         try {
             val entryPoint = EntryPointAccessors.fromApplication(
                 application,
                 com.hypo.clipboard.di.ServiceEntryPoint::class.java
             )
             syncCoordinator = entryPoint.syncCoordinator()
+            storageManager = entryPoint.storageManager()
+            
+            // Initialize dependencies using obtained storageManager
+            clipboardParser = ClipboardParser(contentResolver, storageManager)
+            
             Log.i(TAG, "✅ ClipboardAccessibilityService CONNECTED - can now access clipboard in background!")
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Failed to get SyncCoordinator: ${e.message}", e)
-            Log.w(TAG, "⚠️ Accessibility service will monitor clipboard but cannot sync (SyncCoordinator unavailable)")
+            Log.e(TAG, "❌ Failed to get dependencies: ${e.message}", e)
+            Log.w(TAG, "⚠️ Accessibility service will monitor clipboard but cannot sync (Dependencies unavailable)")
+            // Fallback initialization if possible, or just fail safely
         }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+    override fun onAccessibilityEvent(event: AccessibilityEvent) {
         // Use accessibility events as a trigger to check clipboard
         // This allows us to monitor clipboard even when app is in background
         val now = System.currentTimeMillis()
@@ -72,8 +76,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
             val clip = clipboardManager?.primaryClip ?: return
             
             // Parse clipboard content
-            val event = clipboardParser.parse(clip) ?: return
-            val signature = event.signature()
+            val clipboardEvent = clipboardParser.parse(clip) ?: return
+            val signature = clipboardEvent.signature()
             
             // Skip if duplicate
             if (signature == lastSignature) {
@@ -81,14 +85,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
             }
             lastSignature = signature
             
-            Log.i(TAG, "📋 Accessibility service detected clipboard change: ${event.type}, preview: ${event.preview.take(50)}")
+            Log.i(TAG, "📋 Accessibility service detected clipboard change: ${clipboardEvent.type}, preview: ${clipboardEvent.preview.take(50)}")
             
             // Forward to sync coordinator if available
             val coordinator = syncCoordinator
             if (coordinator != null) {
                 scope.launch {
                     try {
-                        coordinator.onClipboardEvent(event)
+                        coordinator.onClipboardEvent(clipboardEvent)
                         Log.i(TAG, "✅ Clipboard event forwarded to SyncCoordinator")
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Failed to forward clipboard event: ${e.message}", e)
@@ -115,7 +119,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
         scope.coroutineContext.cancelChildren()
         Log.i(TAG, "🛑 ClipboardAccessibilityService destroyed")
     }
-    
+
     /**
      * Update system clipboard from Accessibility Service context.
      * This bypasses Android 10+ background clipboard restrictions.
@@ -132,45 +136,68 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 com.hypo.clipboard.domain.model.ClipboardType.TEXT,
                 com.hypo.clipboard.domain.model.ClipboardType.LINK -> {
                     // Use special label to prevent ClipboardListener from processing this update
-                    // Same label as regular context update for consistency
                     ClipData.newPlainText("Hypo Remote", item.content)
                 }
                 com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
-                    // Images: decode base64, save to temp file, create URI
-                    val imageBytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
+                    // Images: use localPath if available, else decode content
                     val format = item.metadata?.get("format") ?: "png"
-                    val mimeType = when (format.lowercase()) {
-                        "png" -> "image/png"
-                        "jpeg", "jpg" -> "image/jpeg"
-                        "webp" -> "image/webp"
-                        "gif" -> "image/gif"
-                        else -> "image/png"
-                    }
                     val tempFile = java.io.File.createTempFile("hypo_image", ".$format", cacheDir)
-                    java.io.FileOutputStream(tempFile).use { it.write(imageBytes) }
+                    // Log.d(TAG, "MIME type for image update: $mimeType") // mimeType was calculated but not used in this context
+                    
+                    val os = java.io.FileOutputStream(tempFile)
+                    try {
+                        if (item.localPath != null) {
+                            val localFile = java.io.File(item.localPath)
+                            if (localFile.exists()) {
+                                localFile.inputStream().use { input -> input.copyTo(os) }
+                            } else if (item.content.isNotEmpty()) {
+                                os.write(android.util.Base64.decode(item.content, android.util.Base64.DEFAULT))
+                            }
+                        } else if (item.content.isNotEmpty()) {
+                             os.write(android.util.Base64.decode(item.content, android.util.Base64.DEFAULT))
+                        }
+                    } finally {
+                        os.close()
+                    }
+                    
                     tempFile.setReadable(true, false)
                     val uri = androidx.core.content.FileProvider.getUriForFile(
                         this,
                         "${packageName}.fileprovider",
                         tempFile
                     )
-                    ClipData.newUri(contentResolver, mimeType, uri)
+                    ClipData.newUri(contentResolver, "Hypo Remote", uri)
                 }
                 com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
-                    // Files: decode base64, save to temp file, create URI
-                    val fileBytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
+                    // Files: use localPath if available
                     val filename = item.metadata?.get("file_name") ?: "file"
-                    val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
                     val extension = filename.substringAfterLast('.', "").lowercase()
                     val tempFile = java.io.File.createTempFile("hypo_file", if (extension.isNotEmpty()) ".$extension" else "", cacheDir)
-                    java.io.FileOutputStream(tempFile).use { it.write(fileBytes) }
+                    // Log.d(TAG, "MIME type: $mimeType") // mimeType was calculated but not used in this context
+                    
+                    val os = java.io.FileOutputStream(tempFile)
+                    try {
+                        if (item.localPath != null) {
+                             val localFile = java.io.File(item.localPath)
+                             if (localFile.exists()) {
+                                 localFile.inputStream().use { input -> input.copyTo(os) }
+                             } else if (item.content.isNotEmpty()) {
+                                 os.write(android.util.Base64.decode(item.content, android.util.Base64.DEFAULT))
+                             }
+                        } else if (item.content.isNotEmpty()) {
+                             os.write(android.util.Base64.decode(item.content, android.util.Base64.DEFAULT))
+                        }
+                    } finally {
+                        os.close()
+                    }
+
                     tempFile.setReadable(true, false)
                     val uri = androidx.core.content.FileProvider.getUriForFile(
                         this,
                         "${packageName}.fileprovider",
                         tempFile
                     )
-                    ClipData.newUri(contentResolver, mimeType, uri)
+                    ClipData.newUri(contentResolver, "Hypo Remote", uri)
                 }
             }
             

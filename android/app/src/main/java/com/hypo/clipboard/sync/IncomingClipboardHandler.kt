@@ -38,7 +38,8 @@ class IncomingClipboardHandler @Inject constructor(
     private val syncCoordinator: SyncCoordinator,
     private val identity: DeviceIdentity,
     private val accessibilityServiceChecker: com.hypo.clipboard.util.AccessibilityServiceChecker,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val storageManager: com.hypo.clipboard.data.local.StorageManager
 ) {
     private val scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     
@@ -170,7 +171,7 @@ class IncomingClipboardHandler @Inject constructor(
         
         scope.launch {
             try {
-                val senderDeviceId = envelope.payload.deviceId
+                val senderDeviceIdFromEnvelope = envelope.payload.deviceId
                 val senderDeviceName = envelope.payload.deviceName
                 
                 // Normalize device IDs to lowercase for comparison
@@ -200,8 +201,8 @@ class IncomingClipboardHandler @Inject constructor(
                     finalSenderDeviceName = cachedPayloadForThisMessage.senderDeviceName
                     finalTransportOrigin = cachedPayloadForThisMessage.transportOrigin
                     // Check if message was encrypted (non-empty nonce and tag)
-                    val encryption = envelope.payload.encryption
-                    isEncrypted = encryption != null && encryption.nonce.isNotEmpty() && encryption.tag.isNotEmpty()
+                    val encryptionMeta = envelope.payload.encryption
+                    isEncrypted = encryptionMeta != null && encryptionMeta.nonce.isNotEmpty() && encryptionMeta.tag.isNotEmpty()
                     Log.d(TAG, "📥 Using cached clipboard from deviceId=${finalSenderDeviceId.take(20)}, deviceName=$finalSenderDeviceName, origin=${finalTransportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
                 } else {
                     // Also check if senderDeviceId is null - this shouldn't happen but handle it gracefully
@@ -213,8 +214,8 @@ class IncomingClipboardHandler @Inject constructor(
                     Log.d(TAG, "📥 Received clipboard from deviceId=${senderDeviceId.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
                     
                     // Check if message was encrypted (non-empty nonce and tag)
-                    val encryption = envelope.payload.encryption
-                    isEncrypted = encryption != null && encryption.nonce.isNotEmpty() && encryption.tag.isNotEmpty()
+                    val encryptionMeta = envelope.payload.encryption
+                    isEncrypted = encryptionMeta != null && encryptionMeta.nonce.isNotEmpty() && encryptionMeta.tag.isNotEmpty()
                     
                     // Decode the encrypted clipboard payload using key fetched by UUID (device ID)
                     // The syncEngine.decode() will fetch the key using envelope.payload.deviceId
@@ -253,9 +254,13 @@ class IncomingClipboardHandler @Inject constructor(
                 
                 // For images and files, keep content as base64 string (binary data)
                 // For text and links, decode base64 to get the actual text
-                val content: String
+                // For images and files, keep content as base64 string (binary data)
+                // For text and links, decode base64 to get the actual text
+                var content: String
                 val preview: String
                 var enhancedMetadata: MutableMap<String, String>? = null // For IMAGE/FILE types with hash and size
+                var localPath: String? = null
+                
                 when (clipboardPayload.contentType) {
                     com.hypo.clipboard.domain.model.ClipboardType.TEXT,
                     com.hypo.clipboard.domain.model.ClipboardType.LINK -> {
@@ -266,45 +271,33 @@ class IncomingClipboardHandler @Inject constructor(
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.IMAGE,
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
-                        // Content should already be base64-encoded binary data
-                        // ClipboardParser extracts binary data from URIs when creating local clipboard events,
-                        // so incoming messages should never contain URIs (which wouldn't be accessible anyway)
-                        content = clipboardPayload.dataBase64
-                        
-                        // Calculate size from base64 content
-                        // Base64 encoding: 4 chars represent 3 bytes, so original size ≈ base64_length * 3/4
-                        // But we need to account for padding (base64 strings may have = padding)
-                        val sizeFromMetadata = clipboardPayload.metadata?.get("size")?.toLongOrNull()
-                        val sizeFromContent = if (content.isNotEmpty()) {
-                            // Remove padding characters for accurate calculation
-                            val base64WithoutPadding = content.trimEnd('=')
-                            // Calculate: base64 chars represent 3 bytes per 4 chars
-                            // For every 4 base64 chars, we get 3 bytes
-                            val estimatedBytes = (base64WithoutPadding.length * 3L / 4L)
-                            estimatedBytes
-                        } else {
-                            0L
+                        // Decode base64 to binary data
+                        val bytes = try {
+                            java.util.Base64.getDecoder().decode(clipboardPayload.dataBase64)
+                        } catch (e: Exception) {
+                             Log.e(TAG, "❌ Failed to decode base64 content: ${e.message}")
+                             ByteArray(0)
                         }
-                        val size = sizeFromMetadata ?: sizeFromContent
                         
-                        // Calculate hash for duplication detection (macOS doesn't send hash)
-                        val contentHash = if (content.isNotEmpty()) {
+                        // Calculate size
+                        val size = bytes.size.toLong()
+                        
+                        // Calculate hash for duplication detection
+                        val contentHash = if (bytes.isNotEmpty()) {
                             try {
-                                // Content is now base64-encoded binary data (after URI extraction if needed)
-                                val bytes = java.util.Base64.getDecoder().decode(content)
                                 val digest = java.security.MessageDigest.getInstance("SHA-256")
                                 val hashBytes = digest.digest(bytes)
                                 hashBytes.joinToString("") { "%02x".format(it) }
                             } catch (e: Exception) {
-                                Log.w(TAG, "⚠️ Failed to calculate hash for ${clipboardPayload.contentType}: ${e.message}")
+                                Log.w(TAG, "⚠️ Failed to calculate hash: ${e.message}")
                                 null
                             }
                         } else {
                             null
                         }
                         
-                        // Add hash and size to metadata if not present (for duplication detection and size display)
-                        enhancedMetadata = clipboardPayload.metadata?.toMutableMap() ?: mutableMapOf()
+                        // Add hash and size to metadata
+                        enhancedMetadata = clipboardPayload.metadata.toMutableMap()
                         if (contentHash != null && !enhancedMetadata.containsKey("hash")) {
                             enhancedMetadata["hash"] = contentHash
                         }
@@ -312,9 +305,29 @@ class IncomingClipboardHandler @Inject constructor(
                             enhancedMetadata["size"] = size.toString()
                         }
                         
-                        // Debug logging
-                        Log.d(TAG, "📏 Size calculation: dataBase64.length=${clipboardPayload.dataBase64.length}, content.length=${content.length}, sizeFromContent=$sizeFromContent, sizeFromMetadata=$sizeFromMetadata, finalSize=$size, hash=${contentHash?.take(8)}")
+                        // Save to disk managed by StorageManager (cache dir)
+                        // This prevents keeping large data in memory/DB
+                        if (bytes.isNotEmpty()) {
+                            try {
+                                val extension = enhancedMetadata["format"] ?: 
+                                               enhancedMetadata["file_name"]?.substringAfterLast('.', "") ?: 
+                                               if (clipboardPayload.contentType == com.hypo.clipboard.domain.model.ClipboardType.IMAGE) "png" else "bin"
+                                val isImage = clipboardPayload.contentType == com.hypo.clipboard.domain.model.ClipboardType.IMAGE
+                                localPath = storageManager.save(bytes, extension, isImage)
+                                Log.d(TAG, "💾 Saved payload to disk: $localPath (${formatBytes(size)})")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "❌ Failed to save payload to disk: ${e.message}")
+                            }
+                        }
                         
+                        // Clear content to avoid memory bloat (we use localPath now)
+                        // This empty content will be saved to DB, which is what we want
+                        content = ""
+                        
+                        // Debug logging
+                        Log.d(TAG, "📏 Processed payload: bytes=${bytes.size}, hash=${contentHash?.take(8)}")
+                        
+                        // Generate preview
                         preview = when (clipboardPayload.contentType) {
                             com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
                                 val width = enhancedMetadata["width"] ?: "?"
@@ -335,15 +348,13 @@ class IncomingClipboardHandler @Inject constructor(
                     }
                 }
                 
-                // Convert to ClipboardEvent with device info (normalized to lowercase)
-                // For IMAGE/FILE types, use enhanced metadata (with hash and size) that was created above
+                // Convert to ClipboardEvent with device info
                 val finalMetadata = when (clipboardPayload.contentType) {
                     com.hypo.clipboard.domain.model.ClipboardType.IMAGE,
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
-                        // Use enhancedMetadata that was created in the when block above
-                        enhancedMetadata ?: clipboardPayload.metadata?.toMutableMap() ?: mutableMapOf()
+                        enhancedMetadata ?: clipboardPayload.metadata.toMutableMap()
                     }
-                    else -> clipboardPayload.metadata ?: emptyMap()
+                    else -> clipboardPayload.metadata
                 }
                 
                 val event = ClipboardEvent(
@@ -357,7 +368,8 @@ class IncomingClipboardHandler @Inject constructor(
                     deviceName = finalSenderDeviceName,
                     skipBroadcast = true, // ✅ Don't re-broadcast received clipboard
                     isEncrypted = isEncrypted,
-                    transportOrigin = finalTransportOrigin
+                    transportOrigin = finalTransportOrigin,
+                    localPath = localPath
                 )
                 
                 // Extract message content for logging
@@ -381,7 +393,8 @@ class IncomingClipboardHandler @Inject constructor(
                     deviceId = finalSenderDeviceId.lowercase(),
                     deviceName = finalSenderDeviceName,
                     createdAt = java.time.Instant.now(),
-                    isPinned = false
+                    isPinned = false,
+                    localPath = localPath
                 )
                 updateSystemClipboard(clipboardItem)
                 
@@ -472,7 +485,6 @@ class IncomingClipboardHandler @Inject constructor(
                         ClipData.newPlainText("Hypo Remote", item.content)
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
-                        val imageBytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
                         val format = item.metadata?.get("format") ?: "png"
                         val mimeType = when (format.lowercase()) {
                             "png" -> "image/png"
@@ -481,30 +493,88 @@ class IncomingClipboardHandler @Inject constructor(
                             "gif" -> "image/gif"
                             else -> "image/png"
                         }
+                        // MIME type intentionally not used yet, but calculated for future use or logging
+                        // Log.d(TAG, "MIME type for image: $mimeType")
+                        
                         val tempFile = java.io.File.createTempFile("hypo_image", ".$format", context.cacheDir)
-                        java.io.FileOutputStream(tempFile).use { it.write(imageBytes) }
+                        
+                        // Stream content to temp file (avoiding large byte arrays in memory)
+                        val os = java.io.FileOutputStream(tempFile)
+                        try {
+                            if (item.localPath != null && item.localPath.isNotEmpty()) {
+                                // Read from local storage file
+                                val localFile = java.io.File(item.localPath)
+                                if (localFile.exists()) {
+                                    localFile.inputStream().use { input ->
+                                        input.copyTo(os)
+                                    }
+                                } else {
+                                    Log.w(TAG, "⚠️ Local file not found: ${item.localPath}, trying content fallback")
+                                    // Fallback to content if file missing
+                                    if (item.content.isNotEmpty()) {
+                                        val bytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
+                                        os.write(bytes)
+                                    }
+                                }
+                            } else if (item.content.isNotEmpty()) {
+                                // Decode from content string
+                                val bytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
+                                os.write(bytes)
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "❌ Failed to write image to temp file: ${e.message}")
+                        } finally {
+                            os.close()
+                        }
+                        
                         tempFile.setReadable(true, false)
                         val uri = FileProvider.getUriForFile(
                             context,
                             "${context.packageName}.fileprovider",
                             tempFile
                         )
-                        ClipData.newUri(context.contentResolver, mimeType, uri)
+                        ClipData.newUri(context.contentResolver, "Hypo Remote", uri)
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
-                        val fileBytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
                         val filename = item.metadata?.get("file_name") ?: "file"
-                        val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
                         val extension = filename.substringAfterLast('.', "").lowercase()
+                        // MIME type intentionally not used yet, but calculated for future use or logging
+                        // val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
+                        
                         val tempFile = java.io.File.createTempFile("hypo_file", if (extension.isNotEmpty()) ".$extension" else "", context.cacheDir)
-                        java.io.FileOutputStream(tempFile).use { it.write(fileBytes) }
+                        
+                        // Stream content to temp file
+                        val os = java.io.FileOutputStream(tempFile)
+                        try {
+                            if (item.localPath != null && item.localPath.isNotEmpty()) {
+                                val localFile = java.io.File(item.localPath)
+                                if (localFile.exists()) {
+                                    localFile.inputStream().use { input ->
+                                        input.copyTo(os)
+                                    }
+                                } else {
+                                    if (item.content.isNotEmpty()) {
+                                        val bytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
+                                        os.write(bytes)
+                                    }
+                                }
+                            } else if (item.content.isNotEmpty()) {
+                                val bytes = android.util.Base64.decode(item.content, android.util.Base64.DEFAULT)
+                                os.write(bytes)
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "❌ Failed to write file to temp file: ${e.message}")
+                        } finally {
+                            os.close()
+                        }
+
                         tempFile.setReadable(true, false)
                         val uri = FileProvider.getUriForFile(
                             context,
                             "${context.packageName}.fileprovider",
                             tempFile
                         )
-                        ClipData.newUri(context.contentResolver, mimeType, uri)
+                        ClipData.newUri(context.contentResolver, "Hypo Remote", uri)
                     }
                 }
                 

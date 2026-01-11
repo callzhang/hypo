@@ -179,7 +179,8 @@ class SyncCoordinator @Inject constructor(
                     createdAt = event.createdAt,
                     isPinned = false,
                     isEncrypted = event.isEncrypted,
-                    transportOrigin = event.transportOrigin
+                    transportOrigin = event.transportOrigin,
+                    localPath = event.localPath
                 )
                 
                 val latestEntry = repository.getLatestEntry()
@@ -213,7 +214,8 @@ class SyncCoordinator @Inject constructor(
                             createdAt = Instant.now(),
                             isPinned = false,
                             isEncrypted = event.isEncrypted,
-                            transportOrigin = event.transportOrigin
+                            transportOrigin = event.transportOrigin,
+                            localPath = event.localPath
                         )
                         repository.upsert(newItem)
                         android.util.Log.d(TAG, "✅ Successfully removed old item and created new one at top: ${newItem.preview.take(50)}")
@@ -250,7 +252,8 @@ class SyncCoordinator @Inject constructor(
                                 createdAt = Instant.now(),
                                 isPinned = false,
                                 isEncrypted = event.isEncrypted,
-                                transportOrigin = event.transportOrigin
+                                transportOrigin = event.transportOrigin,
+                                localPath = event.localPath
                             )
                             repository.upsert(newItem)
                             android.util.Log.d(TAG, "✅ Successfully removed old history item and created new one at top: ${newItem.preview.take(50)}")
@@ -273,7 +276,8 @@ class SyncCoordinator @Inject constructor(
                             createdAt = event.createdAt,
                             isPinned = false,
                             isEncrypted = event.isEncrypted,
-                            transportOrigin = event.transportOrigin
+                            transportOrigin = event.transportOrigin,
+                            localPath = event.localPath
                         )
                         try {
                             repository.upsert(newItem)

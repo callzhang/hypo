@@ -59,6 +59,7 @@ class ClipboardSyncService : Service() {
     @Inject lateinit var clipboardAccessChecker: com.hypo.clipboard.sync.ClipboardAccessChecker
     @Inject lateinit var connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber
     @Inject lateinit var pairingHandshakeManager: com.hypo.clipboard.pairing.PairingHandshakeManager
+    @Inject lateinit var storageManager: com.hypo.clipboard.data.local.StorageManager
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var listener: ClipboardListener
@@ -100,6 +101,7 @@ class ClipboardSyncService : Service() {
         val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         val parser = ClipboardParser(
             contentResolver = contentResolver,
+            storageManager = storageManager,
             onFileTooLarge = { filename, size ->
                 // Show warning notification when file exceeds 10MB
                 showFileTooLargeWarning(filename, size)
@@ -503,6 +505,7 @@ class ClipboardSyncService : Service() {
                 val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 val parser = ClipboardParser(
                     contentResolver = contentResolver,
+                    storageManager = storageManager,
                     onFileTooLarge = { filename, size ->
                         showFileTooLargeWarning(filename, size)
                     }

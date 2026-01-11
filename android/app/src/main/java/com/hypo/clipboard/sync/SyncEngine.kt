@@ -26,7 +26,8 @@ class SyncEngine @Inject constructor(
     private val keyStore: DeviceKeyStore,
     private val transport: SyncTransport,
     private val identity: DeviceIdentity,
-    private val settingsRepository: com.hypo.clipboard.data.settings.SettingsRepository
+    private val settingsRepository: com.hypo.clipboard.data.settings.SettingsRepository,
+    private val storageManager: com.hypo.clipboard.data.local.StorageManager
 ) {
     @OptIn(ExperimentalSerializationApi::class)
     private val json = Json {
@@ -78,7 +79,23 @@ class SyncEngine @Inject constructor(
         val dataBase64 = when (item.type) {
             ClipboardType.TEXT, ClipboardType.LINK ->
                 base64Encoder.encodeToString(item.content.encodeToByteArray())
-            ClipboardType.IMAGE, ClipboardType.FILE -> item.content
+            ClipboardType.IMAGE, ClipboardType.FILE -> {
+                if (item.content.isNotEmpty()) {
+                    item.content
+                } else if (!item.localPath.isNullOrEmpty()) {
+                    // Load from disk if content is empty but localPath exists
+                    android.util.Log.d("SyncEngine", "📥 Loading attachment from disk: ${item.localPath}")
+                    val bytes = storageManager.read(item.localPath)
+                    if (bytes != null) {
+                        base64Encoder.encodeToString(bytes)
+                    } else {
+                        android.util.Log.e("SyncEngine", "❌ Failed to read attachment from ${item.localPath}")
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            }
         }
         val payload = ClipboardPayload(
             contentType = item.type,

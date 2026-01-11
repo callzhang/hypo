@@ -1,6 +1,10 @@
 import Foundation
 import CryptoKit
 
+extension CodingUserInfoKey {
+    static let skipLargeData = CodingUserInfoKey(rawValue: "skipLargeData")!
+}
+
 public enum TransportOrigin: String, Codable {
     case lan
     case cloud
@@ -118,14 +122,62 @@ public struct ImageMetadata: Equatable, Codable {
     public let altText: String?
     public let data: Data?
     public let thumbnail: Data?
-
-    public init(pixelSize: CGSizeValue, byteSize: Int, format: String, altText: String?, data: Data?, thumbnail: Data?) {
+    public let localPath: String?
+    
+    public init(pixelSize: CGSizeValue, byteSize: Int, format: String, altText: String?, data: Data?, thumbnail: Data?, localPath: String? = nil) {
         self.pixelSize = pixelSize
         self.byteSize = byteSize
         self.format = format
         self.altText = altText
         self.data = data
         self.thumbnail = thumbnail
+        self.localPath = localPath
+    }
+    
+    // Custom encoding to skip large data during persistence
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pixelSize, forKey: .pixelSize)
+        try container.encode(byteSize, forKey: .byteSize)
+        try container.encode(format, forKey: .format)
+        try container.encodeIfPresent(altText, forKey: .altText)
+        try container.encodeIfPresent(thumbnail, forKey: .thumbnail)
+        try container.encodeIfPresent(localPath, forKey: .localPath)
+        
+        // Skip encoding data if requested (persistence)
+        if encoder.userInfo[.skipLargeData] as? Bool == true {
+            // Do not encode data
+        } else {
+            try container.encodeIfPresent(data, forKey: .data)
+        }
+    }
+    
+    // Custom decoding to restore data if needed
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pixelSize = try container.decode(CGSizeValue.self, forKey: .pixelSize)
+        byteSize = try container.decode(Int.self, forKey: .byteSize)
+        format = try container.decode(String.self, forKey: .format)
+        altText = try container.decodeIfPresent(String.self, forKey: .altText)
+        thumbnail = try container.decodeIfPresent(Data.self, forKey: .thumbnail)
+        localPath = try container.decodeIfPresent(String.self, forKey: .localPath)
+        
+        // Try decoding data directly first
+        if let decodedData = try container.decodeIfPresent(Data.self, forKey: .data) {
+            data = decodedData
+        } else if let path = localPath {
+            // If data is missing but specific path exists, try to load it lazily?
+            // Since this is a struct, we can't be lazy. We either load now or leave nil.
+            // Leaving nil is safer for memory (List View).
+            // Let previewData() load it when needed.
+            data = nil
+        } else {
+            data = nil
+        }
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case pixelSize, byteSize, format, altText, data, thumbnail, localPath
     }
 }
 
@@ -135,13 +187,49 @@ public struct FileMetadata: Equatable, Codable {
     public let uti: String
     public let url: URL?
     public let base64: String?
-
-    public init(fileName: String, byteSize: Int, uti: String, url: URL?, base64: String?) {
+    public let localPath: String?
+    
+    public init(fileName: String, byteSize: Int, uti: String, url: URL?, base64: String?, localPath: String? = nil) {
         self.fileName = fileName
         self.byteSize = byteSize
         self.uti = uti
         self.url = url
         self.base64 = base64
+        self.localPath = localPath
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fileName, forKey: .fileName)
+        try container.encode(byteSize, forKey: .byteSize)
+        try container.encode(uti, forKey: .uti)
+        try container.encodeIfPresent(url, forKey: .url)
+        try container.encodeIfPresent(localPath, forKey: .localPath)
+        
+        if encoder.userInfo[.skipLargeData] as? Bool == true {
+            // Skip base64
+        } else {
+            try container.encodeIfPresent(base64, forKey: .base64)
+        }
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fileName = try container.decode(String.self, forKey: .fileName)
+        byteSize = try container.decode(Int.self, forKey: .byteSize)
+        uti = try container.decode(String.self, forKey: .uti)
+        url = try container.decodeIfPresent(URL.self, forKey: .url)
+        localPath = try container.decodeIfPresent(String.self, forKey: .localPath)
+        
+        if let decodedBase64 = try container.decodeIfPresent(String.self, forKey: .base64) {
+            base64 = decodedBase64
+        } else {
+            base64 = nil
+        }
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case fileName, byteSize, uti, url, base64, localPath
     }
 }
 
@@ -196,16 +284,28 @@ public extension ClipboardEntry {
         case .link(let url):
             return url.absoluteString.data(using: .utf8)
         case .image(let metadata):
-            // Return data if available (from pasteboard), otherwise nil (will be loaded async in preview)
-            return metadata.data
+            // Return data if available (from pasteboard or loaded)
+            if let data = metadata.data {
+                return data
+            }
+            // Fallback: load from localPath via StorageManager
+            if let path = metadata.localPath,
+               let data = StorageManager.shared.load(relativePath: path) {
+                return data
+            }
+            return nil
+            
         case .file(let metadata):
-            // Only return base64 data if available (from remote origin)
-            // Don't read from URL synchronously - let preview view handle async loading
+            // Return base64 data if available
             if let base64 = metadata.base64,
                let data = Data(base64Encoded: base64) {
                 return data
             }
-            // Return nil for local files - preview will load async
+            // Fallback: load from localPath
+            if let path = metadata.localPath,
+               let data = StorageManager.shared.load(relativePath: path) {
+                return data
+            }
             return nil
         }
     }
@@ -245,8 +345,8 @@ public extension ClipboardEntry {
             if meta1.byteSize != meta2.byteSize {
                 return false
             }
-            let data1 = meta1.data ?? Data()
-            let data2 = meta2.data ?? Data()
+            let data1 = meta1.data ?? (meta1.localPath.flatMap { StorageManager.shared.load(relativePath: $0) }) ?? Data()
+            let data2 = meta2.data ?? (meta2.localPath.flatMap { StorageManager.shared.load(relativePath: $0) }) ?? Data()
             let hash1 = sha256(data1)
             let hash2 = sha256(data2)
             return hash1 == hash2

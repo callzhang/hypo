@@ -27,6 +27,7 @@ private val base64Encoder = Base64.getEncoder().withoutPadding()
 
 class ClipboardParser(
     private val contentResolver: ContentResolver,
+    private val storageManager: com.hypo.clipboard.data.local.StorageManager,
     private val onFileTooLarge: ((String, Long) -> Unit)? = null // Callback for file size warnings
 ) {
 
@@ -233,15 +234,30 @@ class ClipboardParser(
                 }
             }
 
-            val base64 = base64Encoder.encodeToString(encodedBytes)
+            // val base64 = "" // Clear content to avoid memory bloat (Variable not used)
+            val extension = resolvedMimeForFormat(format).substringAfter("/", "png")
+            val localPath = try {
+                storageManager.save(encodedBytes, extension, isImage = true)
+            } catch (e: Exception) {
+                android.util.Log.e("ClipboardParser", "❌ Failed to save image to disk: ${e.message}")
+                null
+            }
+            
+            // If saving failed, localPath is null, so we might want to keep base64 as fallback?
+            // But we already set base64 to empty string.
+            // If saving fails, we should probably fail the whole operation or fallback to base64.
+            // Let's fallback for safety:
+            val effectiveContent = if (localPath == null) base64Encoder.encodeToString(encodedBytes) else ""
+            
             val preview = "Image ${width}×${height} (${formatBytes(encodedBytes.size.toLong())})"
             ClipboardEvent(
                 id = newEventId(),
                 type = ClipboardType.IMAGE,
-                content = base64,
+                content = effectiveContent,
                 preview = preview,
                 metadata = metadata,
-                createdAt = Instant.now()
+                createdAt = Instant.now(),
+                localPath = localPath
             )
         } catch (e: OutOfMemoryError) {
             android.util.Log.e("ClipboardParser", "❌ OutOfMemoryError in parseImage: ${e.message}", e)
@@ -286,33 +302,65 @@ class ClipboardParser(
                 onFileTooLarge?.invoke(filename, size)
                 return null
             }
-            
             if (size <= 0L) return null
             
-            val bytes = readBytes(uri) ?: return null
+            // Stream to disk and calculate hash simultaneously
+            var localPath: String? = null
+            var hash: String? = null
             
-            // Double-check after reading
-            if (bytes.size > SizeConstants.MAX_ATTACHMENT_BYTES) {
-                android.util.Log.w("ClipboardParser", "⚠️ File too large after reading: ${formatBytes(bytes.size.toLong())} (limit: ${formatBytes(SizeConstants.MAX_ATTACHMENT_BYTES.toLong())})")
-                onFileTooLarge?.invoke(filename, bytes.size.toLong())
+            try {
+                // Open input stream
+                val inputStream = if (uri.scheme == ContentResolver.SCHEME_FILE) {
+                    uri.path?.let { File(it).takeIf { f -> f.exists() }?.inputStream() }
+                } else {
+                    contentResolver.openInputStream(uri)
+                }
+                
+                inputStream?.use { input ->
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    val digestStream = java.security.DigestInputStream(input, digest)
+                    val extension = filename.substringAfterLast('.', "").lowercase().ifEmpty { "bin" }
+                    
+                    // Save to storage (consumes stream)
+                    localPath = storageManager.save(digestStream, extension, isImage = false)
+                    
+                    // Get hash after stream is consumed
+                    hash = digest.digest().joinToString("") { "%02x".format(it) }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ClipboardParser", "❌ Failed to save file stream: ${e.message}", e)
                 return null
             }
-            val base64 = base64Encoder.encodeToString(bytes)
+
+            if (localPath == null) return null
+            
+            // Verify size from saved file (optional, but good practice)
+            val savedFile = File(localPath!!)
+            if (savedFile.length() > SizeConstants.MAX_ATTACHMENT_BYTES) {
+                 android.util.Log.w("ClipboardParser", "⚠️ Saved file too large: ${formatBytes(savedFile.length())}, deleting...")
+                 savedFile.delete()
+                 onFileTooLarge?.invoke(filename, savedFile.length())
+                 return null
+            }
+
             val mimeType = mimeTypeOverride ?: metadata?.mimeType ?: "application/octet-stream"
             val meta = mapOf(
-                "size" to bytes.size.toString(),
-                "hash" to sha256Hex(bytes),
+                "size" to savedFile.length().toString(),
+                "hash" to (hash ?: ""),
                 "mime_type" to mimeType,
                 "filename" to filename
             )
-            val preview = "$filename (${formatBytes(bytes.size.toLong())})"
+            val preview = "$filename (${formatBytes(savedFile.length())})"
+            
+            // Content is empty, we refer to localPath
             return ClipboardEvent(
                 id = newEventId(),
                 type = ClipboardType.FILE,
-                content = base64,
+                content = "",
                 preview = preview,
                 metadata = meta,
-                createdAt = Instant.now()
+                createdAt = Instant.now(),
+                localPath = localPath
             )
         } catch (e: SecurityException) {
             android.util.Log.d("ClipboardParser", "🔒 parseFile: Clipboard access blocked: ${e.message}")

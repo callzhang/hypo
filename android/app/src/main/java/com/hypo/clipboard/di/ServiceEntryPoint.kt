@@ -9,5 +9,6 @@ import dagger.hilt.components.SingletonComponent
 @InstallIn(SingletonComponent::class)
 interface ServiceEntryPoint {
     fun syncCoordinator(): SyncCoordinator
+    fun storageManager(): com.hypo.clipboard.data.local.StorageManager
 }
 

@@ -59,7 +59,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): HypoDatabase =
         Room.databaseBuilder(context, HypoDatabase::class.java, "hypo.db")
-            .addMigrations(DatabaseMigrations.MIGRATION_2_3)
+            .fallbackToDestructiveMigration() // Wipe DB on schema change (v3 -> v4)
             .build()
 
     @Provides
@@ -67,7 +67,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideRepository(dao: ClipboardDao): ClipboardRepository = ClipboardRepositoryImpl(dao)
+    fun provideRepository(dao: ClipboardDao, storageManager: com.hypo.clipboard.data.local.StorageManager): ClipboardRepository = ClipboardRepositoryImpl(dao, storageManager)
 
     @Provides
     @Singleton

@@ -1,6 +1,7 @@
 package com.hypo.clipboard.data
 
 import com.hypo.clipboard.data.local.ClipboardDao
+import com.hypo.clipboard.data.local.StorageManager
 import com.hypo.clipboard.data.local.ClipboardEntity
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
@@ -15,7 +16,8 @@ import javax.inject.Singleton
 
 @Singleton
 class ClipboardRepositoryImpl @Inject constructor(
-    private val dao: ClipboardDao
+    private val dao: ClipboardDao,
+    private val storageManager: StorageManager
 ) : ClipboardRepository {
 
     override fun observeHistory(limit: Int): Flow<List<ClipboardItem>> {
@@ -32,17 +34,29 @@ class ClipboardRepositoryImpl @Inject constructor(
     
     // Load full content for an item (needed when copying IMAGE/FILE items)
     // For large IMAGE/FILE items, load content separately to avoid CursorWindow overflow
-    // Uses direct SQLite access to handle large blobs that exceed CursorWindow limit
+    // Uses direct SQLite access or file storage to handle large blobs
     override suspend fun loadFullContent(itemId: String): String? {
         return try {
-            // First try to get the item to check its type
+            // First try to get the item to check its type and local path
             val item = dao.findByIdWithoutContent(itemId)
             if (item == null) {
                 return null
             }
             
-            // For IMAGE/FILE types, load content using direct SQLite access to handle large blobs
+            // For IMAGE/FILE types, try loading from disk first, then fallback to DB
             if (item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE) {
+                // Try to load from disk if localPath is available
+                if (item.localPath != null) {
+                    val bytes = storageManager.read(item.localPath)
+                    if (bytes != null) {
+                         // Convert back to base64 for consumption by existing app logic
+                        return android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                    } else {
+                        Log.w("ClipboardRepository", "⚠️ Failed to read from localPath: ${item.localPath}, falling back to DB")
+                    }
+                }
+                
+                // Fallback: load from DB using direct SQLite access
                 loadLargeContentDirectly(itemId)
             } else {
                 // For TEXT/LINK, content is already loaded (small)
@@ -79,21 +93,51 @@ class ClipboardRepositoryImpl @Inject constructor(
         try {
             Log.d("ClipboardRepository", "💾 Upserting item: id=${item.id.take(20)}..., type=${item.type}, preview=${item.preview.take(30)}")
             
-            // Check content size for IMAGE/FILE types to prevent crashes
-            if ((item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE) && item.content.length > 20 * 1024 * 1024) {
-                // Content is too large (>20MB base64), log warning but still try to save
-                Log.w("ClipboardRepository", "⚠️ Large content detected: ${item.content.length} bytes (${item.type}), may cause issues")
+            var localPath: String? = item.localPath
+            var contentToSave = item.content
+            
+            // For IMAGE/FILE types, move large content to disk if not already there
+            if ((item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE)) {
+                // If localPath is already set, assume content is already handled (or not needed in DB)
+                // If localPath is null, we need to save content to disk
+                if (localPath == null && contentToSave.isNotEmpty()) {
+                    try {
+                        // Decode base64 to bytes
+                        val bytes = android.util.Base64.decode(contentToSave, android.util.Base64.DEFAULT)
+                        val extension = item.metadata?.get("format") ?: "bin"
+                        val isImage = item.type == ClipboardType.IMAGE
+                        
+                        // Save to disk using StorageManager
+                        localPath = storageManager.save(bytes, extension, isImage)
+                        Log.d("ClipboardRepository", "✅ Moved large content to disk: $localPath")
+                        
+                        // Clear content to save space in DB, but keep it in the item for now if needed
+                        // For DB, we store empty string/placeholder
+                        contentToSave = ""
+                    } catch (e: Exception) {
+                        Log.e("ClipboardRepository", "❌ Failed to save content to disk: ${e.message}", e)
+                        // Fallback: try to save as is (will fail if too big)
+                    }
+                } else if (localPath != null) {
+                    // Already has path, ensure we don't duplicate content in DB
+                    contentToSave = ""
+                }
             }
             
             // Only update created_at to current time for local items (transportOrigin == null)
             // Preserve original timestamp for received items (transportOrigin != null) to maintain chronological order
+            val entityItem = item.copy(
+                content = contentToSave,
+                localPath = localPath
+            )
+            
             val entity = if (item.transportOrigin == null) {
                 // Local item - move to top by updating timestamp
                 val now = Instant.now()
-                item.toEntity().copy(createdAt = now)
+                entityItem.toEntity().copy(createdAt = now)
             } else {
                 // Received item - preserve original timestamp
-                item.toEntity()
+                entityItem.toEntity()
             }
             dao.upsert(entity)
             
@@ -104,11 +148,9 @@ class ClipboardRepositoryImpl @Inject constructor(
             }
         } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
             Log.e("ClipboardRepository", "❌ SQLiteBlobTooBigException when upserting ${item.type} item: ${e.message}", e)
-            // Re-throw to let caller handle it
             throw e
         } catch (e: Exception) {
             Log.e("ClipboardRepository", "❌ Error upserting item: ${e.message}", e)
-            // Re-throw to let caller handle it
             throw e
         }
     }
@@ -185,7 +227,8 @@ class ClipboardRepositoryImpl @Inject constructor(
         createdAt = createdAt,
         isPinned = isPinned,
         isEncrypted = isEncrypted,
-        transportOrigin = transportOrigin?.name
+        transportOrigin = transportOrigin?.name,
+        localPath = localPath
     )
 
     private fun ClipboardEntity.toDomain(): ClipboardItem = ClipboardItem(
@@ -205,6 +248,7 @@ class ClipboardRepositoryImpl @Inject constructor(
             } catch (e: IllegalArgumentException) {
                 null
             }
-        }
+        },
+        localPath = localPath
     )
 }

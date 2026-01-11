@@ -58,8 +58,8 @@ class FallbackSyncTransport(
      * At least one must succeed, but we try both in parallel for maximum reliability.
      */
     private suspend fun sendToBoth(envelope: SyncEnvelope, targetDeviceId: String?) = coroutineScope {
-        var lanSuccess = false
-        var cloudSuccess = false
+        var lanSuccess: Boolean
+        var cloudSuccess: Boolean
         var lanError: Exception? = null
         var cloudError: Exception? = null
         

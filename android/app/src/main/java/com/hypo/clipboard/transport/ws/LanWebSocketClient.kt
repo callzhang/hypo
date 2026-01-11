@@ -42,6 +42,7 @@ import okio.ByteString
 import okio.ByteString.Companion.of
 import kotlin.math.max
 
+@OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
 class LanWebSocketClient @Inject constructor(
     private val config: TlsWebSocketConfig,
     private val connector: WebSocketConnector,

@@ -212,6 +212,7 @@ class LanDiscoveryRepository(
     }
 
     private fun toPeer(serviceInfo: NsdServiceInfo): DiscoveredPeer? {
+        @Suppress("DEPRECATION")
         val host = serviceInfo.host?.asString() ?: return null
         val attributes = serviceInfo.attributes.mapValues { entry ->
             entry.value?.let { String(it) } ?: ""

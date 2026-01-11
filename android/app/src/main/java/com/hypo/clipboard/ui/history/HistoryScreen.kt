@@ -384,16 +384,17 @@ private fun ClipboardCard(
                 val clip = when (item.type) {
                     com.hypo.clipboard.domain.model.ClipboardType.TEXT,
                     com.hypo.clipboard.domain.model.ClipboardType.LINK -> {
-                        // Text and links: use plain text
-                        // Use "Hypo Remote" label for remote-origin items to prevent re-syncing loops
-                        // Use "Hypo Clipboard" for local-origin items to allow re-syncing
-                        val label = if (isLocal) "Hypo Clipboard" else "Hypo Remote"
+                        // Use "Hypo Clipboard" for all items copied from history to ensure 
+                        // the change is detected and the item is moved to the top.
+                        // "Hypo Remote" is reserved ONLY for automatic syncs to prevent loops.
+                        val label = "Hypo Clipboard"
                         ClipData.newPlainText(label, content)
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> {
                         // Images: decode base64, save to temp file, create URI
                         val imageBytes = Base64.getDecoder().decode(content)
                         val format = item.metadata?.get("format") ?: "png"
+                        /*
                         val mimeType = when (format.lowercase()) {
                             "png" -> "image/png"
                             "jpeg", "jpg" -> "image/jpeg"
@@ -401,13 +402,15 @@ private fun ClipboardCard(
                             "gif" -> "image/gif"
                             else -> "image/png"
                         }
+                        */
                         val tempFile = createTempFileForClipboard(context, imageBytes, "hypo_image", ".$format")
+                        // Log.d("HistoryScreen", "MIME type for image: $mimeType") // mimeType was calculated but not used in this context
                         android.util.Log.d("HistoryScreen", "📁 Created temp file: ${tempFile.absolutePath}, exists=${tempFile.exists()}, readable=${tempFile.canRead()}, size=${tempFile.length()}")
                         // Register temp file for automatic cleanup
                         tempFileManager.registerTempFile(tempFile)
                         val uri = getFileProviderUri(context, tempFile)
                         android.util.Log.d("HistoryScreen", "🔗 FileProvider URI: $uri")
-                        ClipData.newUri(context.contentResolver, mimeType, uri)
+                        ClipData.newUri(context.contentResolver, "Hypo Clipboard", uri)
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
                         // Files: decode base64, save to temp file, create URI
@@ -421,7 +424,7 @@ private fun ClipboardCard(
                         tempFileManager.registerTempFile(tempFile)
                         val uri = getFileProviderUri(context, tempFile)
                         android.util.Log.d("HistoryScreen", "🔗 FileProvider URI: $uri")
-                        ClipData.newUri(context.contentResolver, mimeType, uri)
+                        ClipData.newUri(context.contentResolver, "Hypo Clipboard", uri)
                     }
                 }
                 
@@ -608,7 +611,7 @@ private fun ClipboardCard(
                                 ClipboardType.IMAGE -> {
                                     val width = item.metadata?.get("width") ?: "?"
                                     val height = item.metadata?.get("height") ?: "?"
-                                    val format = item.metadata?.get("format") ?: "image"
+                                    // val format = item.metadata?.get("format") ?: "image" // format was not used
                                     "Image ${width}×${height} (${formatBytes(size)})"
                                 }
                                 ClipboardType.FILE -> {
@@ -703,14 +706,18 @@ private val ClipboardType.iconVector: androidx.compose.ui.graphics.vector.ImageV
     }
 
 @Composable
-private fun FileDetailContent(item: ClipboardItem) {
+private fun FileDetailContent(item: ClipboardItem, content: String) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isSaving by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
     
     val fileBytes = try {
-        Base64.getDecoder().decode(item.content)
+        if (content.isNotEmpty()) {
+            Base64.getDecoder().decode(content)
+        } else {
+            null
+        }
     } catch (e: Exception) {
         null
     }
@@ -1028,7 +1035,13 @@ private fun ClipboardDetailContent(
                 )
             }
             ClipboardType.FILE -> {
-                FileDetailContent(item = item)
+                if (isLoading) {
+                    Text("Loading file...")
+                } else if (loadError != null) {
+                    Text("Error: $loadError", color = MaterialTheme.colorScheme.error)
+                } else {
+                    FileDetailContent(item = item, content = loadedContent)
+                }
             }
         }
     }

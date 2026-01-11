@@ -53,7 +53,12 @@ class ShareImageActivity : AppCompatActivity() {
     }
     
     private fun handleSendImage(intent: Intent) {
-        val imageUri: Uri? = intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        val imageUri: Uri? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        }
         
         if (imageUri == null) {
             Log.w(TAG, "⚠️ No image URI provided in ACTION_SEND intent")
@@ -123,7 +128,12 @@ class ShareImageActivity : AppCompatActivity() {
     }
     
     private fun handleSendMultipleImages(intent: Intent) {
-        val imageUris: ArrayList<Uri>? = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+        val imageUris: ArrayList<Uri>? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+        }
         
         if (imageUris.isNullOrEmpty()) {
             Log.w(TAG, "⚠️ No image URIs provided in ACTION_SEND_MULTIPLE intent")

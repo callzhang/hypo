@@ -168,6 +168,7 @@ class OkHttpWebSocketConnector @Inject constructor(
  * For LAN: uses peer discovery to find connection URL dynamically.
  * For cloud: uses config.url for relay server connection.
  */
+@OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
 class WebSocketTransportClient @Inject constructor(
     private val config: TlsWebSocketConfig,
     private val connector: WebSocketConnector?, // Nullable for LAN connections (created after peer discovery)

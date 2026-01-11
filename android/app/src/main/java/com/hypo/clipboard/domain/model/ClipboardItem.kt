@@ -19,7 +19,8 @@ data class ClipboardItem(
     val createdAt: Instant,
     val isPinned: Boolean,
     val isEncrypted: Boolean = false,
-    val transportOrigin: TransportOrigin? = null
+    val transportOrigin: TransportOrigin? = null,
+    val localPath: String? = null
 ) {
     /**
      * Unified content matching: content length, then SHA-256 hash of full content

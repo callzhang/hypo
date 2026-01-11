@@ -39,5 +39,7 @@ data class ClipboardEntity(
     @ColumnInfo(name = "is_encrypted")
     val isEncrypted: Boolean = false,
     @ColumnInfo(name = "transport_origin")
-    val transportOrigin: String? = null  // "LAN" or "CLOUD" as string
+    val transportOrigin: String? = null,  // "LAN" or "CLOUD" as string
+    @ColumnInfo(name = "local_path")
+    val localPath: String? = null
 )

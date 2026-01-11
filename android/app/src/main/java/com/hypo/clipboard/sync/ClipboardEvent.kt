@@ -14,7 +14,9 @@ data class ClipboardEvent(
     val deviceName: String? = null,
     val skipBroadcast: Boolean = false,
     val isEncrypted: Boolean = false,
-    val transportOrigin: com.hypo.clipboard.domain.model.TransportOrigin? = null
+
+    val transportOrigin: com.hypo.clipboard.domain.model.TransportOrigin? = null,
+    val localPath: String? = null
 )
 
 fun ClipboardEvent.signature(): String {

@@ -21,7 +21,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         ORDER BY created_at DESC
     """)
@@ -34,7 +34,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         ORDER BY created_at DESC 
         LIMIT :limit
@@ -48,7 +48,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         ORDER BY created_at DESC
     """)
@@ -61,7 +61,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         WHERE is_pinned = 1 
         ORDER BY created_at DESC
@@ -75,7 +75,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         WHERE content LIKE '%' || :query || '%' OR preview LIKE '%' || :query || '%'
         ORDER BY created_at DESC 
@@ -90,7 +90,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         WHERE device_id = :deviceId 
         ORDER BY created_at DESC 
@@ -105,7 +105,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         WHERE type = :type 
         ORDER BY created_at DESC 
@@ -159,7 +159,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         WHERE id = :id 
         LIMIT 1
@@ -193,7 +193,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         ORDER BY created_at DESC 
         LIMIT 1
@@ -210,7 +210,7 @@ interface ClipboardDao {
                 WHEN type IN ('IMAGE', 'FILE') THEN '' 
                 ELSE content 
             END as content,
-            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin
+            preview, metadata, device_id, device_name, created_at, is_pinned, is_encrypted, transport_origin, local_path
         FROM clipboard_items 
         WHERE content = :content 
         AND type = :type 

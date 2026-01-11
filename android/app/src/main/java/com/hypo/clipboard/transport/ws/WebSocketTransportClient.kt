@@ -287,7 +287,9 @@ class WebSocketTransportClient @Inject constructor(
                 val peerUrl = when {
                     peer != null && peer.host != "unknown" && peer.host != "127.0.0.1" -> {
                         // Use discovered peer's IP address
-                        "ws://${peer.host}:${peer.port}"
+                        // Fix: Wrap IPv6 addresses in brackets (required by OkHttp/URI)
+                        val host = if (peer.host.contains(":")) "[${peer.host}]" else peer.host
+                        "ws://$host:${peer.port}"
                     }
                     peer != null && peer.host == "127.0.0.1" -> {
                         // Emulator case: replace localhost with host IP

@@ -103,6 +103,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     private var reconnectingTask: Task<Void, Never>? // Guard to prevent concurrent reconnection attempts
     // Track messages that are "in flight" - send callback fired but transmission may not be complete
     private var inFlightMessages: [UUID: QueuedMessage] = [:] // message ID -> queued message
+    // Track pending control message queries (query ID -> continuation)
+    private var pendingControlQueries: [String: CheckedContinuation<[String: Any], Never>] = [:]
 
     public init(
         configuration: WebSocketConfiguration,
@@ -223,7 +225,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             }
             logger.debug("✅ [WebSocketTransport] Connection established")
         } catch {
-            logger.warning("❌ [WebSocketTransport] Connection failed: \(error.localizedDescription)")
+            logger.error("❌ [WebSocketTransport] Connection failed: \(error.localizedDescription)")
+            // Clear handshake continuation if it's still set (timeout case)
+            if handshakeContinuation != nil {
+                logger.error("⚠️ [WebSocketTransport] Handshake continuation still set after error - clearing it")
+                handshakeContinuation = nil
+            }
+            state = .idle
             throw error
         }
     }
@@ -257,7 +265,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         )
         messageQueue.append(queuedMessage)
         
-        logger.debug("📥 [WebSocketTransport] Queued message: type=\(envelope.payload.contentType), size=\(data.count) bytes, id=\(envelope.id.uuidString.prefix(8)), queue=\(messageQueue.count)")
+        logger.debug("📥 [WebSocketTransport] Queued message: type=\(envelope.payload.contentType), size=\(data.count.formattedAsKB), id=\(envelope.id.uuidString.prefix(8)), queue=\(messageQueue.count)")
         
         // Start queue processor if not already running
         if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
@@ -291,7 +299,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 continue
             }
             
-            logger.info("📤 [WebSocketTransport] Processing message from queue: id=\(queuedMessage.envelope.id.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), size=\(queuedMessage.data.count) bytes, retry=\(queuedMessage.retryCount), queue remaining=\(queueSizeBefore - 1)")
+            logger.info("📤 [WebSocketTransport] Processing message from queue: id=\(queuedMessage.envelope.id.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), size=\(queuedMessage.data.count.formattedAsKB), retry=\(queuedMessage.retryCount), queue remaining=\(queueSizeBefore - 1)")
             
             // Check Connection Timeout (10 minutes from queue time - fallback)
             if timeInQueue > maxTimeout {
@@ -376,7 +384,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 
                 // Track all messages as in-flight until we get server feedback
                 inFlightMessages[messageId] = queuedMessage
-                self.logger.debug("📤 [WebSocketTransport] Message in-flight: type=\(contentType), size=\(frameSize) bytes, id=\(messageId.uuidString.prefix(8))")
+                self.logger.debug("📤 [WebSocketTransport] Message in-flight: type=\(contentType), size=\(frameSize.formattedAsKB), id=\(messageId.uuidString.prefix(8))")
                 
                 // Set up timeout to handle cases where server doesn't respond
                 // If no error response is received within timeout, check connection state:
@@ -410,7 +418,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                             }
                         } else {
                             // Connection is invalid - requeue message for retry
-                            strongSelf.logger.warning("⚠️ [WebSocketTransport] Message timeout but connection invalid, requeuing: id=\(messageId.uuidString.prefix(8)), frame=\(queuedMessage.data.count) bytes")
+                            strongSelf.logger.warning("⚠️ [WebSocketTransport] Message timeout but connection invalid, requeuing: id=\(messageId.uuidString.prefix(8)), frame=\(queuedMessage.data.count.formattedAsKB)")
                             // Don't increment retry count - this is a connection issue, not a message issue
                             strongSelf.messageQueue.append(queuedMessage)
                             // Trigger queue processing to retry
@@ -565,6 +573,69 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         case .connecting, .idle:
             return false
         }
+    }
+    
+    /// Query connected peers from cloud relay (only works for cloud connections)
+    /// Returns list of connected device IDs, or empty array if query fails
+    public func queryConnectedPeers() async -> [String] {
+        guard configuration.environment == "cloud" else {
+            logger.debug("⚠️ [WebSocketTransport] queryConnectedPeers only works for cloud connections")
+            return []
+        }
+        
+        guard case .connected(let task) = state else {
+            logger.debug("⚠️ [WebSocketTransport] Cannot query connected peers: not connected")
+            return []
+        }
+        
+        let queryId = UUID().uuidString
+        
+        // Create control message as raw JSON (not SyncEnvelope)
+        let controlMessage: [String: Any] = [
+            "id": queryId,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "version": "1.0",
+            "type": "control",
+            "payload": [
+                "action": "query_connected_peers",
+                "original_message_id": queryId
+            ]
+        ]
+        
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: controlMessage),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            logger.warning("⚠️ [WebSocketTransport] Failed to encode control message")
+            return []
+        }
+        
+        let payload = await withCheckedContinuation { continuation in
+            // Store continuation for response handling
+            pendingControlQueries[queryId] = continuation
+            
+            // Send raw JSON control message
+            task.send(.string(jsonString)) { error in
+                if let error = error {
+                    self.logger.warning("⚠️ [WebSocketTransport] Failed to send query_connected_peers: \(error.localizedDescription)")
+                    if let pending = self.pendingControlQueries.removeValue(forKey: queryId) {
+                        pending.resume(returning: [:])
+                    }
+                } else {
+                    // Set timeout - if no response in 5 seconds, return empty dictionary (will result in empty array)
+                    Task {
+                        try? await Task.sleep(nanoseconds: 5_000_000_000)
+                        if let pending = self.pendingControlQueries.removeValue(forKey: queryId) {
+                            pending.resume(returning: [:])
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Extract connected_devices array from payload
+        if let devicesArray = payload["connected_devices"] as? [String] {
+            return devicesArray
+        }
+        return []
     }
 
     private func ensureConnected() async throws {
@@ -820,7 +891,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             let inFlightCount = inFlightMessages.count
             logger.info("⚠️ [WebSocketTransport] Socket closed with \(inFlightCount) in-flight message(s) - requeuing for retry")
             for (messageId, queuedMessage) in inFlightMessages {
-                logger.info("🔄 [WebSocketTransport] Requeuing in-flight message: id=\(messageId.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), frame=\(queuedMessage.data.count) bytes")
+                logger.info("🔄 [WebSocketTransport] Requeuing in-flight message: id=\(messageId.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), frame=\(queuedMessage.data.count.formattedAsKB)")
                 messageQueue.append(queuedMessage)
             }
             inFlightMessages.removeAll()
@@ -990,8 +1061,10 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             case .success(let message):
                 self.touch()
                 if case .data(let data) = message {
-                    self.logger.info("📥 [WebSocketTransport] Received binary message: \(data.count) bytes")
+                    self.logger.info("📥 [WebSocketTransport] Received binary message: \(data.count.formattedAsKB), environment=\(self.configuration.environment), url=\(self.configuration.url.absoluteString)")
                     self.handleIncoming(data: data)
+                } else if case .string(let str) = message {
+                    self.logger.info("📝 [WebSocketTransport] Received text message: \(str.prefix(100))")
                 }
                 self.receiveNext(on: task)
             case .failure(let error):
@@ -1026,7 +1099,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                         let inFlightCount = inFlightMessages.count
                         logger.info("⚠️ [WebSocketTransport] Socket disconnected with \(inFlightCount) in-flight message(s) - requeuing for retry")
                         for (messageId, queuedMessage) in inFlightMessages {
-                            logger.info("🔄 [WebSocketTransport] Requeuing in-flight message: id=\(messageId.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), frame=\(queuedMessage.data.count) bytes")
+                            logger.info("🔄 [WebSocketTransport] Requeuing in-flight message: id=\(messageId.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), frame=\(queuedMessage.data.count.formattedAsKB)")
                             messageQueue.append(queuedMessage)
                         }
                         inFlightMessages.removeAll()
@@ -1152,6 +1225,17 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                                let payload = jsonDict["payload"] as? [String: Any],
                                let action = payload["action"] as? String {
                                 logger.debug("📋 [WebSocketTransport] Control message: \(action)")
+                                
+                                // Handle query_connected_peers response
+                                if action == "query_connected_peers" {
+                                    if let originalMessageId = payload["original_message_id"] as? String,
+                                       let continuation = pendingControlQueries.removeValue(forKey: originalMessageId) {
+                                        // Return the payload which contains connected_devices array
+                                        continuation.resume(returning: payload)
+                                        return
+                                    }
+                                }
+                                
                                 if action == "routing_failure" {
                                     if let reason = payload["reason"] as? String {
                                         // Log as debug instead of warning - these are expected when devices are offline
@@ -1171,6 +1255,9 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             }
             
             let envelope = try frameCodec.decode(data)
+            
+            // Log envelope details for debugging
+            logger.info("📦 [WebSocketTransport] Decoded envelope: type=\(envelope.type.rawValue), id=\(envelope.id.uuidString.prefix(8)), target=\(envelope.payload.target ?? "nil"), deviceId=\(envelope.payload.deviceId.prefix(8))")
             
             // Check if this is an acknowledgment for an in-flight message
             // (In some scenarios, the server may echo back the same envelope ID as acknowledgment)
@@ -1195,6 +1282,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             // Determine transport origin based on configuration
             let transportOrigin: TransportOrigin = (configuration.environment == "cloud" || configuration.url.scheme == "wss") ? .cloud : .lan
             if let handler = onIncomingMessage {
+                logger.info("✅ [WebSocketTransport] Calling onIncomingMessage handler: origin=\(transportOrigin.rawValue), envelopeType=\(envelope.type.rawValue)")
                 Task {
                     await handler(data, transportOrigin)
                 }
@@ -1223,7 +1311,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                     buffer.load(as: UInt32.self)
                 }
                 let length = Int(UInt32(bigEndian: lengthValue))
-                logger.error("   Frame header: length=\(length) bytes, total data=\(data.count) bytes")
+                logger.error("   Frame header: length=\(length.formattedAsKB), total data=\(data.count.formattedAsKB)")
                 if data.count >= 4 + length {
                     let jsonData = data.subdata(in: 4..<(4 + length))
                     if let jsonString = String(data: jsonData, encoding: .utf8) {

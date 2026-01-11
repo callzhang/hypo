@@ -219,6 +219,17 @@ public final class ConnectionStatusProber {
             }
         }
         
+            // Query cloud relay for connected peers (if cloud is connected) - MIRROR ANDROID LOGIC
+            var cloudConnectedDeviceIds = Set<String>()
+            if let transportProvider = transportProvider as? DefaultTransportProvider {
+                let cloudTransport = transportProvider.getCloudTransport()
+                if cloudTransport.isConnected() {
+                    let connectedPeers = await cloudTransport.queryConnectedPeers()
+                    logger.info("☁️ [ConnectionStatusProber] Cloud query returned \(connectedPeers.count) connected devices")
+                    cloudConnectedDeviceIds = Set(connectedPeers)
+                }
+            }
+        
         // Check network connectivity - update status immediately if disconnected
         if !hasNetworkConnectivity {
             transportManager?.updateConnectionState(.disconnected)
@@ -329,14 +340,19 @@ public final class ConnectionStatusProber {
                 }
             }
             
+            // Check if device is connected via cloud relay (from query result)
+            let isConnectedViaCloud = cloudConnectedDeviceIds.contains(device.id) ||
+                cloudConnectedDeviceIds.contains { $0.lowercased() == device.id.lowercased() }
+            
             // Determine device online status - REAL-TIME STATUS (no grace period):
             // Devices are only online if they are:
             //   1. Discovered on LAN (active discovery) - LAN discovery means network is available
             //   2. Have an active WebSocket connection (LAN or cloud)
-            //   3. Have cloud transport AND server is connected via cloud (device connected via cloud relay)
+            //   3. Are in the cloud-connected peers list (device connected via cloud relay)
+            //   4. Have cloud transport AND server is connected via cloud (fallback for devices that haven't been queried yet)
             let isOnline: Bool
-            if isDiscovered || hasActiveConnection {
-                // Device is discovered on LAN or has active connection - definitely online
+            if isDiscovered || hasActiveConnection || isConnectedViaCloud {
+                // Device is discovered on LAN, has active connection, or is connected via cloud relay - definitely online
                 isOnline = true
             } else if deviceTransport == .cloud && currentConnectionState == .connectedCloud {
                 // Device has cloud transport and server is connected - device is reachable via cloud
@@ -351,7 +367,7 @@ public final class ConnectionStatusProber {
             
             // Only update if status changed
             if device.isOnline != isOnline {
-                logger.info("update", "🔄 [ConnectionStatusProber] Updating device \(device.name) status: \(device.isOnline) → \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n")
+                logger.info("update", "🔄 [ConnectionStatusProber] Updating device \(device.name) status: \(device.isOnline) → \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), cloudConnected=\(isConnectedViaCloud), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n")
                 await historyViewModel.updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
             }
         }

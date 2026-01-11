@@ -95,4 +95,10 @@ public final class CloudRelayTransport: SyncTransport {
         try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
         try? await delegate.connect()
     }
+    
+    /// Query connected peers from cloud relay
+    /// Returns list of connected device IDs, or empty array if query fails
+    public func queryConnectedPeers() async -> [String] {
+        return await delegate.queryConnectedPeers()
+    }
 }

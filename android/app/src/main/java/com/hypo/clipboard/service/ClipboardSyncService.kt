@@ -60,6 +60,7 @@ class ClipboardSyncService : Service() {
     @Inject lateinit var connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber
     @Inject lateinit var pairingHandshakeManager: com.hypo.clipboard.pairing.PairingHandshakeManager
     @Inject lateinit var storageManager: com.hypo.clipboard.data.local.StorageManager
+    @Inject lateinit var accessibilityServiceChecker: com.hypo.clipboard.util.AccessibilityServiceChecker
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var listener: ClipboardListener
@@ -207,9 +208,14 @@ class ClipboardSyncService : Service() {
             while (isActive) {
                 val wasForeground = isAppInForeground
                 checkAppForegroundState()
-                // Probe connections when app comes to foreground
+                // When app becomes active, check clipboard for new content
                 if (!wasForeground && isAppInForeground) {
+                    Log.d(TAG, "📱 App became active - checking clipboard for new content")
                     connectionStatusProber.probeNow()
+                    // Trigger clipboard check to catch any changes that occurred while app was in background
+                    if (::listener.isInitialized) {
+                        listener.forceProcessCurrentClipboard()
+                    }
                 }
                 delay(2_000) // Check every 2 seconds
             }
@@ -702,8 +708,10 @@ class ClipboardSyncService : Service() {
                 val networkId = network.hashCode()
                 if (lastActiveNetworkId == networkId) {
                     lastActiveNetworkId = null
-                    android.util.Log.d(TAG, "🌐 Network lost (ID: $networkId) - triggering immediate probe")
-                    connectionStatusProber.probeNow()
+                    android.util.Log.d(TAG, "🌐 Network lost (ID: $networkId) - waiting for new network (onAvailable will trigger reconnection)")
+                    // Don't trigger immediate probe - wait for onAvailable() to be called with new network
+                    // This prevents DNS resolution failures when network is transitioning (WiFi -> cellular)
+                    // The onAvailable() callback will handle reconnection when new network is ready
                 } else {
                     android.util.Log.d(TAG, "🌐 Network lost but not the active one (ID: $networkId) - ignoring")
                 }
@@ -794,34 +802,34 @@ class ClipboardSyncService : Service() {
     }
 
     private fun ensureClipboardPermissionAndStartListener() {
-        Log.d(TAG, "🔍 ensureClipboardPermissionAndStartListener() CALLED")
-        Log.d(TAG, "   scope.isActive=${scope.isActive}, scope=$scope")
         clipboardPermissionJob?.cancel()
-        Log.d(TAG, "   About to launch clipboard permission check coroutine...")
         clipboardPermissionJob = scope.launch {
             try {
-                Log.i(TAG, "🔍 Starting clipboard permission check loop...")
                 while (isActive) {
+                    // Check if AccessibilityService is enabled - if so, it handles clipboard monitoring
+                    // Don't start ClipboardListener to avoid duplicate processing
+                    val accessibilityEnabled = accessibilityServiceChecker.isAccessibilityServiceEnabled()
+                    if (accessibilityEnabled) {
+                        // AccessibilityService handles clipboard monitoring, don't start ClipboardListener
+                        awaitingClipboardPermission = false
+                        updateNotification()
+                        return@launch
+                    }
+                    
                     val allowed = clipboardAccessChecker.canReadClipboard()
                     awaitingClipboardPermission = !allowed
-                    Log.d(TAG, "📋 Clipboard permission status: allowed=$allowed, awaiting=$awaitingClipboardPermission")
                     updateNotification()
                     if (allowed) {
-                        Log.i(TAG, "✅ Clipboard permission granted! Starting ClipboardListener...")
                         listener.start()
-                        Log.i(TAG, "✅ ClipboardListener started successfully")
                         return@launch
                     } else {
-                        Log.w(TAG, "⚠️ Clipboard access denied. Waiting for user consent… (will retry in 5s)")
                         delay(5_000)
                     }
                 }
-                Log.w(TAG, "⚠️ Clipboard permission check loop ended (scope cancelled)")
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Exception in clipboard permission check coroutine: ${e.message}", e)
             }
         }
-        Log.d(TAG, "   Coroutine launched, job=$clipboardPermissionJob")
     }
 
     private fun ensureClipboardListenerIsRunning() {

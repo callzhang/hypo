@@ -2,6 +2,7 @@ package com.hypo.clipboard.transport.ws
 
 import com.hypo.clipboard.sync.SyncEnvelope
 import com.hypo.clipboard.sync.SyncTransport
+import com.hypo.clipboard.util.formattedAsKB
 import com.hypo.clipboard.transport.NoopTransportAnalytics
 import com.hypo.clipboard.transport.NoopTransportMetricsRecorder
 import com.hypo.clipboard.transport.TransportAnalytics
@@ -351,8 +352,12 @@ class WebSocketTransportClient @Inject constructor(
         }
         
         ensureConnection()
+        // Log connection status before queuing
+        val connected = isConnected()
+        android.util.Log.d("WebSocketTransportClient", "📤 Queuing envelope: type=${envelope.type}, target=${envelope.payload.target}, isConnected=$connected, isCloud=${config.environment == "cloud"}")
         try {
             sendQueue.send(envelope)
+            android.util.Log.d("WebSocketTransportClient", "✅ Envelope queued successfully (will be sent when connection is ready)")
         } catch (e: Exception) {
             android.util.Log.e("WebSocketTransportClient", "❌ Failed to queue envelope: ${e.message}", e)
             throw e
@@ -1109,11 +1114,11 @@ class WebSocketTransportClient @Inject constructor(
                             if (bytes.size >= 4 + length) {
                                 String(bytes.toByteArray(), 4, length, Charsets.UTF_8)
                             } else {
-                                android.util.Log.e("WebSocketTransportClient", "❌ Frame size mismatch: expected ${4 + length} bytes, got ${bytes.size}")
+                                android.util.Log.e("WebSocketTransportClient", "❌ Frame size mismatch: expected ${4 + length}, got ${bytes.size.formattedAsKB()}")
                                 null
                             }
                         } else {
-                            android.util.Log.e("WebSocketTransportClient", "❌ Frame too small: ${bytes.size} bytes, expected at least 4")
+                            android.util.Log.e("WebSocketTransportClient", "❌ Frame too small: ${bytes.size.formattedAsKB()}, expected at least 4")
                             null
                         }
                     } catch (e: Exception) {
@@ -1151,7 +1156,7 @@ class WebSocketTransportClient @Inject constructor(
                     
                     try {
                         val envelope = frameCodec.decode(bytes.toByteArray())
-                        android.util.Log.d("WebSocketTransportClient", "📥 Received: ${envelope.type} (${bytes.size} bytes, id: ${envelope.id.take(8)}...)")
+                        android.util.Log.d("WebSocketTransportClient", "📥 Received: ${envelope.type} (${bytes.size.formattedAsKB()}, id: ${envelope.id.take(8)}...)")
                         
                         // Check if this is a pairing challenge by looking at envelope payload
                         // Re-encode to JSON string to check for pairing message structure
@@ -1164,11 +1169,11 @@ class WebSocketTransportClient @Inject constructor(
                                 if (tempFrame.size >= 4 + length) {
                                     String(tempFrame, 4, length, Charsets.UTF_8)
                                 } else {
-                                    android.util.Log.e("WebSocketTransportClient", "❌ Frame size mismatch: expected ${4 + length} bytes, got ${tempFrame.size}")
+                                    android.util.Log.e("WebSocketTransportClient", "❌ Frame size mismatch: expected ${4 + length}, got ${tempFrame.size.formattedAsKB()}")
                                     null
                                 }
                             } else {
-                                android.util.Log.e("WebSocketTransportClient", "❌ Frame too small: ${tempFrame.size} bytes, expected at least 4")
+                                android.util.Log.e("WebSocketTransportClient", "❌ Frame too small: ${tempFrame.size.formattedAsKB()}, expected at least 4")
                                 null
                             }
                         } catch (e: Exception) {
@@ -1365,12 +1370,32 @@ class WebSocketTransportClient @Inject constructor(
                     } else {
                         lastKnownUrl ?: "unknown"
                     }
+                    
+                    // Check if this is a DNS resolution failure (UnknownHostException)
+                    // This often happens when network is transitioning (WiFi -> cellular)
+                    // DNS might not be ready yet, so we should retry with longer backoff
+                    val isDnsFailure = t is java.net.UnknownHostException || 
+                                      (t.message?.contains("Unable to resolve host", ignoreCase = true) == true) ||
+                                      (t.message?.contains("No address associated with hostname", ignoreCase = true) == true)
+                    
                     // For LAN connections, timeouts are expected when devices aren't on the same network
                     // Log at debug level to reduce noise
                     if (isCloudConnection) {
-                        android.util.Log.w("WebSocketTransportClient", "❌ Connection failed: $connUrl - ${t.message} (${t.javaClass.simpleName})")
+                        if (isDnsFailure) {
+                            android.util.Log.w("WebSocketTransportClient", "❌ DNS resolution failed: $connUrl - ${t.message} (network may be transitioning, will retry)")
+                        } else {
+                            android.util.Log.w("WebSocketTransportClient", "❌ Connection failed: $connUrl - ${t.message} (${t.javaClass.simpleName})")
+                        }
                     } else {
                         android.util.Log.d("WebSocketTransportClient", "⏱️ LAN connection timeout (expected when not on same network): $connUrl - ${t.javaClass.simpleName}")
+                    }
+                    
+                    // For DNS failures, increase backoff delay to give network time to stabilize
+                    if (isDnsFailure && isCloudConnection) {
+                        // Increase consecutive failures count to trigger longer backoff
+                        // This gives DNS time to be ready after network transition
+                        consecutiveFailures = maxOf(consecutiveFailures, 3) // At least 4 seconds backoff
+                        android.util.Log.d("WebSocketTransportClient", "📈 DNS failure detected - increasing backoff (consecutive failures: $consecutiveFailures)")
                     }
                     
                     // For LAN connections, if connection is refused, clear lastKnownUrl to force re-discovery
@@ -1400,8 +1425,15 @@ class WebSocketTransportClient @Inject constructor(
                     // Notify TransportManager of connection state change (event-driven)
                     if (transportManager != null && isCloudConnection) {
                         transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectingCloud)
-                        consecutiveFailures++
-                        android.util.Log.d("WebSocketTransportClient", "📈 Consecutive failures: $consecutiveFailures")
+                        // For DNS failures, increase backoff by setting minimum failure count
+                        // This gives DNS time to be ready after network transition
+                        if (isDnsFailure) {
+                            consecutiveFailures = maxOf(consecutiveFailures + 1, 3) // At least 4 seconds backoff
+                            android.util.Log.d("WebSocketTransportClient", "📈 DNS failure - increased backoff (consecutive failures: $consecutiveFailures)")
+                        } else {
+                            consecutiveFailures++
+                            android.util.Log.d("WebSocketTransportClient", "📈 Consecutive failures: $consecutiveFailures")
+                        }
                     }
                     
                     // Event-driven: immediately trigger reconnection for cloud connections
@@ -1505,6 +1537,11 @@ class WebSocketTransportClient @Inject constructor(
                 }
                 shutdownSocket(socket)
                 
+                // CRITICAL: Reset isReconnecting flag before returning to allow retry
+                // Otherwise, ensureConnection() will be skipped on next call
+                isReconnecting = false
+                android.util.Log.d("WebSocketTransportClient", "   🔄 Reset isReconnecting=false to allow retry")
+                
                 // Event-driven: exit and let onFailure trigger ensureConnection()
                 // Increment failure count for exponential backoff (both cloud and LAN)
                 consecutiveFailures++
@@ -1526,6 +1563,11 @@ class WebSocketTransportClient @Inject constructor(
                     android.util.Log.w("WebSocketTransportClient", "   ⚠️ Error cancelling socket: ${e.message}")
                 }
                 shutdownSocket(socket)
+                
+                // CRITICAL: Reset isReconnecting flag before returning to allow retry
+                // Otherwise, ensureConnection() will be skipped on next call
+                isReconnecting = false
+                android.util.Log.d("WebSocketTransportClient", "   🔄 Reset isReconnecting=false to allow retry")
                 
                 // Event-driven: exit and let onFailure trigger ensureConnection()
                 // Increment failure count for exponential backoff (both cloud and LAN)
@@ -1582,7 +1624,7 @@ class WebSocketTransportClient @Inject constructor(
                         is LoopEvent.Envelope -> {
                             android.util.Log.d("WebSocketTransportClient", "📦 Processing envelope: type=${event.envelope.type}, id=${event.envelope.id}, target=${event.envelope.payload.target}")
                             val payload = frameCodec.encode(event.envelope)
-                            android.util.Log.d("WebSocketTransportClient", "📤 Encoded frame: ${payload.size} bytes")
+                            android.util.Log.d("WebSocketTransportClient", "📤 Encoded frame: ${payload.size.formattedAsKB()}")
                             val now = clock.instant()
                             synchronized(pendingLock) {
                                 prunePendingLocked(now)
@@ -1594,7 +1636,7 @@ class WebSocketTransportClient @Inject constructor(
                                     android.util.Log.w("WebSocketTransportClient", "⚠️ WebSocket send failed, closing connection loop")
                                     break@loop
                                 }
-                                android.util.Log.d("WebSocketTransportClient", "✅ Frame sent successfully: ${payload.size} bytes")
+                                android.util.Log.d("WebSocketTransportClient", "✅ Frame sent successfully: ${payload.size.formattedAsKB()}")
                             } catch (e: Exception) {
                                 android.util.Log.e("WebSocketTransportClient", "❌ WebSocket send exception: ${e.message}", e)
                                 break@loop
@@ -1816,7 +1858,7 @@ class WebSocketTransportClient @Inject constructor(
 
     private fun handleIncoming(bytes: ByteString) {
         val now = clock.instant()
-        android.util.Log.d("WebSocketTransportClient", "🔍 handleIncoming: ${bytes.size} bytes, handler=${onIncomingClipboard != null}, transportOrigin=$transportOrigin")
+        android.util.Log.d("WebSocketTransportClient", "🔍 handleIncoming: ${bytes.size.formattedAsKB()}, handler=${onIncomingClipboard != null}, transportOrigin=$transportOrigin")
         
         // Early return if no handler registered - don't decode unnecessarily
         if (onIncomingClipboard == null) {

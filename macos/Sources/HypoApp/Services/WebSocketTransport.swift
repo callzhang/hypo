@@ -990,6 +990,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             case .success(let message):
                 self.touch()
                 if case .data(let data) = message {
+                    self.logger.info("📥 [WebSocketTransport] Received binary message: \(data.count) bytes")
                     self.handleIncoming(data: data)
                 }
                 self.receiveNext(on: task)

@@ -56,6 +56,9 @@ public final class ClipboardMonitor {
                 self?.changeCount = changeCount
             }
         }
+        
+        // Initialize storage
+        StorageManager.shared.setup()
     }
 
     deinit {
@@ -157,9 +160,7 @@ public final class ClipboardMonitor {
     }
 
     private func captureImage(types: [NSPasteboard.PasteboardType]) -> ClipboardEntry? {
-        
         // Check if there's a file URL - if so, extract filename for image metadata
-        // Images copied from files have both image types AND .fileURL types
         var imageFileName: String? = nil
         if types.contains(.fileURL) {
             let fileObjects = pasteboard.readObjects(forClasses: [NSURL.self], options: nil).compactMap { $0 as? URL }
@@ -169,9 +170,6 @@ public final class ClipboardMonitor {
         }
         
         // Priority order for image types (most specific first)
-        // Read raw data directly from pasteboard to preserve original format
-        // NOTE: TIFF is intentionally excluded - macOS pasteboard often includes TIFF as a fallback
-        // even when the original image is PNG/JPEG, which causes incorrect format detection
         let imageTypePriority: [(NSPasteboard.PasteboardType, String)] = [
             (NSPasteboard.PasteboardType("public.png"), "png"),
             (NSPasteboard.PasteboardType("public.jpeg"), "jpeg"),
@@ -251,6 +249,9 @@ public final class ClipboardMonitor {
                 }
                 
                 // Store processed image data
+                // Save to disk first
+                let localPath = try? StorageManager.shared.save(processedData, extension: format)
+                
                 // Include filename if available (from file URL)
                 let metadata = ImageMetadata(
                     pixelSize: processedPixels,
@@ -258,9 +259,9 @@ public final class ClipboardMonitor {
                     format: processedData.count < rawData.count ? "jpeg" : format, // Use jpeg if we re-encoded
                     altText: imageFileName, // Include filename if available
                     data: processedData,
-                    thumbnail: thumbnail
+                    thumbnail: thumbnail,
+                    localPath: localPath
                 )
-                
                 
                 return ClipboardEntry(deviceId: deviceId.uuidString, originPlatform: platform, originDeviceName: deviceName, content: .image(metadata), isEncrypted: false, transportOrigin: nil)
             }
@@ -371,20 +372,25 @@ public final class ClipboardMonitor {
                 }
                 
                 // Store as image (not file) with filename from file URL
+                // Save to disk first using StorageManager
+                let extensionName = fileURL.pathExtension.isEmpty ? format : fileURL.pathExtension
+                let localPath = try? StorageManager.shared.save(processedData, extension: extensionName)
+                
                 let metadata = ImageMetadata(
                     pixelSize: processedPixels,
                     byteSize: processedData.count,
                     format: processedData.count < imageData.count ? "jpeg" : format, // Use jpeg if we re-encoded
                     altText: fileURL.lastPathComponent, // Include filename
                     data: processedData,
-                    thumbnail: thumbnail
+                    thumbnail: thumbnail,
+                    localPath: localPath
                 )
                 
                 logger.info("🖼️ [ClipboardMonitor] Captured image file as image: \(fileURL.lastPathComponent) (\(processedData.count) bytes)")
                 return ClipboardEntry(
-                    deviceId: deviceId.uuidString,
-                    originPlatform: platform,
-                    originDeviceName: deviceName,
+                    deviceId: self.deviceId.uuidString,
+                    originPlatform: self.platform,
+                    originDeviceName: self.deviceName,
                     content: .image(metadata),
                     isEncrypted: false,
                     transportOrigin: nil
@@ -397,20 +403,26 @@ public final class ClipboardMonitor {
         // For local files we only store a pointer (URL) and metadata to avoid
         // duplicating file bytes in our history database. The actual bytes are
         // loaded lazily when syncing to other devices or when needed for preview.
-        let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
-        let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+        var size = 0
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path) {
+            if let sizeNum = attrs[FileAttributeKey.size] as? NSNumber {
+                size = sizeNum.intValue
+            }
+        }
+        
         guard size <= SizeConstants.maxAttachmentBytes else { return nil }
         let metadata = FileMetadata(
             fileName: fileURL.lastPathComponent,
             byteSize: size,
             uti: uti,
             url: fileURL,
-            base64: nil
+            base64: nil,
+            localPath: nil // Local regular files don't need persistent copy in caches yet (we use URL)
         )
         return ClipboardEntry(
-            deviceId: deviceId.uuidString,
-            originPlatform: platform,
-            originDeviceName: deviceName,
+            deviceId: self.deviceId.uuidString,
+            originPlatform: self.platform,
+            originDeviceName: self.deviceName,
             content: .file(metadata),
             isEncrypted: false,
             transportOrigin: nil

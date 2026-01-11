@@ -281,24 +281,35 @@ public final class IncomingClipboardHandler {
                 format = "png"
             }
             
+            // Save to disk
+            let extensionName = format
+            let localPath = try? StorageManager.shared.save(payload.data, extension: extensionName)
+            
             let metadata = ImageMetadata(
                 pixelSize: pixelSize,
                 byteSize: payload.data.count,
                 format: format,
                 altText: fileName, // Include filename from metadata
                 data: payload.data,
-                thumbnail: nil
+                thumbnail: nil,
+                localPath: localPath
             )
             content = .image(metadata)
             
         case .file:
             let fileName = payload.metadata?["file_name"] ?? "file"
+            // Save to disk
+            // Use file extension from name if possible
+            let ext = (fileName as NSString).pathExtension
+            let localPath = try? StorageManager.shared.save(payload.data, extension: ext.isEmpty ? "dat" : ext)
+            
             let metadata = FileMetadata(
                 fileName: fileName,
                 byteSize: payload.data.count,
                 uti: "public.data",
                 url: nil,
-                base64: payload.data.base64EncodedString()
+                base64: payload.data.base64EncodedString(),
+                localPath: localPath
             )
             content = .file(metadata)
         }

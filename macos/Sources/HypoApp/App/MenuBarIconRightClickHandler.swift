@@ -83,7 +83,13 @@ struct MenuBarIconRightClickHandler: NSViewRepresentable {
         quitItem.target = MenuActionTarget.shared
         MenuActionTarget.shared.quitAction = {
             NSLog("🚪 [Right-click menu] Exit selected")
-            NSApplication.shared.terminate(nil)
+            // Use delegate's requestQuit method to properly handle termination
+            if let delegate = NSApplication.shared.delegate as? HypoAppDelegate {
+                delegate.requestQuit()
+            } else {
+                // Fallback if delegate is not set
+                NSApplication.shared.terminate(nil)
+            }
         }
         menu.addItem(quitItem)
         

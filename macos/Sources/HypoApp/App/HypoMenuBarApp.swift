@@ -9,11 +9,29 @@ import ApplicationServices
 #endif
 
 #if canImport(AppKit)
+// Global state to track if we've already prompted for accessibility permission in this session
+private var hasPromptedForAccessibility = false
+
 // Check if accessibility permissions are granted (required for CGEvent to work)
 private func checkAccessibilityPermissions(prompt: Bool = false) -> Bool {
-    // Default to non‑prompting to avoid triggering the system permission dialog
-    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt]
-    return AXIsProcessTrustedWithOptions(options as CFDictionary)
+    // First check without prompting to see current status
+    let optionsNoPrompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false]
+    let isCurrentlyTrusted = AXIsProcessTrustedWithOptions(optionsNoPrompt as CFDictionary)
+    
+    // If already trusted, return true immediately
+    if isCurrentlyTrusted {
+        return true
+    }
+    
+    // If not trusted and prompt is requested, only prompt once per app session
+    if prompt && !hasPromptedForAccessibility {
+        hasPromptedForAccessibility = true
+        let optionsWithPrompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        return AXIsProcessTrustedWithOptions(optionsWithPrompt as CFDictionary)
+    }
+    
+    // Otherwise return false (not trusted and either not prompting or already prompted)
+    return false
 }
 #endif
 
@@ -32,8 +50,27 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         // Removed logging to reduce duplicates
     }
     
+    /// Ensures the app activation policy is set to .accessory (menu bar only, no dock icon)
+    /// This is critical for menu bar apps, especially when running from /Applications
+    private func ensureActivationPolicy() {
+        let currentPolicy = NSApplication.shared.activationPolicy()
+        if currentPolicy != .accessory {
+            logger.info("🔧 [HypoAppDelegate] Setting activation policy to .accessory (current: \(currentPolicy.rawValue))")
+            let success = NSApplication.shared.setActivationPolicy(.accessory)
+            if success {
+                logger.info("✅ [HypoAppDelegate] Activation policy set to .accessory")
+            } else {
+                logger.error("❌ [HypoAppDelegate] Failed to set activation policy to .accessory")
+            }
+        }
+    }
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.debug("🚀 [HypoAppDelegate] applicationDidFinishLaunching called")
+        
+        // CRITICAL: Ensure activation policy is set to .accessory (menu bar only)
+        // This is especially important when running from /Applications
+        ensureActivationPolicy()
         
         // CRITICAL: Activate the app to ensure menu bar icon appears
         // Menu bar apps need to activate to show their status item
@@ -452,12 +489,15 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    // CRITICAL: Prevent macOS from auto-terminating menu bar app
-    // Menu bar apps run without windows and macOS asks if they should terminate
-    // We must explicitly return .terminateCancel to keep the app running
+    // Always allow termination when requested (user or system)
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        logger.info("🚫 [HypoAppDelegate] Application termination requested - denying to keep menu bar app running")
-        return .terminateCancel
+        logger.info("✅ [HypoAppDelegate] Termination requested - allowing quit")
+        return .terminateNow
+    }
+    
+    /// Request app quit (called from Exit menu or Cmd+Q handler)
+    func requestQuit() {
+        NSApplication.shared.terminate(nil)
     }
 }
 
@@ -662,8 +702,8 @@ public struct HypoMenuBarApp: App {
     public init() {
         logger.info("🚀 [HypoMenuBarApp] Initializing app (viewModel setup)")
         
-        // CRITICAL: Activate app immediately in init to ensure menu bar icon appears
-        // This must happen before MenuBarExtra is created
+        // Note: Activation policy is set in applicationDidFinishLaunching (proper lifecycle method)
+        // Just activate app here to ensure menu bar icon appears
         DispatchQueue.main.async {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
@@ -711,8 +751,14 @@ public struct HypoMenuBarApp: App {
 
     public var body: some Scene {
         logger.info("📐 [HypoMenuBarApp] body property accessed - creating MenuBarExtra scene")
-        logger.info("📐 [HypoMenuBarApp] NSApp.activationPolicy() = \(NSApplication.shared.activationPolicy().rawValue)")
+        let currentPolicy = NSApplication.shared.activationPolicy()
+        logger.info("📐 [HypoMenuBarApp] NSApp.activationPolicy() = \(currentPolicy.rawValue)")
         logger.info("📐 [HypoMenuBarApp] NSApp.isActive = \(NSApplication.shared.isActive)")
+        
+        // Log warning if activation policy is incorrect (should be set in applicationDidFinishLaunching)
+        if currentPolicy != .accessory {
+            logger.warning("⚠️ [HypoMenuBarApp] Activation policy is not .accessory (\(currentPolicy.rawValue)) - should be set in applicationDidFinishLaunching")
+        }
         
         return MenuBarExtra(content: {
             MenuBarContentView(viewModel: viewModel, applySwiftUIBackground: false)
@@ -848,8 +894,8 @@ public struct HypoMenuBarApp: App {
     }
     
     private func setupGlobalShortcut() {
-        // Using Shift+Cmd+V (V for View/History) to avoid system shortcut conflicts
-        // Shift+Cmd+C conflicts with Terminal/Color Picker system shortcuts
+        // Using Alt+V (V for View/History) to avoid system shortcut conflicts
+        // Alt+V is less likely to conflict with system shortcuts
         
         // Avoid duplicate setup
         if globalShortcutMonitor != nil {
@@ -857,7 +903,7 @@ public struct HypoMenuBarApp: App {
             return
         }
         
-        logger.debug("🔧 [HypoMenuBarApp] setupGlobalShortcut() called - Using Shift+Cmd+V")
+        logger.debug("🔧 [HypoMenuBarApp] setupGlobalShortcut() called - Using Alt+V")
         
         // Clean up existing monitors
         if let monitor = globalShortcutMonitor {
@@ -876,64 +922,8 @@ public struct HypoMenuBarApp: App {
             runLoopSource = nil
         }
         
-        // Use NSEvent monitors with Alt+V (doesn't conflict with system shortcuts)
-        setupNSEventShortcut()
-    }
-    
-    private func setupNSEventShortcut() {
-        // Use NSEvent monitors with Shift+Cmd+V (V for View/History)
-        // This avoids conflicts with system shortcuts like Shift+Cmd+C (Color Picker)
-        
-        logger.debug("🔧 [HypoMenuBarApp] Setting up NSEvent shortcut for Shift+Cmd+V")
-        
-        // Local monitor (works when app is active)
-        let localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
-            let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-            let hasCmd = event.modifierFlags.contains(.command)
-            let hasShift = event.modifierFlags.contains(.shift)
-            
-            // Debug log for all key events
-            if hasCmd && hasShift {
-                logger.debug("🔍 [NSEvent] Key pressed: '\(key)' (Cmd+Shift)")
-            }
-            
-            if hasCmd && hasShift && key == "v" {
-                logger.debug("🎯 [NSEvent] Intercepted Shift+Cmd+V - showing popup")
-                
-                // CRITICAL: Save frontmost app BEFORE activating Hypo
-                HistoryPopupPresenter.shared.saveFrontmostAppBeforeActivation()
-                
-                // Activate app first, then show popup
-                NSApp.activate(ignoringOtherApps: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    self.showHistoryPopup()
-                }
-                return nil  // Consume the event
-            }
-            return event
-        }
-        globalShortcutMonitor = localMonitor
-        
-        logger.debug("✅ [HypoMenuBarApp] NSEvent shortcut registered (local only): Shift+Cmd+V")
-    }
-    
-    private func showHistoryPopup() {
-        logger.debug("📢 [HypoMenuBarApp] showHistoryPopup() called - posting notifications")
-        
-        // Post notification to show history popup
-        // The MenuBarContentView will handle centering and showing the window
-        NotificationCenter.default.post(
-            name: NSNotification.Name("ShowHistoryPopup"),
-            object: nil
-        )
-        
-        // Also ensure history section is selected
-        NotificationCenter.default.post(
-            name: NSNotification.Name("ShowHistorySection"),
-            object: nil
-        )
-        
-        logger.debug("✅ [HypoMenuBarApp] Notifications posted: ShowHistoryPopup, ShowHistorySection")
+        // Alt+V is handled by Carbon hotkey system (registered in HypoAppDelegate)
+        // No need for NSEvent monitor as Carbon hotkey works globally including when app is active
     }
 }
 
@@ -2807,30 +2797,48 @@ private struct ClipboardDetailWindow: View {
 // Image detail view with async loading for image files
 private struct ImageDetailView: View {
     let metadata: ImageMetadata
+    @State private var loadedImage: NSImage?
+    @State private var isLoading = true
+    @State private var loadError: String?
     
     var body: some View {
         Group {
-            if let imageData = metadata.data {
-                // Try to create NSImage from raw data
-                if let nsImage = NSImage(data: imageData) {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: 800, maxHeight: 600)
-                        .padding()
-                } else {
-                    // Failed to decode - show error with format info
-                    VStack(spacing: 8) {
-                        Text("⚠️ Failed to display image")
-                            .font(.headline)
-                        Text("Format: \(metadata.format.uppercased())")
-                        Text("Size: \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
-                        Text("Data length: \(imageData.count) bytes")
-                    }
+            if let image = loadedImage {
+                // Successfully loaded image
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 800, maxHeight: 600)
                     .padding()
+            } else if isLoading {
+                // Loading state
+                VStack(spacing: 16) {
+                    ProgressView()
+                    Text("Loading image...")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            } else if let error = loadError {
+                // Error state
+                VStack(spacing: 8) {
+                    Text("⚠️ Failed to display image")
+                        .font(.headline)
+                    Text(error)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if let fileName = metadata.altText {
+                        Text("\(fileName) · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
+                            .font(.caption)
+                    } else {
+                        Text("Image · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
+                            .font(.caption)
+                    }
+                }
+                .padding()
             } else {
-                // No image data available (shouldn't happen for pasteboard images, but handle gracefully)
+                // Fallback: show thumbnail if available
                 VStack(spacing: 16) {
                     if let fileName = metadata.altText {
                         Text("\(fileName) · \(metadata.format.uppercased()) · \(metadata.byteSize.formatted(.byteCount(style: .binary)))")
@@ -2851,6 +2859,46 @@ private struct ImageDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
             }
+        }
+        .task {
+            await loadImage()
+        }
+    }
+    
+    private func loadImage() async {
+        // Try to load image data from multiple sources
+        var imageData: Data?
+        
+        // 1. Try metadata.data (in-memory, not persisted)
+        if let data = metadata.data {
+            imageData = data
+        }
+        // 2. Try loading from localPath (persisted images)
+        else if let path = metadata.localPath {
+            imageData = StorageManager.shared.load(relativePath: path)
+        }
+        
+        // Try to create NSImage from loaded data
+        if let data = imageData {
+            if let image = NSImage(data: data) {
+                await MainActor.run {
+                    self.loadedImage = image
+                    self.isLoading = false
+                }
+                return
+            } else {
+                await MainActor.run {
+                    self.loadError = "Failed to decode image data (\(data.count) bytes)"
+                    self.isLoading = false
+                }
+                return
+            }
+        }
+        
+        // No data available
+        await MainActor.run {
+            self.loadError = "Image data not available"
+            self.isLoading = false
         }
     }
 }

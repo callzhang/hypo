@@ -1,6 +1,24 @@
 package com.hypo.clipboard.util
 
 /**
+ * Format bytes as KB (kilobytes) with 2 decimal places
+ * Example: 1024 -> "1.00 KB", 1536 -> "1.50 KB"
+ */
+fun Int.formattedAsKB(): String {
+    val kb = this.toDouble() / 1024.0
+    return String.format("%.2f KB", kb)
+}
+
+/**
+ * Format bytes as KB (kilobytes) with 2 decimal places
+ * Example: 1024L -> "1.00 KB", 1536L -> "1.50 KB"
+ */
+fun Long.formattedAsKB(): String {
+    val kb = this.toDouble() / 1024.0
+    return String.format("%.2f KB", kb)
+}
+
+/**
  * Single source of truth for size limits across the Hypo app.
  * All size-related constants should be defined here to avoid duplication.
  */

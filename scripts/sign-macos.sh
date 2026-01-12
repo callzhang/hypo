@@ -1,10 +1,13 @@
 #!/bin/bash
-# Self-sign macOS app for free distribution (without notarization)
+# Sign macOS app (Self-signed preferred, falls back to Ad-hoc)
 # Usage: ./scripts/sign-macos.sh [app-bundle-path]
 #
-# This creates an ad-hoc signature that allows the app to run,
-# but users will see a Gatekeeper warning on first launch.
-# Users can right-click and select "Open" to bypass the warning.
+# This script attempts to sign the app with a stable self-signed identity
+# (if available) to preserve accessibility permissions across builds.
+# If no such identity is found, it falls back to an ad-hoc signature.
+#
+# Ad-hoc signatures allow the app to run, but users will see a Gatekeeper
+# warning on first launch. Users can right-click and select "Open" to bypass the warning.
 #
 # For notarization (no warnings), you need a paid Apple Developer account.
 # See docs/NOTARIZATION.md for details.
@@ -107,13 +110,35 @@ find "$APP_BUNDLE" -name .DS_Store -delete 2>/dev/null || true
 find "$APP_BUNDLE" -name "._*" -delete 2>/dev/null || true
 log_success "Cleaned app bundle"
 
-# Step 1: Ad-hoc sign the app (free, no certificate needed)
-log_info "Step 1: Ad-hoc signing app bundle..."
-log_warn "Note: This is a free ad-hoc signature, not notarized."
-log_warn "Users will see a Gatekeeper warning on first launch."
-log_info "Note: --timestamp is omitted for ad-hoc signing (only needed for Developer ID signatures)"
 
-codesign --force --deep --sign "-" \
+# Find best signing identity
+SIGN_IDENTITY="-"
+if security find-identity -v -p codesigning | grep -q "HypoSelfSign"; then
+    SIGN_IDENTITY="HypoSelfSign"
+    log_info "Found local development certificate: $SIGN_IDENTITY"
+elif security find-identity -v -p codesigning | grep -q "Apple Development"; then
+    # Pick the first Apple Development cert
+    SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Apple Development" | head -1 | awk -F '"' '{print $2}')
+    log_info "Found Apple Development certificate: $SIGN_IDENTITY"
+fi
+
+# Check if HypoSelfSign exists but is untrusted (ignored by find-identity -v)
+if [ "$SIGN_IDENTITY" = "-" ] && security find-identity -p codesigning | grep -q "HypoSelfSign"; then
+    log_warn "Found 'HypoSelfSign' certificate, but it is not trusted/valid."
+    log_warn "You must Open Keychain Access > 'HypoSelfSign' > Trust > Always Trust."
+fi
+
+log_info "Signing with identity: $SIGN_IDENTITY"
+
+if [ "$SIGN_IDENTITY" = "-" ]; then
+    log_warn "Using ad-hoc signing (identity '-')."
+    log_warn "This will cause accessibility permission prompts on every rebuild."
+    log_info "To fix this, run: ./scripts/setup-dev-certs.sh"
+else
+    log_success "Using stable identity. This should preserve accessibility permissions."
+fi
+
+codesign --force --deep --sign "$SIGN_IDENTITY" \
     --entitlements "$ENTITLEMENTS" \
     "$APP_BUNDLE"
 
@@ -122,7 +147,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-log_success "App signed with ad-hoc signature"
+log_success "App signed successfully"
 
 # Verify signature
 log_info "Verifying signature..."
@@ -153,6 +178,6 @@ log_info "  - Apple Developer Program membership (\$99/year)"
 log_info "  - Developer ID Application certificate"
 log_info "  - See docs/NOTARIZATION.md for details"
 log_info ""
-log_success "✅ Ad-hoc signing complete!"
+log_success "✅ Signing complete!"
 log_info "App bundle: $APP_BUNDLE"
 

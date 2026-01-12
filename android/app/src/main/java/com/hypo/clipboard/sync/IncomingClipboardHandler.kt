@@ -1,5 +1,6 @@
 package com.hypo.clipboard.sync
 
+import com.hypo.clipboard.util.formattedAsKB
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -175,7 +176,7 @@ class IncomingClipboardHandler @Inject constructor(
                 val senderDeviceName = envelope.payload.deviceName
                 
                 // Normalize device IDs to lowercase for comparison
-                val normalizedSenderId = senderDeviceId?.lowercase()
+                val normalizedSenderId = senderDeviceIdFromEnvelope?.lowercase()
                 val normalizedLocalId = identity.deviceId.lowercase()
                 
                 // Log device IDs for debugging
@@ -205,13 +206,13 @@ class IncomingClipboardHandler @Inject constructor(
                     isEncrypted = encryptionMeta != null && encryptionMeta.nonce.isNotEmpty() && encryptionMeta.tag.isNotEmpty()
                     Log.d(TAG, "📥 Using cached clipboard from deviceId=${finalSenderDeviceId.take(20)}, deviceName=$finalSenderDeviceName, origin=${finalTransportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
                 } else {
-                    // Also check if senderDeviceId is null - this shouldn't happen but handle it gracefully
-                    if (senderDeviceId == null) {
+                    // Also check if senderDeviceIdFromEnvelope is null - this shouldn't happen but handle it gracefully
+                    if (senderDeviceIdFromEnvelope == null) {
                         Log.w(TAG, "⚠️ Received clipboard with null deviceId, skipping")
                         return@launch
                     }
                     
-                    Log.d(TAG, "📥 Received clipboard from deviceId=${senderDeviceId.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
+                    Log.d(TAG, "📥 Received clipboard from deviceId=${senderDeviceIdFromEnvelope.take(20)}, deviceName=$senderDeviceName, origin=${transportOrigin.name}, localDeviceId=${normalizedLocalId.take(20)}")
                     
                     // Check if message was encrypted (non-empty nonce and tag)
                     val encryptionMeta = envelope.payload.encryption
@@ -219,13 +220,18 @@ class IncomingClipboardHandler @Inject constructor(
                     
                     // Decode the encrypted clipboard payload using key fetched by UUID (device ID)
                     // The syncEngine.decode() will fetch the key using envelope.payload.deviceId
-                    val deviceIdPreview = senderDeviceId.take(20)
+                    val deviceIdPreview = senderDeviceIdFromEnvelope.take(20)
                     val payloadSize = envelope.payload.ciphertext?.length ?: 0
-                    Log.d(TAG, "🔓 Starting decryption for deviceId=$deviceIdPreview, type=${envelope.type}, payloadSize=$payloadSize")
+                    val noncePreview = envelope.payload.encryption?.nonce?.take(20) ?: "none"
+                    Log.d(TAG, "🔓 Starting decryption for deviceId=$deviceIdPreview, type=${envelope.type}, payloadSize=$payloadSize, nonce=$noncePreview")
                     clipboardPayload = try {
                         syncEngine.decode(envelope)
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Decryption failed in syncEngine.decode(): ${e.javaClass.simpleName}: ${e.message}", e)
+                        // Log envelope details for debugging
+                        Log.e(TAG, "   Envelope deviceId: ${envelope.payload.deviceId}")
+                        Log.e(TAG, "   Envelope nonce: ${envelope.payload.encryption?.nonce?.take(30)}")
+                        Log.e(TAG, "   Envelope tag: ${envelope.payload.encryption?.tag?.take(30)}")
                         throw e // Re-throw to be caught by outer catch block
                     }
                     Log.d(TAG, "✅ Decryption successful: contentType=${clipboardPayload.contentType}, dataSize=${clipboardPayload.dataBase64.length}")
@@ -239,7 +245,7 @@ class IncomingClipboardHandler @Inject constructor(
                         
                         cachedPayloads[messageId] = CachedPayload(
                             clipboardPayload = clipboardPayload,
-                            senderDeviceId = senderDeviceId,
+                            senderDeviceId = senderDeviceIdFromEnvelope,
                             senderDeviceName = senderDeviceName,
                             transportOrigin = transportOrigin,
                             cachedAt = now
@@ -247,7 +253,7 @@ class IncomingClipboardHandler @Inject constructor(
                         Log.d(TAG, "💾 Cached payload for message ID: id=${messageId.take(8)}..., cache size=${cachedPayloads.size}")
                     }
                     
-                    finalSenderDeviceId = senderDeviceId
+                    finalSenderDeviceId = senderDeviceIdFromEnvelope
                     finalSenderDeviceName = senderDeviceName
                     finalTransportOrigin = transportOrigin
                 }
@@ -325,7 +331,7 @@ class IncomingClipboardHandler @Inject constructor(
                         content = ""
                         
                         // Debug logging
-                        Log.d(TAG, "📏 Processed payload: bytes=${bytes.size}, hash=${contentHash?.take(8)}")
+                        Log.d(TAG, "📏 Processed payload: size=${bytes.size.formattedAsKB()}, hash=${contentHash?.take(8)}")
                         
                         // Generate preview
                         preview = when (clipboardPayload.contentType) {
@@ -494,7 +500,7 @@ class IncomingClipboardHandler @Inject constructor(
                             else -> "image/png"
                         }
                         // MIME type intentionally not used yet, but calculated for future use or logging
-                        // Log.d(TAG, "MIME type for image: $mimeType")
+                        Log.d(TAG, "MIME type for image: $mimeType")
                         
                         val tempFile = java.io.File.createTempFile("hypo_image", ".$format", context.cacheDir)
                         

@@ -182,59 +182,102 @@ public final class LanSyncTransport: SyncTransport {
         
         let framed = try frameCodec.encode(envelope)
         
-        // 1) Send to all currently connected peers (inbound connections to our server)
-        let activeConnections = server.activeConnections()
-        #if canImport(os)
-        logger.debug("📡 [LanSyncTransport] Broadcasting to \(activeConnections.count) peer(s)")
-        #endif
-        server.sendToAll(framed)
+        // Get target device ID from envelope (for encrypted messages, this is set by DualSyncTransport)
+        let targetDeviceId = envelope.payload.target
         
-        // 2) Best-effort: Also try to send to all discovered peers (even if not currently connected)
-        // This uses their last seen address for maximum delivery reliability
-        if let getDiscoveredPeers = getDiscoveredPeers {
-            let discoveredPeers = getDiscoveredPeers()
-            let activeDeviceIds = Set(activeConnections.compactMap { connectionId in
-                server.connectionMetadata(for: connectionId)?.deviceId
-            })
-            
-            // Filter out peers that are already connected (we already sent to them above)
-            let disconnectedPeers = discoveredPeers.filter { peer in
-                guard let deviceId = peer.endpoint.metadata["device_id"] else { return false }
-                return !activeDeviceIds.contains(deviceId)
-            }
-            
+        // 1) Send to target device via inbound connections (peers connected to our server)
+        let activeConnections = server.activeConnections()
+        
+        if let targetDeviceId = targetDeviceId {
+            // Encrypted message - unicast to specific target device only
             #if canImport(os)
-            logger.debug("📡 [LanSyncTransport] Attempting delivery to \(disconnectedPeers.count) disconnected peer(s)")
+            logger.debug("📡 [LanSyncTransport] Unicasting to target device: \(targetDeviceId.prefix(8))...")
             #endif
             
-            // Send to disconnected peers using persistent connections (maintained by syncPeerConnections)
-            // These connections are already established and maintained, so we can send directly
-            for peer in disconnectedPeers {
-                let deviceId = peer.endpoint.metadata["device_id"] ?? peer.serviceName
+            // Find connection(s) for target device
+            var sentToTarget = false
+            for connectionId in activeConnections {
+                if let metadata = server.connectionMetadata(for: connectionId),
+                   metadata.deviceId == targetDeviceId {
+                    server.send(framed, to: connectionId)
+                    sentToTarget = true
+                    #if canImport(os)
+                    logger.debug("✅ [LanSyncTransport] Sent to target device via connection \(connectionId.uuidString.prefix(8))")
+                    #endif
+                }
+            }
+            
+            // 2) If target not found in active connections, try persistent connection
+            if !sentToTarget {
+                #if canImport(os)
+                logger.debug("📡 [LanSyncTransport] Target device not in active connections, trying persistent connection...")
+                #endif
                 
-                // Use persistent connection if available
-                if let clientTransport = clientTransports[deviceId] {
-                    // Connection is maintained by syncPeerConnections, just send
+                if let clientTransport = clientTransports[targetDeviceId] {
                     Task {
                         do {
-                            // Ensure connected (should already be, but check just in case)
                             if !clientTransport.isConnected() {
                                 try await clientTransport.connect()
                             }
                             try await clientTransport.send(envelope)
                             #if canImport(os)
-                            logger.debug("✅ [LanSyncTransport] Sent to peer \(peer.serviceName)")
+                            logger.debug("✅ [LanSyncTransport] Sent to target device \(targetDeviceId.prefix(8)) via persistent connection")
                             #endif
                         } catch {
                             #if canImport(os)
-                            logger.debug("⏭️ [LanSyncTransport] Failed to send to peer \(peer.serviceName): \(error.localizedDescription) (best-effort, continuing)")
+                            logger.warning("⚠️ [LanSyncTransport] Failed to send to target device \(targetDeviceId.prefix(8)): \(error.localizedDescription)")
                             #endif
                         }
                     }
                 } else {
                     #if canImport(os)
-                    logger.debug("⏭️ [LanSyncTransport] No persistent connection for peer \(peer.serviceName), skipping (will be created by syncPeerConnections)")
+                    logger.warning("⚠️ [LanSyncTransport] No connection found for target device \(targetDeviceId.prefix(8))")
                     #endif
+                }
+            }
+        } else {
+            // Unencrypted message or broadcast - send to all peers
+            #if canImport(os)
+            logger.debug("📡 [LanSyncTransport] Broadcasting to \(activeConnections.count) peer(s)")
+            #endif
+            server.sendToAll(framed)
+            
+            // Also send to disconnected peers via persistent connections
+            if let getDiscoveredPeers = getDiscoveredPeers {
+                let discoveredPeers = getDiscoveredPeers()
+                let activeDeviceIds = Set(activeConnections.compactMap { connectionId in
+                    server.connectionMetadata(for: connectionId)?.deviceId
+                })
+                
+                let disconnectedPeers = discoveredPeers.filter { peer in
+                    guard let deviceId = peer.endpoint.metadata["device_id"] else { return false }
+                    return !activeDeviceIds.contains(deviceId)
+                }
+                
+                #if canImport(os)
+                logger.debug("📡 [LanSyncTransport] Attempting delivery to \(disconnectedPeers.count) disconnected peer(s)")
+                #endif
+                
+                for peer in disconnectedPeers {
+                    let deviceId = peer.endpoint.metadata["device_id"] ?? peer.serviceName
+                    
+                    if let clientTransport = clientTransports[deviceId] {
+                        Task {
+                            do {
+                                if !clientTransport.isConnected() {
+                                    try await clientTransport.connect()
+                                }
+                                try await clientTransport.send(envelope)
+                                #if canImport(os)
+                                logger.debug("✅ [LanSyncTransport] Sent to peer \(peer.serviceName)")
+                                #endif
+                            } catch {
+                                #if canImport(os)
+                                logger.debug("⏭️ [LanSyncTransport] Failed to send to peer \(peer.serviceName): \(error.localizedDescription) (best-effort, continuing)")
+                                #endif
+                            }
+                        }
+                    }
                 }
             }
         }

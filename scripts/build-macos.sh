@@ -337,14 +337,11 @@ fi
 
 # Sign the app for local development (adhoc signature)
 # This allows the app to run locally without Gatekeeper blocking it
+# We only re-sign if the signature is invalid or missing to preserve accessibility permissions
 log_info "Signing app bundle for local development..."
 
-# Always clear extended attributes before signing to prevent signing failures
-log_info "Clearing extended attributes..."
-xattr -cr "$APP_BUNDLE" 2>/dev/null || true
-
 if [ -f "$SCRIPT_DIR/sign-macos.sh" ]; then
-    # Use the dedicated signing script
+    # Use the dedicated signing script (it will skip if signature is already valid)
     # Temporarily disable exit on error to allow build to continue if signing fails
     set +e
     bash "$SCRIPT_DIR/sign-macos.sh" "$APP_BUNDLE" 2>&1
@@ -363,17 +360,27 @@ if [ -f "$SCRIPT_DIR/sign-macos.sh" ]; then
             log_info "If macOS says the app is damaged, right-click and select 'Open' to bypass Gatekeeper"
         fi
     else
-        log_success "App signed successfully"
+        # Check if signing was skipped (exit code 0 from sign-macos.sh means success or skip)
+        if codesign --verify --verbose "$APP_BUNDLE" 2>/dev/null; then
+            # Signature is valid - check if it was just created or already existed
+            log_success "App signature verified"
+        fi
     fi
 else
-    # Fallback to simple ad-hoc signing if script not found
-    log_warn "sign-macos.sh not found, using simple ad-hoc signing..."
-    if codesign --force --sign - "$APP_BINARY" 2>/dev/null && \
-       codesign --force --sign - "$APP_BUNDLE" 2>/dev/null; then
-        log_success "App signed successfully"
+    # Fallback: Check if already signed before re-signing
+    if codesign --verify --verbose "$APP_BUNDLE" 2>/dev/null; then
+        log_info "App already has a valid signature, skipping re-signing"
+        log_info "This preserves accessibility permissions across builds"
     else
-        log_warn "Code signing failed, but app may still work for local development"
-        log_info "If macOS says the app is damaged, right-click and select 'Open' to bypass Gatekeeper"
+        log_warn "sign-macos.sh not found, using simple ad-hoc signing..."
+        xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+        if codesign --force --sign - "$APP_BINARY" 2>/dev/null && \
+           codesign --force --sign - "$APP_BUNDLE" 2>/dev/null; then
+            log_success "App signed successfully"
+        else
+            log_warn "Code signing failed, but app may still work for local development"
+            log_info "If macOS says the app is damaged, right-click and select 'Open' to bypass Gatekeeper"
+        fi
     fi
 fi
 
@@ -400,11 +407,14 @@ fi
 
 # Copy app to /Applications (use cp -R to preserve permissions and extended attributes)
 if cp -R "$APP_BUNDLE" "/Applications/"; then
-    log_success "App moved to /Applications: $APPLICATIONS_APP"
+    log_success "App copied to /Applications: $APPLICATIONS_APP"
+    # Remove the local app bundle after successful copy (clean up)
+    log_info "Removing local app bundle: $APP_BUNDLE"
+    rm -rf "$APP_BUNDLE"
     # Update APP_BUNDLE to point to /Applications version for launching
     APP_BUNDLE="$APPLICATIONS_APP"
 else
-    log_error "Failed to move app to /Applications"
+    log_error "Failed to copy app to /Applications"
     log_warn "Continuing with local app bundle: $APP_BUNDLE"
 fi
 

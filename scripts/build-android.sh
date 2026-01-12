@@ -164,8 +164,12 @@ build_apk() {
     local capitalized_variant=$(echo "$variant" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')
     local task="assemble$capitalized_variant"  # assembleDebug or assembleRelease
     
-    # Create temp file for build output
-    local build_log=$(mktemp /tmp/hypo-build-XXXXXX.log)
+    # Create temp file for build output (mktemp requires Xs at end on macOS)
+    local build_log
+    build_log=$(mktemp "${TMPDIR:-/tmp}/hypo-build-android-XXXXXX") || {
+        echo -e "${RED}❌ Failed to create temp build log${NC}"
+        return 1
+    }
     
     echo ""
     echo -e "${YELLOW}Building $variant APK...${NC}"
@@ -179,6 +183,18 @@ build_apk() {
         echo -e "${YELLOW}⚠️  Duplicate class error detected, cleaning build...${NC}"
         ./gradlew clean 2>&1 | tee -a "$build_log"
         echo -e "${YELLOW}Rebuilding after clean...${NC}"
+        set +e
+        ./gradlew "$task" --stacktrace 2>&1 | tee -a "$build_log"
+        build_result=${PIPESTATUS[0]}
+        set -e
+    fi
+
+    # Gradle distribution cache corruption (missing GradleMain)
+    if [ $build_result -ne 0 ] && grep -q "ClassNotFoundException: org.gradle.launcher.GradleMain" "$build_log"; then
+        echo -e "${YELLOW}⚠️  Gradle distribution appears corrupted, clearing wrapper cache...${NC}"
+        ./gradlew --stop >/dev/null 2>&1 || true
+        rm -rf "$GRADLE_USER_HOME/wrapper/dists/gradle-"*
+        echo -e "${YELLOW}Rebuilding after cache clear...${NC}"
         set +e
         ./gradlew "$task" --stacktrace 2>&1 | tee -a "$build_log"
         build_result=${PIPESTATUS[0]}
@@ -210,6 +226,11 @@ build_apk() {
         echo -e "${RED}❌ $variant build failed${NC}"
         if [ $build_result -ne 0 ]; then
             echo "   Gradle build returned error code: $build_result"
+            if [ $build_result -eq 137 ]; then
+                echo "   Gradle was killed (137). Try reducing heap:"
+                echo "   ORG_GRADLE_PROJECT_org.gradle.jvmargs='-Xmx2048m -Dfile.encoding=UTF-8' \\"
+                echo "   ./scripts/build-android.sh release"
+            fi
             echo ""
             echo -e "${YELLOW}Last 30 lines of build output:${NC}"
             tail -n 30 "$build_log" | sed 's/^/   /'
@@ -241,66 +262,121 @@ if [ "$BUILD_SUCCESS" = false ]; then
     exit 1
 fi
 
-# Auto-install debug APK if device is connected (only for debug builds)
-if [ "$BUILD_TYPE" = "debug" ] || [ "$BUILD_TYPE" = "both" ]; then
-    DEBUG_APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+# Auto-install APK if device is connected (always, regardless of build type)
+echo ""
+# Auto-install and reopen app if device is connected
+# Try system-wide adb first (from Homebrew), then fallback to SDK adb
+if command -v adb &> /dev/null; then
+    ADB="adb"
+elif [ -f "$ANDROID_SDK_ROOT/platform-tools/adb" ]; then
+    ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
+else
+    ADB=""
+fi
+
+if [ -n "$ADB" ]; then
+    # Get list of connected devices
+    DEVICES=$("$ADB" devices 2>/dev/null | grep "device$" | awk '{print $1}')
+    DEVICE_COUNT=$(echo "$DEVICES" | grep -c . || echo "0")
     
-    if [ -f "$DEBUG_APK_PATH" ]; then
-        echo ""
-        # Auto-install and reopen app if device is connected
-        # Try system-wide adb first (from Homebrew), then fallback to SDK adb
-        if command -v adb &> /dev/null; then
-            ADB="adb"
-        elif [ -f "$ANDROID_SDK_ROOT/platform-tools/adb" ]; then
-            ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
-        else
-            ADB=""
+    if [ "$DEVICE_COUNT" -gt 0 ]; then
+        echo -e "${YELLOW}Found $DEVICE_COUNT connected device(s)${NC}"
+        
+        # Determine which APK(s) to install based on build type
+        APKS_TO_INSTALL=()
+        if [ "$BUILD_TYPE" = "debug" ] || [ "$BUILD_TYPE" = "both" ]; then
+            DEBUG_APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+            if [ -f "$DEBUG_APK_PATH" ]; then
+                APKS_TO_INSTALL+=("debug:$DEBUG_APK_PATH")
+            fi
         fi
         
-        if [ -n "$ADB" ]; then
-            # Get list of connected devices
-            DEVICES=$("$ADB" devices 2>/dev/null | grep "device$" | awk '{print $1}')
-            DEVICE_COUNT=$(echo "$DEVICES" | grep -c . || echo "0")
-            
-            if [ "$DEVICE_COUNT" -gt 0 ]; then
-                echo -e "${YELLOW}Found $DEVICE_COUNT connected device(s)${NC}"
+        if [ "$BUILD_TYPE" = "release" ] || [ "$BUILD_TYPE" = "both" ]; then
+            RELEASE_APK_PATH="app/build/outputs/apk/release/app-release.apk"
+            if [ -f "$RELEASE_APK_PATH" ]; then
+                APKS_TO_INSTALL+=("release:$RELEASE_APK_PATH")
+            fi
+        fi
+        
+        if [ ${#APKS_TO_INSTALL[@]} -eq 0 ]; then
+            echo "No APKs found to install"
+        else
+            # Install and launch on each device
+            for DEVICE_ID in $DEVICES; do
+                DEVICE_NAME=$("$ADB" -s "$DEVICE_ID" shell getprop ro.product.model 2>/dev/null | tr -d '\r' || echo "unknown")
                 
-                # Install and launch on each device
-                for DEVICE_ID in $DEVICES; do
-                    DEVICE_NAME=$("$ADB" -s "$DEVICE_ID" shell getprop ro.product.model 2>/dev/null | tr -d '\r' || echo "unknown")
-                    echo ""
-                    echo -e "${YELLOW}Installing debug APK on device: $DEVICE_ID ($DEVICE_NAME)...${NC}"
+                # Install each APK that was built
+                for APK_INFO in "${APKS_TO_INSTALL[@]}"; do
+                    APK_TYPE=$(echo "$APK_INFO" | cut -d':' -f1)
+                    APK_PATH=$(echo "$APK_INFO" | cut -d':' -f2-)
                     
-                    if "$ADB" -s "$DEVICE_ID" install -r "$PROJECT_ROOT/android/$DEBUG_APK_PATH" 2>/dev/null; then
-                        echo -e "${GREEN}✅ Installed successfully on $DEVICE_ID${NC}"
+                    echo ""
+                    echo -e "${YELLOW}Installing $APK_TYPE APK on device: $DEVICE_ID ($DEVICE_NAME)...${NC}"
+                    
+                    if "$ADB" -s "$DEVICE_ID" install -r "$PROJECT_ROOT/android/$APK_PATH" 2>/dev/null; then
+                        echo -e "${GREEN}✅ Installed $APK_TYPE APK successfully on $DEVICE_ID${NC}"
+                        
+                        # Wait a moment for installation to fully complete
+                        sleep 1
                         
                         # Launch the app (both debug and release use the same package name)
                         PACKAGE_NAME="com.hypo.clipboard"
                         echo -e "${YELLOW}Opening Hypo app on $DEVICE_ID...${NC}"
                         
-                        if "$ADB" -s "$DEVICE_ID" shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" >/dev/null 2>&1; then
-                            echo -e "${GREEN}✅ App opened on $DEVICE_ID${NC}"
+                        # Try multiple methods to launch the app
+                        LAUNCH_SUCCESS=false
+                        
+                        # Method 1: Use explicit activity name with dot notation
+                        if "$ADB" -s "$DEVICE_ID" shell am start -n "$PACKAGE_NAME/.MainActivity" >/dev/null 2>&1; then
+                            LAUNCH_SUCCESS=true
+                        # Method 2: Use launcher intent with explicit activity
+                        elif "$ADB" -s "$DEVICE_ID" shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$PACKAGE_NAME/.MainActivity" >/dev/null 2>&1; then
+                            LAUNCH_SUCCESS=true
+                        # Method 3: Use monkey (most reliable fallback)
                         elif "$ADB" -s "$DEVICE_ID" shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; then
+                            LAUNCH_SUCCESS=true
+                        # Method 4: Try with full activity path
+                        elif "$ADB" -s "$DEVICE_ID" shell am start -n "$PACKAGE_NAME/com.hypo.clipboard.MainActivity" >/dev/null 2>&1; then
+                            LAUNCH_SUCCESS=true
+                        fi
+                        
+                        if [ "$LAUNCH_SUCCESS" = true ]; then
                             echo -e "${GREEN}✅ App opened on $DEVICE_ID${NC}"
                         else
-                            echo -e "${YELLOW}⚠️  Could not auto-open app on $DEVICE_ID. Please open manually.${NC}"
+                            echo -e "${YELLOW}⚠️  Could not auto-open app on $DEVICE_ID${NC}"
+                            echo "   Try manually: $ADB -s $DEVICE_ID shell am start -n $PACKAGE_NAME/.MainActivity"
+                            # Show error for debugging
+                            echo -e "${YELLOW}   Debug: Testing launch command...${NC}"
+                            "$ADB" -s "$DEVICE_ID" shell am start -n "$PACKAGE_NAME/.MainActivity" 2>&1 | head -5 | sed 's/^/   /' || true
                         fi
+                        
+                        # Only launch once per device (use the first installed APK)
+                        break
                     else
                         echo -e "${RED}❌ Installation failed on $DEVICE_ID${NC}"
-                        echo "   Try manually: $ADB -s $DEVICE_ID install -r android/$DEBUG_APK_PATH"
+                        echo "   Try manually: $ADB -s $DEVICE_ID install -r android/$APK_PATH"
                     fi
                 done
-            else
-                echo "No devices connected. To install manually:"
-                echo "   $ADB install -r android/$DEBUG_APK_PATH"
-            fi
-        else
-            echo "To install on connected device:"
-            echo "   adb install -r android/$DEBUG_APK_PATH"
+            done
         fi
+    else
+        echo "No devices connected. To install manually:"
+        if [ "$BUILD_TYPE" = "debug" ] || [ "$BUILD_TYPE" = "both" ]; then
+            echo "   $ADB install -r android/app/build/outputs/apk/debug/app-debug.apk"
+        fi
+        if [ "$BUILD_TYPE" = "release" ] || [ "$BUILD_TYPE" = "both" ]; then
+            echo "   $ADB install -r android/app/build/outputs/apk/release/app-release.apk"
+        fi
+    fi
+else
+    echo "To install on connected device:"
+    if [ "$BUILD_TYPE" = "debug" ] || [ "$BUILD_TYPE" = "both" ]; then
+        echo "   adb install -r android/app/build/outputs/apk/debug/app-debug.apk"
+    fi
+    if [ "$BUILD_TYPE" = "release" ] || [ "$BUILD_TYPE" = "both" ]; then
+        echo "   adb install -r android/app/build/outputs/apk/release/app-release.apk"
     fi
 fi
 
 echo ""
 echo -e "${GREEN}✅ All builds completed!${NC}"
-

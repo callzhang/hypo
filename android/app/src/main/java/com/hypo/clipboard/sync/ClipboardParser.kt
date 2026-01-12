@@ -277,6 +277,13 @@ class ClipboardParser(
                 thumbnail?.let {
                     put("thumbnail_base64", base64Encoder.encodeToString(it))
                 }
+                
+                // Try to get filename if available (e.g. copied from file manager)
+                val fileMeta = queryMetadata(uri)
+                val name = fileMeta?.displayName ?: uri.lastPathSegment
+                if (!name.isNullOrEmpty() && name != "pasted_image" && !name.startsWith("image:")) {
+                     put("file_name", name)
+                }
             }
 
             // val base64 = "" // Clear content to avoid memory bloat (Variable not used)

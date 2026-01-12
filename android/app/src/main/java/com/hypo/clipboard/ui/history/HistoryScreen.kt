@@ -13,6 +13,7 @@ import java.io.FileOutputStream
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,6 +42,8 @@ import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -687,194 +690,10 @@ private fun ClipboardCard(
                 ) {
                     ClipboardDetailContent(
                         item = item,
-                        viewModel = viewModel,
-                        onDismiss = { showDetailDialog = false }
+                        viewModel = viewModel
                     )
                 }
             }
-        }
-    }
-}
-
-private val ClipboardType.iconVector: androidx.compose.ui.graphics.vector.ImageVector
-    get() = when (this) {
-        ClipboardType.TEXT -> Icons.Outlined.TextFields
-        ClipboardType.LINK -> Icons.Outlined.Link
-        ClipboardType.IMAGE -> Icons.Outlined.Image
-        ClipboardType.FILE -> Icons.Outlined.Description
-    }
-
-@Composable
-private fun FileDetailContent(item: ClipboardItem, content: String) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var isSaving by remember { mutableStateOf(false) }
-    var saveError by remember { mutableStateOf<String?>(null) }
-    
-    val fileBytes = try {
-        if (content.isNotEmpty()) {
-            Base64.getDecoder().decode(content)
-        } else {
-            null
-        }
-    } catch (e: Exception) {
-        null
-    }
-    
-    val fileName = item.metadata?.get("filename") ?: "file"
-    val fileSize = item.metadata?.get("size")?.toLongOrNull() ?: (fileBytes?.size?.toLong() ?: 0L)
-    val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
-    
-    // Check if it's an image file (should not be rendered as text)
-    val isImageFile = mimeType.startsWith("image/") ||
-                     fileName.endsWith(".jpg", ignoreCase = true) ||
-                     fileName.endsWith(".jpeg", ignoreCase = true) ||
-                     fileName.endsWith(".png", ignoreCase = true) ||
-                     fileName.endsWith(".gif", ignoreCase = true) ||
-                     fileName.endsWith(".webp", ignoreCase = true) ||
-                     fileName.endsWith(".bmp", ignoreCase = true) ||
-                     fileName.endsWith(".svg", ignoreCase = true)
-    
-    // For non-image files, always try to render as text
-    // Only show binary preview for actual image files or if text decoding fails
-    val fileContent = if (fileBytes != null && !isImageFile) {
-        try {
-            String(fileBytes, Charsets.UTF_8)
-        } catch (e: Exception) {
-            // If UTF-8 decoding fails, try to check if it's valid text by checking for null bytes
-            // If no null bytes and mostly printable ASCII, treat as text
-            val hasNullBytes = fileBytes.any { it == 0.toByte() }
-            val printableRatio = fileBytes.count { it.toInt() in 32..126 || it.toInt() == 9 || it.toInt() == 10 || it.toInt() == 13 }.toFloat() / fileBytes.size
-            if (!hasNullBytes && printableRatio > 0.7f) {
-                // Mostly printable characters, try ISO-8859-1 or other encoding
-                try {
-                    String(fileBytes, Charsets.ISO_8859_1)
-                } catch (e2: Exception) {
-                    null
-                }
-            } else {
-                null
-            }
-        }
-    } else null
-    
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // File info
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = fileName,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Size: ${formatBytes(fileSize)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Type: $mimeType",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        
-        // Save button
-        Button(
-            onClick = {
-                if (fileBytes == null) {
-                    saveError = "No file data available"
-                    return@Button
-                }
-                
-                isSaving = true
-                saveError = null
-                
-                // For Android, we'll show a message to use the copy button
-                // Full file save with SAF requires Activity context and result handling
-                // which is complex in Compose. Users can copy the file data instead.
-                scope.launch(Dispatchers.Main) {
-                    isSaving = false
-                    android.widget.Toast.makeText(
-                        context,
-                        "Use the copy button to copy file data",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                }
-            },
-            enabled = !isSaving && fileBytes != null
-        ) {
-            if (isSaving) {
-                Text("Saving...")
-            } else {
-                Text("Save File")
-            }
-        }
-        
-        if (saveError != null) {
-            Text(
-                text = "Error: $saveError",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
-            )
-        }
-        
-        // Content display
-        if (fileContent != null) {
-            // Text file - show content
-            val scrollState = rememberScrollState()
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(scrollState)
-            ) {
-                Text(
-                    text = fileContent,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        } else if (fileBytes != null && isImageFile) {
-            // Image file - show hex preview (images shouldn't be rendered as text)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Image file content (hex preview):",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = hexDump(fileBytes, maxBytes = 1024),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                if (fileBytes.size > 1024) {
-                    Text(
-                        text = "(Showing first 1KB of ${fileBytes.size} bytes)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        } else if (fileBytes != null) {
-            // Non-image file that couldn't be decoded as text - still try to show as text
-            // This handles edge cases where decoding failed but content might still be viewable
-            Text(
-                text = "Unable to decode file as text. File size: ${formatBytes(fileSize)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            Text(
-                text = "Unable to decode file data",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
@@ -889,49 +708,33 @@ private fun formatBytes(bytes: Long): String {
     }
 }
 
-private fun hexDump(data: ByteArray, maxBytes: Int): String {
-    val bytesToShow = minOf(data.size, maxBytes)
-    val sb = StringBuilder()
-    for (i in 0 until bytesToShow step 16) {
-        val end = minOf(i + 16, bytesToShow)
-        val chunk = data.sliceArray(i until end)
-        
-        // Hex representation
-        val hex = chunk.joinToString(" ") { "%02x".format(it) }
-        val padding = "   ".repeat(maxOf(0, 16 - chunk.size))
-        
-        // ASCII representation
-        val ascii = chunk.joinToString("") { byte ->
-            val char = byte.toInt().toChar()
-            if (char.isLetterOrDigit() || char.isWhitespace() || char in "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~") {
-                char.toString()
-            } else {
-                "."
-            }
-        }
-        
-        sb.append("%08x  $hex$padding  |$ascii|\n".format(i))
+private val ClipboardType.iconVector: androidx.compose.ui.graphics.vector.ImageVector
+    get() = when (this) {
+        ClipboardType.TEXT -> Icons.Outlined.TextFields
+        ClipboardType.LINK -> Icons.Outlined.Link
+        ClipboardType.IMAGE -> Icons.Outlined.Image
+        ClipboardType.FILE -> Icons.Outlined.Description
     }
-    return sb.toString()
-}
 
 @Composable
 private fun ClipboardDetailContent(
     item: ClipboardItem,
-    viewModel: HistoryViewModel,
-    onDismiss: () -> Unit = {}
+    viewModel: HistoryViewModel
 ) {
-    val scrollState = rememberScrollState()
-    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     
     // Load full content for IMAGE/FILE types automatically when detail view opens
     var loadedContent by remember { mutableStateOf(item.content) }
     var isLoading by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
     
-    // Load content automatically when detail view opens for IMAGE/FILE types
-    LaunchedEffect(item.id, item.type) {
-        if ((item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE) && loadedContent.isEmpty()) {
+    // Determine if content loading is needed
+    val needsLoading = remember(item.type, item.content) {
+        (item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE) && item.content.isEmpty()
+    }
+
+    LaunchedEffect(item.id, needsLoading) {
+        if (needsLoading) {
             isLoading = true
             loadError = null
             try {
@@ -939,17 +742,7 @@ private fun ClipboardDetailContent(
                 if (content != null && content.isNotEmpty()) {
                     loadedContent = content
                 } else {
-                    // Content is null - this could be due to size or other reasons
-                    // Only show size error if we know the size is definitely too large
                     loadError = "Failed to load content"
-                }
-            } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
-                // SQLite CursorWindow limit exceeded - get size from metadata if available
-                val sizeFromMetadata = item.metadata?.get("size")?.toLongOrNull() ?: 0L
-                if (sizeFromMetadata > 0) {
-                    loadError = "Content is too large to display (${formatBytes(sizeFromMetadata)}). Please copy to clipboard instead."
-                } else {
-                    loadError = "Content is too large to display. Please copy to clipboard instead."
                 }
             } catch (e: Exception) {
                 loadError = "Error loading content: ${e.message}"
@@ -959,114 +752,165 @@ private fun ClipboardDetailContent(
         }
     }
     
+    val fileBytes = remember(loadedContent) {
+        try {
+            if (loadedContent.isNotEmpty() && (item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE)) {
+                Base64.getDecoder().decode(loadedContent)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Determine Metadata
+    val fileName = remember(item) {
+        item.metadata?.get("file_name") ?: item.metadata?.get("filename") ?: 
+        when (item.type) {
+            ClipboardType.TEXT -> "Clipboard content"
+            ClipboardType.IMAGE -> "Clipboard image"
+            else -> item.type.name
+        }
+    }
+    
+    val size = remember(item, fileBytes) {
+        item.metadata?.get("size")?.toLongOrNull() ?: (fileBytes?.size?.toLong()) ?: item.content.length.toLong()
+    }
+    
+    val mimeType = remember(item) {
+        item.metadata?.get("mime_type") ?: "text/plain"
+    }
+    
+    val date = remember(item.createdAt) {
+        DateTimeFormatter.ofPattern("MMM d, HH:mm").format(item.createdAt.atZone(ZoneId.systemDefault()))
+    }
+    
+    fun getExtension(name: String): String {
+        val i = name.lastIndexOf('.')
+        return if (i > 0) name.substring(i + 1).lowercase() else ""
+    }
+    val extension = getExtension(fileName)
+    
+    val isImage = item.type == ClipboardType.IMAGE || mimeType.startsWith("image/")
+    
+    // Logic to open file
+    fun openFile() {
+        try {
+            val bytesToSave = fileBytes ?: loadedContent.toByteArray()
+            val ext = if (extension.isNotEmpty()) ".$extension" else if (item.type == ClipboardType.TEXT) ".txt" else ""
+            val prefix = "hypo_open_"
+            
+            // Create temp file
+            val tempFile = File.createTempFile(prefix, ext, context.cacheDir)
+            FileOutputStream(tempFile).use { it.write(bytesToSave) }
+            tempFile.setReadable(true, false)
+            
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                tempFile
+            )
+            
+            val targetMimeType = if (item.type == ClipboardType.TEXT) "text/plain" else mimeType
+            
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, targetMimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(intent, "Open with..."))
+        } catch (e: Exception) {
+            Toast.makeText(context, "Cannot open: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = 600.dp)
-            .padding(16.dp)
-            .verticalScroll(scrollState),
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Header
+        // Header Row: Title + Open Button
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = item.type.name,
+                text = fileName,
                 style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
             )
-            TextButton(onClick = onDismiss) {
-                Text("Close")
+            
+            Button(onClick = { openFile() }) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                    contentDescription = "Open",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Open")
             }
         }
         
-        // Content based on type
-        when (item.type) {
-            ClipboardType.IMAGE -> {
-                if (isLoading) {
-                    Text("Loading image...")
-                } else if (loadError != null) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Error: $loadError", color = MaterialTheme.colorScheme.error)
-                        Button(
-                            onClick = { 
-                                // Retry loading
-                                isLoading = true
-                                loadError = null
-                                coroutineScope.launch {
-                                    try {
-                                        val content = viewModel.loadFullContent(item.id)
-                                        if (content != null && content.isNotEmpty()) {
-                                            loadedContent = content
-                                        } else {
-                                            // Content is null - this could be due to size or other reasons
-                                            // Only show size error if we know the size is definitely too large
-                                            loadError = "Failed to load content"
-                                        }
-                                    } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
-                                        // SQLite CursorWindow limit exceeded - get size from metadata if available
-                                        val sizeFromMetadata = item.metadata?.get("size")?.toLongOrNull() ?: 0L
-                                        if (sizeFromMetadata > 0) {
-                                            loadError = "Content is too large to display (${formatBytes(sizeFromMetadata)}). Please copy to clipboard instead."
-                                        } else {
-                                            loadError = "Content is too large to display. Please copy to clipboard instead."
-                                        }
-                                    } catch (e: Exception) {
-                                        loadError = "Error loading content: ${e.message}"
-                                    } finally {
-                                        isLoading = false
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Retry")
-                        }
-                    }
+        // Metadata Row
+        Text(
+            text = "${formatBytes(size)} • $date • ${mimeType}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        
+        // Content Area
+        Box(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .fillMaxWidth()
+        ) {
+            val scrollState = rememberScrollState()
+            
+            if (isLoading) {
+                Text("Loading content...", modifier = Modifier.align(Alignment.Center))
+            } else if (loadError != null) {
+                Text("Error: $loadError", color = MaterialTheme.colorScheme.error, modifier = Modifier.align(Alignment.Center))
+            } else {
+                if (isImage && fileBytes != null) {
+                   val bitmap = BitmapFactory.decodeByteArray(fileBytes, 0, fileBytes.size)
+                   if (bitmap != null) {
+                       Image(
+                           bitmap = bitmap.asImageBitmap(),
+                           contentDescription = "Preview",
+                           modifier = Modifier
+                               .fillMaxWidth()
+                               .verticalScroll(scrollState)
+                       )
+                   } else {
+                       Text("Unable to enable image preview", modifier = Modifier.align(Alignment.Center))
+                   }
                 } else {
-                    // Decode and display image
-                    val imageBytes = try {
-                        if (loadedContent.isNotEmpty()) {
-                            Base64.getDecoder().decode(loadedContent)
-                        } else {
-                            null
-                        }
-                    } catch (e: Exception) {
-                        null
+                    // Text content (or fallback for binary)
+                    val textToShow = if (item.type != ClipboardType.IMAGE && item.type != ClipboardType.FILE) {
+                        loadedContent
+                    } else if (fileBytes != null) {
+                        try {
+                             // Try to decode generic file as text logic
+                             val hasNull = fileBytes.any { it == 0.toByte() }
+                             if (!hasNull) String(fileBytes, Charsets.UTF_8) else "Binary content. Click Open to view."
+                        } catch(e: Exception) { "Binary content. Click Open to view." }
+                    } else "No content"
+
+                    SelectionContainer {
+                        Text(
+                            text = textToShow,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(scrollState)
+                        )
                     }
-                    
-                    if (imageBytes != null && imageBytes.isNotEmpty()) {
-                        val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-                        if (bitmap != null) {
-                            Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = "Clipboard Image",
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        } else {
-                            Text("Failed to decode image")
-                        }
-                    } else {
-                        Text("Invalid image data")
-                    }
-                }
-            }
-            ClipboardType.TEXT, ClipboardType.LINK -> {
-                Text(
-                    text = item.content,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-            ClipboardType.FILE -> {
-                if (isLoading) {
-                    Text("Loading file...")
-                } else if (loadError != null) {
-                    Text("Error: $loadError", color = MaterialTheme.colorScheme.error)
-                } else {
-                    FileDetailContent(item = item, content = loadedContent)
                 }
             }
         }

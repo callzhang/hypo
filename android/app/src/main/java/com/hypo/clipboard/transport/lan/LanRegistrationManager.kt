@@ -155,19 +155,22 @@ class LanRegistrationManager(
             // Add device_id attribute so devices can match discovered peers
             config.deviceId?.let { deviceId ->
                 setAttribute("device_id", deviceId)
-                android.util.Log.d("LanRegistrationManager", "📝 Added device_id attribute: $deviceId")
             }
             // Add public keys for device-agnostic pairing
             config.publicKey?.let { pubKey ->
                 setAttribute("pub_key", pubKey)
-                android.util.Log.d("LanRegistrationManager", "📝 Added pub_key attribute (${pubKey.length} chars)")
             }
             config.signingPublicKey?.let { signingKey ->
                 setAttribute("signing_pub_key", signingKey)
-                android.util.Log.d("LanRegistrationManager", "📝 Added signing_pub_key attribute (${signingKey.length} chars)")
             }
         }
-        android.util.Log.d("LanRegistrationManager", "📝 Service info created: name=${info.serviceName}, type=${info.serviceType}, port=${info.port}")
+        val attributesSummary = listOfNotNull(
+            config.deviceId?.let { "deviceId=$it" },
+            config.publicKey?.let { "pubKey=${it.length}chars" },
+            config.signingPublicKey?.let { "signKey=${it.length}chars" },
+            "fp=${config.fingerprint}"
+        ).joinToString(", ")
+        android.util.Log.d("LanRegistrationManager", "📝 Service created: ${info.serviceName} (${info.serviceType}:${info.port}) | Attributes: [$attributesSummary]")
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
                 android.util.Log.d("LanRegistrationManager", "✅ Service registered successfully: ${serviceInfo.serviceName}")
@@ -197,9 +200,8 @@ class LanRegistrationManager(
         registrationListener = listener
         scope.launch(dispatcher) {
             runCatching { 
-                android.util.Log.d("LanRegistrationManager", "🔄 Calling nsdManager.registerService()...")
                 nsdManager.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
-                android.util.Log.d("LanRegistrationManager", "✅ nsdManager.registerService() called successfully")
+                android.util.Log.d("LanRegistrationManager", "🔄 nsdManager.registerService() called")
             }
                 .onFailure { error ->
                     android.util.Log.e("LanRegistrationManager", "❌ Failed to call registerService: ${error.message}", error)

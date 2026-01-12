@@ -202,20 +202,27 @@ class SyncCoordinator @Inject constructor(
                     android.util.Log.d(TAG, "🔄 Matched current clipboard, removing old item and creating new one at top: id=${latestEntry.id}")
                     try {
                         repository.delete(latestEntry.id)
+                        
+                        // Preserve origin info if this is a local event (event.deviceId == null)
+                        val isLocalEvent = event.deviceId == null
+                        val resolvedDeviceId = if (isLocalEvent) latestEntry.deviceId ?: deviceId else deviceId
+                        val resolvedDeviceName = if (isLocalEvent) latestEntry.deviceName ?: deviceName else deviceName
+                        val resolvedTransportOrigin = if (isLocalEvent) latestEntry.transportOrigin else event.transportOrigin
+                        
                         // Create new item with current timestamp (will be at top)
                         val newItem = ClipboardItem(
                             id = event.id,
                             type = event.type,
-                            content = event.content,
+                            content = event.content, // Use new content (same but fresh)
                             preview = event.preview,
                             metadata = event.metadata.ifEmpty { emptyMap() },
-                            deviceId = deviceId,
-                            deviceName = deviceName,
+                            deviceId = resolvedDeviceId,
+                            deviceName = resolvedDeviceName,
                             createdAt = Instant.now(),
-                            isPinned = false,
-                            isEncrypted = event.isEncrypted,
-                            transportOrigin = event.transportOrigin,
-                            localPath = event.localPath
+                            isPinned = latestEntry.isPinned, // Preserve pinned state
+                            isEncrypted = latestEntry.isEncrypted, // Preserve encryption state
+                            transportOrigin = resolvedTransportOrigin,
+                            localPath = latestEntry.localPath ?: event.localPath // Prefer existing path if valid
                         )
                         repository.upsert(newItem)
                         android.util.Log.d(TAG, "✅ Successfully removed old item and created new one at top: ${newItem.preview.take(50)}")
@@ -240,6 +247,13 @@ class SyncCoordinator @Inject constructor(
                         android.util.Log.d(TAG, "🔄 Matched history item, removing old item and creating new one at top: id=${matchingEntry.id}")
                         try {
                             repository.delete(matchingEntry.id)
+                            
+                            // Preserve origin info if this is a local event (event.deviceId == null)
+                            val isLocalEvent = event.deviceId == null
+                            val resolvedDeviceId = if (isLocalEvent) matchingEntry.deviceId ?: deviceId else deviceId
+                            val resolvedDeviceName = if (isLocalEvent) matchingEntry.deviceName ?: deviceName else deviceName
+                            val resolvedTransportOrigin = if (isLocalEvent) matchingEntry.transportOrigin else event.transportOrigin
+                            
                             // Create new item with current timestamp (will be at top)
                             val newItem = ClipboardItem(
                                 id = event.id,
@@ -247,13 +261,13 @@ class SyncCoordinator @Inject constructor(
                                 content = event.content,
                                 preview = event.preview,
                                 metadata = event.metadata.ifEmpty { emptyMap() },
-                                deviceId = deviceId,
-                                deviceName = deviceName,
+                                deviceId = resolvedDeviceId,
+                                deviceName = resolvedDeviceName,
                                 createdAt = Instant.now(),
-                                isPinned = false,
-                                isEncrypted = event.isEncrypted,
-                                transportOrigin = event.transportOrigin,
-                                localPath = event.localPath
+                                isPinned = matchingEntry.isPinned, // Preserve pinned state
+                                isEncrypted = matchingEntry.isEncrypted, // Preserve encryption state
+                                transportOrigin = resolvedTransportOrigin,
+                                localPath = matchingEntry.localPath ?: event.localPath // Prefer existing path if valid
                             )
                             repository.upsert(newItem)
                             android.util.Log.d(TAG, "✅ Successfully removed old history item and created new one at top: ${newItem.preview.take(50)}")

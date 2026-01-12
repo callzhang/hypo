@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
  * Note: This is a legitimate use case for accessibility services as it helps users
  * with clipboard synchronization across devices.
  */
-class ClipboardAccessibilityService : AccessibilityService() {
+class ClipboardAccessibilityService : AccessibilityService(), ClipboardManager.OnPrimaryClipChangedListener {
 
     private lateinit var clipboardParser: ClipboardParser
     private var syncCoordinator: com.hypo.clipboard.sync.SyncCoordinator? = null
@@ -33,8 +33,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var lastSignature: String? = null
-    private var lastClipboardCheck: Long = 0
-    private val clipboardCheckInterval = 500L // Check clipboard every 500ms
+    private var clipboardManager: ClipboardManager? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -54,7 +53,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
             // Initialize dependencies using obtained storageManager
             clipboardParser = ClipboardParser(contentResolver, storageManager)
             
-            Log.i(TAG, "✅ ClipboardAccessibilityService CONNECTED - can now access clipboard in background!")
+            // Register for clipboard change events (truly event-driven)
+            clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            clipboardManager?.addPrimaryClipChangedListener(this)
+            
+            Log.i(TAG, "✅ ClipboardAccessibilityService CONNECTED - registered for clipboard events!")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to get dependencies: ${e.message}", e)
             Log.w(TAG, "⚠️ Accessibility service will monitor clipboard but cannot sync (Dependencies unavailable)")
@@ -63,49 +66,47 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        // Use accessibility events as a trigger to check clipboard
-        // This allows us to monitor clipboard even when app is in background
-        val now = System.currentTimeMillis()
-        if (now - lastClipboardCheck < clipboardCheckInterval) {
-            return // Throttle clipboard checks
-        }
-        lastClipboardCheck = now
-        
-        try {
-            val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            val clip = clipboardManager?.primaryClip ?: return
-            
-            // Parse clipboard content
-            val clipboardEvent = clipboardParser.parse(clip) ?: return
-            val signature = clipboardEvent.signature()
-            
-            // Skip if duplicate
-            if (signature == lastSignature) {
-                return
-            }
-            lastSignature = signature
-            
-            Log.i(TAG, "📋 Accessibility service detected clipboard change: ${clipboardEvent.type}, preview: ${clipboardEvent.preview.take(50)}")
-            
-            // Forward to sync coordinator if available
-            val coordinator = syncCoordinator
-            if (coordinator != null) {
-                scope.launch {
+        // Accessibility events are NOT used for clipboard monitoring
+        // We use onPrimaryClipChanged() instead (truly event-driven)
+        // This method is required by AccessibilityService but we don't use it for clipboard
+    }
+    
+    override fun onPrimaryClipChanged() {
+        // EVENT-DRIVEN: Only called when clipboard actually changes
+        scope.launch(Dispatchers.Default) {
+            try {
+                val clip = clipboardManager?.primaryClip ?: return@launch
+                
+                // Skip if this is a remote clipboard update (from other devices)
+                val description = clip.description
+                if (description.label == "Hypo Remote") {
+                    return@launch
+                }
+                
+                // Parse clipboard content
+                val clipboardEvent = clipboardParser.parse(clip) ?: return@launch
+                val signature = clipboardEvent.signature()
+                
+                // Skip if duplicate (using signature)
+                if (signature == lastSignature) {
+                    return@launch
+                }
+                lastSignature = signature
+                
+                // Forward to sync coordinator if available
+                val coordinator = syncCoordinator
+                if (coordinator != null) {
                     try {
                         coordinator.onClipboardEvent(clipboardEvent)
-                        Log.i(TAG, "✅ Clipboard event forwarded to SyncCoordinator")
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Failed to forward clipboard event: ${e.message}", e)
                     }
                 }
-            } else {
-                Log.w(TAG, "⚠️ SyncCoordinator not available, clipboard event not synced")
+            } catch (e: SecurityException) {
+                // Should not happen with accessibility service, but handle gracefully
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error processing clipboard in accessibility service: ${e.message}", e)
             }
-        } catch (e: SecurityException) {
-            // Should not happen with accessibility service, but handle gracefully
-            Log.w(TAG, "⚠️ SecurityException in accessibility service: ${e.message}")
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error processing clipboard in accessibility service: ${e.message}", e)
         }
     }
 
@@ -115,6 +116,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        clipboardManager?.removePrimaryClipChangedListener(this)
         ClipboardAccessibilityService.instance = null
         scope.coroutineContext.cancelChildren()
         Log.i(TAG, "🛑 ClipboardAccessibilityService destroyed")

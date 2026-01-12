@@ -152,6 +152,25 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    
+    override fun onResume() {
+        super.onResume()
+        // Trigger clipboard check when app becomes active
+        // This ensures we catch clipboard changes that occurred while app was in background
+        android.util.Log.d("MainActivity", "📱 onResume - triggering clipboard check")
+        val serviceIntent = Intent(this, ClipboardSyncService::class.java).apply {
+            action = ClipboardSyncService.ACTION_FORCE_PROCESS_CLIPBOARD
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "⚠️ Failed to trigger clipboard check: ${e.message}")
+        }
+    }
 
     private fun openBatterySettings() {
         runCatching {

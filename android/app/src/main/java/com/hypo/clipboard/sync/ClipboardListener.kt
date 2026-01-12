@@ -22,16 +22,15 @@ class ClipboardListener(
 
     private var lastSignature: String? = null
     private var job: Job? = null
-    private var pollingJob: Job? = null
     @Volatile
     var isListening: Boolean = false
         private set
-    private var lastPolledSignature: String? = null
+    // Track last clipboard description to avoid parsing when clipboard hasn't changed
+    private var lastClipDescription: String? = null
 
     fun start() {
         if (isListening) return
         try {
-            Log.d(TAG, "📋 ClipboardListener STARTING - registering listener")
             clipboardManager.addPrimaryClipChangedListener(this)
             
             // Initialize lastSignature from current clipboard to prevent re-sending old content on restart
@@ -43,23 +42,20 @@ class ClipboardListener(
                     val event = parser.parse(clip)
                     if (event != null) {
                         lastSignature = event.signature()
-                        Log.d(TAG, "📋 Initialized lastSignature from current clipboard (will not process on startup - only actual changes will trigger sync)")
                     }
                 }
             } catch (e: SecurityException) {
-                Log.d(TAG, "🔒 Initial clip access blocked: ${e.message}")
+                // Silently handle - expected on Android 10+
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ Error accessing initial clip: ${e.message}", e)
             }
             
-            // On Android 10+, onPrimaryClipChanged() doesn't fire in background
-            // Add polling fallback to detect manual clipboard changes
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startPolling()
-            }
+            // EVENT-DRIVEN: Rely only on onPrimaryClipChanged() events
+            // Note: On Android 10+, onPrimaryClipChanged() may not fire in background,
+            // but if AccessibilityService is enabled, it will handle clipboard events.
+            // Polling is removed - everything is now event-driven.
             
             isListening = true
-            Log.d(TAG, "✅ ClipboardListener is now ACTIVE (listener + ${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "polling" else "no polling"})")
         } catch (e: SecurityException) {
             Log.e(TAG, "❌ SecurityException in start(): ${e.message}", e)
             // Don't set isListening = true if we can't register the listener
@@ -74,70 +70,8 @@ class ClipboardListener(
         clipboardManager.removePrimaryClipChangedListener(this)
         job?.cancel()
         job = null
-        pollingJob?.cancel()
-        pollingJob = null
         isListening = false
         Log.i(TAG, "🛑 ClipboardListener STOPPED")
-    }
-    
-    /**
-     * Poll clipboard periodically as fallback for Android 10+ where
-     * onPrimaryClipChanged() doesn't fire when app is in background.
-     * This is a workaround for system restrictions.
-     */
-    private fun startPolling() {
-        pollingJob?.cancel()
-        pollingJob = scope.launch(dispatcher) {
-            Log.d(TAG, "🔄 Starting clipboard polling (Android 10+ workaround)")
-            var consecutiveBlockedCount = 0
-            while (isActive) {
-                delay(2_000) // Poll every 2 seconds
-                try {
-                    // On Android 10+, accessing clipboard in background may throw SecurityException
-                    val clip = clipboardManager.primaryClip
-                    if (clip != null) {
-                        try {
-                            val event = parser.parse(clip)
-                            if (event != null) {
-                                val signature = event.signature()
-                                // Only process if it's different from what we last polled
-                                // (onPrimaryClipChanged might have already processed it)
-                                if (signature != lastPolledSignature && signature != lastSignature) {
-                                    Log.d(TAG, "🔍 Polling detected new clipboard content (manual paste detected)")
-                                    lastPolledSignature = signature
-                                    consecutiveBlockedCount = 0 // Reset counter on success
-                                    process(clip)
-                                }
-                            }
-                        } catch (e: SecurityException) {
-                            // Parser may throw SecurityException when accessing clipboard content
-                            consecutiveBlockedCount++
-                            if (consecutiveBlockedCount % 10 == 0) {
-                                // Log warning every 20 seconds (10 attempts * 2 seconds) when blocked
-                                Log.w(TAG, "🔒 Clipboard access blocked repeatedly (${consecutiveBlockedCount} times). User needs to enable \"Allow clipboard access\" in Settings → Apps → Hypo → Permissions")
-                            } else {
-                                Log.d(TAG, "🔒 Parser: Clipboard access blocked: ${e.message}")
-                            }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "⚠️ Parser error during polling: ${e.message}", e)
-                        }
-                    }
-                } catch (e: SecurityException) {
-                    // Android 10+ may block clipboard access in background
-                    // This is expected behavior, just log and continue
-                    consecutiveBlockedCount++
-                    if (consecutiveBlockedCount % 10 == 0) {
-                        // Log warning every 20 seconds when blocked
-                        Log.w(TAG, "🔒 Clipboard access blocked repeatedly (${consecutiveBlockedCount} times). Background clipboard access requires user permission in system settings.")
-                    } else {
-                        Log.d(TAG, "🔒 Clipboard access blocked (background restriction): ${e.message}")
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "⚠️ Error during clipboard polling: ${e.message}", e)
-                }
-            }
-            Log.i(TAG, "🛑 Clipboard polling stopped")
-        }
     }
 
     override fun onPrimaryClipChanged() {
@@ -146,24 +80,44 @@ class ClipboardListener(
         // Launch processing in a coroutine immediately to avoid blocking the main thread
         scope.launch(Dispatchers.Default) {
             try {
-                Log.d(TAG, "🔔 onPrimaryClipChanged TRIGGERED!")
                 try {
                     val clip = clipboardManager.primaryClip
                     if (clip != null) {
-                        Log.d(TAG, "📋 Clipboard has content, processing...")
+                        val description = clip.description
+                        val label = description.label
+                        val isUserCopyFromHistory = label == "Hypo Clipboard"
+                        
+                        // Quick check: compare clipboard description to avoid parsing if unchanged
+                        // BUT: Always process "Hypo Clipboard" label even if description matches
+                        // This ensures user-initiated copies from history always sync, even on second click
+                        val descriptionKey = "${description.label}|${description.getMimeType(0)}|${clip.itemCount}"
+                        if (!isUserCopyFromHistory && descriptionKey == lastClipDescription) {
+                            // Clipboard description hasn't changed, skip parsing (unless it's a user copy from history)
+                            return@launch
+                        }
+                        
+                        // For "Hypo Clipboard" label, always process even if description matches
+                        // This ensures second clicks on the same item still trigger sync
+                        if (isUserCopyFromHistory) {
+                            // Clear lastClipDescription to force processing
+                            lastClipDescription = null
+                        } else {
+                            lastClipDescription = descriptionKey
+                        }
+                        
                         process(clip)
                     } else {
-                        Log.w(TAG, "⚠️  Clipboard clip is null!")
+                        lastClipDescription = null
                     }
                 } catch (e: SecurityException) {
                     // Android 10+ may block clipboard access in background
-                    Log.d(TAG, "🔒 onPrimaryClipChanged: primaryClip access blocked: ${e.message}")
+                    // Silently handle - this is expected behavior
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ Error accessing primaryClip in onPrimaryClipChanged: ${e.message}", e)
                 }
             } catch (e: SecurityException) {
                 // Android 10+ may block clipboard access in background
-                Log.d(TAG, "🔒 onPrimaryClipChanged: Clipboard access blocked (background restriction): ${e.message}")
+                // Silently handle - this is expected behavior
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Error in onPrimaryClipChanged: ${e.message}", e)
             }
@@ -178,30 +132,43 @@ class ClipboardListener(
             // Skip processing if this is a remote clipboard update (from other devices)
             // Remote updates use "Hypo Remote" label to prevent loops
             val description = clip.description
-            Log.d(TAG, "🔍 Processing clipboard: label='${description.label}', mimeType='${description.getMimeType(0)}'")
-            if (description.label == "Hypo Remote") {
-                Log.d(TAG, "⏭️ Skipping remote clipboard update (to prevent loops)")
+            val label = description.label
+            if (label == "Hypo Remote") {
                 return
+            }
+            
+            // "Hypo Clipboard" label indicates user explicitly copied from history
+            // This should sync to other devices even if it's a duplicate
+            val isUserCopyFromHistory = label == "Hypo Clipboard"
+            
+            // If user copied from history, clear parser's URI/hash tracking AND seen hashes to allow re-parsing
+            if (isUserCopyFromHistory) {
+                synchronized(ClipboardParser.hashLock) {
+                    ClipboardParser.lastImageUri = null
+                    ClipboardParser.lastImageHash = null
+                    // Also clear the seen hashes set to allow re-parsing even if hash matches
+                    ClipboardParser.seenImageHashes.clear()
+                }
             }
             
             val event = parser.parse(clip)
             if (event == null) {
-                Log.w(TAG, "⚠️ Parser returned null - clipboard content not supported or empty")
                 return
             }
-            Log.d(TAG, "✅ Parsed clipboard event: type=${event.type}, preview='${event.preview.take(30)}...'")
             val signature = event.signature()
             
-            // Check for duplicate - use synchronized block to prevent race conditions
+            // Check for duplicate - but allow "Hypo Clipboard" (user copy from history) to sync
             synchronized(this) {
-                if (lastSignature == signature || processingSignature == signature) {
-                    Log.d(TAG, "⏭️ Skipping duplicate clipboard event (signature=$signature, lastSignature=$lastSignature, processingSignature=$processingSignature)")
+                if (!isUserCopyFromHistory && (lastSignature == signature || processingSignature == signature)) {
                     return
+                }
+                // If user copied from history, clear lastSignature to allow sync
+                if (isUserCopyFromHistory) {
+                    lastSignature = null // Clear to force sync
                 }
                 // Mark as processing BEFORE launching coroutine to prevent race condition
                 processingSignature = signature
             }
-            Log.d(TAG, "📤 Launching coroutine to process clipboard event (signature=$signature)")
 
             job?.cancel()
             val exceptionHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->

@@ -1,6 +1,6 @@
 [package]
 name = "hypo-relay"
-version = "1.0.9"
+version = "1.0.11"
 edition = "2021"
 authors = ["Hypo Contributors"]
 license = "MIT"
@@ -10,7 +10,7 @@ readme = "README.md"
 [dependencies]
 # Web framework
 actix-web = "4.4"
-actix-ws = "0.2"
+actix-ws = "0.3"
 actix-rt = "2.9"
 
 # Async runtime

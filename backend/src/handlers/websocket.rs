@@ -11,9 +11,10 @@ use crate::models::message::ClipboardMessage;
 use crate::services::session_manager::SessionError;
 use crate::AppState;
 
+
 pub async fn websocket_handler(
     req: HttpRequest,
-    body: web::Payload,
+    _body: web::Payload,
     data: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     let device_id = req
@@ -36,7 +37,6 @@ pub async fn websocket_handler(
     }
 
     // Normalize device ID to lowercase for consistent matching across platforms
-    // Android sends uppercase UUIDs, macOS sends lowercase UUIDs
     let device_id = device_id.unwrap().to_lowercase();
     let platform = platform.unwrap();
 
@@ -46,41 +46,89 @@ pub async fn websocket_handler(
     );
 
     info!("About to call actix_ws::handle for {} ({})", device_id, platform);
-    let (response, session, mut msg_stream) = actix_ws::handle(&req, body)?;
-    info!("actix_ws::handle succeeded for {} ({})", device_id, platform);
+    let (response, session, mut msg_stream) = match actix_ws::handle(&req, _body) {
+        Ok(result) => {
+            info!("actix_ws::handle succeeded for {} ({})", device_id, platform);
+            result
+        }
+        Err(e) => {
+            error!(
+                "actix_ws::handle failed for {} ({}): {:?}",
+                device_id, platform, e
+            );
+            error!(
+                "  This may indicate a buffer overflow during WebSocket handshake/upgrade"
+            );
+            return Err(e);
+        }
+    };
+
+    // CRITICAL: Configure max_frame_size to 1GB to support large file transfers
+    // This removes the 64KB default limit in actix-ws 0.2.x
+    // With actix-ws 0.3.0, we can set this to 1GB (1_073_741_824 bytes)
+    const MAX_FRAME_SIZE: usize = 1_073_741_824; // 1GB
+    msg_stream = msg_stream.max_frame_size(MAX_FRAME_SIZE);
+    info!(
+        "Configured max_frame_size to {} bytes (1GB) for device {} ({})",
+        MAX_FRAME_SIZE, device_id, platform
+    );
 
     info!("Registering WebSocket session for device: {} ({})", device_id, platform);
     let registration = data.sessions.register(device_id.clone()).await;
     let mut outbound = registration.receiver;
     let session_token = registration.token;
+    let connection_start_time = std::time::Instant::now();
     info!(
-        "Session registered successfully for device: {} (token={})",
-        device_id, session_token
+        "Session registered successfully for device: {} (token={}) at {:?}",
+        device_id, session_token, connection_start_time
     );
 
     let mut writer_session = session.clone();
     let writer_sessions = data.sessions.clone();
     let writer_device_id = device_id.clone();
     let writer_token = session_token;
+    let writer_start_time = std::time::Instant::now();
     actix_web::rt::spawn(async move {
         // Simple stateless relay: just forward messages, fail fast if connection is closed
+        let mut message_count = 0u64;
+        let mut last_message_time = writer_start_time;
+        
         while let Some(message) = outbound.recv().await {
+            message_count += 1;
+            last_message_time = std::time::Instant::now();
+            
             // message is already in binary frame format (4-byte length + JSON)
             if let Err(err) = writer_session.binary(message).await {
-                // Connection closed or error - log and break (client will reconnect and retry)
-                warn!("Failed to relay message to {}: {:?}. Client should retry.", writer_device_id, err);
+                // Connection closed or error - log detailed information
+                let connection_duration = writer_start_time.elapsed();
+                let time_since_last_message = last_message_time.elapsed();
+                warn!(
+                    "Writer task failed for device {} (token {}): {:?}",
+                    writer_device_id, writer_token, err
+                );
+                warn!(
+                    "  Connection duration: {:.2}s, Messages sent: {}, Time since last message: {:.2}s",
+                    connection_duration.as_secs_f64(),
+                    message_count,
+                    time_since_last_message.as_secs_f64()
+                );
                 break;
             }
         }
+        
+        let connection_duration = writer_start_time.elapsed();
         let removed = writer_sessions
             .unregister_with_token(&writer_device_id, writer_token)
             .await;
         if removed {
-            info!("Session closed for device: {}", writer_device_id);
+            info!(
+                "Writer task finished for device {} (token {}): duration={:.2}s, messages={}",
+                writer_device_id, writer_token, connection_duration.as_secs_f64(), message_count
+            );
         } else {
             info!(
-                "Stale writer task finished for device {} (token {}). Newer session remains active.",
-                writer_device_id, writer_token
+                "Stale writer task finished for device {} (token {}). Newer session remains active. Duration={:.2}s, messages={}",
+                writer_device_id, writer_token, connection_duration.as_secs_f64(), message_count
             );
         }
     });
@@ -90,81 +138,139 @@ pub async fn websocket_handler(
     let reader_device_id = device_id.clone();
     let reader_token = session_token;
     let key_store = data.device_keys.clone();
+    let reader_start_time = std::time::Instant::now();
 
     actix_web::rt::spawn(async move {
-        while let Some(Ok(msg)) = msg_stream.recv().await {
-            match msg {
-                Message::Text(text) => {
-                    // Legacy text format - decode and convert to binary frame
-                    if let Err(err) =
-                        handle_text_message(&reader_device_id, &text, &reader_sessions, &key_store, &mut reader_session)
-                            .await
-                    {
-                        // DeviceNotConnected is expected when target device is offline - log as warn
-                        // Other errors (InvalidMessage, SendError) are actual problems - log as error
-                        match &err {
-                            SessionError::DeviceNotConnected => {
-                                warn!(
-                                    "Target device not connected for message from {}: {:?}",
-                                    reader_device_id, err
-                                );
-                            }
-                            _ => {
-                                error!(
-                                    "Failed to handle message from {}: {:?}",
-                                    reader_device_id, err
-                                );
-                            }
-                        }
-                    }
-                }
-                Message::Binary(bytes) => {
-                    // Skip empty binary frames (likely WebSocket keepalive/ping frames)
-                    if bytes.is_empty() {
-                        // Silently ignore empty frames - these are likely keepalive messages
-                        continue;
-                    }
-                    // Binary frame format (4-byte length + JSON) - forward as-is
-                    if let Err(err) =
-                        handle_binary_message(&reader_device_id, &bytes, &reader_sessions, &key_store, &mut reader_session)
-                            .await
-                    {
-                        // DeviceNotConnected is expected when target device is offline - log as warn
-                        // Other errors (InvalidMessage, SendError) are actual problems - log as error
-                        match &err {
-                            SessionError::DeviceNotConnected => {
-                                warn!(
-                                    "Target device not connected for message from {}: {:?}",
-                                    reader_device_id, err
-                                );
-                            }
-                            _ => {
-                                error!(
-                                    "Failed to handle binary message from {}: {:?}",
-                                    reader_device_id, err
-                                );
+        let mut message_count = 0u64;
+        let mut error_count = 0u64;
+        let mut last_message_time = reader_start_time;
+        let mut close_reason = String::from("stream_ended");
+        
+        loop {
+            match msg_stream.recv().await {
+                Some(Ok(msg)) => {
+                    message_count += 1;
+                    last_message_time = std::time::Instant::now();
+                    
+                    match msg {
+                        Message::Text(text) => {
+                            // Legacy text format - decode and convert to binary frame
+                            if let Err(err) =
+                                handle_text_message(&reader_device_id, &text, &reader_sessions, &key_store, &mut reader_session)
+                                    .await
+                            {
+                                error_count += 1;
+                                // DeviceNotConnected is expected when target device is offline - log as warn
+                                // Other errors (InvalidMessage, SendError) are actual problems - log as error
+                                match &err {
+                                    SessionError::DeviceNotConnected => {
+                                        warn!(
+                                            "Target device not connected for message from {}: {:?}",
+                                            reader_device_id, err
+                                        );
+                                    }
+                                    _ => {
+                                        error!(
+                                            "Failed to handle message from {}: {:?}",
+                                            reader_device_id, err
+                                        );
+                                    }
+                                }
                             }
                         }
+                        Message::Binary(bytes) => {
+                            // Skip empty binary frames (likely WebSocket keepalive/ping frames)
+                            if bytes.is_empty() {
+                                // Silently ignore empty frames - these are likely keepalive messages
+                                continue;
+                            }
+                            // Binary frame format (4-byte length + JSON) - forward as-is
+                            if let Err(err) =
+                                handle_binary_message(&reader_device_id, &bytes, &reader_sessions, &key_store, &mut reader_session)
+                                    .await
+                            {
+                                error_count += 1;
+                                // DeviceNotConnected is expected when target device is offline - log as warn
+                                // Other errors (InvalidMessage, SendError) are actual problems - log as error
+                                match &err {
+                                    SessionError::DeviceNotConnected => {
+                                        warn!(
+                                            "Target device not connected for message from {}: {:?}",
+                                            reader_device_id, err
+                                        );
+                                    }
+                                    _ => {
+                                        error!(
+                                            "Failed to handle binary message from {}: {:?}",
+                                            reader_device_id, err
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        Message::Ping(bytes) => {
+                            if let Err(e) = reader_session.pong(&bytes).await {
+                                warn!("Failed to send pong to {}: {:?}", reader_device_id, e);
+                            }
+                        }
+                        Message::Close(close_frame) => {
+                            if let Some(frame) = close_frame {
+                                close_reason = format!("close_frame_code_{:?}_description_{}", frame.code, 
+                                    frame.description.as_ref().map(|d| d.as_str()).unwrap_or("none"));
+                            } else {
+                                close_reason = String::from("close_frame_no_details");
+                            }
+                            info!(
+                                "Received close frame from {} (token {}): {}",
+                                reader_device_id, reader_token, close_reason
+                            );
+                            break;
+                        }
+                        _ => {}
                     }
                 }
-                Message::Ping(bytes) => {
-                    let _ = reader_session.pong(&bytes).await;
-                }
-                Message::Close(_) => {
+                Some(Err(e)) => {
+                    error_count += 1;
+                    close_reason = format!("stream_error_{:?}", e);
+                    
+                    let error_str = format!("{:?}", e);
+                    let connection_duration = reader_start_time.elapsed();
+                    let time_since_last_message = last_message_time.elapsed();
+                    
+                    error!(
+                        "Reader stream error for device {} (token {}): {:?}",
+                        reader_device_id, reader_token, e
+                    );
+                    error!(
+                        "  Connection duration: {:.2}s, Messages received: {}, Errors: {}, Time since last message: {:.2}s",
+                        connection_duration.as_secs_f64(),
+                        message_count,
+                        error_count,
+                        time_since_last_message.as_secs_f64()
+                    );
                     break;
                 }
-                _ => {}
+                None => {
+                    close_reason = String::from("stream_ended_normally");
+                    break;
+                }
             }
         }
+        
+        let connection_duration = reader_start_time.elapsed();
+        let time_since_last_message = last_message_time.elapsed();
         let removed = reader_sessions
             .unregister_with_token(&reader_device_id, reader_token)
             .await;
         if removed {
-            info!("WebSocket closed for device: {}", reader_device_id);
+            info!(
+                "Reader task finished for device {} (token {}): reason={}, duration={:.2}s, messages={}, errors={}, time_since_last_message={:.2}s",
+                reader_device_id, reader_token, close_reason, connection_duration.as_secs_f64(), message_count, error_count, time_since_last_message.as_secs_f64()
+            );
         } else {
             info!(
-                "Skipped unregister for device {} (token {}) because a newer session is active",
-                reader_device_id, reader_token
+                "Skipped unregister for device {} (token {}) because a newer session is active. reason={}, duration={:.2}s, messages={}, errors={}",
+                reader_device_id, reader_token, close_reason, connection_duration.as_secs_f64(), message_count, error_count
             );
         }
     });
@@ -323,11 +429,21 @@ async fn handle_binary_message(
                 let error_frame = encode_binary_frame(&error_message.to_string());
                 // Send error response - handle gracefully if session is closed (e.g., in tests)
                 // In tests, the session might not be fully functional, so we handle errors gracefully
-                if let Err(e) = sender_session.binary(error_frame).await {
-                    // Log but don't fail - session might be closed (e.g., in tests or connection dropped)
-                    warn!("Failed to send error response to {}: {:?} (session may be closed)", sender_id, e);
-                } else {
-                    info!("Sent error response to {} for failed delivery to {}", sender_id, target);
+                let error_frame_size = error_frame.len();
+                match sender_session.binary(error_frame).await {
+                    Ok(_) => {
+                        info!(
+                            "Sent error response to {} for failed delivery to {} (frame_size={} bytes)",
+                            sender_id, target, error_frame_size
+                        );
+                    }
+                    Err(e) => {
+                        // Log but don't fail - session might be closed (e.g., in tests or connection dropped)
+                        warn!(
+                            "Failed to send error response to {} for target {}: {:?} (frame_size={} bytes, session may be closed)",
+                            sender_id, target, e, error_frame_size
+                        );
+                    }
                 }
                 
                 Err(SessionError::DeviceNotConnected)
@@ -419,11 +535,21 @@ async fn handle_text_message(
                 let error_frame = encode_binary_frame(&error_message.to_string());
                 // Send error response - handle gracefully if session is closed (e.g., in tests)
                 // In tests, the session might not be fully functional, so we handle errors gracefully
-                if let Err(e) = sender_session.binary(error_frame).await {
-                    // Log but don't fail - session might be closed (e.g., in tests or connection dropped)
-                    warn!("Failed to send error response to {}: {:?} (session may be closed)", sender_id, e);
-                } else {
-                    info!("Sent error response to {} for failed delivery to {}", sender_id, target);
+                let error_frame_size = error_frame.len();
+                match sender_session.binary(error_frame).await {
+                    Ok(_) => {
+                        info!(
+                            "Sent error response to {} for failed delivery to {} (frame_size={} bytes)",
+                            sender_id, target, error_frame_size
+                        );
+                    }
+                    Err(e) => {
+                        // Log but don't fail - session might be closed (e.g., in tests or connection dropped)
+                        warn!(
+                            "Failed to send error response to {} for target {}: {:?} (frame_size={} bytes, session may be closed)",
+                            sender_id, target, e, error_frame_size
+                        );
+                    }
                 }
                 
                 Err(SessionError::DeviceNotConnected)

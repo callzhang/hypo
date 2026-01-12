@@ -11,6 +11,7 @@ pub async fn health_check(data: web::Data<AppState>) -> HttpResponse {
     
     HttpResponse::Ok().json(json!({
         "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "uptime_seconds": uptime_seconds,
         "connections": 0,  // Placeholder

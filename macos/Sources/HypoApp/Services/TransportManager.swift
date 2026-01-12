@@ -138,10 +138,27 @@ public final class TransportManager {
         // Set up cloud relay incoming message handler
         if let defaultProvider = provider as? DefaultTransportProvider,
            let handler = incomingHandler {
-           defaultProvider.setCloudIncomingMessageHandler { [weak handler] data, transportOrigin in
-               await handler?.handle(data, transportOrigin: transportOrigin)
+           defaultProvider.setCloudIncomingMessageHandler { [weak self, weak handler] data, transportOrigin in
+               self?.logger.info("📥 [TransportManager] Cloud relay incoming message received: \(data.count.formattedAsKB), origin=\(transportOrigin.rawValue)")
+               // Decode envelope to log target device ID
+               do {
+                   let frameCodec = TransportFrameCodec()
+                   let envelope = try frameCodec.decode(data)
+                   self?.logger.info("🔍 [TransportManager] Envelope details: type=\(envelope.type.rawValue), target=\(envelope.payload.target ?? "nil"), deviceId=\(envelope.payload.deviceId.prefix(8))")
+               } catch {
+                   self?.logger.warning("⚠️ [TransportManager] Failed to decode envelope for logging: \(error.localizedDescription)")
+               }
+               if let handler = handler {
+                   self?.logger.info("✅ [TransportManager] Calling incomingHandler.handle()")
+                   await handler.handle(data, transportOrigin: transportOrigin)
+                   self?.logger.info("✅ [TransportManager] incomingHandler.handle() completed")
+               } else {
+                   self?.logger.error("❌ [TransportManager] incomingHandler is nil when message received!")
+               }
            }
             logger.info("✅ [TransportManager] Cloud relay incoming message handler set")
+        } else {
+            logger.warning("⚠️ [TransportManager] Could not set cloud relay handler: defaultProvider=\(provider is DefaultTransportProvider), incomingHandler=\(incomingHandler != nil)")
         }
         
         // Connection status prober will be initialized after historyViewModel is set
@@ -1086,7 +1103,7 @@ public func updateConnectionState(_ newState: ConnectionState) {
         let keyStore = FileBasedKeyStore()
         if let stored = try keyStore.load(for: lanPairingKeyIdentifier) {
             let data = stored.withUnsafeBytes { Data($0) }
-            logger.info("🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: \(data.count) bytes)")
+            logger.info("🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: \(data.count.formattedAsKB))")
             do {
                 let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data)
                 logger.info("🔑 [TransportManager] Successfully loaded existing key, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")

@@ -60,9 +60,22 @@ public final class DualSyncTransport: SyncTransport {
         // If encrypted and we have crypto service and key provider, create separate envelopes with unique nonces
         // This prevents nonce reuse when the same message is sent to both LAN and cloud
         if isEncrypted, let cryptoService = cryptoService, let keyProvider = keyProvider, let targetDeviceId = envelope.payload.target {
+            // CRITICAL: Log key lookup parameters for debugging
+            logger.debug("🔑 [DualSyncTransport] Key lookup: targetDeviceId=\(targetDeviceId), senderDeviceId=\(envelope.payload.deviceId)")
+            
             // Decrypt the original envelope to get plaintext
             let key = try await keyProvider.key(for: targetDeviceId)
+            
+            let keyData = key.withUnsafeBytes { Data($0) }
+            logger.debug("🔑 [DualSyncTransport] Key loaded: \(keyData.count) bytes for targetDeviceId=\(targetDeviceId)")
+            logger.debug("   Key hex (first 16): \(keyData.prefix(16).map { String(format: "%02x", $0) }.joined())")
+            
             let aad = Data(envelope.payload.deviceId.utf8)
+            
+            logger.debug("🔑 [DualSyncTransport] AAD: senderDeviceId=\(envelope.payload.deviceId) (\(aad.count) bytes)")
+            logger.debug("   AAD hex: \(aad.map { String(format: "%02x", $0) }.joined())")
+            logger.debug("🔑 [DualSyncTransport] Decrypting original envelope: ciphertext=\(envelope.payload.ciphertext.count.formattedAsKB), nonce=\(envelope.payload.encryption.nonce.count) bytes, tag=\(envelope.payload.encryption.tag.count) bytes")
+            
             let plaintext = try await cryptoService.decrypt(
                 ciphertext: envelope.payload.ciphertext,
                 key: key,
@@ -71,12 +84,17 @@ public final class DualSyncTransport: SyncTransport {
                 aad: aad
             )
             
+            logger.debug("✅ [DualSyncTransport] Original envelope decrypted: \(plaintext.count.formattedAsKB)")
+            
             // Create two separate envelopes with unique nonces but same message ID for deduplication
             let messageId = envelope.id
             let timestamp = envelope.timestamp
             
             // First envelope (for LAN) - re-encrypt with new nonce
+            logger.debug("🔒 [DualSyncTransport] Re-encrypting for LAN with new nonce...")
             let sealed1 = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
+            
+            logger.debug("🔒 [DualSyncTransport] LAN envelope encrypted: ciphertext=\(sealed1.ciphertext.count.formattedAsKB), nonce=\(sealed1.nonce.count) bytes, tag=\(sealed1.tag.count) bytes")
             let envelope1 = SyncEnvelope(
                 id: messageId,  // Same message ID for deduplication
                 timestamp: timestamp,
@@ -93,7 +111,10 @@ public final class DualSyncTransport: SyncTransport {
             )
             
             // Second envelope (for cloud) - re-encrypt with new nonce
+            logger.debug("🔒 [DualSyncTransport] Re-encrypting for cloud with new nonce...")
             let sealed2 = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
+            
+            logger.debug("🔒 [DualSyncTransport] Cloud envelope encrypted: ciphertext=\(sealed2.ciphertext.count.formattedAsKB), nonce=\(sealed2.nonce.count) bytes, tag=\(sealed2.tag.count) bytes")
             let envelope2 = SyncEnvelope(
                 id: messageId,  // Same message ID for deduplication
                 timestamp: timestamp,

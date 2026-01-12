@@ -42,12 +42,14 @@ public final class IncomingClipboardHandler {
     ///   - data: The clipboard data (frame-encoded)
     ///   - transportOrigin: Whether the message came via LAN or cloud relay
     public func handle(_ data: Data, transportOrigin: TransportOrigin = .lan) async {
+        logger.info("📥 [IncomingClipboardHandler] handle() called: \(data.count.formattedAsKB), origin=\(transportOrigin.rawValue)")
         do {
             // Decode envelope to get device info
             let envelope = try frameCodec.decode(data)
             let deviceId = envelope.payload.deviceId  // UUID string (pure UUID)
             let devicePlatform = envelope.payload.devicePlatform  // Platform string
             let deviceName = envelope.payload.deviceName
+            logger.info("📦 [IncomingClipboardHandler] Decoded envelope: deviceId=\(deviceId.prefix(8)), deviceName=\(deviceName ?? "nil"), platform=\(devicePlatform)")
             
             // Parse platform string to DevicePlatform enum
             let platform: DevicePlatform? = devicePlatform.flatMap { DevicePlatform(rawValue: $0) }
@@ -218,7 +220,7 @@ public final class IncomingClipboardHandler {
                 }
                 
                 #if canImport(os)
-                logger.info("✅ Applied file to clipboard: \(fileName) (\(payload.data.count) bytes)")
+                logger.info("✅ Applied file to clipboard: \(fileName) (\(payload.data.count.formattedAsKB))")
                 #endif
             } catch {
                 throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to write file to temporary location: \(error.localizedDescription)"])

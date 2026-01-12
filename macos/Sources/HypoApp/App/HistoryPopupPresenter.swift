@@ -145,6 +145,10 @@ final class HistoryPopupPresenter {
             self.removeClickMonitor()
             self.removeEscHotkey()  // Unregister ESC key handler
             
+            // CRITICAL: Resign first responder to ensure no text field captures input
+            // This prevents "paste into search bar" bug if window receives the event
+            window.makeFirstResponder(nil)
+            
             // Hide window immediately (no animation) for faster paste
             window.orderOut(nil)
             window.alphaValue = 1.0  // Reset for next show
@@ -161,29 +165,46 @@ final class HistoryPopupPresenter {
                 if window.isVisible {
                     self.logger.warning("⚠️ Window still visible after orderOut, forcing hide")
                     window.orderOut(nil)
-                    // If window still visible, add small additional delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        self.logger.debug("✅ Window hidden, calling completion")
-                        completion()
-                    }
-                    return
                 }
                 
-                // Verify focus was restored (non-blocking check)
-                let currentFrontmost = NSWorkspace.shared.frontmostApplication
-                let expectedApp = self.previousFrontmostApp
-                if let expected = expectedApp, let current = currentFrontmost {
-                    if current.processIdentifier == expected.processIdentifier {
-                        self.logger.debug("✅ Focus restored to: \(current.localizedName ?? "unknown")")
-                    } else {
-                        self.logger.debug("⚠️ Focus may not be restored correctly. Expected: \(expected.localizedName ?? "unknown"), Current: \(current.localizedName ?? "unknown")")
-                    }
-                }
-                
-                self.logger.debug("✅ Window hidden, calling completion")
-                completion()
+                // Verify focus was restored (with retries)
+                self.checkFocusAndComplete(completion: completion, attempts: 5)
             }
         }
+    }
+    
+    private func checkFocusAndComplete(completion: @escaping () -> Void, attempts: Int) {
+        let currentFrontmost = NSWorkspace.shared.frontmostApplication
+        let hypoBundleId = Bundle.main.bundleIdentifier ?? "com.hypo.clipboard"
+        
+        // If Hypo is NOT frontmost, we are good
+        if let current = currentFrontmost, current.bundleIdentifier != hypoBundleId {
+            logger.debug("✅ Focus restored to: \(current.localizedName ?? "unknown")")
+            completion()
+            return
+        }
+        
+        // If we have an expected app, check if it's that one (even if bundle ID check was ambiguous)
+        if let expected = previousFrontmostApp, let current = currentFrontmost {
+            if current.processIdentifier == expected.processIdentifier {
+                 logger.debug("✅ Focus restored to expected app: \(current.localizedName ?? "unknown")")
+                 completion()
+                 return
+            }
+        }
+        
+        // If Hypo is still frontmost and we have attempts left, wait and retry
+        if attempts > 0 {
+            logger.debug("⚠️ Hypo still frontmost, waiting for focus transfer... (\(attempts) left)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.checkFocusAndComplete(completion: completion, attempts: attempts - 1)
+            }
+            return
+        }
+        
+        // No attempts left, proceed anyway
+        logger.warning("⚠️ Failed to restore focus after retries. Proceeding anyway.")
+        completion()
     }
     
     private func restorePreviousFocus() {

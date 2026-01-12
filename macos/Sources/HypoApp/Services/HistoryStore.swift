@@ -78,7 +78,7 @@ public actor HistoryStore {
     }
 
     @discardableResult
-    public func insert(_ entry: ClipboardEntry) -> [ClipboardEntry] {
+    public func insert(_ entry: ClipboardEntry) -> (entries: [ClipboardEntry], duplicate: ClipboardEntry?) {
         let now = Date()
         
         // Simplified duplicate detection (no time windows):
@@ -107,7 +107,7 @@ public actor HistoryStore {
                 } else {
                     logger.debug("🔄 [HistoryStore] Received entry matches history item, moved existing item to top (pinned: \(entries[index].isPinned)): \(matchingEntry.previewText.prefix(50))")
                 }
-                return entries
+                return (entries, matchingEntry)
             }
         }
         
@@ -119,7 +119,7 @@ public actor HistoryStore {
         persistEntries()
         let afterCount = entries.count
         logger.debug("✅ [HistoryStore] Inserted entry: \(entry.previewText.prefix(50)), before: \(beforeCount), after: \(afterCount)")
-        return entries
+        return (entries, nil)
     }
 
     public func all() -> [ClipboardEntry] {
@@ -599,7 +599,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         
         // Insert entry into store (for local entries from ClipboardMonitor)
         // Remote entries are already inserted by IncomingClipboardHandler, but local entries need to be inserted here
-        let insertedEntries = await store.insert(entry)
+        // We get back the updated list and potentially a duplicate entry if one existed
+        let (insertedEntries, duplicate) = await store.insert(entry)
         logger.debug("💾 [ClipboardHistoryViewModel] Inserted entry into store: \(insertedEntries.count) total entries")
         
         // Reload all entries from store to get the latest state including any sorting/trimming that happened
@@ -616,13 +617,28 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         // Only show notifications for remote clipboard items (not local copies)
         let localId = deviceIdentity.deviceId.uuidString.lowercased()
         let isRemote = entry.deviceId.lowercased() != localId
-        if isRemote {
+        
+        // Determine if we should notify
+        // 1. Must be a remote item
+        // 2. Must NOT be an echo of a local item (originated from here, sent back by peer)
+        var shouldNotify = isRemote
+        
+        if isRemote, let duplicate = duplicate {
+            // Check if the duplicate (existing item) was local
+            // If we already have this content and it originated locally, this is an echo
+            if duplicate.deviceId.lowercased() == localId {
+                logger.debug("📢 [ClipboardHistoryViewModel] Duplicate of local item detected (echo), suppressing notification")
+                shouldNotify = false
+            }
+        }
+        
+        if shouldNotify {
             logger.debug("📢 [ClipboardHistoryViewModel] Remote clipboard item detected, showing notification")
 #if canImport(UserNotifications)
             notificationController?.deliverNotification(for: entry)
 #endif
         } else {
-            logger.debug("📢 [ClipboardHistoryViewModel] Local clipboard item, skipping notification")
+            logger.debug("📢 [ClipboardHistoryViewModel] Local clipboard item or echo, skipping notification")
         }
         
         // ✅ Auto-sync to paired devices

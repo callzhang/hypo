@@ -328,7 +328,7 @@ public final class IncomingClipboardHandler {
             transportOrigin: transportOrigin
         )
         
-        _ = await historyStore.insert(entry)
+        let (_, _) = await historyStore.insert(entry)
         // Notify callback if provided (e.g., to update viewModel)
         if let onEntryAdded = onEntryAdded {
             await onEntryAdded(entry)

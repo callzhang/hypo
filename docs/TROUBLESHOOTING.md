@@ -98,12 +98,61 @@ device_id=$(adb devices | grep -E "device$" | head -1 | awk '{print $1}' | tr -d
 echo "✅ Using device: $device_id"
 
 # Step 2: View logs
-# System noise patterns to filter
-NOISE_PATTERNS=" V/|MIUIInput|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon"
 
-# Get PID and stream logs in one command (PID is refreshed on each run)
+# Method 1: Pure app logs (tag-based filtering - only logs written by app code)
+# This shows ONLY logs that the app code writes, excluding ALL system framework logs
+# This is the closest equivalent to macOS "log stream --predicate 'process == \"HypoApp\"'"
+# All app log tags (automatically collected from source code)
+# Using "*:S" to silence all logs, then only show our app tags (quoted to prevent shell glob expansion)
+adb -s $device_id logcat "*:S" \
+  AccessibilityServiceChecker:D \
+  ClipboardAccessChecker:D \
+  ClipboardAccessibilityService:D \
+  ClipboardListener:D \
+  ClipboardSyncService:D \
+  ConnectionStatusProber:D \
+  IncomingClipboardHandler:D \
+  LanPairingViewModel:D \
+  LanWebSocketServer:D \
+  MiuiAdapter:D \
+  MiuiClipboardHistory:D \
+  PairingHandshake:D \
+  ProcessTextActivity:D \
+  ScreenStateReceiver:D \
+  ShareImageActivity:D \
+  SmsReceiver:D \
+  StorageManager:D \
+  SyncCoordinator:D \
+  TempFileManager:D \
+  MainActivity:D \
+  TransportManager:D \
+  WebSocketTransportClient:D \
+  RelayWebSocketClient:D \
+  LanRegistrationManager:D \
+  LanDiscoveryRepository:D \
+  ClipboardParser:D \
+  ClipboardRepositoryImpl:D \
+  HistoryViewModel:D \
+  SettingsViewModel:D \
+  HomeViewModel:D
+
+# Alternative: If you want to see ALL logs from the app process (including system framework logs)
+# Use PID-based filtering (may include MIUIInput, VRI, etc. from system framework)
 APP_PID=$(adb -s $device_id shell "pgrep -f com.hypo.clipboard")
-echo "✅ Using APP_PID: $APP_PID"
+if [ -n "$APP_PID" ]; then
+    echo "⚠️  Note: PID-based filtering includes system framework logs (MIUIInput, VRI, etc.)"
+    echo "   Use tag-based filtering (Method 1) for pure app logs only"
+    # Uncomment to see all process logs:
+    adb -s $device_id logcat "*:D" --pid="$APP_PID"
+fi
+
+# Method 2: Filtered logs (removes system noise, but keeps app logs)
+# Use this if you want to exclude system framework logs that are triggered by the app
+# System noise patterns to filter (includes Android framework UI logs, GC logs, graphics errors, input system, and system initialization)
+NOISE_PATTERNS=" V/|MIUI*|SKIA|VRI|RenderThread|SkJpeg|JpegXm|HWUI|ContentCatcher|HandWriting|ImeTracker|SecurityManager|InsetsController|Activity.*Resume|ProfileInstaller|FinalizerDaemon|ViewRootImpl|Choreographer|WindowOnBackDispatcher|Binder.*destroyed|弹出式窗口|Cleared Reference|sticky GC|non sticky GC|maxfree|minfree|FrameInsert|MiInputConsumer|Zygote|nativeloader|AssetManager2|ApplicationLoaders|ViewContentFactory|CompatChangeReporter|libc.*Access denied|TurboSchedMonitor|MiuiDownscaleImpl|MiuiMonitorThread|ResMonitorStub|MiuiAppAdaptationStubsControl|MiuiProcessManagerServiceStub|MiuiNBIManagerImpl|DecorViewImmersiveImpl|WM-WrkMgrInitializer|WM-PackageManagerHelper|WM-Schedulers|Adreno|Vulkan|libEGL|AdrenoVK|AdrenoUtils|SnapAlloc|qdgralloc|RenderLite|FramePredict|DecorView|ActivityThread.*HardwareRenderer|ActivityThread.*Miui Feature|ActivityThread.*TrafficStats|ActivityThread.*currentPkg|DesktopModeFlags|FirstFrameSpeedUp|ComputilityLevel|SLF4J|Sentry.*auto-init|Sentry.*Retrieving|AppScoutStateMachine|FlingPromotion|ForceDarkHelper|MiuiForceDarkConfig|vulkan.*searching|libEGL.*shader cache|Perf.*Connecting|NativeTurboSchedManager|ashmem.*Pinning|EpFrameworkFactory"
+
+APP_PID=$(adb -s $device_id shell "pgrep -f com.hypo.clipboard")
+echo "✅ Using APP_PID: $APP_PID (with noise filtering)"
 adb -s $device_id logcat "*:D" --pid="$APP_PID" | grep --color=always -vE "$NOISE_PATTERNS"
 ```
 

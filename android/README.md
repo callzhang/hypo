@@ -652,19 +652,68 @@ $ANDROID_SDK_ROOT/platform-tools/adb devices
 ### Monitoring Logs
 
 ```bash
-# View all logs (always filter MIUIInput)
-adb -s <device_id> logcat | grep -v "MIUIInput"
+# Method 1: Pure app logs (tag-based filtering - only logs written by app code)
+# This shows ONLY logs that the app code writes, excluding ALL system framework logs
+# This is the closest equivalent to macOS "log stream --predicate 'process == \"HypoApp\"'"
+# All app log tags (automatically collected from source code)
+# Using "*:S" to silence all logs first, then only show our app tags (quoted to prevent shell glob expansion)
+adb -s <device_id> logcat "*:S" \
+  AccessibilityServiceChecker:D \
+  ClipboardAccessChecker:D \
+  ClipboardAccessibilityService:D \
+  ClipboardListener:D \
+  ClipboardSyncService:D \
+  ConnectionStatusProber:D \
+  IncomingClipboardHandler:D \
+  LanPairingViewModel:D \
+  LanWebSocketServer:D \
+  MiuiAdapter:D \
+  MiuiClipboardHistory:D \
+  PairingHandshake:D \
+  ProcessTextActivity:D \
+  ScreenStateReceiver:D \
+  ShareImageActivity:D \
+  SmsReceiver:D \
+  StorageManager:D \
+  SyncCoordinator:D \
+  TempFileManager:D \
+  MainActivity:D \
+  TransportManager:D \
+  WebSocketTransportClient:D \
+  RelayWebSocketClient:D \
+  LanRegistrationManager:D \
+  LanDiscoveryRepository:D \
+  ClipboardParser:D \
+  ClipboardRepositoryImpl:D \
+  HistoryViewModel:D \
+  SettingsViewModel:D \
+  HomeViewModel:D
 
-# Filter for Hypo app only
-adb -s <device_id> logcat -v time "*:E" | grep -v "MIUIInput" | grep -E "clipboard|Hypo"
+# Alternative: If you want to see ALL logs from the app process (including system framework logs)
+# Use PID-based filtering (may include MIUIInput, VRI, etc. from system framework)
+APP_PID=$(adb -s <device_id> shell "pgrep -f com.hypo.clipboard" 2>/dev/null | tr -d '\r' | head -1)
+if [ -n "$APP_PID" ]; then
+    echo "⚠️  Note: PID-based filtering includes system framework logs (MIUIInput, VRI, etc.)"
+    echo "   Use tag-based filtering (Method 1) for pure app logs only"
+    # Uncomment to see all process logs:
+    # adb -s <device_id> logcat "*:D" --pid="$APP_PID"
+fi
+
+# Method 2: Filtered logs (removes system noise, but keeps app logs)
+# Use this if you want to exclude system framework logs that are triggered by the app
+# View all logs (always filter system noise including UI framework logs and GC logs)
+adb -s <device_id> logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread|ViewRootImpl|Choreographer|WindowOnBackDispatcher|Binder.*destroyed|弹出式窗口|Cleared Reference|sticky GC|non sticky GC|maxfree|minfree|Zygote|nativeloader|AssetManager2|ApplicationLoaders|ViewContentFactory|CompatChangeReporter|libc.*Access denied|TurboSchedMonitor|MiuiDownscaleImpl|MiuiMonitorThread|ResMonitorStub|MiuiAppAdaptationStubsControl|MiuiProcessManagerServiceStub|MiuiNBIManagerImpl|DecorViewImmersiveImpl|WM-WrkMgrInitializer|WM-PackageManagerHelper|WM-Schedulers|Adreno|Vulkan|libEGL|AdrenoVK|AdrenoUtils|SnapAlloc|qdgralloc|RenderLite|FramePredict|DecorView|ActivityThread.*HardwareRenderer|ActivityThread.*Miui Feature|ActivityThread.*TrafficStats|ActivityThread.*currentPkg|DesktopModeFlags|FirstFrameSpeedUp|ComputilityLevel|SLF4J|Sentry.*auto-init|Sentry.*Retrieving|AppScoutStateMachine|FlingPromotion|ForceDarkHelper|MiuiForceDarkConfig|vulkan.*searching|libEGL.*shader cache|Perf.*Connecting|NativeTurboSchedManager|ashmem.*Pinning|EpFrameworkFactory"
+
+# Filter for Hypo app only (excludes UI framework logs and GC logs)
+adb -s <device_id> logcat -v time "*:E" | grep -vE "MIUIInput|SKIA|VRI|RenderThread|ViewRootImpl|Choreographer|WindowOnBackDispatcher|Binder.*destroyed|弹出式窗口|Cleared Reference|sticky GC|non sticky GC|maxfree|minfree|Zygote|nativeloader|AssetManager2|ApplicationLoaders|ViewContentFactory|CompatChangeReporter|libc.*Access denied|TurboSchedMonitor|MiuiDownscaleImpl|MiuiMonitorThread|ResMonitorStub|MiuiAppAdaptationStubsControl|MiuiProcessManagerServiceStub|MiuiNBIManagerImpl|DecorViewImmersiveImpl|WM-WrkMgrInitializer|WM-PackageManagerHelper|WM-Schedulers|Adreno|Vulkan|libEGL|AdrenoVK|AdrenoUtils|SnapAlloc|qdgralloc|RenderLite|FramePredict|DecorView|ActivityThread.*HardwareRenderer|ActivityThread.*Miui Feature|ActivityThread.*TrafficStats|ActivityThread.*currentPkg|DesktopModeFlags|FirstFrameSpeedUp|ComputilityLevel|SLF4J|Sentry.*auto-init|Sentry.*Retrieving|AppScoutStateMachine|FlingPromotion|ForceDarkHelper|MiuiForceDarkConfig|vulkan.*searching|libEGL.*shader cache|Perf.*Connecting|NativeTurboSchedManager|ashmem.*Pinning|EpFrameworkFactory" | grep -E "clipboard|Hypo"
 
 # Filter by PID (excludes MIUIInput)
 # Subsystem: "com.hypo.clipboard" (same as macOS, debug and release share same application ID)
 APP_PID=$(adb -s <device_id> shell "pgrep -f com.hypo.clipboard" 2>/dev/null | tr -d '\r' | head -1)
 if [ -n "$APP_PID" ]; then
-    adb -s <device_id> logcat --pid="$APP_PID" | grep -v "MIUIInput"
+    adb -s <device_id> logcat --pid="$APP_PID" | grep -vE "MIUIInput|SKIA|VRI|RenderThread|ViewRootImpl|Choreographer|WindowOnBackDispatcher|Binder.*destroyed|弹出式窗口|Cleared Reference|sticky GC|non sticky GC|maxfree|minfree|Zygote|nativeloader|AssetManager2|ApplicationLoaders|ViewContentFactory|CompatChangeReporter|libc.*Access denied|TurboSchedMonitor|MiuiDownscaleImpl|MiuiMonitorThread|ResMonitorStub|MiuiAppAdaptationStubsControl|MiuiProcessManagerServiceStub|MiuiNBIManagerImpl|DecorViewImmersiveImpl|WM-WrkMgrInitializer|WM-PackageManagerHelper|WM-Schedulers|Adreno|Vulkan|libEGL|AdrenoVK|AdrenoUtils|SnapAlloc|qdgralloc|RenderLite|FramePredict|DecorView|ActivityThread.*HardwareRenderer|ActivityThread.*Miui Feature|ActivityThread.*TrafficStats|ActivityThread.*currentPkg|DesktopModeFlags|FirstFrameSpeedUp|ComputilityLevel|SLF4J|Sentry.*auto-init|Sentry.*Retrieving|AppScoutStateMachine|FlingPromotion|ForceDarkHelper|MiuiForceDarkConfig|vulkan.*searching|libEGL.*shader cache|Perf.*Connecting|NativeTurboSchedManager|ashmem.*Pinning|EpFrameworkFactory"
 else
-    adb -s <device_id> logcat -v time "*:S" "com.hypo.clipboard:D" | grep -v "MIUIInput"
+    adb -s <device_id> logcat -v time "*:S" "com.hypo.clipboard:D" | grep -vE "MIUIInput|SKIA|VRI|RenderThread|ViewRootImpl|Choreographer|WindowOnBackDispatcher|Binder.*destroyed|弹出式窗口|Cleared Reference|sticky GC|non sticky GC|maxfree|minfree|Zygote|nativeloader|AssetManager2|ApplicationLoaders|ViewContentFactory|CompatChangeReporter|libc.*Access denied|TurboSchedMonitor|MiuiDownscaleImpl|MiuiMonitorThread|ResMonitorStub|MiuiAppAdaptationStubsControl|MiuiProcessManagerServiceStub|MiuiNBIManagerImpl|DecorViewImmersiveImpl|WM-WrkMgrInitializer|WM-PackageManagerHelper|WM-Schedulers|Adreno|Vulkan|libEGL|AdrenoVK|AdrenoUtils|SnapAlloc|qdgralloc|RenderLite|FramePredict|DecorView|ActivityThread.*HardwareRenderer|ActivityThread.*Miui Feature|ActivityThread.*TrafficStats|ActivityThread.*currentPkg|DesktopModeFlags|FirstFrameSpeedUp|ComputilityLevel|SLF4J|Sentry.*auto-init|Sentry.*Retrieving|AppScoutStateMachine|FlingPromotion|ForceDarkHelper|MiuiForceDarkConfig|vulkan.*searching|libEGL.*shader cache|Perf.*Connecting|NativeTurboSchedManager|ashmem.*Pinning|EpFrameworkFactory"
 fi
 
 # Show app logs only (no MIUIInput)

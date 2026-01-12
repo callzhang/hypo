@@ -783,9 +783,9 @@ public final class LanWebSocketServer {
     }
     
     private func handleReceivedData(_ data: Data, from connectionId: UUID) {
-        logger.info("📨 [LanWebSocketServer] CLIPBOARD DATA RECEIVED: \(data.count) bytes from \(connectionId.uuidString.prefix(8))")
+        logger.info("📨 [LanWebSocketServer] CLIPBOARD DATA RECEIVED: \(data.count.formattedAsKB) from \(connectionId.uuidString.prefix(8))")
         #if canImport(os)
-        logger.info("📨 CLIPBOARD DATA RECEIVED: \(data.count) bytes from connection \(connectionId.uuidString.prefix(8))")
+        logger.info("📨 CLIPBOARD DATA RECEIVED: \(data.count.formattedAsKB) from connection \(connectionId.uuidString.prefix(8))")
         #endif
         
         // Skip empty data (should have been caught in handleFrame, but double-check here)
@@ -842,9 +842,9 @@ public final class LanWebSocketServer {
                 // Forward the original frame-encoded data to the delegate
                 // (it will decode it again in IncomingClipboardHandler)
                 #if canImport(os)
-                logger.info("✅ CLIPBOARD MESSAGE RECEIVED: forwarding to delegate, \(data.count) bytes")
+                logger.info("✅ CLIPBOARD MESSAGE RECEIVED: forwarding to delegate, \(data.count.formattedAsKB)")
                 #endif
-                logger.info("✅  CLIPBOARD MESSAGE RECEIVED: \(data.count) bytes, forwarding to delegate")
+                logger.info("✅  CLIPBOARD MESSAGE RECEIVED: \(data.count.formattedAsKB), forwarding to delegate")
                 logger.info("🔍  About to call delegate?.server()")
                 if let delegate = delegate {
                     logger.info("✅  Delegate exists: \(type(of: delegate))")

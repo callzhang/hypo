@@ -1,5 +1,6 @@
 package com.hypo.clipboard
 
+import com.hypo.clipboard.util.formattedAsKB
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -100,7 +101,7 @@ class ShareImageActivity : AppCompatActivity() {
                         
                         val clip = ClipData.newUri(contentResolver, mimeType, fileProviderUri)
                         clipboardManager.setPrimaryClip(clip)
-                        Log.i(TAG, "✅ Image copied to clipboard (${imageBytes.size} bytes, format: $format) - will sync to other devices")
+                        Log.i(TAG, "✅ Image copied to clipboard (${imageBytes.size.formattedAsKB()}, format: $format) - will sync to other devices")
                         
                         // Force process the clipboard immediately
                         val serviceIntent = Intent(this@ShareImageActivity, com.hypo.clipboard.service.ClipboardSyncService::class.java).apply {

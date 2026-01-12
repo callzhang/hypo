@@ -1,5 +1,6 @@
 package com.hypo.clipboard.transport
 
+import com.hypo.clipboard.util.formattedAsKB
 import android.content.Context
 import android.content.SharedPreferences
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
@@ -281,7 +282,7 @@ class TransportManager(
                 }
                 
                 override fun onClipboardData(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, data: ByteArray, connectionId: String) {
-                    android.util.Log.d("TransportManager", "📋 Received clipboard data from connection $connectionId (${data.size} bytes)")
+                    android.util.Log.d("TransportManager", "📋 Received clipboard data from connection $connectionId (${data.size.formattedAsKB()})")
                     
                     // Skip empty frames (could be ping/pong or malformed)
                     if (data.isEmpty()) {
@@ -291,7 +292,7 @@ class TransportManager(
                     
                     // Skip frames that are too small to contain a valid frame header (4 bytes)
                     if (data.size < 4) {
-                        android.util.Log.w("TransportManager", "⚠️ Received truncated frame from connection $connectionId (${data.size} bytes < 4), skipping")
+                        android.util.Log.w("TransportManager", "⚠️ Received truncated frame from connection $connectionId (${data.size.formattedAsKB()} < 4), skipping")
                         return
                     }
                     

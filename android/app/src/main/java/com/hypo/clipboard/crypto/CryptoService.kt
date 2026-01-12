@@ -1,5 +1,6 @@
 package com.hypo.clipboard.crypto
 
+import com.hypo.clipboard.util.formattedAsKB
 import com.google.crypto.tink.subtle.Hkdf
 import com.google.crypto.tink.subtle.X25519
 import java.security.GeneralSecurityException
@@ -55,16 +56,16 @@ class CryptoService @Inject constructor(
             val gcmSpec = GCMParameterSpec(GCM_TAG_LENGTH_BITS, encrypted.nonce)
             cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
             aad?.takeIf { it.isNotEmpty() }?.let { 
-                android.util.Log.d("CryptoService", "🔓 Setting AAD: ${it.size} bytes, content: ${it.decodeToString().take(50)}")
+                android.util.Log.d("CryptoService", "🔓 Setting AAD: ${it.size.formattedAsKB()}, content: ${it.decodeToString().take(50)}")
                 cipher.updateAAD(it)
             }
             val combined = encrypted.ciphertext + encrypted.tag
-            android.util.Log.d("CryptoService", "🔓 Decrypting: ciphertext=${encrypted.ciphertext.size} bytes, tag=${encrypted.tag.size} bytes, combined=${combined.size} bytes")
+            android.util.Log.d("CryptoService", "🔓 Decrypting: ciphertext=${encrypted.ciphertext.size.formattedAsKB()}, tag=${encrypted.tag.size.formattedAsKB()}, combined=${combined.size.formattedAsKB()}")
             cipher.doFinal(combined)
         } catch (e: GeneralSecurityException) {
             android.util.Log.e("CryptoService", "❌ Decryption failed: ${e.javaClass.simpleName}: ${e.message}")
-            android.util.Log.e("CryptoService", "   Key size: ${key.size} bytes, Nonce size: ${encrypted.nonce.size} bytes, Tag size: ${encrypted.tag.size} bytes")
-            android.util.Log.e("CryptoService", "   Ciphertext size: ${encrypted.ciphertext.size} bytes, AAD size: ${aad?.size ?: 0} bytes")
+            android.util.Log.e("CryptoService", "   Key size: ${key.size.formattedAsKB()}, Nonce size: ${encrypted.nonce.size.formattedAsKB()}, Tag size: ${encrypted.tag.size.formattedAsKB()}")
+            android.util.Log.e("CryptoService", "   Ciphertext size: ${encrypted.ciphertext.size.formattedAsKB()}, AAD size: ${(aad?.size ?: 0).formattedAsKB()}")
             throw e
         }
     }

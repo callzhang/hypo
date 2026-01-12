@@ -1,5 +1,6 @@
 package com.hypo.clipboard.pairing
 
+import com.hypo.clipboard.util.formattedAsKB
 import android.util.Base64
 import android.util.Log
 import com.google.crypto.tink.subtle.Ed25519Verify
@@ -47,7 +48,7 @@ class PairingHandshakeManager @Inject constructor(
             }
             
             val peerPublicKey = Base64.decode(publicKeyString, Base64.DEFAULT)
-            Log.d(TAG, "Pairing initiate: Decoded peerPublicKey, ${peerPublicKey.size} bytes")
+            Log.d(TAG, "Pairing initiate: Decoded peerPublicKey, ${peerPublicKey.size.formattedAsKB()}")
             
             // Validate key size
             if (peerPublicKey.size != 32) {
@@ -58,7 +59,7 @@ class PairingHandshakeManager @Inject constructor(
             // (we rely on TLS fingerprint verification instead)
             if (payload.signature != "LAN_AUTO_DISCOVERY") {
                 val signingKey = Base64.decode(payload.peerSigningPublicKey, Base64.DEFAULT)
-                Log.d(TAG, "Pairing initiate: Decoded signingPublicKey, ${signingKey.size} bytes (expected 32 for Ed25519)")
+                Log.d(TAG, "Pairing initiate: Decoded signingPublicKey, ${signingKey.size.formattedAsKB()} (expected 32 for Ed25519)")
                 
                 Log.d(TAG, "Pairing initiate: Starting signature verification...")
                 verifySignature(payload, signingKey)
@@ -240,11 +241,11 @@ class PairingHandshakeManager @Inject constructor(
             // Encode with sorted keys to match Swift's JSONEncoder.sortedKeys
             val stripped = payload.copy(signature = "")
             val encoded = encodeWithSortedKeys(stripped)
-            Log.d(TAG, "verifySignature: Encoded payload for verification: ${encoded.size} bytes")
+            Log.d(TAG, "verifySignature: Encoded payload for verification: ${encoded.size.formattedAsKB()}")
             Log.d(TAG, "verifySignature: Payload JSON: ${String(encoded)}")
             
             val signature = Base64.decode(payload.signature, Base64.DEFAULT)
-            Log.d(TAG, "verifySignature: Decoded signature: ${signature.size} bytes (expected 64 for Ed25519)")
+            Log.d(TAG, "verifySignature: Decoded signature: ${signature.size.formattedAsKB()} (expected 64 for Ed25519)")
             
             verifier.verify(signature, encoded)
             Log.d(TAG, "verifySignature: Signature verification PASSED")
@@ -319,7 +320,7 @@ class PairingHandshakeManager @Inject constructor(
             }
             
             val sharedKey = cryptoService.deriveKey(sessionState.androidPrivateKey, responderPublicKey)
-            Log.d(TAG, "handleChallengeAsInitiator: Derived shared key (${sharedKey.size} bytes)")
+            Log.d(TAG, "handleChallengeAsInitiator: Derived shared key (${sharedKey.size.formattedAsKB()})")
             
             // Decrypt the challenge
             val encrypted = EncryptedData(
@@ -382,7 +383,7 @@ class PairingHandshakeManager @Inject constructor(
                 }
                 
                 val sharedKey = cryptoService.deriveKey(responderPrivateKey, initiatorPublicKey)
-                Log.d(TAG, "handleChallenge: Derived shared key (${sharedKey.size} bytes)")
+                Log.d(TAG, "handleChallenge: Derived shared key (${sharedKey.size.formattedAsKB()})")
                 
                 // Decrypt the challenge
                 val encrypted = EncryptedData(

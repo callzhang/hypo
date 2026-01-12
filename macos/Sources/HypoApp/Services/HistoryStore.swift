@@ -159,6 +159,19 @@ public actor HistoryStore {
     }
 
     @discardableResult
+    public func togglePin(id: UUID) -> [ClipboardEntry] {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else {
+            logger.warning("⚠️ [HistoryStore] Cannot find entry with id \(id) to toggle pin state")
+            return entries
+        }
+        entries[index].isPinned.toggle()
+        sortEntries()
+        persistEntries()
+        logger.debug("📌 [HistoryStore] Toggled pin state for entry \(id): isPinned=\(entries[index].isPinned)")
+        return entries
+    }
+
+    @discardableResult
     public func updateLimit(_ newLimit: Int) -> [ClipboardEntry] {
         maxEntries = max(1, newLimit)
         trimIfNeeded()
@@ -682,7 +695,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             // Check size limit
             if imageData.count > SizeConstants.maxAttachmentBytes {
 #if canImport(os)
-                logger.warning("⚠️ [HistoryStore] Image too large: \(imageData.count) bytes (limit: \(SizeConstants.maxAttachmentBytes)), skipping sync")
+                logger.warning("⚠️ [HistoryStore] Image too large: \(imageData.count.formattedAsKB) (limit: \(SizeConstants.maxAttachmentBytes.formattedAsKB)), skipping sync")
 #endif
                 // Show notification to user
                 await MainActor.run {
@@ -700,7 +713,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             }
             
 #if canImport(os)
-            logger.debug("🖼️ [HistoryStore] Preparing image sync: \(imageData.count) bytes")
+            logger.debug("🖼️ [HistoryStore] Preparing image sync: \(imageData.count.formattedAsKB)")
 #endif
             
             var imageMetadata: [String: String] = [
@@ -759,7 +772,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             // Check size limit
             if fileData.count > SizeConstants.maxAttachmentBytes {
 #if canImport(os)
-                logger.warning("⚠️ [HistoryStore] File too large: \(fileData.count) bytes (limit: \(SizeConstants.maxAttachmentBytes)), skipping sync")
+                logger.warning("⚠️ [HistoryStore] File too large: \(fileData.count.formattedAsKB) (limit: \(SizeConstants.maxAttachmentBytes.formattedAsKB)), skipping sync")
 #endif
                 // Show notification to user
                 await MainActor.run {
@@ -1036,13 +1049,13 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         let payloadSize = message.payload.data.count
         let contentType = message.payload.contentType.rawValue
 #if canImport(os)
-        logger.info("🔍 [DEBUG] trySendMessage - About to transmit: contentType=\(contentType), payloadSize=\(payloadSize) bytes, targetDeviceId=\(message.targetDeviceId.prefix(8))...")
+        logger.info("🔍 [DEBUG] trySendMessage - About to transmit: contentType=\(contentType), payloadSize=\(payloadSize.formattedAsKB), targetDeviceId=\(message.targetDeviceId.prefix(8))...")
 #endif
         try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
         
 #if canImport(os)
         logger.info("✅ [HistoryStore] Sent to device \(message.targetDeviceId.prefix(8))")
-        logger.info("🔍 [DEBUG] trySendMessage - transmit completed successfully: contentType=\(contentType), payloadSize=\(payloadSize) bytes")
+        logger.info("🔍 [DEBUG] trySendMessage - transmit completed successfully: contentType=\(contentType), payloadSize=\(payloadSize.formattedAsKB)")
 #endif
             // Update lastSeen timestamp after successful sync
             if let device = pairedDevices.first(where: { $0.id == message.targetDeviceId }) {
@@ -1098,9 +1111,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     public func togglePin(_ entry: ClipboardEntry) {
         logger.debug("📌 [ClipboardHistoryViewModel] togglePin called for entry: \(entry.id), current isPinned: \(entry.isPinned)")
         Task {
-            let newPinState = !entry.isPinned
-            logger.debug("📌 [ClipboardHistoryViewModel] Setting pin state to: \(newPinState)")
-            let updated = await store.updatePinState(id: entry.id, isPinned: newPinState)
+            logger.debug("📌 [ClipboardHistoryViewModel] Requesting toggle pin for: \(entry.id)")
+            let updated = await store.togglePin(id: entry.id)
             await MainActor.run {
                 self.items = updated
                 self.latestItem = updated.first
@@ -1422,7 +1434,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                     // Register temp file for automatic cleanup
                     TempFileManager.shared.registerTempFile(tempURL)
                     pasteboard.writeObjects([tempURL as NSURL])
-                    logger.info("✅ Copied file to clipboard: \(metadata.fileName) (\(data.count) bytes)")
+                    logger.info("✅ Copied file to clipboard: \(metadata.fileName) (\(data.count.formattedAsKB))")
                 } catch {
                     logger.error("❌ Failed to create temp file for copying: \(error.localizedDescription)")
                 }

@@ -766,7 +766,7 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                 logger.info("✅ [LanWebSocketTransport] Message received: \(messageType)")
                 fflush(stdout)
                 if case .data(let data) = message {
-                    logger.info("📦 [LanWebSocketTransport] Binary data received: \(data.count) bytes")
+                    logger.info("📦 [LanWebSocketTransport] Binary data received: \(data.count.formattedAsKB)")
                     fflush(stdout)
                     self.handleIncoming(data: data)
                 } else if case .string(let str) = message {
@@ -871,7 +871,7 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
                     buffer.load(as: UInt32.self)
                 }
                 let length = Int(UInt32(bigEndian: lengthValue))
-                logger.error("   Frame header: length=\(length) bytes, total data=\(data.count) bytes")
+                logger.error("   Frame header: length=\(length.formattedAsKB), total data=\(data.count.formattedAsKB)")
                 if data.count >= 4 + length {
                     let jsonData = data.subdata(in: 4..<(4 + length))
                     if let jsonString = String(data: jsonData, encoding: .utf8) {

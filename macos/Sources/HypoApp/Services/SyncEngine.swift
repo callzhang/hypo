@@ -362,7 +362,7 @@ public final actor SyncEngine {
         // Always compress the JSON payload before encryption
         let jsonData = try encoder.encode(payload)
         let plaintext = try CompressionUtils.compress(jsonData)
-        logger.debug("🗜️ [SyncEngine] Compressed: \(jsonData.count) -> \(plaintext.count) bytes")
+        logger.debug("🗜️ [SyncEngine] Compressed: \(jsonData.count.formattedAsKB) -> \(plaintext.count.formattedAsKB)")
         
         let ciphertext: Data
         let nonce: Data
@@ -379,16 +379,21 @@ public final actor SyncEngine {
         } else {
             // Normal encryption mode
             let key = try await keyProvider.key(for: targetDeviceId)
+            let keyData = key.withUnsafeBytes { Data($0) }
+            logger.debug("🔒 [SyncEngine] Key loaded for encryption: targetDeviceId=\(targetDeviceId), keySize=\(keyData.count) bytes")
+            logger.debug("   Key hex (first 16): \(keyData.prefix(16).map { String(format: "%02x", $0) }.joined())")
+            
             // Use entry.deviceId as AAD (sender's device ID) so it matches what Android expects
             // Android decrypts using envelope.payload.deviceId as AAD, so they must match
             // deviceId is already normalized to lowercase in ClipboardEntry.init
             aad = Data(entry.deviceId.utf8)
             logger.debug("🔒 [SyncEngine] Encrypting: deviceId=\(entry.deviceId), targetDeviceId=\(targetDeviceId), aad=\(entry.deviceId) (\(aad.count) bytes)")
+            logger.debug("   AAD hex: \(aad.map { String(format: "%02x", $0) }.joined())")
             let sealed = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
             ciphertext = sealed.ciphertext
             nonce = sealed.nonce
             tag = sealed.tag
-            logger.debug("🔒 [SyncEngine] Encrypted: \(ciphertext.count) bytes")
+            logger.debug("🔒 [SyncEngine] Encrypted: \(ciphertext.count.formattedAsKB)")
         }
 
         // Create one envelope - DualSyncTransport will handle creating separate envelopes with unique nonces if needed
@@ -405,7 +410,7 @@ public final actor SyncEngine {
             )
         )
         
-        logger.debug("📦 [SyncEngine] Envelope ready: \(envelope.payload.ciphertext.count) bytes")
+        logger.debug("📦 [SyncEngine] Envelope ready: \(envelope.payload.ciphertext.count.formattedAsKB)")
         
         try await transport.send(envelope)
     }
@@ -462,7 +467,7 @@ public final actor SyncEngine {
         }
         
         let payload = try decoder.decode(ClipboardPayload.self, from: plaintext)
-        logger.debug("✅ [SyncEngine] Decoded: type=\(payload.contentType.rawValue), \(payload.data.count) bytes")
+        logger.debug("✅ [SyncEngine] Decoded: type=\(payload.contentType.rawValue), \(payload.data.count.formattedAsKB)")
         return payload
     }
 }

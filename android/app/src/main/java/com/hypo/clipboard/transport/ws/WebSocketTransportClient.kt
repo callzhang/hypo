@@ -1384,7 +1384,7 @@ class WebSocketTransportClient @Inject constructor(
                         if (isDnsFailure) {
                             android.util.Log.w("WebSocketTransportClient", "❌ DNS resolution failed: $connUrl - ${t.message} (network may be transitioning, will retry)")
                         } else {
-                            android.util.Log.w("WebSocketTransportClient", "❌ Connection failed: $connUrl - ${t.message} (${t.javaClass.simpleName})")
+                        android.util.Log.w("WebSocketTransportClient", "❌ Connection failed: $connUrl - ${t.message} (${t.javaClass.simpleName})")
                         }
                     } else {
                         android.util.Log.d("WebSocketTransportClient", "⏱️ LAN connection timeout (expected when not on same network): $connUrl - ${t.javaClass.simpleName}")
@@ -1431,8 +1431,8 @@ class WebSocketTransportClient @Inject constructor(
                             consecutiveFailures = maxOf(consecutiveFailures + 1, 3) // At least 4 seconds backoff
                             android.util.Log.d("WebSocketTransportClient", "📈 DNS failure - increased backoff (consecutive failures: $consecutiveFailures)")
                         } else {
-                            consecutiveFailures++
-                            android.util.Log.d("WebSocketTransportClient", "📈 Consecutive failures: $consecutiveFailures")
+                        consecutiveFailures++
+                        android.util.Log.d("WebSocketTransportClient", "📈 Consecutive failures: $consecutiveFailures")
                         }
                     }
                     

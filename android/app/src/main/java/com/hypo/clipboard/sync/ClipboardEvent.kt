@@ -20,8 +20,28 @@ data class ClipboardEvent(
 )
 
 fun ClipboardEvent.signature(): String {
-    val metadataSignature = metadata.entries
+    // For IMAGE/FILE types, prioritize hash from metadata for stable signatures
+    // This ensures duplicate detection works even when content is stored on disk
+    // and prevents issues with thumbnail_base64 or other variable metadata fields
+    val contentForSignature = when {
+        type == ClipboardType.IMAGE || type == ClipboardType.FILE -> {
+            // Use hash from metadata as primary identifier (most stable)
+            // Fall back to content if hash not available, then localPath
+            metadata["hash"] ?: if (content.isNotEmpty()) content else (localPath ?: "")
+        }
+        else -> content
+    }
+    
+    // For IMAGE/FILE, exclude variable fields like thumbnail_base64 from signature
+    // to ensure stable signatures for the same image
+    val metadataForSignature = if (type == ClipboardType.IMAGE || type == ClipboardType.FILE) {
+        metadata.filterKeys { it != "thumbnail_base64" }
+    } else {
+        metadata
+    }
+    
+    val metadataSignature = metadataForSignature.entries
         .sortedBy { it.key }
         .joinToString(separator = "|") { (key, value) -> "$key=$value" }
-    return listOf(type.name, content, metadataSignature).joinToString(separator = "||")
+    return listOf(type.name, contentForSignature, metadataSignature).joinToString(separator = "||")
 }

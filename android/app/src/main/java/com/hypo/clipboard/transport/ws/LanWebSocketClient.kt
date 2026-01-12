@@ -1,5 +1,7 @@
 package com.hypo.clipboard.transport.ws
 
+import com.hypo.clipboard.util.formattedAsKB
+
 import com.hypo.clipboard.sync.SyncEnvelope
 import com.hypo.clipboard.sync.SyncTransport
 import com.hypo.clipboard.transport.NoopTransportAnalytics
@@ -172,7 +174,7 @@ class LanWebSocketClient @Inject constructor(
         
         mutex.withLock {
             val socket = webSocket ?: throw IllegalStateException("WebSocket not connected")
-            android.util.Log.d("LanWebSocketClient", "sendRawJson: Sending ${jsonData.size} bytes")
+            android.util.Log.d("LanWebSocketClient", "sendRawJson: Sending ${jsonData.size.formattedAsKB()}")
             val sent = socket.send(of(*jsonData))
             if (!sent) {
                 android.util.Log.w("LanWebSocketClient", "⚠️ WebSocket send failed in sendRawJson (connection may be closed)")
@@ -347,20 +349,20 @@ class LanWebSocketClient @Inject constructor(
                         }
                         is LoopEvent.Envelope -> {
                             val payload = frameCodec.encode(event.envelope)
-                            android.util.Log.d("LanWebSocketClient", "📤 Encoding envelope: type=${event.envelope.type}, target=${event.envelope.payload.target}, payload size=${payload.size} bytes")
+                            android.util.Log.d("LanWebSocketClient", "📤 Encoding envelope: type=${event.envelope.type}, target=${event.envelope.payload.target}, payload size=${payload.size.formattedAsKB()}")
                             val now = clock.instant()
                             synchronized(pendingLock) {
                                 prunePendingLocked(now)
                                 pendingRoundTrips[event.envelope.id] = now
                             }
-                            android.util.Log.d("LanWebSocketClient", "📤 Sending frame: ${payload.size} bytes via WebSocket")
+                            android.util.Log.d("LanWebSocketClient", "📤 Sending frame: ${payload.size.formattedAsKB()} via WebSocket")
                             try {
                                 val sent = socket.send(of(*payload))
                                 if (!sent) {
                                     android.util.Log.w("LanWebSocketClient", "⚠️ WebSocket send failed (connection may be closed), closing connection loop")
                                     break@loop
                                 }
-                                android.util.Log.d("LanWebSocketClient", "✅ Frame transmitted successfully: ${payload.size} bytes")
+                                android.util.Log.d("LanWebSocketClient", "✅ Frame transmitted successfully: ${payload.size.formattedAsKB()}")
                             } catch (e: Exception) {
                                 android.util.Log.e("LanWebSocketClient", "❌ WebSocket send exception: ${e.message}", e)
                                 break@loop

@@ -30,6 +30,17 @@ class ClipboardParser(
     private val storageManager: com.hypo.clipboard.data.local.StorageManager,
     private val onFileTooLarge: ((String, Long) -> Unit)? = null // Callback for file size warnings
 ) {
+    // Track seen image hashes to prevent saving duplicates
+    // Using a companion object so it's shared across all parser instances
+    companion object {
+        val seenImageHashes = mutableSetOf<String>() // Made accessible for external clearing
+        val hashLock = Any() // Make accessible for external clearing
+        // Track last clipboard URI to avoid reading bytes if URI hasn't changed
+        @Volatile
+        var lastImageUri: Uri? = null // Make accessible for external clearing
+        @Volatile
+        var lastImageHash: String? = null // Make accessible for external clearing
+    }
 
     fun parse(clipData: ClipData): ClipboardEvent? {
         return try {
@@ -152,16 +163,50 @@ class ClipboardParser(
     private fun parseImage(uri: Uri, mimeType: String?): ClipboardEvent? {
         var bitmap: Bitmap? = null
         return try {
-            // First, get image dimensions without loading full image into memory
-            val options = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
+            // Check if URI has changed before reading bytes
+            // If same URI, skip immediately without reading bytes
+            // Note: ClipboardListener will clear URI tracking for "Hypo Clipboard" label
+            // to allow user-initiated copies from history to sync
+            if (uri == lastImageUri && lastImageHash != null) {
+                android.util.Log.d("ClipboardParser", "⏭️ Clipboard URI unchanged, skipping parse (URI: ${uri.lastPathSegment?.take(30)}...)")
+                return null
             }
+            
+            // Read bytes only if URI changed
             val bytes = readBytes(uri) ?: return null
+            
+            // Calculate hash from ORIGINAL bytes IMMEDIATELY after reading
+            // This ensures stable hash for duplicate detection even if compression varies
+            val originalHash = sha256Hex(bytes)
+            
+            // Check if we've seen this hash before - skip EARLY to avoid expensive processing
+            synchronized(hashLock) {
+                if (seenImageHashes.contains(originalHash)) {
+                    android.util.Log.d("ClipboardParser", "⏭️ Skipping duplicate image (hash match: ${originalHash.take(16)}...) - avoiding expensive parsing")
+                    // Update URI tracking even though we're skipping
+                    lastImageUri = uri
+                    lastImageHash = originalHash
+                    return null
+                }
+                // Keep only last 100 hashes to prevent memory bloat
+                if (seenImageHashes.size >= 100) {
+                    seenImageHashes.clear()
+                }
+                seenImageHashes.add(originalHash)
+                // Track this URI/hash combination
+                lastImageUri = uri
+                lastImageHash = originalHash
+            }
             
             // Check if image is too large before decoding
             if (bytes.size > SizeConstants.MAX_ATTACHMENT_BYTES * 10) {
                 android.util.Log.w("ClipboardParser", "⚠️ Image too large: ${formatBytes(bytes.size.toLong())}, skipping")
                 return null
+            }
+            
+            // First, get image dimensions without loading full image into memory
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
             }
             
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
@@ -225,7 +270,7 @@ class ClipboardParser(
             val thumbnail = bitmap.scaleToThumbnail(128)
             val metadata = buildMap {
                 put("size", encodedBytes.size.toString())
-                put("hash", sha256Hex(encodedBytes))
+                put("hash", originalHash) // Use hash from original bytes, not compressed
                 put("width", width.toString())
                 put("height", height.toString())
                 put("mime_type", resolvedMimeForFormat(format))
@@ -519,7 +564,7 @@ class ClipboardParser(
         return formatter.format(value) + " " + units[unitIndex]
     }
 
-    private fun sha256Hex(bytes: ByteArray): String {
+    fun sha256Hex(bytes: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
         return digest.joinToString(separator = "") { byte ->
             (byte.toInt() and 0xFF).toString(16).padStart(2, '0')

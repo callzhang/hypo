@@ -207,7 +207,7 @@ public final class ClipboardMonitor {
                 var processedPixels = pixels
                 
                 if processedData.count > maxRawSize {
-                    logger.info("📐 [ClipboardMonitor] Image too large: \(processedData.count) bytes, compressing...")
+                    logger.info("📐 [ClipboardMonitor] Image too large: \(processedData.count.formattedAsKB), compressing...")
                     
                     // Scale down to reasonable size
                     let maxDimension = SizeConstants.maxImageDimensionPx
@@ -226,7 +226,7 @@ public final class ClipboardMonitor {
                     // Re-encode with compression (use JPEG for better compression)
                     if let compressedData = processedImage.jpegData(compressionQuality: 0.85) {
                         processedData = compressedData
-                        logger.info("🗜️ [ClipboardMonitor] Re-encoded as JPEG: \(processedData.count) bytes")
+                        logger.info("🗜️ [ClipboardMonitor] Re-encoded as JPEG: \(processedData.count.formattedAsKB)")
                     }
                     
                     // Further compress if still too large
@@ -235,7 +235,7 @@ public final class ClipboardMonitor {
                         while processedData.count > maxRawSize && quality >= 0.4 {
                             if let furtherCompressed = processedImage.jpegData(compressionQuality: quality) {
                                 processedData = furtherCompressed
-                                logger.info("🗜️ [ClipboardMonitor] Further compressed (quality: \(Int(quality * 100))%): \(processedData.count) bytes")
+                                logger.info("🗜️ [ClipboardMonitor] Further compressed (quality: \(Int(quality * 100))%): \(processedData.count.formattedAsKB)")
                             }
                             quality -= 0.1
                         }
@@ -244,7 +244,7 @@ public final class ClipboardMonitor {
                 
                 // Final check - if still too large, skip
                 if processedData.count > SizeConstants.maxAttachmentBytes {
-                    logger.warning("⚠️ [ClipboardMonitor] Image exceeds \(SizeConstants.maxAttachmentBytes / (1024 * 1024))MB limit after compression: \(processedData.count) bytes, skipping")
+                    logger.warning("⚠️ [ClipboardMonitor] Image exceeds \(SizeConstants.maxAttachmentBytes / (1024 * 1024))MB limit after compression: \(processedData.count.formattedAsKB), skipping")
                     return nil
                 }
                 
@@ -330,7 +330,7 @@ public final class ClipboardMonitor {
                 var processedPixels = pixels
                 
                 if processedData.count > maxRawSize {
-                    logger.info("📐 [ClipboardMonitor] Image file too large: \(processedData.count) bytes, compressing...")
+                    logger.info("📐 [ClipboardMonitor] Image file too large: \(processedData.count.formattedAsKB), compressing...")
                     
                     // Scale down to reasonable size
                     let maxDimension = SizeConstants.maxImageDimensionPx
@@ -349,7 +349,7 @@ public final class ClipboardMonitor {
                     // Re-encode with compression (use JPEG for better compression)
                     if let compressedData = processedImage.jpegData(compressionQuality: 0.85) {
                         processedData = compressedData
-                        logger.info("🗜️ [ClipboardMonitor] Re-encoded image file as JPEG: \(processedData.count) bytes")
+                        logger.info("🗜️ [ClipboardMonitor] Re-encoded image file as JPEG: \(processedData.count.formattedAsKB)")
                     }
                     
                     // Further compress if still too large
@@ -358,7 +358,7 @@ public final class ClipboardMonitor {
                         while processedData.count > maxRawSize && quality >= 0.4 {
                             if let furtherCompressed = processedImage.jpegData(compressionQuality: quality) {
                                 processedData = furtherCompressed
-                                logger.info("🗜️ [ClipboardMonitor] Further compressed image file (quality: \(Int(quality * 100))%): \(processedData.count) bytes")
+                                logger.info("🗜️ [ClipboardMonitor] Further compressed image file (quality: \(Int(quality * 100))%): \(processedData.count.formattedAsKB)")
                             }
                             quality -= 0.1
                         }
@@ -367,7 +367,7 @@ public final class ClipboardMonitor {
                 
                 // Final check - if still too large, skip
                 if processedData.count > SizeConstants.maxAttachmentBytes {
-                    logger.warning("⚠️ [ClipboardMonitor] Image file exceeds \(SizeConstants.maxAttachmentBytes / (1024 * 1024))MB limit after compression: \(processedData.count) bytes, skipping")
+                    logger.warning("⚠️ [ClipboardMonitor] Image file exceeds \(SizeConstants.maxAttachmentBytes / (1024 * 1024))MB limit after compression: \(processedData.count.formattedAsKB), skipping")
                     return nil
                 }
                 
@@ -386,7 +386,7 @@ public final class ClipboardMonitor {
                     localPath: localPath
                 )
                 
-                logger.info("🖼️ [ClipboardMonitor] Captured image file as image: \(fileURL.lastPathComponent) (\(processedData.count) bytes)")
+                logger.info("🖼️ [ClipboardMonitor] Captured image file as image: \(fileURL.lastPathComponent) (\(processedData.count.formattedAsKB))")
                 return ClipboardEntry(
                     deviceId: self.deviceId.uuidString,
                     originPlatform: self.platform,

@@ -1,5 +1,6 @@
 package com.hypo.clipboard.pairing
 
+import com.hypo.clipboard.util.formattedAsKB
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -335,7 +336,7 @@ class LanPairingViewModel @Inject constructor(
                                 Log.d(TAG, "🔑 Verifying key was saved for device: $deviceId")
                                 val savedKey = deviceKeyStore.loadKey(deviceId)
                                 if (savedKey != null) {
-                                    Log.d(TAG, "✅ Key exists in store: ${savedKey.size} bytes")
+                                    Log.d(TAG, "✅ Key exists in store: ${savedKey.size.formattedAsKB()}")
                                 } else {
                                     Log.e(TAG, "❌ Key missing from store! Available keys: ${deviceKeyStore.getAllDeviceIds()}")
                                 }

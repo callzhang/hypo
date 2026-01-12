@@ -56,7 +56,7 @@ public final class StorageManager {
         
         try data.write(to: fileURL)
         #if canImport(os)
-        logger.debug("💾 [StorageManager] Saved \(data.count) bytes to \(fileName)")
+        logger.debug("💾 [StorageManager] Saved \(data.count.formattedAsKB) to \(fileName)")
         #endif
         
         return fileName

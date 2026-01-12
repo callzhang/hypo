@@ -109,32 +109,31 @@ adb -s $device_id logcat "*:S" \
   ClipboardAccessChecker:D \
   ClipboardAccessibilityService:D \
   ClipboardListener:D \
+  ClipboardParser:D \
+  ClipboardRepository:D \
   ClipboardSyncService:D \
   ConnectionStatusProber:D \
+  CryptoService:D \
   IncomingClipboardHandler:D \
+  LanDiscoveryRepository:D \
   LanPairingViewModel:D \
+  LanRegistrationManager:D \
   LanWebSocketServer:D \
+  MainActivity:D \
   MiuiAdapter:D \
   MiuiClipboardHistory:D \
   PairingHandshake:D \
   ProcessTextActivity:D \
+  RelayWebSocketClient:D \
   ScreenStateReceiver:D \
   ShareImageActivity:D \
   SmsReceiver:D \
   StorageManager:D \
   SyncCoordinator:D \
+  SyncEngine:D \
   TempFileManager:D \
-  MainActivity:D \
   TransportManager:D \
-  WebSocketTransportClient:D \
-  RelayWebSocketClient:D \
-  LanRegistrationManager:D \
-  LanDiscoveryRepository:D \
-  ClipboardParser:D \
-  ClipboardRepositoryImpl:D \
-  HistoryViewModel:D \
-  SettingsViewModel:D \
-  HomeViewModel:D
+  WebSocketTransportClient:D
 
 # Alternative: If you want to see ALL logs from the app process (including system framework logs)
 # Use PID-based filtering (may include MIUIInput, VRI, etc. from system framework)

@@ -110,7 +110,8 @@ class SettingsViewModel @Inject constructor(
                 }.getOrElse { emptyList() }
                 
                 // Build list of paired devices from storage (not synthetic peers)
-                val pairedDevices = allPairedDeviceIds.mapNotNull { deviceId ->
+                val pairedDevices = mutableListOf<PairedDeviceInfo>()
+                for (deviceId in allPairedDeviceIds) {
                     val deviceName = transportManager.getDeviceName(deviceId)
                     if (deviceName != null) {
                         // Find discovered peer for this device (if any) - use case-insensitive matching
@@ -122,14 +123,22 @@ class SettingsViewModel @Inject constructor(
                             peerDeviceId == deviceId || 
                             peer.serviceName == deviceId
                         }
-                        PairedDeviceInfo(
+                        pairedDevices.add(PairedDeviceInfo(
                             deviceId = deviceId,
                             deviceName = deviceName,
                             discoveredPeer = discoveredPeer
-                        )
+                        ))
                     } else {
-                        // Skip devices without stored name (they were deleted)
-                        null
+                        // Found an orphaned key (valid key in keystore, but no name in prefs)
+                        // This happens if pairing was interrupted or during migration
+                        // Heal the state by deleting the orphaned key
+                        android.util.Log.w("SettingsViewModel", "⚠️ Found orphaned key for device $deviceId (no name found). Deleting key to clean up state.")
+                        runCatching {
+                            deviceKeyStore.deleteKey(deviceId)
+                            transportManager.forgetPairedDevice(deviceId)
+                        }.onFailure { e ->
+                            android.util.Log.e("SettingsViewModel", "❌ Failed to delete orphaned key for $deviceId", e)
+                        }
                     }
                 }
                 

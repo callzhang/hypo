@@ -271,6 +271,22 @@ class ConnectionStatusProber @Inject constructor(
             val dualStatuses = mutableMapOf<String, com.hypo.clipboard.ui.components.DeviceDualStatus>()
             
             for (deviceId in pairedDeviceIds) {
+                // Check if device has a name - if not, it's an orphaned key from migration
+                val deviceName = transportManager.getDeviceName(deviceId)
+                if (deviceName == null) {
+                    // Found an orphaned key (valid key in keystore, but no name in prefs)
+                    // This happens if pairing was interrupted or during migration
+                    // Heal the state by deleting the orphaned key
+                    Log.w(TAG, "⚠️ Found orphaned key for device $deviceId (no name found). Deleting key to clean up state.")
+                    runCatching {
+                        deviceKeyStore.deleteKey(deviceId)
+                        transportManager.forgetPairedDevice(deviceId)
+                    }.onFailure { e ->
+                        Log.e(TAG, "❌ Failed to delete orphaned key for $deviceId", e)
+                    }
+                    continue // Skip this device for status checks
+                }
+                
                 // Check LAN status: device is discovered OR has active LAN connection
                 val isDiscovered = peers.any { 
                     val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
@@ -293,8 +309,7 @@ class ConnectionStatusProber @Inject constructor(
                     isConnectedViaCloud = isConnectedViaCloud
                 )
                 
-                val deviceName = transportManager.getDeviceName(deviceId)
-                val deviceLabel = if (deviceName != null) "$deviceId ($deviceName)" else deviceId
+                val deviceLabel = "$deviceId ($deviceName)"
                 Log.d(TAG, "📊 Device $deviceLabel: LAN=${isConnectedViaLan}, Cloud=${isConnectedViaCloud}")
             }
             

@@ -60,6 +60,7 @@ android/.gradle/
 android/build/
 android/local.properties
 android/gradle/wrapper/gradle-wrapper.jar
+*.jar.new
 
 # Android Studio
 android/.idea/
@@ -218,3 +219,4 @@ __pycache__/
 
 .secrets
 macos/Hypo.app/
+build_log.txt

@@ -104,36 +104,7 @@ echo "✅ Using device: $device_id"
 # This is the closest equivalent to macOS "log stream --predicate 'process == \"HypoApp\"'"
 # All app log tags (automatically collected from source code)
 # Using "*:S" to silence all logs, then only show our app tags (quoted to prevent shell glob expansion)
-adb -s $device_id logcat "*:S" \
-  AccessibilityServiceChecker:D \
-  ClipboardAccessChecker:D \
-  ClipboardAccessibilityService:D \
-  ClipboardListener:D \
-  ClipboardParser:D \
-  ClipboardRepository:D \
-  ClipboardSyncService:D \
-  ConnectionStatusProber:D \
-  CryptoService:D \
-  IncomingClipboardHandler:D \
-  LanDiscoveryRepository:D \
-  LanPairingViewModel:D \
-  LanRegistrationManager:D \
-  LanWebSocketServer:D \
-  MainActivity:D \
-  MiuiAdapter:D \
-  MiuiClipboardHistory:D \
-  PairingHandshake:D \
-  ProcessTextActivity:D \
-  RelayWebSocketClient:D \
-  ScreenStateReceiver:D \
-  ShareImageActivity:D \
-  SmsReceiver:D \
-  StorageManager:D \
-  SyncCoordinator:D \
-  SyncEngine:D \
-  TempFileManager:D \
-  TransportManager:D \
-  WebSocketTransportClient:D
+adb logcat "*:S" AccessibilityServiceChecker:D ClipboardAccessChecker:D ClipboardAccessibilityService:D ClipboardListener:D ClipboardParser:D ClipboardRepository:D ClipboardSyncService:D ConnectionStatusProber:D CryptoService:D IncomingClipboardHandler:D LanDiscoveryRepository:D LanPairingViewModel:D LanRegistrationManager:D LanWebSocketServer:D MainActivity:D MiuiAdapter:D MiuiClipboardHistory:D PairingHandshake:D ProcessTextActivity:D RelayWebSocketClient:D ScreenStateReceiver:D ShareImageActivity:D SmsReceiver:D StorageManager:D SyncCoordinator:D SyncEngine:D TempFileManager:D TransportManager:D WebSocketTransportClient:D
 
 # Alternative: If you want to see ALL logs from the app process (including system framework logs)
 # Use PID-based filtering (may include MIUIInput, VRI, etc. from system framework)

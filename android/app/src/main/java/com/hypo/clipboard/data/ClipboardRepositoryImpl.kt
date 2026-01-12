@@ -21,13 +21,11 @@ class ClipboardRepositoryImpl @Inject constructor(
 ) : ClipboardRepository {
 
     override fun observeHistory(limit: Int): Flow<List<ClipboardItem>> {
-        Log.d("ClipboardRepository", "📋 observeHistory called with limit=$limit")
         // Use observe() without LIMIT to ensure Room Flow emits on all changes
         // Filtering will be done in ViewModel
         // Note: Content is excluded for IMAGE/FILE types to avoid CursorWindow overflow
         // Content will be loaded on-demand when copying or viewing details
         return dao.observe().map { list ->
-            Log.d("ClipboardRepository", "📋 Flow emitted: ${list.size} items (before limit)")
             list.map { it.toDomain() }
         }
     }
@@ -91,7 +89,6 @@ class ClipboardRepositoryImpl @Inject constructor(
 
     override suspend fun upsert(item: ClipboardItem) {
         try {
-            Log.d("ClipboardRepository", "💾 Upserting item: id=${item.id.take(20)}..., type=${item.type}, preview=${item.preview.take(30)}")
             
             var localPath: String? = item.localPath
             var contentToSave = item.content
@@ -141,11 +138,6 @@ class ClipboardRepositoryImpl @Inject constructor(
             }
             dao.upsert(entity)
             
-            if (item.transportOrigin == null) {
-                Log.d("ClipboardRepository", "✅ Local item upserted to database (moved to top)")
-            } else {
-                Log.d("ClipboardRepository", "✅ Received item upserted to database (preserved timestamp: ${item.createdAt})")
-            }
         } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
             Log.e("ClipboardRepository", "❌ SQLiteBlobTooBigException when upserting ${item.type} item: ${e.message}", e)
             throw e
@@ -190,10 +182,16 @@ class ClipboardRepositoryImpl @Inject constructor(
                         existingItem.type == item.type &&
                         existingItem.metadata?.get("hash") == hash
                     }
+            } else {
+                // For IMAGE/FILE types without hash, we cannot safely match
+                // Files stored on disk have empty content, so content-based matching would
+                // incorrectly match different files. Return null to add as new entry.
+                Log.d("ClipboardRepository", "⚠️ IMAGE/FILE item has no hash - cannot safely match, will add as new entry")
+                return null
             }
         }
         
-        // For TEXT/LINK or if hash not available, use content-based matching
+        // For TEXT/LINK, use content-based matching
         // But limit to recent entries to avoid loading too much data
         val allEntries = dao.observe().firstOrNull() ?: return null
         val latestEntry = allEntries.firstOrNull()

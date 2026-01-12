@@ -82,6 +82,7 @@ import com.hypo.clipboard.R
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
 import com.hypo.clipboard.util.SizeConstants
+import com.hypo.clipboard.util.formattedAsKB
 import com.hypo.clipboard.domain.model.TransportOrigin
 import com.hypo.clipboard.transport.ConnectionState
 import com.hypo.clipboard.ui.components.ConnectionStatusBadge
@@ -166,17 +167,28 @@ fun HistoryScreen(
         } else {
             val listState = rememberLazyListState()
             
+            // Track clicked item ID to scroll when it moves to top
+            var clickedItemId by remember { mutableStateOf<String?>(null) }
+            
             // Track the first item's timestamp to detect when an item moves to top
             // When an item is clicked and moved to top, its timestamp changes, triggering scroll
             val firstItemTimestamp = items.firstOrNull()?.createdAt
+            val firstItemId = items.firstOrNull()?.id
             
-            // Scroll to top when:
-            // 1. Items list size changes (new item added)
-            // 2. First item changes (different item at top)
-            // 3. First item's timestamp changes (same item moved to top via click)
-            LaunchedEffect(items.size, items.firstOrNull()?.id, firstItemTimestamp) {
-                if (items.isNotEmpty()) {
-                    // Use a small delay to ensure the list has been recomposed with new order
+            // Scroll to top when clicked item actually appears at index 0
+            LaunchedEffect(clickedItemId, firstItemId) {
+                if (clickedItemId != null && firstItemId == clickedItemId) {
+                    // The clicked item is now at the top - scroll to it
+                    kotlinx.coroutines.delay(100) // Small delay to ensure UI has recomposed
+                    listState.animateScrollToItem(0)
+                    clickedItemId = null // Clear after scrolling
+                }
+            }
+            
+            // Fallback: Scroll to top when first item changes (for new items or when timestamp changes)
+            LaunchedEffect(items.size, firstItemId, firstItemTimestamp) {
+                if (items.isNotEmpty() && clickedItemId == null) {
+                    // Only auto-scroll if no item was clicked (to avoid conflicts)
                     kotlinx.coroutines.delay(50)
                     listState.animateScrollToItem(0)
                 }
@@ -194,17 +206,21 @@ fun HistoryScreen(
                         viewModel = viewModel,
                         tempFileManager = tempFileManager,
                         onItemClicked = {
-                            // When item is clicked, it will be copied to clipboard
-                            // The clipboard listener will detect the change and update the database,
-                            // moving the item to the top. The LaunchedEffect above will detect
-                            // the timestamp change and automatically scroll to top.
-                            // We also trigger an immediate scroll as a fallback in case the
-                            // LaunchedEffect doesn't trigger quickly enough.
+                            // Track the clicked item ID - we'll scroll when it appears at index 0
+                            clickedItemId = item.id
+                            
+                            // Also set up a timeout fallback in case the item doesn't move to top
+                            // (shouldn't happen, but defensive programming)
                             scope.launch {
-                                // Wait for database update and Flow emission
-                                kotlinx.coroutines.delay(200)
-                                // Scroll to top - the item should now be at index 0
-                                listState.animateScrollToItem(0)
+                                kotlinx.coroutines.delay(1000) // Wait up to 1 second
+                                // Check if item is at top, if not, scroll anyway
+                                if (items.firstOrNull()?.id == item.id) {
+                                    listState.animateScrollToItem(0)
+                                } else if (clickedItemId == item.id) {
+                                    // Item didn't move to top - scroll anyway as fallback
+                                    listState.animateScrollToItem(0)
+                                    clickedItemId = null
+                                }
                             }
                         }
                     )
@@ -288,7 +304,6 @@ private fun ClipboardCard(
         // Prevent multiple rapid clicks by checking if job is already active
         // Job state is atomic, so this check is thread-safe
         if (copyJob?.isActive == true) {
-            android.util.Log.d("HistoryScreen", "⏸️ Copy already in progress, ignoring click")
             return
         }
         
@@ -304,7 +319,6 @@ private fun ClipboardCard(
                 // Load content on-demand if needed (for IMAGE/FILE types that have empty content)
                 var content = contentToCopy
                 if (needsContentLoad) {
-                    android.util.Log.d("HistoryScreen", "📥 Loading full content for ${item.type} item ${itemId}")
                     content = viewModel.loadFullContent(itemId) ?: contentToCopy
                     if (content.isBlank()) {
                         android.util.Log.w("HistoryScreen", "⚠️ Failed to load content for item ${itemId}, cannot copy")
@@ -337,7 +351,7 @@ private fun ClipboardCard(
                 // Base64 encoding increases size by ~33%, so check the base64 string size
                 val estimatedSizeBytes = (content.length * 3) / 4 // Approximate decoded size
                 if (estimatedSizeBytes > SizeConstants.MAX_COPY_SIZE_BYTES) {
-                    android.util.Log.w("HistoryScreen", "⚠️ Item too large to copy: ${estimatedSizeBytes} bytes (limit: ${SizeConstants.MAX_COPY_SIZE_BYTES})")
+                    android.util.Log.w("HistoryScreen", "⚠️ Item too large to copy: ${estimatedSizeBytes.formattedAsKB()} (limit: ${SizeConstants.MAX_COPY_SIZE_BYTES.formattedAsKB()})")
                     kotlinx.coroutines.withContext(Dispatchers.Main) {
                         Toast.makeText(
                             context,
@@ -404,12 +418,9 @@ private fun ClipboardCard(
                         }
                         */
                         val tempFile = createTempFileForClipboard(context, imageBytes, "hypo_image", ".$format")
-                        // Log.d("HistoryScreen", "MIME type for image: $mimeType") // mimeType was calculated but not used in this context
-                        android.util.Log.d("HistoryScreen", "📁 Created temp file: ${tempFile.absolutePath}, exists=${tempFile.exists()}, readable=${tempFile.canRead()}, size=${tempFile.length()}")
                         // Register temp file for automatic cleanup
                         tempFileManager.registerTempFile(tempFile)
                         val uri = getFileProviderUri(context, tempFile)
-                        android.util.Log.d("HistoryScreen", "🔗 FileProvider URI: $uri")
                         ClipData.newUri(context.contentResolver, "Hypo Clipboard", uri)
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
@@ -419,11 +430,9 @@ private fun ClipboardCard(
                         val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
                         val extension = getExtensionFromFilename(filename) ?: getExtensionFromMimeType(mimeType) ?: ""
                         val tempFile = createTempFileForClipboard(context, fileBytes, "hypo_file", if (extension.isNotEmpty()) ".$extension" else "")
-                        android.util.Log.d("HistoryScreen", "📁 Created temp file: ${tempFile.absolutePath}, exists=${tempFile.exists()}, readable=${tempFile.canRead()}, size=${tempFile.length()}")
                         // Register temp file for automatic cleanup
                         tempFileManager.registerTempFile(tempFile)
                         val uri = getFileProviderUri(context, tempFile)
-                        android.util.Log.d("HistoryScreen", "🔗 FileProvider URI: $uri")
                         ClipData.newUri(context.contentResolver, "Hypo Clipboard", uri)
                     }
                 }
@@ -431,19 +440,9 @@ private fun ClipboardCard(
                 // Switch to Main thread to set clipboard
                 withContext(Dispatchers.Main) {
                     try {
-                        // Log clip details before setting
-                        android.util.Log.d("HistoryScreen", "📋 Setting clipboard: type=${item.type}, clip.description=${clip.description}, clip.itemCount=${clip.itemCount}")
-                        if (item.type == com.hypo.clipboard.domain.model.ClipboardType.IMAGE || 
-                            item.type == com.hypo.clipboard.domain.model.ClipboardType.FILE) {
-                            val uri = clip.getItemAt(0).uri
-                            android.util.Log.d("HistoryScreen", "📋 Clip URI: $uri, scheme=${uri.scheme}, authority=${uri.authority}")
-                        }
-                        
                         // ClipData.newUri() automatically adds FLAG_GRANT_READ_URI_PERMISSION
                         // This allows the clipboard system to read the FileProvider URI
                         manager.setPrimaryClip(clip)
-                        
-                        android.util.Log.d("HistoryScreen", "✅ Copied to clipboard (itemId=$itemId, type=${item.type}): ${content.take(30)}")
                         
                         // Show success toast for all types
                         Toast.makeText(
@@ -726,25 +725,36 @@ private fun FileDetailContent(item: ClipboardItem, content: String) {
     val fileSize = item.metadata?.get("size")?.toLongOrNull() ?: (fileBytes?.size?.toLong() ?: 0L)
     val mimeType = item.metadata?.get("mime_type") ?: "application/octet-stream"
     
-    // Check if it's a text file
-    val isTextFile = fileName.endsWith(".txt", ignoreCase = true) ||
-                     fileName.endsWith(".md", ignoreCase = true) ||
-                     fileName.endsWith(".json", ignoreCase = true) ||
-                     fileName.endsWith(".xml", ignoreCase = true) ||
-                     fileName.endsWith(".html", ignoreCase = true) ||
-                     fileName.endsWith(".css", ignoreCase = true) ||
-                     fileName.endsWith(".js", ignoreCase = true) ||
-                     fileName.endsWith(".py", ignoreCase = true) ||
-                     fileName.endsWith(".kt", ignoreCase = true) ||
-                     fileName.endsWith(".java", ignoreCase = true) ||
-                     fileName.endsWith(".log", ignoreCase = true) ||
-                     mimeType.startsWith("text/")
+    // Check if it's an image file (should not be rendered as text)
+    val isImageFile = mimeType.startsWith("image/") ||
+                     fileName.endsWith(".jpg", ignoreCase = true) ||
+                     fileName.endsWith(".jpeg", ignoreCase = true) ||
+                     fileName.endsWith(".png", ignoreCase = true) ||
+                     fileName.endsWith(".gif", ignoreCase = true) ||
+                     fileName.endsWith(".webp", ignoreCase = true) ||
+                     fileName.endsWith(".bmp", ignoreCase = true) ||
+                     fileName.endsWith(".svg", ignoreCase = true)
     
-    val fileContent = if (fileBytes != null && isTextFile) {
+    // For non-image files, always try to render as text
+    // Only show binary preview for actual image files or if text decoding fails
+    val fileContent = if (fileBytes != null && !isImageFile) {
         try {
             String(fileBytes, Charsets.UTF_8)
         } catch (e: Exception) {
-            null
+            // If UTF-8 decoding fails, try to check if it's valid text by checking for null bytes
+            // If no null bytes and mostly printable ASCII, treat as text
+            val hasNullBytes = fileBytes.any { it == 0.toByte() }
+            val printableRatio = fileBytes.count { it.toInt() in 32..126 || it.toInt() == 9 || it.toInt() == 10 || it.toInt() == 13 }.toFloat() / fileBytes.size
+            if (!hasNullBytes && printableRatio > 0.7f) {
+                // Mostly printable characters, try ISO-8859-1 or other encoding
+                try {
+                    String(fileBytes, Charsets.ISO_8859_1)
+                } catch (e2: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
         }
     } else null
     
@@ -816,16 +826,24 @@ private fun FileDetailContent(item: ClipboardItem, content: String) {
         // Content display
         if (fileContent != null) {
             // Text file - show content
-            Text(
-                text = fileContent,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.fillMaxWidth()
-            )
-        } else if (fileBytes != null) {
-            // Binary file - show hex preview
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(scrollState)
+            ) {
+                Text(
+                    text = fileContent,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        } else if (fileBytes != null && isImageFile) {
+            // Image file - show hex preview (images shouldn't be rendered as text)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Binary file content (hex preview):",
+                    text = "Image file content (hex preview):",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -843,6 +861,14 @@ private fun FileDetailContent(item: ClipboardItem, content: String) {
                     )
                 }
             }
+        } else if (fileBytes != null) {
+            // Non-image file that couldn't be decoded as text - still try to show as text
+            // This handles edge cases where decoding failed but content might still be viewable
+            Text(
+                text = "Unable to decode file as text. File size: ${formatBytes(fileSize)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         } else {
             Text(
                 text = "Unable to decode file data",

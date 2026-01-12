@@ -60,7 +60,6 @@ class TempFileManager(
             clipboardListener = ClipboardChangeListener {
                 // Don't clean up immediately - the clipboard system needs to access the file
                 // Files will be cleaned up after CLEANUP_DELAY_MS or during periodic cleanup
-                Log.d(TAG, "📋 Clipboard changed, but not cleaning up temp files immediately (they may still be in use)")
             }
             manager.addPrimaryClipChangedListener(clipboardListener)
         }
@@ -73,7 +72,6 @@ class TempFileManager(
     fun registerTempFile(file: File) {
         synchronized(tempFiles) {
             tempFiles.add(file)
-            Log.d(TAG, "📁 Registered temp file: ${file.name} (${tempFiles.size} total)")
             
             // Schedule cleanup after delay
             val cleanupJob = scope.launch(Dispatchers.IO) {

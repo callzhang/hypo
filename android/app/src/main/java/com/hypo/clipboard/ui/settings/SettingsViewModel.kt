@@ -232,7 +232,6 @@ class SettingsViewModel @Inject constructor(
     fun removeDevice(peer: DiscoveredPeer) {
         viewModelScope.launch {
             val deviceId = peer.attributes["device_id"] ?: peer.serviceName
-            android.util.Log.d("SettingsViewModel", "🗑️ Removing device: deviceId=$deviceId, serviceName=${peer.serviceName}")
             // Remove from transport manager (only if it's a discovered peer)
             if (peer.host != "unknown") {
                 transportManager.removePeer(peer.serviceName)
@@ -240,12 +239,10 @@ class SettingsViewModel @Inject constructor(
             // Delete the encryption key FIRST (this removes it from getAllDeviceIds())
             runCatching { 
                 deviceKeyStore.deleteKey(deviceId)
-                android.util.Log.d("SettingsViewModel", "🔑 Deleted encryption key for device: $deviceId")
             }
             // Then forget the paired device (clears transport status and device name)
             transportManager.forgetPairedDevice(deviceId)
             syncCoordinator.removeTargetDevice(deviceId)
-            android.util.Log.d("SettingsViewModel", "✅ Device removed: $deviceId")
         }
     }
     

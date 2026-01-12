@@ -47,14 +47,12 @@ class HistoryViewModel @Inject constructor(
 
     private fun observeHistory() {
         viewModelScope.launch {
-            android.util.Log.d("HistoryViewModel", "📋 Starting to observe history...")
             combine(
                 historyItems,
                 settingsRepository.settings,
                 searchQuery,
                 transportManager.cloudConnectionState
             ) { items, settings, query, connectionState ->
-                android.util.Log.d("HistoryViewModel", "📋 History Flow emitted: ${items.size} items, limit=${settings.historyLimit}, query='$query', connectionState=$connectionState")
                 // Apply limit in ViewModel (Room query no longer has LIMIT to ensure Flow emits)
                 val limited = items.take(settings.historyLimit)
                 val filtered = if (query.isBlank()) {
@@ -65,7 +63,6 @@ class HistoryViewModel @Inject constructor(
                             item.content.contains(query, ignoreCase = true)
                     }
                 }
-                android.util.Log.d("HistoryViewModel", "📋 Filtered to ${filtered.size} items, first item: ${filtered.firstOrNull()?.preview?.take(30)}")
                 HistoryUiState(
                     items = filtered,
                     query = query,
@@ -74,14 +71,12 @@ class HistoryViewModel @Inject constructor(
                     connectionState = connectionState
                 )
             }.collect { uiState ->
-                android.util.Log.d("HistoryViewModel", "📋 UI state updated: ${uiState.items.size} items, first: ${uiState.items.firstOrNull()?.preview?.take(30)}")
                 _state.value = uiState
             }
         }
     }
     
     fun refresh() {
-        android.util.Log.d("HistoryViewModel", "🔄 Manual refresh triggered")
         // Trigger a refresh by updating search query (this will cause combine to re-evaluate)
         val currentQuery = searchQuery.value
         searchQuery.value = currentQuery + " "  // Add space to trigger change

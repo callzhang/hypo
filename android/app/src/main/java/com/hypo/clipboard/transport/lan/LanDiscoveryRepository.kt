@@ -48,10 +48,9 @@ class LanDiscoveryRepository(
             }
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                android.util.Log.d("LanDiscoveryRepository", "🔍 Service found: ${serviceInfo.serviceName}, type: ${serviceInfo.serviceType}")
                 // Log own IPs before resolution to help debug why NSD resolves to wrong IP
-                val ownIPsBeforeResolve = getLocalIPAddresses()
-                android.util.Log.d("LanDiscoveryRepository", "   Own IPs before resolve: [${ownIPsBeforeResolve.joinToString()}]")
+                val ownIPsBeforeResolve = getLocalIPAddresses() // Will log to debug internally
+                android.util.Log.d("LanDiscoveryRepository", "🔍 Found: ${serviceInfo.serviceName} (${serviceInfo.serviceType}) | OwnIPs: [${ownIPsBeforeResolve.joinToString()}]")
                 @Suppress("DEPRECATION")
                 nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
@@ -253,7 +252,6 @@ class LanDiscoveryRepository(
         } catch (e: Exception) {
             android.util.Log.w("LanDiscoveryRepository", "⚠️ Failed to get local IP addresses: ${e.message}")
         }
-        android.util.Log.d("LanDiscoveryRepository", "   Local IP addresses: ${ips.joinToString()}")
         return ips
     }
 

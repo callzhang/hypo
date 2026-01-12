@@ -499,6 +499,8 @@ class WebSocketTransportClient @Inject constructor(
             // CRITICAL: Reset reconnecting flag to allow new connection attempts
             // Without this, all future ensureConnection() calls will be blocked
             isReconnecting = false
+            // Reset consecutive failures to allow immediate reconnection
+            consecutiveFailures = 0
             // Don't close socket or set isClosed - let the connection job cleanup handle it
         }
     }
@@ -566,6 +568,8 @@ class WebSocketTransportClient @Inject constructor(
         // CRITICAL: Reset flags for reconnection
         // Without this, all future ensureConnection() calls will be blocked
         isReconnecting = false  // Reset reconnecting flag to allow new connection attempts
+        // Reset consecutive failures to allow immediate reconnection without backoff
+        consecutiveFailures = 0
         // Reset isClosed flag so we can reconnect
         isClosed.set(false)
     }

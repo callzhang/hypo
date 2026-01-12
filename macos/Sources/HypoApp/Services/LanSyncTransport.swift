@@ -199,7 +199,7 @@ public final class LanSyncTransport: SyncTransport {
             for connectionId in activeConnections {
                 if let metadata = server.connectionMetadata(for: connectionId),
                    metadata.deviceId == targetDeviceId {
-                    server.send(framed, to: connectionId)
+                    try? server.send(framed, to: connectionId)
                     sentToTarget = true
                     #if canImport(os)
                     logger.debug("✅ [LanSyncTransport] Sent to target device via connection \(connectionId.uuidString.prefix(8))")

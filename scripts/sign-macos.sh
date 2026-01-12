@@ -81,9 +81,22 @@ fi
 
 log_info "Using entitlements: $ENTITLEMENTS"
 
-# Step 0: Clean extended attributes and resource forks (required before signing)
-log_info "Step 0: Cleaning app bundle..."
-# Remove any existing signature first
+# Step 0: Check if app is already signed and valid
+# If the signature is valid, we skip re-signing to preserve accessibility permissions
+log_info "Step 0: Checking existing signature..."
+if codesign --verify --strict --verbose "$APP_BUNDLE" 2>/dev/null; then
+    log_info "App already has a valid signature"
+    log_info "Skipping re-signing to preserve accessibility permissions across builds"
+    log_info "Note: If the binary changed, the signature will be invalid and re-signing will occur automatically"
+    log_success "Using existing signature"
+    exit 0
+else
+    log_info "App is not signed or signature is invalid (binary may have changed), will sign"
+fi
+
+# Step 1: Clean extended attributes and resource forks (required before signing)
+log_info "Step 1: Cleaning app bundle..."
+# Remove any existing signature first (only if we need to re-sign)
 codesign --remove-signature "$APP_BUNDLE" 2>/dev/null || true
 # Remove quarantine attribute (set by macOS when downloading from internet)
 xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true

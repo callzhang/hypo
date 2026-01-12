@@ -68,7 +68,7 @@ if echo "$DEVICE_ID" | grep -q "emulator"; then
     
     echo ""
     echo "📊 Recent logs:"
-    adb_cmd logcat -d -t 20 | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep -E "SmsReceiver|ClipboardListener" | tail -10 || echo "   No recent SMS-related logs"
+    adb_cmd logcat -d -t 20 | grep -vE "MIUIInput|SKIA|VRI|RenderThread|ViewRootImpl|Choreographer|WindowOnBackDispatcher|Binder.*destroyed|弹出式窗口|Cleared Reference|sticky GC|non sticky GC|maxfree|minfree|Zygote|nativeloader|AssetManager2|ApplicationLoaders|ViewContentFactory|CompatChangeReporter|libc.*Access denied|TurboSchedMonitor|MiuiDownscaleImpl|MiuiMonitorThread|ResMonitorStub|MiuiAppAdaptationStubsControl|MiuiProcessManagerServiceStub|MiuiNBIManagerImpl|DecorViewImmersiveImpl|WM-WrkMgrInitializer|WM-PackageManagerHelper|WM-Schedulers|Adreno|Vulkan|libEGL|AdrenoVK|AdrenoUtils|SnapAlloc|qdgralloc|RenderLite|FramePredict|DecorView|ActivityThread.*HardwareRenderer|ActivityThread.*Miui Feature|ActivityThread.*TrafficStats|ActivityThread.*currentPkg|DesktopModeFlags|FirstFrameSpeedUp|ComputilityLevel|SLF4J|Sentry.*auto-init|Sentry.*Retrieving|AppScoutStateMachine|FlingPromotion|ForceDarkHelper|MiuiForceDarkConfig|vulkan.*searching|libEGL.*shader cache|Perf.*Connecting|NativeTurboSchedManager|ashmem.*Pinning|EpFrameworkFactory" | grep -E "SmsReceiver|ClipboardListener" | tail -10 || echo "   No recent SMS-related logs"
     
 else
     echo "📱 Physical device detected"
@@ -89,6 +89,6 @@ else
     echo "  Press Ctrl+C to stop monitoring"
     echo ""
     adb_cmd logcat -c  # Clear logs
-    adb_cmd logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|📱|✅.*SMS"
+    adb_cmd logcat | grep -vE "MIUIInput|SKIA|VRI|RenderThread|ViewRootImpl|Choreographer|WindowOnBackDispatcher|Binder.*destroyed|弹出式窗口|Cleared Reference|sticky GC|non sticky GC|maxfree|minfree|Zygote|nativeloader|AssetManager2|ApplicationLoaders|ViewContentFactory|CompatChangeReporter|libc.*Access denied|TurboSchedMonitor|MiuiDownscaleImpl|MiuiMonitorThread|ResMonitorStub|MiuiAppAdaptationStubsControl|MiuiProcessManagerServiceStub|MiuiNBIManagerImpl|DecorViewImmersiveImpl|WM-WrkMgrInitializer|WM-PackageManagerHelper|WM-Schedulers|Adreno|Vulkan|libEGL|AdrenoVK|AdrenoUtils|SnapAlloc|qdgralloc|RenderLite|FramePredict|DecorView|ActivityThread.*HardwareRenderer|ActivityThread.*Miui Feature|ActivityThread.*TrafficStats|ActivityThread.*currentPkg|DesktopModeFlags|FirstFrameSpeedUp|ComputilityLevel|SLF4J|Sentry.*auto-init|Sentry.*Retrieving|AppScoutStateMachine|FlingPromotion|ForceDarkHelper|MiuiForceDarkConfig|vulkan.*searching|libEGL.*shader cache|Perf.*Connecting|NativeTurboSchedManager|ashmem.*Pinning|EpFrameworkFactory" | grep --line-buffered -E "SmsReceiver|ClipboardListener|SMS|📱|✅.*SMS"
 fi
 

@@ -70,6 +70,74 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379
         run: cargo test --all-features --locked
 
+      - name: Setup Python for integration tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python dependencies
+        run: pip install websockets
+
+      - name: Build backend server
+        working-directory: backend
+        run: cargo build --release
+
+      - name: Start backend server
+        working-directory: backend
+        env:
+          REDIS_URL: redis://127.0.0.1:6379
+          RUST_LOG: info
+        run: |
+          # Start server in background
+          ./target/release/hypo-relay > /tmp/hypo-server.log 2>&1 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          echo "Started server with PID: $SERVER_PID"
+          
+          # Wait for server to start (max 30 seconds)
+          for i in {1..30}; do
+            if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+              echo "✅ Backend server is ready"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Server failed to start after 30 seconds"
+              echo "Server logs:"
+              cat /tmp/hypo-server.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Run large file sync tests
+        working-directory: backend/tests
+        env:
+          CLOUD_URL: ws://localhost:8080/ws
+        run: |
+          echo "🧪 Running large file sync tests (100MB)..."
+          echo "This test verifies that the server can handle large file transfers (100MB) without overflow errors"
+          python3 test_file_sync.py \
+            --skip-lan \
+            --skip-overflow \
+            --cloud-url "$CLOUD_URL" \
+            --device-id $(python3 -c "import uuid; print(uuid.uuid4())") || {
+            echo "❌ Large file sync test failed"
+            echo "Server logs:"
+            cat /tmp/hypo-server.log || true
+            exit 1
+          }
+          echo "✅ Large file sync tests passed"
+
+      - name: Stop backend server
+        if: always()
+        run: |
+          if [ -n "$SERVER_PID" ]; then
+            kill $SERVER_PID 2>/dev/null || true
+            sleep 1
+            kill -9 $SERVER_PID 2>/dev/null || true
+            echo "✅ Backend server stopped"
+          fi
+
       - name: Deploy to Fly.io
         working-directory: backend
         run: |

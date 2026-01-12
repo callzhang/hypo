@@ -1,6 +1,9 @@
 #!/bin/bash
 # Backend Deployment Script for Hypo Relay Server
 # Deploys to Fly.io production environment
+# 
+# This script combines functionality from both scripts/deploy.sh and backend/deploy.sh
+# Can be run from project root or backend directory
 
 set -euo pipefail
 

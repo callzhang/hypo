@@ -3,6 +3,17 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// Represents a connected peer device with its ID and optional name.
+public struct ConnectedPeer: Sendable, Equatable {
+    public let deviceId: String
+    public let name: String?
+    
+    public init(deviceId: String, name: String?) {
+        self.deviceId = deviceId
+        self.name = name
+    }
+}
+
 public struct CloudRelayConfiguration: Sendable, Equatable {
     public let url: URL
     public let fingerprint: String?
@@ -24,12 +35,14 @@ public struct CloudRelayConfiguration: Sendable, Equatable {
 
 public final class CloudRelayTransport: SyncTransport {
     private let delegate: WebSocketTransport
+    private var nameLookup: ((String) -> String?)?
 
     public init(
         configuration: CloudRelayConfiguration,
         frameCodec: TransportFrameCodec = TransportFrameCodec(),
         metricsRecorder: TransportMetricsRecorder = NullTransportMetricsRecorder(),
         analytics: TransportAnalytics = NoopTransportAnalytics(),
+        nameLookup: ((String) -> String?)? = nil,
         sessionFactory: @escaping @Sendable (URLSessionDelegate, TimeInterval) -> URLSessionProviding = { delegate, timeout in
             let config = URLSessionConfiguration.ephemeral
             // WebSocket connections should stay open indefinitely
@@ -57,6 +70,7 @@ public final class CloudRelayTransport: SyncTransport {
             analytics: analytics,
             sessionFactory: sessionFactory
         )
+        self.nameLookup = nameLookup
     }
 
     public func connect() async throws {
@@ -87,6 +101,12 @@ public final class CloudRelayTransport: SyncTransport {
         delegate.setOnIncomingMessage(handler)
     }
     
+    /// Set the closure for looking up device names by device ID
+    /// This closure will be used when querying connected peers to include device names
+    public func setNameLookup(_ lookup: @escaping (String) -> String?) {
+        nameLookup = lookup
+    }
+    
     /// Force reconnection by disconnecting and reconnecting.
     /// Used when network changes to ensure connection uses new IP address.
     public func reconnect() async {
@@ -97,8 +117,13 @@ public final class CloudRelayTransport: SyncTransport {
     }
     
     /// Query connected peers from cloud relay
-    /// Returns list of connected device IDs, or empty array if query fails
-    public func queryConnectedPeers() async -> [String] {
-        return await delegate.queryConnectedPeers()
+    /// Returns list of connected peers with their IDs and names, or empty array if query fails
+    /// Device names are looked up using the nameLookup closure if provided
+    public func queryConnectedPeers() async -> [ConnectedPeer] {
+        let deviceIds = await delegate.queryConnectedPeers()
+        return deviceIds.map { deviceId in
+            let name = nameLookup?(deviceId)
+            return ConnectedPeer(deviceId: deviceId, name: name)
+        }
     }
 }

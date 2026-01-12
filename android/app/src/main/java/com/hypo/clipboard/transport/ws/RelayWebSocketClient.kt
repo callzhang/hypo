@@ -13,6 +13,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 
+/**
+ * Represents a connected peer device with its ID and optional name.
+ */
+data class ConnectedPeer(
+    val deviceId: String,
+    val name: String?
+)
+
 class RelayWebSocketClient @Inject constructor(
     private val config: TlsWebSocketConfig,
     connector: WebSocketConnector,
@@ -103,10 +111,11 @@ class RelayWebSocketClient @Inject constructor(
     
     /**
      * Query connected peers from the cloud relay server.
-     * Sends a control message and returns the list of connected device IDs.
+     * Sends a control message and returns the list of connected peers with their IDs and names.
      * Returns empty list if query fails or connection is not established.
+     * Device names are looked up locally from TransportManager.
      */
-    suspend fun queryConnectedPeers(): List<String> {
+    suspend fun queryConnectedPeers(): List<ConnectedPeer> {
         if (!isConnected()) {
             android.util.Log.d("RelayWebSocketClient", "⚠️ Cannot query connected peers: not connected")
             return emptyList()
@@ -116,14 +125,16 @@ class RelayWebSocketClient @Inject constructor(
             val response = delegate.sendControlMessage("query_connected_peers", timeoutMs = 5000)
             if (response != null) {
                 val devicesArray = response.optJSONArray("connected_devices")
-                val devices = mutableListOf<String>()
+                val peers = mutableListOf<ConnectedPeer>()
                 if (devicesArray != null) {
                     for (i in 0 until devicesArray.length()) {
-                        devices.add(devicesArray.getString(i))
+                        val deviceId = devicesArray.getString(i)
+                        val name = transportManager.getDeviceName(deviceId)
+                        peers.add(ConnectedPeer(deviceId = deviceId, name = name))
                     }
                 }
-                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${devices.size} devices")
-                devices
+                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${peers.size} devices")
+                peers
             } else {
                 android.util.Log.w("RelayWebSocketClient", "⚠️ No response from query_connected_peers")
                 emptyList()

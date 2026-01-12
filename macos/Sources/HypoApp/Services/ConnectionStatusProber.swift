@@ -65,6 +65,18 @@ public final class ConnectionStatusProber {
     public func start() {
         stop() // Stop any existing task
         
+        // Set up name lookup for cloud transport
+        if let transportProvider = transportProvider as? DefaultTransportProvider {
+            let cloudTransport = transportProvider.getCloudTransport()
+            cloudTransport.setNameLookup { [weak self] deviceId in
+                guard let self = self,
+                      let device = self.historyViewModel?.pairedDevices.first(where: { $0.id.lowercased() == deviceId.lowercased() }) else {
+                    return nil
+                }
+                return device.name
+            }
+        }
+        
         logger.info("🔍", "Started - event-driven only (no periodic polling)")
         
         // Initial probe on launch (immediate, no delay)
@@ -225,8 +237,15 @@ public final class ConnectionStatusProber {
                 let cloudTransport = transportProvider.getCloudTransport()
                 if cloudTransport.isConnected() {
                     let connectedPeers = await cloudTransport.queryConnectedPeers()
-                    logger.info("☁️ [ConnectionStatusProber] Cloud query returned \(connectedPeers.count) connected devices")
-                    cloudConnectedDeviceIds = Set(connectedPeers)
+                    // Format device IDs with names for logging
+                    let devicesWithNames = connectedPeers.map { peer in
+                        if let name = peer.name {
+                            return "\(peer.deviceId) (\(name))"
+                        }
+                        return peer.deviceId
+                    }
+                    logger.info("☁️ [ConnectionStatusProber] Cloud query returned \(connectedPeers.count) connected devices: \(devicesWithNames)")
+                    cloudConnectedDeviceIds = Set(connectedPeers.map { $0.deviceId })
                 }
             }
         

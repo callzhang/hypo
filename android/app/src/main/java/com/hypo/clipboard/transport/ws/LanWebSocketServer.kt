@@ -1,5 +1,7 @@
 package com.hypo.clipboard.transport.ws
 
+import com.hypo.clipboard.util.formattedAsKB
+
 import android.util.Log
 import com.hypo.clipboard.pairing.PairingChallengeMessage
 import java.net.InetSocketAddress

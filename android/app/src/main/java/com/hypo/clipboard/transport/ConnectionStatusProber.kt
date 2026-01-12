@@ -243,8 +243,11 @@ class ConnectionStatusProber @Inject constructor(
             val cloudConnectedDevices = if (cloudWebSocketClient.isConnected()) {
                 try {
                     val connectedPeers = cloudWebSocketClient.queryConnectedPeers()
-                    Log.d(TAG, "☁️ Cloud query returned ${connectedPeers.size} connected devices: $connectedPeers")
-                    connectedPeers.toSet()
+                    val devicesWithNames = connectedPeers.map { peer ->
+                        if (peer.name != null) "${peer.deviceId} (${peer.name})" else peer.deviceId
+                    }
+                    Log.d(TAG, "☁️ Cloud query returned ${connectedPeers.size} connected devices: $devicesWithNames")
+                    connectedPeers.map { it.deviceId }.toSet()
                 } catch (e: Exception) {
                     Log.w(TAG, "⚠️ Failed to query cloud for connected peers: ${e.message}", e)
                     emptySet()
@@ -290,7 +293,9 @@ class ConnectionStatusProber @Inject constructor(
                     isConnectedViaCloud = isConnectedViaCloud
                 )
                 
-                Log.d(TAG, "📊 Device $deviceId: LAN=${isConnectedViaLan}, Cloud=${isConnectedViaCloud}")
+                val deviceName = transportManager.getDeviceName(deviceId)
+                val deviceLabel = if (deviceName != null) "$deviceId ($deviceName)" else deviceId
+                Log.d(TAG, "📊 Device $deviceLabel: LAN=${isConnectedViaLan}, Cloud=${isConnectedViaCloud}")
             }
             
             _deviceDualStatus.value = dualStatuses

@@ -441,6 +441,81 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 - Every 30 days, initiate ECDH renegotiation
 - Old key valid for 7 days grace period (dual-key decryption)
 
+#### 3.3.1 Encryption Model and Transport Architecture ✅ Implemented (January 2026)
+
+**Symmetric Key Design**:
+- Hypo uses **symmetric encryption** with **per-device shared keys**
+- During pairing, both devices exchange and store the **same secret key**
+- Each device pair has a unique key (Device A ↔ Device B uses key `K_AB`)
+- When Device A sends to Device B: encrypts with `K_AB`, Device B decrypts with same `K_AB`
+
+**Why Symmetric vs Asymmetric**:
+- ✅ **Confidentiality**: Each device pair has unique key; compromising one doesn't expose others
+- ✅ **Performance**: AES-GCM is 100-1000x faster than RSA/ECC (1-10 GB/s encryption speed)
+- ✅ **Smaller messages**: Minimal overhead (12-byte nonce + 16-byte tag)
+- ❌ Asymmetric (public key) only provides **authentication**, not **confidentiality**
+
+**Dual Transport (LAN + Cloud)**:
+
+For each paired device, messages are sent via **both** LAN and Cloud for maximum reliability:
+
+```
+Mac → [Encrypt with Device A's key] → LAN + Cloud → Device A ✅
+Mac → [Encrypt with Device B's key] → LAN + Cloud → Device B ✅
+Mac → [Encrypt with Device C's key] → LAN + Cloud → Device C ✅
+```
+
+**Message Flow for N Devices**:
+1. **Encrypt N times**: Once per device with unique shared key
+2. **Re-encrypt for each transport**: Create separate envelopes with unique nonces for LAN and Cloud
+3. **Send 2N messages total**: N via LAN (unicast) + N via Cloud
+
+**Nonce Reuse Prevention**:
+- AES-GCM requires **unique nonces** for each encryption with the same key
+- Same message + same key + same nonce = **catastrophic security failure**
+- `DualSyncTransport` decrypts original envelope and re-encrypts with new nonce for each transport
+- Both LAN and Cloud use same key but different nonces
+
+**Critical: LAN Unicast Behavior** ✅ Fixed (January 2026):
+
+**Rule**: When `envelope.payload.target` is set, **unicast to that device only**.
+
+```swift
+if let targetDeviceId = envelope.payload.target {
+    // Encrypted message - send ONLY to target device
+    server.send(framed, to: targetConnectionId)
+} else {
+    // Unencrypted or broadcast - send to all
+    server.sendToAll(framed)
+}
+```
+
+**Bug (before fix)**:
+- Mac encrypted messages correctly (one per device with unique keys)
+- But `LanSyncTransport` **broadcast all encrypted messages to all LAN peers**
+- Result: Each device received messages encrypted for other devices
+- Caused `AEADBadTagException` errors (wrong key for decryption)
+
+**After fix**:
+- `LanSyncTransport.send()` checks `envelope.payload.target`
+- If target is set: unicast only to that specific device
+- If target is null: broadcast to all peers (for unencrypted messages)
+- Result: No decryption errors, each device only receives its own messages
+
+**Debugging Decryption Errors**:
+
+If you see `AEADBadTagException` or `BAD_DECRYPT`:
+1. **Check target device ID**: Does envelope's `target` match recipient?
+2. **Check key**: Is sender using correct key for this recipient?
+3. **Check nonce reuse**: Is same nonce used twice with same key?
+4. **Check broadcast**: Is encrypted message being broadcast instead of unicast?
+
+**Performance Considerations**:
+- Encrypting N times is negligible: AES-GCM at 1-10 GB/s vs network latency 10-100ms
+- Encryption is 10,000x faster than network transmission
+- Per-device keys provide better security than group keys (compromising one device doesn't expose all messages)
+
+
 ### 3.4 Certificate Pinning
 
 For cloud relay TLS:

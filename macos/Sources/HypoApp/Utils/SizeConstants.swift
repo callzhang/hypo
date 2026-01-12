@@ -39,5 +39,10 @@ public enum SizeConstants {
     /// Maximum dimension (width or height) for images before scaling down.
     /// Images with longest side > 2560px will be scaled down.
     public static let maxImageDimensionPx: CGFloat = 2560
+    
+    /// Maximum size for WebSocket messages on macOS.
+    /// URLSessionWebSocketTask.maximumMessageSize is set to 1GB to support large file transfers.
+    /// WebSocket will automatically fragment messages using RFC 6455 fragmentation.
+    public static let maxWebSocketMessageBytes = 1_073_741_824 // 1GB
 }
 

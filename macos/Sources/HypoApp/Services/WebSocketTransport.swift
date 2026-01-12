@@ -37,6 +37,7 @@ public struct WebSocketConfiguration: Sendable, Equatable {
 }
 
 public protocol WebSocketTasking: AnyObject {
+    var maximumMessageSize: Int { get set }
     func resume()
     func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping @Sendable (Error?) -> Void)
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
@@ -91,7 +92,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     // Message queue with retry logic
     private struct QueuedMessage {
         let envelope: SyncEnvelope
-        let data: Data
+        var data: Data
         let queuedAt: Date
         var retryCount: UInt
     }
@@ -104,6 +105,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     // Track messages that are "in flight" - send callback fired but transmission may not be complete
     private var inFlightMessages: [UUID: QueuedMessage] = [:] // message ID -> queued message
     // Track pending control message queries (query ID -> continuation)
+    // Thread-safe access using a serial queue
+    private let pendingControlQueriesQueue = DispatchQueue(label: "com.hypo.clipboard.pendingControlQueries")
     private var pendingControlQueries: [String: CheckedContinuation<[String: Any], Never>] = [:]
 
     public init(
@@ -208,6 +211,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
         request.url = finalURL
         let task = session.webSocketTask(with: request)
+        
+        // CRITICAL: Set maximumMessageSize to 1GB to support large file transfers
+        // This allows WebSocket to automatically fragment large messages using RFC 6455 fragmentation
+        // The server already supports 1GB frames, so this enables end-to-end large file support
+        task.maximumMessageSize = 1_073_741_824 // 1GB
+        logger.info("📏 [WebSocketTransport] Set maximumMessageSize to 1GB for automatic fragmentation")
+        
         state = .connecting
 
         // CRITICAL: Retain self and session during connection to prevent deallocation
@@ -237,7 +247,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     }
 
     public func send(_ envelope: SyncEnvelope) async throws {
-        let data = try frameCodec.encode(envelope)
+        // Encode message - WebSocket will automatically fragment if needed (up to 1GB)
+        let encodedData = try frameCodec.encode(envelope)
         await pendingRoundTrips.store(date: Date(), for: envelope.id)
         
         // Queue Overflow Protection: Max 100 messages
@@ -256,27 +267,33 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             logger.warning("⚠️ [WebSocketTransport] Queue overflow: dropped \(dropCount) oldest messages to make room")
         }
         
+        // Ensure connection before queuing
+        // This prevents queuing messages when we know we can't send them
+        try await ensureConnected()
+        
         // Add to queue
         let queuedMessage = QueuedMessage(
             envelope: envelope,
-            data: data,
+            data: encodedData,
             queuedAt: Date(),
             retryCount: 0
         )
         messageQueue.append(queuedMessage)
         
-        logger.debug("📥 [WebSocketTransport] Queued message: type=\(envelope.payload.contentType), size=\(data.count.formattedAsKB), id=\(envelope.id.uuidString.prefix(8)), queue=\(messageQueue.count)")
+        logger.debug("📥 [WebSocketTransport] Queued message: type=\(envelope.payload.contentType), size=\(encodedData.count.formattedAsKB), id=\(envelope.id.uuidString.prefix(8)), queue=\(messageQueue.count)")
         
         // Start queue processor if not already running
+        // The queue processor will handle sending and retries
+        // ensureConnected() already handles waiting for reconnection if needed
         if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
             queueProcessingTask = Task { [weak self] in
                 await self?.processMessageQueue()
             }
         }
         
-        // Wait for message to be sent (with timeout)
-        // Note: This is fire-and-forget from caller's perspective, but we track it internally
-        // The queue processor will handle retries
+        // Return immediately - queue processor will handle sending
+        // If connection fails, ensureConnected() will wait for reconnection
+        // If send fails, queue processor will retry with backoff
     }
     
     private func processMessageQueue() async {
@@ -322,6 +339,55 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             do {
                 try await ensureConnected()
                 logger.debug("✅ [WebSocketTransport] Connection ensured successfully")
+                
+                // CRITICAL FIX: For large messages (>100KB), add a delay after connection
+                // and verify readiness with ping/pong to ensure the WebSocket handshake is
+                // fully complete on the server side. This prevents actix_ws buffer overflow
+                // during handshake when large messages are sent immediately after connection.
+                // 
+                // Root cause: actix_ws has an internal buffer limit during WebSocket upgrade.
+                // If a large message is sent too quickly after connection, the server's
+                // actix_ws::handle() may still be processing the handshake and overflow occurs.
+                let messageSize = queuedMessage.data.count
+                if messageSize > 100_000 { // 100KB threshold
+                    // Delay scales with message size: 
+                    // - 200KB: ~500ms
+                    // - 400KB: ~1000ms (1 second)
+                    // - 500KB+: ~1500ms (1.5 seconds)
+                    let delayMs = min(1500, max(500, Int(messageSize / 400))) // 500-1500ms range
+                    logger.debug("⏳ [WebSocketTransport] Large message (\(messageSize.formattedAsKB)): waiting \(delayMs)ms after connection to ensure handshake completes")
+                    try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+                    
+                    // Additional safety: Send ping and wait for pong to confirm connection is ready
+                    guard case .connected(let pingTask) = state else {
+                        logger.warning("⚠️ [WebSocketTransport] Connection lost during delay, requeuing message")
+                        queuedMessage.retryCount += 1
+                        if queuedMessage.retryCount <= maxRetries {
+                            messageQueue.append(queuedMessage)
+                        } else {
+                            logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
+                            _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                        }
+                        continue
+                    }
+                    
+                    logger.debug("⏳ [WebSocketTransport] Sending ping to verify connection is ready...")
+                    do {
+                        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                            pingTask.sendPing { error in
+                                if let error {
+                                    continuation.resume(throwing: error)
+                                } else {
+                                    continuation.resume(returning: ())
+                                }
+                            }
+                        }
+                        logger.debug("✓ [WebSocketTransport] Pong received, connection is ready for large message")
+                    } catch {
+                        logger.warning("⚠️ [WebSocketTransport] Ping failed, connection may not be ready: \(error.localizedDescription)")
+                        // Continue anyway - the delay should be sufficient
+                    }
+                }
             } catch {
                 logger.warning("⚠️ [WebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)")
                 queuedMessage.retryCount += 1
@@ -417,14 +483,9 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                                 _ = await strongSelf.pendingRoundTrips.remove(id: messageId)
                             }
                         } else {
-                            // Connection is invalid - requeue message for retry
-                            strongSelf.logger.warning("⚠️ [WebSocketTransport] Message timeout but connection invalid, requeuing: id=\(messageId.uuidString.prefix(8)), frame=\(queuedMessage.data.count.formattedAsKB)")
-                            // Don't increment retry count - this is a connection issue, not a message issue
-                            strongSelf.messageQueue.append(queuedMessage)
-                            // Trigger queue processing to retry
-                            Task {
-                                await strongSelf.triggerQueueProcessingIfNeeded()
-                            }
+                            // Connection is invalid - don't requeue here to avoid duplicate nonce errors
+                            // The message will be retried at HistoryStore level if it truly failed
+                            strongSelf.logger.warning("⚠️ [WebSocketTransport] Message timeout but connection invalid: id=\(messageId.uuidString.prefix(8)), frame=\(queuedMessage.data.count.formattedAsKB)")
                         }
                     }
                 }
@@ -609,21 +670,28 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
         
         let payload = await withCheckedContinuation { continuation in
-            // Store continuation for response handling
-            pendingControlQueries[queryId] = continuation
+            // Store continuation for response handling (thread-safe)
+            self.pendingControlQueriesQueue.sync {
+                self.pendingControlQueries[queryId] = continuation
+            }
             
             // Send raw JSON control message
             task.send(.string(jsonString)) { error in
                 if let error = error {
                     self.logger.warning("⚠️ [WebSocketTransport] Failed to send query_connected_peers: \(error.localizedDescription)")
-                    if let pending = self.pendingControlQueries.removeValue(forKey: queryId) {
+                    // Only resume if we successfully remove the continuation (prevents double resume)
+                    // Thread-safe removal
+                    if let pending = self.pendingControlQueriesQueue.sync(execute: { self.pendingControlQueries.removeValue(forKey: queryId) }) {
                         pending.resume(returning: [:])
                     }
                 } else {
                     // Set timeout - if no response in 5 seconds, return empty dictionary (will result in empty array)
                     Task {
                         try? await Task.sleep(nanoseconds: 5_000_000_000)
-                        if let pending = self.pendingControlQueries.removeValue(forKey: queryId) {
+                        // Only resume if we successfully remove the continuation (prevents double resume)
+                        // This ensures that if the response came in first, we won't try to resume again
+                        // Thread-safe removal
+                        if let pending = self.pendingControlQueriesQueue.sync(execute: { self.pendingControlQueries.removeValue(forKey: queryId) }) {
                             pending.resume(returning: [:])
                         }
                     }
@@ -855,6 +923,10 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             closeCodeMsg = "unknown(\(closeCode.rawValue))"
         }
         
+        // Check for in-flight messages when connection closes
+        let inFlightCount = inFlightMessages.count
+        let inFlightSizes = inFlightMessages.values.map { $0.data.count.formattedAsKB }.joined(separator: ", ")
+        
         // Enhanced logging for cloud connections
         var closeMsg = "🔌 [WebSocketTransport] WebSocket closed\n"
         closeMsg += "   Close code: \(closeCode.rawValue) (\(closeCodeMsg))\n"
@@ -862,6 +934,10 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
         closeMsg += "   URL: \(configuration.url.absoluteString)\n"
         closeMsg += "   Environment: \(configuration.environment)\n"
         closeMsg += "   State: \(state)\n"
+        if inFlightCount > 0 {
+            closeMsg += "   ⚠️ In-flight messages: \(inFlightCount) (sizes: \(inFlightSizes))\n"
+            closeMsg += "   This suggests the server closed the connection during large message transmission\n"
+        }
         
         // Capture HTTP response details if available (for cloud connections)
         if isCloud, let httpResponse = webSocketTask.response as? HTTPURLResponse {
@@ -886,14 +962,17 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
         logger.info("🔌 [WebSocketTransport] close() called: state=\(state), receive retry count=\(receiveRetryCount)")
         fflush(stdout)
         
-        // Check for in-flight messages - if socket closes during large payload transmission, requeue them
+        // Check for in-flight messages - if socket closes during large payload transmission
+        // NOTE: We don't requeue here because:
+        // 1. The message may have already been successfully sent (send callback fired)
+        // 2. Requeuing would use the same nonce, causing Android to reject it as duplicate
+        // 3. If the message truly failed, it will be retried at the HistoryStore level,
+        //    which will go through DualSyncTransport and generate a new nonce
         if !inFlightMessages.isEmpty {
             let inFlightCount = inFlightMessages.count
-            logger.info("⚠️ [WebSocketTransport] Socket closed with \(inFlightCount) in-flight message(s) - requeuing for retry")
-            for (messageId, queuedMessage) in inFlightMessages {
-                logger.info("🔄 [WebSocketTransport] Requeuing in-flight message: id=\(messageId.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), frame=\(queuedMessage.data.count.formattedAsKB)")
-                messageQueue.append(queuedMessage)
-            }
+            logger.info("⚠️ [WebSocketTransport] Socket closed with \(inFlightCount) in-flight message(s)")
+            // Not requeuing - messages may have been sent successfully. If not, they will be retried at HistoryStore level with new nonces.
+            // Clear in-flight messages - don't requeue to avoid duplicate nonce errors
             inFlightMessages.removeAll()
             
             // Trigger queue processing after reconnection
@@ -1089,32 +1168,57 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                     return
                 }
                 
-                // Socket is not connected is an expected condition when socket is closed
-                // Log at debug level instead of warning
+                // Log detailed error information to diagnose connection failures
+                let inFlightCount = inFlightMessages.count
+                let inFlightSizes = inFlightMessages.values.map { $0.data.count.formattedAsKB }.joined(separator: ", ")
+                
                 if isSocketNotConnected {
-                    logger.debug("ℹ️ [WebSocketTransport] Receive failed: Socket is not connected (expected when socket is closed)")
+                    // Socket is not connected - this could be:
+                    // 1. Server closed the connection (check close code in didCompleteWithError)
+                    // 2. Network issue during large message transmission
+                    // 3. Receive callback from stale socket (already handled above)
+                    if inFlightCount > 0 {
+                        logger.warning("⚠️ [WebSocketTransport] Receive failed: Socket not connected during large message send")
+                        logger.warning("   In-flight messages: \(inFlightCount) (sizes: \(inFlightSizes))")
+                        logger.warning("   Error: \(errorDescription)")
+                        logger.warning("   Error domain: \(nsError.domain), code: \(nsError.code)")
+                        logger.warning("   This suggests the connection was closed by server or network during transmission")
+                    } else {
+                        logger.debug("ℹ️ [WebSocketTransport] Receive failed: Socket is not connected (no in-flight messages)")
+                    }
                     
-                    // Check for in-flight messages - if socket closes during large payload transmission, requeue them
+                    // If we have in-flight messages, the connection was likely closed during send
+                    // NOTE: We don't requeue here because:
+                    // 1. The message may have already been successfully sent (send callback fired)
+                    // 2. Requeuing would use the same nonce, causing Android to reject it as duplicate
+                    // 3. If the message truly failed, it will be retried at the HistoryStore level,
+                    //    which will go through DualSyncTransport and generate a new nonce
                     if !inFlightMessages.isEmpty {
-                        let inFlightCount = inFlightMessages.count
-                        logger.info("⚠️ [WebSocketTransport] Socket disconnected with \(inFlightCount) in-flight message(s) - requeuing for retry")
-                        for (messageId, queuedMessage) in inFlightMessages {
-                            logger.info("🔄 [WebSocketTransport] Requeuing in-flight message: id=\(messageId.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), frame=\(queuedMessage.data.count.formattedAsKB)")
-                            messageQueue.append(queuedMessage)
-                        }
+                        logger.info("⚠️ [WebSocketTransport] Socket disconnected with \(inFlightCount) in-flight message(s)")
+                        logger.info("ℹ️ [WebSocketTransport] Not requeuing - messages may have been sent successfully. If not, they will be retried at HistoryStore level with new nonces.")
+                        
+                        // Update state to idle to prevent further sends on this connection
+                        state = .idle
+                        
+                        // Clear in-flight messages - don't requeue to avoid duplicate nonce errors
                         inFlightMessages.removeAll()
                         
-                        // Trigger queue processing after reconnection
-                        Task { [weak self] in
-                            guard let self else { return }
-                            // Wait a bit for reconnection, then trigger queue processing
-                            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
-                            await self.triggerQueueProcessingIfNeeded()
-                        }
+                        // Trigger reconnection immediately (don't wait)
+                        reconnectWithBackoff()
+                    } else {
+                        // No in-flight messages, but receive failed - connection might be dead
+                        // Update state and trigger reconnection
+                        state = .idle
+                        reconnectWithBackoff()
                     }
                 } else {
                     logger.warning("❌ [WebSocketTransport] Receive failed: \(errorDescription)")
-                    // Only trigger reconnection for real failures, not expected disconnections
+                    logger.warning("   Error domain: \(nsError.domain), code: \(nsError.code)")
+                    if inFlightCount > 0 {
+                        logger.warning("   In-flight messages: \(inFlightCount) (sizes: \(inFlightSizes))")
+                    }
+                    // Update state to idle and trigger reconnection for real failures
+                    state = .idle
                     reconnectWithBackoff()
                 }
             }
@@ -1215,38 +1319,39 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                             }
                         }
                         
-                        // Control messages have structure: {"msg_type":"control","payload":{...}}
-                        // They don't have an "id" field, so decoding as SyncEnvelope will fail
-                        if jsonString.contains("\"msg_type\"") && jsonString.contains("\"control\"") {
-                            // Try to parse as control message
-                            if let jsonDict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                               let msgType = jsonDict["msg_type"] as? String,
-                               msgType == "control",
-                               let payload = jsonDict["payload"] as? [String: Any],
-                               let action = payload["action"] as? String {
-                                logger.debug("📋 [WebSocketTransport] Control message: \(action)")
-                                
-                                // Handle query_connected_peers response
-                                if action == "query_connected_peers" {
-                                    if let originalMessageId = payload["original_message_id"] as? String,
-                                       let continuation = pendingControlQueries.removeValue(forKey: originalMessageId) {
-                                        // Return the payload which contains connected_devices array
-                                        continuation.resume(returning: payload)
-                                        return
-                                    }
-                                }
-                                
-                                if action == "routing_failure" {
-                                    if let reason = payload["reason"] as? String {
-                                        // Log as debug instead of warning - these are expected when devices are offline
-                                        logger.debug("ℹ️ [WebSocketTransport] Routing failure: \(reason)")
-                                    }
-                                    if let targetDeviceId = payload["target_device_id"] as? String {
-                                        // Log as debug instead of warning - these are expected when devices are offline
-                                        logger.debug("ℹ️ [WebSocketTransport] Target device not connected: \(targetDeviceId)")
-                                    }
+                        // Control messages have structure: {"type":"control","payload":{...}}
+                        // They don't have a "contentType" field, so decoding as SyncEnvelope will fail
+                        // Check for control messages by parsing JSON first (more reliable than string contains)
+                        if let jsonDict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                           let msgType = jsonDict["type"] as? String,
+                           msgType == "control",
+                           let payload = jsonDict["payload"] as? [String: Any],
+                           let action = payload["action"] as? String {
+                            logger.debug("📋 [WebSocketTransport] Control message: \(action)")
+                            
+                            // Handle query_connected_peers response
+                            if action == "query_connected_peers" {
+                                if let originalMessageId = payload["original_message_id"] as? String,
+                                   let continuation = self.pendingControlQueriesQueue.sync(execute: { self.pendingControlQueries.removeValue(forKey: originalMessageId) }) {
+                                    // Return the payload which contains connected_devices array
+                                    continuation.resume(returning: payload)
+                                    return
+                                } else {
+                                    logger.debug("⚠️ [WebSocketTransport] query_connected_peers response received but no matching continuation found (original_message_id: \(payload["original_message_id"] as? String ?? "nil"))")
                                 }
                             }
+                            
+                            if action == "routing_failure" {
+                                if let reason = payload["reason"] as? String {
+                                    // Log as debug instead of warning - these are expected when devices are offline
+                                    logger.debug("ℹ️ [WebSocketTransport] Routing failure: \(reason)")
+                                }
+                                if let targetDeviceId = payload["target_device_id"] as? String {
+                                    // Log as debug instead of warning - these are expected when devices are offline
+                                    logger.debug("ℹ️ [WebSocketTransport] Target device not connected: \(targetDeviceId)")
+                                }
+                            }
+                            
                             // Control messages are informational - don't try to decode as SyncEnvelope
                             return
                         }

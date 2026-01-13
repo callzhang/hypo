@@ -292,7 +292,8 @@ class TransportManager(
                             
                             // Pass to handler if set
                             if (envelope.type == com.hypo.clipboard.sync.MessageType.CLIPBOARD) {
-                                if (onIncomingClipboard != null) {
+                                android.util.Log.v("TransportManager", "📋 Invoking incoming clipboard handler (LAN)")
+                                onIncomingClipboard?.invoke(envelope, com.hypo.clipboard.domain.model.TransportOrigin.LAN)
                             } else {
                                 android.util.Log.w("TransportManager", "⚠️ Received non-clipboard message type: ${envelope.type}")
                             }

@@ -91,11 +91,9 @@ pub async fn websocket_handler(
     actix_web::rt::spawn(async move {
         // Simple stateless relay: just forward messages, fail fast if connection is closed
         let mut message_count = 0u64;
-        let mut last_message_time = writer_start_time;
-        
         while let Some(message) = outbound.recv().await {
             message_count += 1;
-            last_message_time = std::time::Instant::now();
+            let last_message_time = std::time::Instant::now();
             
             // message is already in binary frame format (4-byte length + JSON)
             if let Err(err) = writer_session.binary(message).await {
@@ -144,7 +142,7 @@ pub async fn websocket_handler(
         let mut message_count = 0u64;
         let mut error_count = 0u64;
         let mut last_message_time = reader_start_time;
-        let mut close_reason = String::from("stream_ended");
+        let mut close_reason = String::from("stream_ended_normally");
         
         loop {
             match msg_stream.recv().await {
@@ -233,7 +231,6 @@ pub async fn websocket_handler(
                     error_count += 1;
                     close_reason = format!("stream_error_{:?}", e);
                     
-                    let error_str = format!("{:?}", e);
                     let connection_duration = reader_start_time.elapsed();
                     let time_since_last_message = last_message_time.elapsed();
                     
@@ -251,7 +248,6 @@ pub async fn websocket_handler(
                     break;
                 }
                 None => {
-                    close_reason = String::from("stream_ended_normally");
                     break;
                 }
             }
@@ -374,6 +370,9 @@ async fn handle_binary_message(
         return Ok(());
     }
 
+    // Update last_seen for this device session
+    sessions.touch(sender_id).await;
+
     if let Err(err) = validate_encryption_block(payload) {
         warn!("Discarding message from {}: {} (payload keys: {:?})", 
             sender_id, err, 
@@ -482,6 +481,9 @@ async fn handle_text_message(
         return Ok(());
     }
 
+    // Update last_seen for this device session
+    sessions.touch(sender_id).await;
+
     if let Err(err) = validate_encryption_block(payload) {
         warn!("Discarding message from {}: {} (payload keys: {:?})", 
             sender_id, err, 
@@ -563,12 +565,14 @@ async fn handle_text_message(
 }
 
 #[derive(Debug, Deserialize)]
-struct RegisterKeyPayload {
+struct ControlMessagePayload {
     action: String,
     #[serde(default)]
     _device_id: Option<String>,
     #[serde(default)]
     symmetric_key: Option<String>,
+    #[serde(default)]
+    device_ids: Option<Vec<String>>,
 }
 
 async fn handle_control_message(
@@ -579,14 +583,17 @@ async fn handle_control_message(
     sessions: &crate::services::session_manager::SessionManager,
     sender_session: &mut actix_ws::Session,
 ) {
-    let Ok(registration) = serde_json::from_value::<RegisterKeyPayload>(payload.clone()) else {
+    // Update last_seen for this device session
+    sessions.touch(sender_id).await;
+
+    let Ok(control) = serde_json::from_value::<ControlMessagePayload>(payload.clone()) else {
         warn!("Invalid control payload from {}", sender_id);
         return;
     };
 
-    match registration.action.as_str() {
+    match control.action.as_str() {
         "register_key" => {
-            let Some(encoded_key) = registration.symmetric_key else {
+            let Some(encoded_key) = control.symmetric_key else {
                 warn!("register_key missing symmetric_key field for {}", sender_id);
                 return;
             };
@@ -612,7 +619,17 @@ async fn handle_control_message(
             info!("Deregistered symmetric key for device {}", sender_id);
         }
         "query_connected_peers" => {
-            let connected_devices = sessions.get_connected_devices().await;
+            let mut connected_devices = sessions.get_connected_devices_info().await;
+            
+            // Privacy filter: if client provided a list of device IDs, only return the ones that are in that list
+            if let Some(requested_ids) = control.device_ids {
+                let requested_set: std::collections::HashSet<String> = requested_ids.into_iter().collect();
+                connected_devices.retain(|info| requested_set.contains(&info.device_id));
+                info!("Applied privacy filter to connected peers list for {}: returned {}/{} devices", 
+                    sender_id, connected_devices.len(), requested_set.len());
+            } else {
+                warn!("Client {} queried connected peers without a filter. For privacy, clients should provide device_ids.", sender_id);
+            }
             let response = serde_json::json!({
                 "id": uuid::Uuid::new_v4(),
                 "timestamp": chrono::Utc::now().to_rfc3339(),

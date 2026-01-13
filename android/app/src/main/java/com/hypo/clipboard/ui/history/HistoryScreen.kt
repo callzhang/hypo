@@ -724,12 +724,13 @@ private fun ClipboardDetailContent(
     val context = LocalContext.current
     
     // Load full content for IMAGE/FILE types automatically when detail view opens
-    var loadedContent by remember { mutableStateOf(item.content) }
-    var isLoading by remember { mutableStateOf(false) }
-    var loadError by remember { mutableStateOf<String?>(null) }
+    // Key on item.id to ensure state resets when viewing a different item
+    var loadedContent by remember(item.id) { mutableStateOf(item.content) }
+    var isLoading by remember(item.id) { mutableStateOf(false) }
+    var loadError by remember(item.id) { mutableStateOf<String?>(null) }
     
     // Determine if content loading is needed
-    val needsLoading = remember(item.type, item.content) {
+    val needsLoading = remember(item.id, item.type, item.content) {
         (item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE) && item.content.isEmpty()
     }
 
@@ -752,7 +753,7 @@ private fun ClipboardDetailContent(
         }
     }
     
-    val fileBytes = remember(loadedContent) {
+    val fileBytes = remember(item.id, loadedContent) {
         try {
             if (loadedContent.isNotEmpty() && (item.type == ClipboardType.IMAGE || item.type == ClipboardType.FILE)) {
                 Base64.getDecoder().decode(loadedContent)
@@ -765,7 +766,7 @@ private fun ClipboardDetailContent(
     }
 
     // Determine Metadata
-    val fileName = remember(item) {
+    val fileName = remember(item.id, item.metadata) {
         item.metadata?.get("file_name") ?: item.metadata?.get("filename") ?: 
         when (item.type) {
             ClipboardType.TEXT -> "Clipboard content"
@@ -774,11 +775,11 @@ private fun ClipboardDetailContent(
         }
     }
     
-    val size = remember(item, fileBytes) {
+    val size = remember(item.id, item.metadata, fileBytes) {
         item.metadata?.get("size")?.toLongOrNull() ?: (fileBytes?.size?.toLong()) ?: item.content.length.toLong()
     }
     
-    val mimeType = remember(item) {
+    val mimeType = remember(item.id, item.metadata) {
         item.metadata?.get("mime_type") ?: "text/plain"
     }
     

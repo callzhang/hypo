@@ -30,6 +30,7 @@ pub struct SessionManager {
 struct SessionEntry {
     sender: SessionChannel,
     token: u64,
+    last_seen: chrono::DateTime<chrono::Utc>,
 }
 
 pub struct Registration {
@@ -54,6 +55,7 @@ impl SessionManager {
             SessionEntry {
                 sender: tx,
                 token,
+                last_seen: chrono::Utc::now(),
             },
         );
         let count = sessions.len();
@@ -131,9 +133,30 @@ impl SessionManager {
         self.inner.read().await.len()
     }
 
+    pub async fn touch(&self, device_id: &str) {
+        if let Some(entry) = self.inner.write().await.get_mut(device_id) {
+            entry.last_seen = chrono::Utc::now();
+        }
+    }
+
     pub async fn get_connected_devices(&self) -> Vec<String> {
         self.inner.read().await.keys().cloned().collect()
     }
+
+    pub async fn get_connected_devices_info(&self) -> Vec<ConnectedDeviceInfo> {
+        self.inner.read().await.iter().map(|(id, entry)| {
+            ConnectedDeviceInfo {
+                device_id: id.clone(),
+                last_seen: entry.last_seen,
+            }
+        }).collect()
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct ConnectedDeviceInfo {
+    pub device_id: String,
+    pub last_seen: chrono::DateTime<chrono::Utc>,
 }
 
 /// Encode JSON string to binary frame (4-byte big-endian length + JSON payload)

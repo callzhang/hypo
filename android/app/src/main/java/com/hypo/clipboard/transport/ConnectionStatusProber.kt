@@ -239,10 +239,16 @@ class ConnectionStatusProber @Inject constructor(
                 return
             }
             
+            // Get paired device IDs from DeviceKeyStore (devices with encryption keys)
+            val pairedDeviceIds = runCatching {
+                deviceKeyStore.getAllDeviceIds().toList()
+            }.getOrElse { emptyList() }
+            
             // Query cloud for connected peers (if cloud is connected)
+            // Privacy-preserving: only query status for devices we already know about
             val cloudConnectedDevices = if (cloudWebSocketClient.isConnected()) {
                 try {
-                    val connectedPeers = cloudWebSocketClient.queryConnectedPeers()
+                    val connectedPeers = cloudWebSocketClient.queryConnectedPeers(peerIds = pairedDeviceIds)
                     val devicesWithNames = connectedPeers.map { peer ->
                         if (peer.name != null) "${peer.deviceId} (${peer.name})" else peer.deviceId
                     }
@@ -262,10 +268,7 @@ class ConnectionStatusProber @Inject constructor(
             // Get active LAN connections (devices with active WebSocket connections)
             val activeLanConnections = transportManager.getActiveLanConnections()
             
-            // Get paired device IDs from DeviceKeyStore (devices with encryption keys)
-            val pairedDeviceIds = runCatching {
-                deviceKeyStore.getAllDeviceIds().toSet()
-            }.getOrElse { emptySet() }
+
             
             // Build dual status map for each paired device
             val dualStatuses = mutableMapOf<String, com.hypo.clipboard.ui.components.DeviceDualStatus>()

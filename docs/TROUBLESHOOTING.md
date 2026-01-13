@@ -380,7 +380,7 @@ log show --predicate 'subsystem == "com.hypo.clipboard"' --last 10m | grep "Pair
 ```
 
 **Common Causes**:
-- Device ID format mismatch (UUID vs "android-UUID")
+- Device ID format mismatch (Must be pure UUID)
 - Notification not being posted/received
 - HistoryStore not processing notification
 

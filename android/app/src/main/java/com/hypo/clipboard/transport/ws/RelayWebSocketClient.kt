@@ -18,7 +18,8 @@ import javax.inject.Inject
  */
 data class ConnectedPeer(
     val deviceId: String,
-    val name: String?
+    val name: String?,
+    val lastSeen: java.time.Instant? = null
 )
 
 class RelayWebSocketClient @Inject constructor(
@@ -111,36 +112,48 @@ class RelayWebSocketClient @Inject constructor(
     }
     
     /**
-     * Query connected peers from the cloud relay server.
-     * Sends a control message and returns the list of connected peers with their IDs and names.
-     * Returns empty list if query fails or connection is not established.
+     * Query connected status for specific peers from the cloud relay server.
+     * @param peerIds Optional list of device IDs to check. If provided, server only returns status for these.
      * Device names are looked up locally from TransportManager.
      * Filters out the local device ID to avoid "No device name" warnings.
      */
-    suspend fun queryConnectedPeers(): List<ConnectedPeer> {
+    suspend fun queryConnectedPeers(peerIds: List<String>? = null): List<ConnectedPeer> {
         if (!isConnected()) {
             android.util.Log.d("RelayWebSocketClient", "⚠️ Cannot query connected peers: not connected")
             return emptyList()
         }
         
         return try {
-            val response = delegate.sendControlMessage("query_connected_peers", timeoutMs = 5000)
+            val response = delegate.sendControlMessage(
+                action = "query_connected_peers", 
+                timeoutMs = 5000,
+                deviceIds = peerIds
+            )
             if (response != null) {
                 val devicesArray = response.optJSONArray("connected_devices")
                 val peers = mutableListOf<ConnectedPeer>()
                 if (devicesArray != null) {
                     for (i in 0 until devicesArray.length()) {
-                        val deviceId = devicesArray.getString(i)
-                        // Skip local device - cloud server returns all connected devices including self
+                        val deviceInfo = devicesArray.getJSONObject(i)
+                        val deviceId = deviceInfo.getString("device_id")
+                        val lastSeenStr = deviceInfo.optString("last_seen")
+                        
+                        // Skip local device - server might return it if filter wasn't used
                         if (deviceId == deviceIdentity.deviceId) {
-                            android.util.Log.d("RelayWebSocketClient", "⏭️ Skipping local device in peer query: $deviceId")
                             continue
                         }
+                        
+                        val lastSeen = try {
+                            java.time.Instant.parse(lastSeenStr)
+                        } catch (e: Exception) {
+                            null
+                        }
+                        
                         val name = transportManager.getDeviceName(deviceId)
-                        peers.add(ConnectedPeer(deviceId = deviceId, name = name))
+                        peers.add(ConnectedPeer(deviceId = deviceId, name = name, lastSeen = lastSeen))
                     }
                 }
-                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${peers.size} devices (filtered out local device)")
+                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${peers.size} devices")
                 peers
             } else {
                 android.util.Log.w("RelayWebSocketClient", "⚠️ No response from query_connected_peers")

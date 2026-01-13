@@ -368,7 +368,11 @@ class WebSocketTransportClient @Inject constructor(
      * Send a control message and wait for response.
      * Returns the response payload as JSONObject, or null if timeout or error.
      */
-    suspend fun sendControlMessage(action: String, timeoutMs: Long = 5000): org.json.JSONObject? {
+    suspend fun sendControlMessage(
+    action: String, 
+    timeoutMs: Long = 5000,
+    deviceIds: List<String>? = null
+): org.json.JSONObject? {
         if (!isConnected()) {
             android.util.Log.w("WebSocketTransportClient", "⚠️ Cannot send control message: not connected")
             return null
@@ -393,7 +397,8 @@ class WebSocketTransportClient @Inject constructor(
                     target = null,  // Control messages don't target specific devices
                     action = action,  // Use action field for control messages
                     message = "Control message: $action",
-                    originalMessageId = queryId
+                    originalMessageId = queryId,
+                    deviceIds = deviceIds
                 )
             )
             

@@ -160,17 +160,7 @@ class TransportManager(
             }
         }
         
-        // Also try with prefixes added (in case getAllDeviceIds returned unprefixed but name was stored with prefix)
-        for (prefix in listOf("macos-", "android-")) {
-            key = "device_name_${prefix}$normalizedId"
-            name = prefs.getString(key, null)
-            if (name != null) {
-                android.util.Log.v("TransportManager", "✅ Found device name for $deviceId (with prefix $prefix): $name")
-                return name
-            }
-        }
-        
-        android.util.Log.w("TransportManager", "⚠️ No device name found for $deviceId (tried: $normalizedId, $deviceId, $migratedId, and with prefixes)")
+        android.util.Log.w("TransportManager", "⚠️ No device name found for $deviceId (tried: $normalizedId, $deviceId, $migratedId)")
         return null
     }
     

@@ -127,19 +127,10 @@ public struct SyncEnvelope: Codable {
             let ciphertextString = try container.decode(String.self, forKey: .ciphertext)
             self.ciphertext = try decodeBase64Field(ciphertextString, forKey: .ciphertext, in: container)
             
-            // Decode deviceId - handle both old format (with prefix) and new format (pure UUID)
+            // New format: pure UUID
             let rawDeviceId = try container.decode(String.self, forKey: .deviceId)
-            if rawDeviceId.hasPrefix("macos-") || rawDeviceId.hasPrefix("android-") {
-                // Old format: extract UUID from prefixed string
-                let prefix = rawDeviceId.hasPrefix("macos-") ? "macos-" : "android-"
-                self.deviceId = String(rawDeviceId.dropFirst(prefix.count))
-                // Infer platform from prefix if not provided
-                self.devicePlatform = rawDeviceId.hasPrefix("macos-") ? "macos" : "android"
-            } else {
-                // New format: pure UUID
-                self.deviceId = rawDeviceId
-                self.devicePlatform = try container.decodeIfPresent(String.self, forKey: .devicePlatform)
-            }
+            self.deviceId = rawDeviceId
+            self.devicePlatform = try container.decodeIfPresent(String.self, forKey: .devicePlatform)
             
             deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
             target = try container.decodeIfPresent(String.self, forKey: .target)

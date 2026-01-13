@@ -42,7 +42,8 @@ data class Payload(
     @SerialName("original_message_id") val originalMessageId: String? = null,
     @SerialName("target_device_id") val targetDeviceId: String? = null,
     // Control message fields (when type is CONTROL)
-    val action: String? = null  // Control action (e.g., "query_connected_peers")
+    val action: String? = null,  // Control action (e.g., "query_connected_peers")
+    @SerialName("device_ids") val deviceIds: List<String>? = null // Optional list for query_connected_peers filtering
 )
 
 @Serializable
@@ -58,4 +59,10 @@ data class ClipboardPayload(
     @SerialName("data_base64") val dataBase64: String,
     val metadata: Map<String, String> = emptyMap(),
     val compressed: Boolean = false  // Indicates if the JSON payload was compressed
+)
+
+@Serializable
+data class ConnectedDeviceInfo(
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("last_seen") val lastSeen: String // ISO 8601 string
 )

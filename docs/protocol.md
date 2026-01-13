@@ -80,7 +80,7 @@ Sent when clipboard content changes and needs to be synced.
       "hash": "315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3"
     },
     "device": {
-      "id": "macos-macbook-pro-2025",
+      "id": "550e8400-e29b-41d4-a716-446655440000",
       "platform": "macos",
       "name": "Derek's MacBook Pro"
     },
@@ -241,7 +241,7 @@ The `metadata` object can contain type-specific fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | String | Unique device identifier (persisted) |
+| `id` | UUID | Unique device identifier (pure UUID v4, no platform prefix) |
 | `platform` | Enum | `macos`, `android`, `ios`, `windows`, `linux` |
 | `name` | String | User-friendly device name |
 | `version` | String | App version (semver) |
@@ -327,7 +327,7 @@ Sent by client after WebSocket connection established.
   "payload": {
     "action": "handshake",
     "device": {
-      "id": "macos-macbook-pro-2025",
+      "id": "550e8400-e29b-41d4-a716-446655440000",
       "platform": "macos",
       "name": "Derek's MacBook Pro",
       "version": "1.0.0"
@@ -481,6 +481,42 @@ over time.
 For recoverable errors (`RATE_LIMITED`, `PAYLOAD_TOO_LARGE`) the backend MAY
 attach a `retry_after` value (in milliseconds) inside `details`. Clients SHOULD
 respect this hint before retrying to avoid unnecessary load.
+
+### 4.5 Query Connected Peers (Privacy-Preserving)
+
+Clients can query the status of known peers without exposing their full social graph or receiving a list of all connected devices.
+
+**Request**:
+```json
+{
+  "type": "control",
+  "payload": {
+    "action": "query_connected_peers",
+    "device_ids": ["known-peer-uuid-1", "known-peer-uuid-2"]
+  }
+}
+```
+
+**Response**:
+Server returns the subset of requested devices that are currently connected, including their last activity timestamp.
+
+```json
+{
+  "type": "control",
+  "payload": {
+    "action": "connected_peers",
+    "connected_devices": [
+      {
+        "device_id": "known-peer-uuid-1",
+        "last_seen": "2025-10-01T12:35:10.123Z"
+      }
+    ]
+  }
+}
+```
+- Only returns devices from the `device_ids` request list that are currently connected.
+- `last_seen`: ISO 8601 timestamp of the last activity from that device.
+
 
 ---
 
@@ -662,7 +698,7 @@ Backend relay enforces:
       "encoding": "UTF-8"
     },
     "device": {
-      "id": "android-redmi-note-13",
+      "id": "123e4567-e89b-12d3-a456-426614174000",
       "platform": "android",
       "name": "Redmi Note 13",
       "version": "1.0.0"
@@ -723,10 +759,9 @@ See `tests/protocol-test-vectors.json` for encryption/decryption test vectors (c
    - `android_device_id` → `responder_device_id`
    - `mac_pub_key` → `peer_pub_key` or `initiator_pub_key`/`responder_pub_key`
 
-2. **Platform Detection**: Platform now automatically detected from device ID prefixes
-   - `macos-{UUID}` for macOS devices
-   - `android-{UUID}` for Android devices
-   - `ios-{UUID}`, `windows-{UUID}`, `linux-{UUID}` for future platforms
+2. **Platform Detection**: Platform is now explicitly declared in the `device.platform` field.
+   - Device IDs are pure UUIDs (e.g. `550e8400-e29b-41d4-a716-446655440000`)
+   - Legacy prefix-based IDs (`android-UUID`) are no longer supported in v1.1+
 
 3. **Backward Compatibility**: Dual field support maintained during transition
    - Old field names still accepted but deprecated

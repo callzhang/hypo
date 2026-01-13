@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 #if canImport(Combine)
 import Combine
@@ -800,11 +801,17 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 return
             }
             
+            // Calculate SHA-256 hash of file data for duplicate detection
+            let digest = SHA256.hash(data: fileData)
+            let hashString = digest.compactMap { String(format: "%02x", $0) }.joined()
+            
             let fileMetadataDict: [String: String] = [
                 "device_id": entry.deviceId,
                 "device_name": entry.originDeviceName ?? "",
                 "file_name": metadata.fileName,
-                "uti": metadata.uti
+                "uti": metadata.uti,
+                "hash": hashString,
+                "size": "\(fileData.count)"
             ]
             
             payload = ClipboardPayload(

@@ -207,6 +207,8 @@ class WebSocketTransportClient @Inject constructor(
     private val baseBackoffDelay = 1_000L // 1 second base delay
     // Guard against concurrent reconnection attempts (prevent duplicate ensureConnection() calls)
     @Volatile private var isReconnecting = false
+    @Volatile private var reconnectStartedAt: Instant? = null
+    private var reconnectWatchdogJob: Job? = null
     
     // Determine transport origin based on config environment
     private val transportOrigin: com.hypo.clipboard.domain.model.TransportOrigin = 
@@ -503,6 +505,7 @@ class WebSocketTransportClient @Inject constructor(
             // CRITICAL: Reset reconnecting flag to allow new connection attempts
             // Without this, all future ensureConnection() calls will be blocked
             isReconnecting = false
+            stopReconnectWatchdog("cancelConnectionJob")
             // Reset consecutive failures to allow immediate reconnection
             consecutiveFailures = 0
             // Don't close socket or set isClosed - let the connection job cleanup handle it
@@ -572,6 +575,7 @@ class WebSocketTransportClient @Inject constructor(
         // CRITICAL: Reset flags for reconnection
         // Without this, all future ensureConnection() calls will be blocked
         isReconnecting = false  // Reset reconnecting flag to allow new connection attempts
+        stopReconnectWatchdog("disconnect")
         // Reset consecutive failures to allow immediate reconnection without backoff
         consecutiveFailures = 0
         // Reset isClosed flag so we can reconnect
@@ -605,6 +609,7 @@ class WebSocketTransportClient @Inject constructor(
             connectionJob = null
             synchronized(pendingLock) { pendingRoundTrips.clear() }
             handshakeStarted = null
+            stopReconnectWatchdog("close")
         }
     }
 
@@ -682,12 +687,29 @@ class WebSocketTransportClient @Inject constructor(
      */
     private suspend fun ensureConnection() {
         val isCloudConnection = config.environment == "cloud"
+        val reconnectTimeoutMillis = reconnectTimeoutMillis(isCloudConnection)
         
         // Guard against concurrent reconnection attempts
         // Check if reconnection is already in progress (prevents duplicate calls from onClosed/onFailure)
         if (isReconnecting) {
-            android.util.Log.v("WebSocketTransportClient", "⏸️ ensureConnection() skipped - reconnection already in progress (isCloud=$isCloudConnection)")
-            return
+            val startedAt = reconnectStartedAt ?: clock.instant().also { reconnectStartedAt = it }
+            val ageMillis = Duration.between(startedAt, clock.instant()).toMillis()
+            val jobActive = connectionJob?.isActive == true
+            val socketOpen = isOpen.get()
+            if (jobActive && !socketOpen && ageMillis >= reconnectTimeoutMillis) {
+                android.util.Log.w(
+                    "WebSocketTransportClient",
+                    "⏱️ ensureConnection() watchdog timeout (${ageMillis}ms >= ${reconnectTimeoutMillis}ms, cloud=$isCloudConnection). Cancelling stuck connection job."
+                )
+                cancelConnectionJob()
+                // Fall through to allow a fresh connection attempt
+            } else {
+                if (jobActive && !socketOpen && reconnectWatchdogJob == null) {
+                    startReconnectWatchdog(isCloudConnection)
+                }
+                android.util.Log.v("WebSocketTransportClient", "⏸️ ensureConnection() skipped - reconnection already in progress (isCloud=$isCloudConnection)")
+                return
+            }
         }
         
         // Set reconnecting flag early to prevent concurrent attempts
@@ -721,6 +743,8 @@ class WebSocketTransportClient @Inject constructor(
                     if (connectionSignal.isCompleted) {
                         connectionSignal = CompletableDeferred()
                     }
+                    reconnectStartedAt = clock.instant()
+                    startReconnectWatchdog(isCloudConnection)
                     val job = scope.launch {
                         try {
                             android.util.Log.d("WebSocketTransportClient", "🔌 Connection job started, calling runConnectionLoop()")
@@ -743,6 +767,7 @@ class WebSocketTransportClient @Inject constructor(
                                 if (connectionJob === current) {
                                     connectionJob = null
                                     isReconnecting = false  // Reset reconnecting flag when job completes
+                                    stopReconnectWatchdog("connection job completed")
                                     android.util.Log.d("WebSocketTransportClient", "🔌 Connection job completed and cleared")
                                 }
                             }
@@ -754,13 +779,19 @@ class WebSocketTransportClient @Inject constructor(
                     // This prevents duplicate ensureConnection() calls while connection is in progress
                 } else {
                     android.util.Log.v("WebSocketTransportClient", "⏸️ ensureConnection() skipped - connection job already active (isCloud=$isCloudConnection)")
-                    // Don't reset isReconnecting here - let the active job's finally block handle it
-                    // Resetting here creates a race window where another ensureConnection() can slip through
+                    // If the socket is already open, we can safely clear the flag to avoid blocking future reconnects
+                    if (isOpen.get()) {
+                        isReconnecting = false
+                        stopReconnectWatchdog("connection already open")
+                    }
+                    // Otherwise keep isReconnecting = true while handshake is in progress
                 }
+                Unit // Explicitly return Unit to avoid 'if' being treated as expression
             }
         } catch (e: Exception) {
             // Reset reconnecting flag on error
             isReconnecting = false
+            stopReconnectWatchdog("ensureConnection error")
             android.util.Log.e("WebSocketTransportClient", "❌ Error in ensureConnection(): ${e.message}", e)
             throw e
         }
@@ -1547,6 +1578,7 @@ class WebSocketTransportClient @Inject constructor(
                 // CRITICAL: Reset isReconnecting flag before returning to allow retry
                 // Otherwise, ensureConnection() will be skipped on next call
                 isReconnecting = false
+                stopReconnectWatchdog("handshake not established")
                 android.util.Log.d("WebSocketTransportClient", "   🔄 Reset isReconnecting=false to allow retry")
                 
                 // Event-driven: exit and let onFailure trigger ensureConnection()
@@ -1574,6 +1606,7 @@ class WebSocketTransportClient @Inject constructor(
                 // CRITICAL: Reset isReconnecting flag before returning to allow retry
                 // Otherwise, ensureConnection() will be skipped on next call
                 isReconnecting = false
+                stopReconnectWatchdog("connection not established")
                 android.util.Log.d("WebSocketTransportClient", "   🔄 Reset isReconnecting=false to allow retry")
                 
                 // Event-driven: exit and let onFailure trigger ensureConnection()
@@ -1593,6 +1626,7 @@ class WebSocketTransportClient @Inject constructor(
             // Connection successful - reset failure count and maintain long-lived connection (both cloud and LAN)
             consecutiveFailures = 0  // Reset on successful connection
             isReconnecting = false  // Reset reconnecting flag on successful connection
+            stopReconnectWatchdog("connected")
             if (isCloudConnection) {
                 android.util.Log.d("WebSocketTransportClient", "✅ Long-lived CLOUD connection established (cloud relay), reset failure count")
                 // Double-check that state was updated to ConnectedCloud
@@ -1747,6 +1781,52 @@ class WebSocketTransportClient @Inject constructor(
 
     private fun touch() {
         lastActivity = clock.instant()
+    }
+
+    private fun reconnectTimeoutMillis(isCloudConnection: Boolean): Long {
+        return if (isCloudConnection) 30_000L else 20_000L
+    }
+
+    private fun startReconnectWatchdog(isCloudConnection: Boolean) {
+        reconnectWatchdogJob?.cancel()
+        val timeoutMillis = reconnectTimeoutMillis(isCloudConnection)
+        val startedAt = reconnectStartedAt ?: clock.instant().also { reconnectStartedAt = it }
+        reconnectWatchdogJob = scope.launch {
+            delay(timeoutMillis)
+            if (!isActive) return@launch
+            val ageMillis = Duration.between(reconnectStartedAt ?: startedAt, clock.instant()).toMillis()
+            val jobActive = connectionJob?.isActive == true
+            val socketOpen = isOpen.get()
+            if (isReconnecting && jobActive && !socketOpen && ageMillis >= timeoutMillis) {
+                android.util.Log.w(
+                    "WebSocketTransportClient",
+                    "⏱️ Reconnect watchdog timed out (${ageMillis}ms >= ${timeoutMillis}ms, cloud=$isCloudConnection). Cancelling stuck connection job."
+                )
+                try {
+                    cancelConnectionJob()
+                } catch (e: Exception) {
+                    android.util.Log.e("WebSocketTransportClient", "❌ Reconnect watchdog failed to cancel connection job: ${e.message}", e)
+                }
+                delay(200)
+                try {
+                    ensureConnection()
+                } catch (e: Exception) {
+                    android.util.Log.e("WebSocketTransportClient", "❌ Reconnect watchdog ensureConnection() failed: ${e.message}", e)
+                }
+            } else {
+                android.util.Log.v(
+                    "WebSocketTransportClient",
+                    "⏱️ Reconnect watchdog fired; no action (isReconnecting=$isReconnecting, jobActive=$jobActive, isOpen=$socketOpen, age=${ageMillis}ms)"
+                )
+            }
+        }
+    }
+
+    private fun stopReconnectWatchdog(reason: String) {
+        reconnectWatchdogJob?.cancel()
+        reconnectWatchdogJob = null
+        reconnectStartedAt = null
+        android.util.Log.v("WebSocketTransportClient", "⏹️ Reconnect watchdog stopped: $reason")
     }
 
     private fun startWatchdog() {

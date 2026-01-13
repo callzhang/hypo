@@ -229,7 +229,7 @@ class SyncEngine @Inject constructor(
             }
             
             val keyHex = key.take(16).joinToString("") { "%02x".format(it) }
-            val keyHex = key.take(16).joinToString("") { "%02x".format(it) }
+
             android.util.Log.v("SyncEngine", "✅ Key loaded: ${key.size.formattedAsKB()} for $deviceId | KeyHex(16): $keyHex")
 
             val ciphertextBytes = try {
@@ -257,9 +257,7 @@ class SyncEngine @Inject constructor(
             val aad = normalizedDeviceId.encodeToByteArray()
             val aadHex = aad.take(50).joinToString("") { "%02x".format(it) }
 
-            val normalizedDeviceId = deviceId.lowercase()
-            val aad = normalizedDeviceId.encodeToByteArray()
-            val aadHex = aad.take(50).joinToString("") { "%02x".format(it) }
+
 
             android.util.Log.v("SyncEngine", "🔓 DECRYPTING: Key=${key.size.formattedAsKB()} | Ctxt=${ciphertextBytes.size.formattedAsKB()} | Nonce=${nonce.size.formattedAsKB()} | Tag=${tag.size.formattedAsKB()} | AAD=${aad.size.formattedAsKB()} ($aadHex)")
             val decrypted = try {

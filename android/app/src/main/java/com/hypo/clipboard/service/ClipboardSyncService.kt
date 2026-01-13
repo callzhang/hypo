@@ -653,18 +653,14 @@ class ClipboardSyncService : Service() {
         
         // Get the current active network BEFORE registering callback
         // This prevents the initial onAvailable() calls from triggering false network changes
-        val currentNetwork = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            connectivityManager.activeNetwork
-        } else {
-            null
-        }
+        val currentNetwork = connectivityManager.activeNetwork
         val currentNetworkId = currentNetwork?.hashCode()
         
         var lastNetworkChangeTime = 0L
         var lastActiveNetworkId: Int? = currentNetworkId  // Initialize with current network
-        val networkChangeDebounceMs = 5000L // 5 seconds debounce (increased from 2s)
+        val networkChangeDebounceMs = 1000L // 1 second debounce
         
-        android.util.Log.d(TAG, "🌐 Registering network callback - current network ID: $currentNetworkId")
+        android.util.Log.d(TAG, "🌐 Registering default network callback - current network ID: $currentNetworkId")
         
         networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: android.net.Network) {
@@ -672,17 +668,19 @@ class ClipboardSyncService : Service() {
                 val now = System.currentTimeMillis()
                 val networkId = network.hashCode()
                 
-                android.util.Log.d(TAG, "🌐 onAvailable() called for network ID: $networkId (current active: $currentNetworkId, lastActive: $lastActiveNetworkId)")
+                android.util.Log.d(TAG, "🌐 Default network available (ID: $networkId) (current active: $currentNetworkId, lastActive: $lastActiveNetworkId)")
                 
-                // Check if this is actually a new network (different network ID)
-                if (lastActiveNetworkId == networkId) {
-                    android.util.Log.d(TAG, "🌐 Network available but same network ID ($networkId) - ignoring (initial callback)")
+                // If this is the initial callback for the current network, ignore it
+                // We only want to react to subsequent changes
+                if (currentNetworkId != null && networkId == currentNetworkId && lastActiveNetworkId == currentNetworkId) {
+                    android.util.Log.d(TAG, "🌐 Initial callback for current network ($networkId) - ignoring")
                     return
                 }
                 
-                // If this is the initial callback for the current network, ignore it
-                if (currentNetworkId != null && networkId == currentNetworkId && lastActiveNetworkId == currentNetworkId) {
-                    android.util.Log.d(TAG, "🌐 Initial callback for current network ($networkId) - ignoring")
+                // If the network ID hasn't changed, ignore (e.g. signal strength change or re-connect to same network)
+                // However, if lastActiveNetworkId is null (from onLost), we SHOULD process this
+                if (lastActiveNetworkId == networkId) {
+                    android.util.Log.d(TAG, "🌐 Network available but same network active ($networkId) - ignoring")
                     return
                 }
                 
@@ -692,12 +690,14 @@ class ClipboardSyncService : Service() {
                 }
                 lastNetworkChangeTime = now
                 lastActiveNetworkId = networkId
-                android.util.Log.d(TAG, "🌐 New network became available (ID: $networkId) - restarting LAN services and reconnecting cloud")
+                android.util.Log.d(TAG, "🌐 New default network became available (ID: $networkId) - restarting LAN services and reconnecting cloud")
+                
                 // Restart LAN services to update IP address in Bonjour/NSD and WebSocket server
                 transportManager.restartForNetworkChange()
+                
                 // Reconnect cloud WebSocket to use new IP address (debounced to avoid cancelling in-progress connections)
                 scope.launch {
-                    kotlinx.coroutines.delay(1000) // Wait 1 second to let any in-progress connection complete
+                    kotlinx.coroutines.delay(500) // Wait 500ms to let any in-progress connection cleanup
                     relayWebSocketClient.reconnect()
                 }
                 connectionStatusProber.probeNow()
@@ -708,12 +708,9 @@ class ClipboardSyncService : Service() {
                 val networkId = network.hashCode()
                 if (lastActiveNetworkId == networkId) {
                     lastActiveNetworkId = null
-                    android.util.Log.d(TAG, "🌐 Network lost (ID: $networkId) - waiting for new network (onAvailable will trigger reconnection)")
-                    // Don't trigger immediate probe - wait for onAvailable() to be called with new network
-                    // This prevents DNS resolution failures when network is transitioning (WiFi -> cellular)
-                    // The onAvailable() callback will handle reconnection when new network is ready
+                    android.util.Log.d(TAG, "🌐 Default network lost (ID: $networkId) - waiting for new default network")
                 } else {
-                    android.util.Log.d(TAG, "🌐 Network lost but not the active one (ID: $networkId) - ignoring")
+                    android.util.Log.d(TAG, "🌐 Network lost but not the active default (ID: $networkId) - ignoring")
                 }
             }
 
@@ -722,17 +719,16 @@ class ClipboardSyncService : Service() {
                 networkCapabilities: android.net.NetworkCapabilities
             ) {
                 super.onCapabilitiesChanged(network, networkCapabilities)
-                // Ignore capability changes - they fire too frequently for minor changes
-                // (signal strength, bandwidth, etc.) without actual network changes
-                // Only react to actual network availability changes (onAvailable/onLost)
-                android.util.Log.v(TAG, "🌐 Network capabilities changed (ID: ${network.hashCode()}) - ignoring (too frequent)")
+                // Ignore capability changes - only care about default network switches
             }
         }
-        val request = android.net.NetworkRequest.Builder()
-            .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        connectivityManager.registerNetworkCallback(request, networkCallback!!)
-        android.util.Log.d(TAG, "Network connectivity callback registered")
+        
+        // Use registerDefaultNetworkCallback to only track changes to the system default network
+        // This is robust against multi-network scenarios (WiFi + Cellular) and only fires
+        // when the active primary network actually changes.
+        // Min SDK is 26, so this API (added in API 24) is safe to use.
+        connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
+        android.util.Log.d(TAG, "Default network connectivity callback registered")
     }
     
     private fun unregisterNetworkChangeCallback() {

@@ -44,13 +44,13 @@ class LanDiscoveryRepository(
 
         val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(regType: String?) {
-                android.util.Log.d("LanDiscoveryRepository", "✅ Discovery started for type: $regType")
+                android.util.Log.v("LanDiscoveryRepository", "✅ Discovery started for type: $regType")
             }
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
                 // Log own IPs before resolution to help debug why NSD resolves to wrong IP
                 val ownIPsBeforeResolve = getLocalIPAddresses() // Will log to debug internally
-                android.util.Log.d("LanDiscoveryRepository", "🔍 Found: ${serviceInfo.serviceName} (${serviceInfo.serviceType}) | OwnIPs: [${ownIPsBeforeResolve.joinToString()}]")
+                android.util.Log.v("LanDiscoveryRepository", "🔍 Found: ${serviceInfo.serviceName} (${serviceInfo.serviceType}) | OwnIPs: [${ownIPsBeforeResolve.joinToString()}]")
                 @Suppress("DEPRECATION")
                 nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
@@ -81,7 +81,7 @@ class LanDiscoveryRepository(
                                          serviceInfo.serviceName.startsWith(deviceIdentity.deviceId) ||
                                          (deviceId.isEmpty() && serviceInfo.serviceName.contains(deviceIdentity.deviceId))
                         
-                        android.util.Log.w("LanDiscoveryRepository", 
+                        android.util.Log.v("LanDiscoveryRepository", 
                             "✅ Service resolved: ${serviceInfo.serviceName} -> IP=$resolvedIP:$serviceInfo.port, " +
                             "hostname=$resolvedHostname, canonical=$canonicalName, addressBytes=$addressBytes, " +
                             "ownIPs=[${ownIPs.joinToString()}], isOwnIP=$isOwnIP, deviceId=$deviceId, isSelfDevice=$isSelfDevice")
@@ -89,14 +89,14 @@ class LanDiscoveryRepository(
                         // Validate that resolved service is not our own service
                         // Check both IP address (Android NSD bug) and device_id (self-service detection)
                         if (isOwnIP) {
-                            android.util.Log.w("LanDiscoveryRepository", 
+                            android.util.Log.v("LanDiscoveryRepository", 
                                 "⚠️ Rejecting service ${serviceInfo.serviceName}: resolved IP $resolvedIP matches own IP " +
                                 "(ownIPs=[${ownIPs.joinToString()}]) - NSD resolution bug, waiting for correct resolution")
                             return // Don't process this peer - wait for correct resolution
                         }
                         
                         if (isSelfDevice) {
-                            android.util.Log.d("LanDiscoveryRepository", 
+                            android.util.Log.v("LanDiscoveryRepository", 
                                 "⏭️ Rejecting service ${serviceInfo.serviceName}: device_id $deviceId matches own device_id " +
                                 "(${deviceIdentity.deviceId}) - this is our own published service")
                             return // Don't process our own service
@@ -146,7 +146,7 @@ class LanDiscoveryRepository(
                     while (coroutineContext.isActive) {
                         delay(restartInterval)
                         if (coroutineContext.isActive && isDiscoveryActive) {
-                            android.util.Log.d("LanDiscoveryRepository", "🔄 Periodic NSD restart (MIUI/HyperOS workaround)")
+                            android.util.Log.v("LanDiscoveryRepository", "🔄 Periodic NSD restart (MIUI/HyperOS workaround)")
                             restartDiscovery(serviceType, listener)
                         }
                     }

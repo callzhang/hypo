@@ -37,7 +37,7 @@ class LanRegistrationManager(
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
 
     override fun start(config: LanRegistrationConfig) {
-        android.util.Log.d("LanRegistrationManager", "🚀 Starting service registration: serviceName=${config.serviceName}, port=${config.port}, serviceType=${config.serviceType}")
+        android.util.Log.v("LanRegistrationManager", "🚀 Starting service registration: serviceName=${config.serviceName}, port=${config.port}, serviceType=${config.serviceType}")
         currentConfig = config
         registerReceiverIfNeeded()
         acquireMulticastLock()
@@ -53,7 +53,7 @@ class LanRegistrationManager(
         }
         if (multicastLock?.isHeld != true) {
             multicastLock?.acquire()
-            android.util.Log.d("LanRegistrationManager", "🔒 Multicast lock acquired")
+            android.util.Log.v("LanRegistrationManager", "🔒 Multicast lock acquired")
             
             // On MIUI/HyperOS, schedule periodic lock refresh to prevent throttling
             // HyperOS throttles multicast after ~15 minutes of screen-off time
@@ -78,7 +78,7 @@ class LanRegistrationManager(
                     if (currentConfig != null && lock != null && lock.isHeld) {
                         try {
                             // Release and re-acquire to refresh the lock
-                            android.util.Log.d("LanRegistrationManager", "🔄 Refreshing multicast lock (MIUI/HyperOS workaround)")
+                            android.util.Log.v("LanRegistrationManager", "🔄 Refreshing multicast lock (MIUI/HyperOS workaround)")
                             lock.release()
                             lock.acquire()
                         } catch (e: RuntimeException) {
@@ -100,7 +100,7 @@ class LanRegistrationManager(
         multicastLock?.let { lock ->
             if (lock.isHeld) {
                 lock.release()
-                android.util.Log.d("LanRegistrationManager", "🔓 Multicast lock released")
+                android.util.Log.v("LanRegistrationManager", "🔓 Multicast lock released")
             }
         }
     }
@@ -126,7 +126,7 @@ class LanRegistrationManager(
         if (connectivityReceiver != null) return
         connectivityReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                android.util.Log.d("LanRegistrationManager", "🌐 Network state changed - re-registering service to update IP address")
+                android.util.Log.v("LanRegistrationManager", "🌐 Network state changed - re-registering service to update IP address")
                 currentConfig?.let { config ->
                     // Unregister first to ensure clean restart with new IP
                     registrationListener?.let { listener ->
@@ -144,7 +144,7 @@ class LanRegistrationManager(
     }
 
     private fun registerService(config: LanRegistrationConfig) {
-        android.util.Log.d("LanRegistrationManager", "📝 Registering NSD service: serviceName=${config.serviceName}, port=${config.port}, serviceType=${config.serviceType}")
+        android.util.Log.v("LanRegistrationManager", "📝 Registering NSD service: serviceName=${config.serviceName}, port=${config.port}, serviceType=${config.serviceType}")
         val info = NsdServiceInfo().apply {
             serviceName = config.serviceName
             serviceType = config.serviceType
@@ -170,7 +170,7 @@ class LanRegistrationManager(
             config.signingPublicKey?.let { "signKey=${it.length}chars" },
             "fp=${config.fingerprint}"
         ).joinToString(", ")
-        android.util.Log.d("LanRegistrationManager", "📝 Service created: ${info.serviceName} (${info.serviceType}:${info.port}) | Attributes: [$attributesSummary]")
+        android.util.Log.v("LanRegistrationManager", "📝 Service created: ${info.serviceName} (${info.serviceType}:${info.port}) | Attributes: [$attributesSummary]")
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
                 android.util.Log.d("LanRegistrationManager", "✅ Service registered successfully: ${serviceInfo.serviceName}")
@@ -201,7 +201,7 @@ class LanRegistrationManager(
         scope.launch(dispatcher) {
             runCatching { 
                 nsdManager.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
-                android.util.Log.d("LanRegistrationManager", "🔄 nsdManager.registerService() called")
+                android.util.Log.v("LanRegistrationManager", "🔄 nsdManager.registerService() called")
             }
                 .onFailure { error ->
                     android.util.Log.e("LanRegistrationManager", "❌ Failed to call registerService: ${error.message}", error)

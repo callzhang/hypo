@@ -28,10 +28,14 @@ echo "Updating version to $NEW_VERSION..."
 echo "$NEW_VERSION" > "$VERSION_FILE"
 echo "✅ Updated VERSION file"
 
-# Update backend Cargo.toml
+# Update backend Cargo.toml and Cargo.lock
 if [ -f "$PROJECT_ROOT/backend/Cargo.toml" ]; then
     sed -i '' "s/^version = \".*\"/version = \"$NEW_VERSION\"/" "$PROJECT_ROOT/backend/Cargo.toml"
     echo "✅ Updated backend/Cargo.toml"
+    
+    # Update Cargo.lock to match Cargo.toml (prevents CI failures with --locked)
+    (cd "$PROJECT_ROOT/backend" && cargo check > /dev/null 2>&1)
+    echo "✅ Updated backend/Cargo.lock"
 fi
 
 echo ""
@@ -40,7 +44,7 @@ echo ""
 echo "Next steps:"
 echo "1. Build apps: ./scripts/build-all.sh"
 echo "2. Test the apps"
-echo "3. Commit changes: git add VERSION backend/Cargo.toml"
+echo "3. Commit changes: git add VERSION backend/Cargo.toml backend/Cargo.lock"
 echo "4. Create git tag: git tag v$NEW_VERSION"
 echo "5. Push: git push && git push --tags"
 

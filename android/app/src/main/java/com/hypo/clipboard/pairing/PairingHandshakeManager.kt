@@ -205,7 +205,7 @@ class PairingHandshakeManager @Inject constructor(
                 }
 
                 // Migrate device ID to pure UUID format (remove prefix if present)
-                val migratedDeviceId = migrateDeviceId(state.payload.peerDeviceId)
+                val migratedDeviceId = state.payload.peerDeviceId
                 deviceKeyStore.saveKey(migratedDeviceId, state.sharedKey)
                 PairingCompletionResult.Success(migratedDeviceId, ack.responderDeviceName)
             }.getOrElse { throwable ->
@@ -220,15 +220,7 @@ class PairingHandshakeManager @Inject constructor(
         require(payload.expiryInstant() >= now) { "Pairing QR expired" }
         
         // Handle platform-prefixed formats (macos-{UUID}, android-{UUID}, etc.) and legacy "{UUID}" formats
-        val deviceId = payload.peerDeviceId
-        val uuidString = when {
-            deviceId.startsWith("macos-") -> deviceId.substring(6) // Remove "macos-" prefix
-            deviceId.startsWith("android-") -> deviceId.substring(8) // Remove "android-" prefix
-            deviceId.startsWith("ios-") -> deviceId.substring(4) // Remove "ios-" prefix
-            deviceId.startsWith("windows-") -> deviceId.substring(8) // Remove "windows-" prefix
-            deviceId.startsWith("linux-") -> deviceId.substring(6) // Remove "linux-" prefix
-            else -> deviceId // Legacy format without prefix
-        }
+        val uuidString = payload.peerDeviceId
         UUID.fromString(uuidString)
     }
 
@@ -290,9 +282,7 @@ class PairingHandshakeManager @Inject constructor(
         return digest.digest(data)
     }
     
-    private fun migrateDeviceId(deviceId: String): String {
-        return deviceId.removePrefix("macos-").removePrefix("android-")
-    }
+
     
     /**
      * Handle an incoming pairing challenge and generate an ACK response.
@@ -357,7 +347,7 @@ class PairingHandshakeManager @Inject constructor(
             )
             
             // Store the shared key for future communication
-            val migratedDeviceId = migrateDeviceId(challenge.initiatorDeviceId)
+            val migratedDeviceId = challenge.initiatorDeviceId
             deviceKeyStore.saveKey(migratedDeviceId, sharedKey)
             trustStore.store(migratedDeviceId, responderPublicKey)
             
@@ -429,7 +419,7 @@ class PairingHandshakeManager @Inject constructor(
                 )
                 
                 // Store shared key for future communication
-                val migratedDeviceId = migrateDeviceId(challenge.initiatorDeviceId)
+                val migratedDeviceId = challenge.initiatorDeviceId
                 deviceKeyStore.saveKey(migratedDeviceId, sharedKey)
                 Log.d(TAG, "handleChallenge: Saved shared key for device: $migratedDeviceId")
                 

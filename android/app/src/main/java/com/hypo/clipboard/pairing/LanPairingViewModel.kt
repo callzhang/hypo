@@ -318,15 +318,10 @@ class LanPairingViewModel @Inject constructor(
                                 // Use the device ID from the pairing result (this is what the key was saved with)
                                 // Migrate from old format (with prefix) to new format (pure UUID)
                                 // peerDeviceId and peerDeviceName are non-nullable, so use them directly
-                                val rawDeviceId = completionResult.peerDeviceId
-                                val deviceId = when {
-                                    rawDeviceId.startsWith("macos-") -> rawDeviceId.removePrefix("macos-")
-                                    rawDeviceId.startsWith("android-") -> rawDeviceId.removePrefix("android-")
-                                    else -> rawDeviceId
-                                }
+                                val deviceId = completionResult.peerDeviceId
                                 val deviceName = completionResult.peerDeviceName
                                 
-                                Log.d(TAG, "✅ Pairing handshake completed! Key saved for device: $deviceId (migrated from: $rawDeviceId)")
+                                Log.d(TAG, "✅ Pairing handshake completed! Key saved for device: $deviceId")
                                 Log.d(TAG, "📋 Device ID from pairing result: ${completionResult.peerDeviceId}")
                                 Log.d(TAG, "📋 Device ID from peer attributes: ${device.attributes["device_id"]}")
                                 Log.d(TAG, "📋 Device service name: ${device.serviceName}")

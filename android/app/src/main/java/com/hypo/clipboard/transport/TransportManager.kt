@@ -116,7 +116,7 @@ class TransportManager(
             return
         }
         // Normalize device ID to lowercase for consistent storage
-        val normalizedId = deviceId.lowercase().removePrefix("macos-").removePrefix("android-")
+        val normalizedId = deviceId.lowercase()
         val key = "device_name_$normalizedId"
         prefs.edit().putString(key, deviceName).commit()
         android.util.Log.d("TransportManager", "💾 Persisted device name: device=$deviceId (normalized: $normalizedId), name=$deviceName")
@@ -147,20 +147,9 @@ class TransportManager(
             }
         }
         
-        // If not found, try with migrated format (remove prefixes)
-        // This handles cases where persistDeviceName was called with prefixed ID
-        // but getAllDeviceIds returns migrated (unprefixed) IDs
-        val migratedId = normalizedId.removePrefix("macos-").removePrefix("android-")
-        if (migratedId != normalizedId) {
-            key = "device_name_$migratedId"
-            name = prefs.getString(key, null)
-            if (name != null) {
-                android.util.Log.v("TransportManager", "✅ Found device name for $deviceId (migrated: $migratedId): $name")
-                return name
-            }
-        }
+
         
-        android.util.Log.w("TransportManager", "⚠️ No device name found for $deviceId (tried: $normalizedId, $deviceId, $migratedId)")
+        android.util.Log.w("TransportManager", "⚠️ No device name found for $deviceId (tried: $normalizedId, $deviceId)")
         return null
     }
     

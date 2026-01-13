@@ -76,14 +76,7 @@ public struct PairingPayload: Codable, Equatable {
         
         // Decode device ID - handle platform-prefixed formats
         let deviceIdString = try container.decode(String.self, forKey: .peerDeviceId)
-        let uuidString: String
-        if deviceIdString.hasPrefix("macos-") {
-            uuidString = String(deviceIdString.dropFirst(6)) // Remove "macos-" prefix
-        } else if deviceIdString.hasPrefix("android-") {
-            uuidString = String(deviceIdString.dropFirst(8)) // Remove "android-" prefix
-        } else {
-            uuidString = deviceIdString // Pure UUID format
-        }
+        let uuidString = deviceIdString
         guard let uuid = UUID(uuidString: uuidString) else {
             throw DecodingError.dataCorruptedError(forKey: .peerDeviceId, in: container, debugDescription: "Invalid UUID format: \(deviceIdString)")
         }
@@ -262,14 +255,7 @@ public struct PairingAckMessage: Codable, Equatable {
         
         // Decode device ID - handle platform-prefixed formats
         let deviceIdString = try container.decode(String.self, forKey: .responderDeviceId)
-        let uuidString: String
-        if deviceIdString.hasPrefix("macos-") {
-            uuidString = String(deviceIdString.dropFirst(6)) // Remove "macos-" prefix
-        } else if deviceIdString.hasPrefix("android-") {
-            uuidString = String(deviceIdString.dropFirst(8)) // Remove "android-" prefix
-        } else {
-            uuidString = deviceIdString // Pure UUID format
-        }
+        let uuidString = deviceIdString
         guard let uuid = UUID(uuidString: uuidString) else {
             throw DecodingError.dataCorruptedError(forKey: .responderDeviceId, in: container, debugDescription: "Invalid UUID format: \(deviceIdString)")
         }

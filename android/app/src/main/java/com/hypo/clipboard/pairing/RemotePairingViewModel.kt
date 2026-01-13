@@ -163,7 +163,7 @@ class RemotePairingViewModel @Inject constructor(
                 // Complete pairing (mirror macOS: delegate.didCompleteWith is called inside handleChallenge)
                 // When we're the initiator, the challenge comes from the responder
                 // The challenge.initiatorDeviceId is actually the responder's device ID
-                val migratedDeviceId = challenge.initiatorDeviceId.removePrefix("macos-").removePrefix("android-")
+                val migratedDeviceId = challenge.initiatorDeviceId
                 val deviceName = challenge.initiatorDeviceName
                 
                 android.util.Log.d("RemotePairingViewModel", "✅ Pairing handshake completed! Key saved for device: $migratedDeviceId")
@@ -365,12 +365,7 @@ class RemotePairingViewModel @Inject constructor(
                 when (val completion = handshakeManager.complete(stateSnapshot, ackJson)) {
                     is PairingCompletionResult.Success -> {
                         // Migrate device ID from old format (with prefix) to new format (pure UUID)
-                        val rawDeviceId = completion.peerDeviceId
-                        val deviceId = when {
-                            rawDeviceId.startsWith("macos-") -> rawDeviceId.removePrefix("macos-")
-                            rawDeviceId.startsWith("android-") -> rawDeviceId.removePrefix("android-")
-                            else -> rawDeviceId
-                        }
+                        val deviceId = completion.peerDeviceId
                         val deviceName = completion.peerDeviceName
                         
                         android.util.Log.d("RemotePairingViewModel", "✅ Pairing handshake completed! Key saved for device: $deviceId")

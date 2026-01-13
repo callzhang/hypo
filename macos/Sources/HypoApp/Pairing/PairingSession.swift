@@ -205,7 +205,7 @@ public final class PairingSession: @unchecked Sendable {
                 responderDeviceName: configuration.deviceName
             )
             // Detect platform from device ID or default to "Unknown"
-            let detectedPlatform = detectPlatform(from: message.initiatorDeviceId)
+            let detectedPlatform = "Unknown"
             let device = PairedDevice(
                 id: message.initiatorDeviceId,
                 name: message.initiatorDeviceName,
@@ -332,23 +332,7 @@ public final class PairingSession: @unchecked Sendable {
         try storeSharedKeyHandler(key, initiatorDeviceId)
     }
     
-    /// Detect platform from device ID by checking for platform prefixes
-    private func detectPlatform(from deviceId: String) -> String {
-        if deviceId.hasPrefix("android-") {
-            return "Android"
-        } else if deviceId.hasPrefix("macos-") {
-            return "macOS"
-        } else if deviceId.hasPrefix("ios-") {
-            return "iOS"
-        } else if deviceId.hasPrefix("windows-") {
-            return "Windows"
-        } else if deviceId.hasPrefix("linux-") {
-            return "Linux"
-        } else {
-            // Default to "Unknown" for pure UUIDs - could be enhanced with Bonjour metadata
-            return "Unknown"
-        }
-    }
+
 
     private func persistAck(_ ack: PairingAckMessage) throws {
         // Placeholder for persisting ack or notifying Android via transport.

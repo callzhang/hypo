@@ -28,6 +28,7 @@ class RelayWebSocketClient @Inject constructor(
     metricsRecorder: TransportMetricsRecorder = NoopTransportMetricsRecorder,
     analytics: TransportAnalytics = NoopTransportAnalytics,
     private val transportManager: com.hypo.clipboard.transport.TransportManager,
+    private val deviceIdentity: com.hypo.clipboard.sync.DeviceIdentity,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     clock: Clock = Clock.systemUTC()
 ) : SyncTransport {
@@ -114,6 +115,7 @@ class RelayWebSocketClient @Inject constructor(
      * Sends a control message and returns the list of connected peers with their IDs and names.
      * Returns empty list if query fails or connection is not established.
      * Device names are looked up locally from TransportManager.
+     * Filters out the local device ID to avoid "No device name" warnings.
      */
     suspend fun queryConnectedPeers(): List<ConnectedPeer> {
         if (!isConnected()) {
@@ -129,11 +131,16 @@ class RelayWebSocketClient @Inject constructor(
                 if (devicesArray != null) {
                     for (i in 0 until devicesArray.length()) {
                         val deviceId = devicesArray.getString(i)
+                        // Skip local device - cloud server returns all connected devices including self
+                        if (deviceId == deviceIdentity.deviceId) {
+                            android.util.Log.d("RelayWebSocketClient", "⏭️ Skipping local device in peer query: $deviceId")
+                            continue
+                        }
                         val name = transportManager.getDeviceName(deviceId)
                         peers.add(ConnectedPeer(deviceId = deviceId, name = name))
                     }
                 }
-                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${peers.size} devices")
+                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${peers.size} devices (filtered out local device)")
                 peers
             } else {
                 android.util.Log.w("RelayWebSocketClient", "⚠️ No response from query_connected_peers")

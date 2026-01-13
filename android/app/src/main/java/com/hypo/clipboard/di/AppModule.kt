@@ -224,13 +224,15 @@ object AppModule {
         @Named("cloud_ws_connector") connector: WebSocketConnector,
         frameCodec: TransportFrameCodec,
         analytics: TransportAnalytics,
-        transportManager: com.hypo.clipboard.transport.TransportManager
+        transportManager: com.hypo.clipboard.transport.TransportManager,
+        deviceIdentity: DeviceIdentity
     ): RelayWebSocketClient = RelayWebSocketClient(
         config = config,
         connector = connector,
         frameCodec = frameCodec,
         analytics = analytics,
-        transportManager = transportManager
+        transportManager = transportManager,
+        deviceIdentity = deviceIdentity
     )
 
     @Provides

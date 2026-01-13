@@ -126,11 +126,11 @@ class SyncCoordinator @Inject constructor(
         val filtered = (allPairedTargets + discoveredAndPaired).toSet()
         
         _targets.value = filtered
-        Log.d(TAG, "🎯 Recomputed targets: auto=${autoTargets.value.size}, manual=${manualTargets.value.size}, candidates=${allCandidates.size}, paired=${pairedDeviceIds.size}, allPairedTargets=${allPairedTargets.size}, discoveredAndPaired=${discoveredAndPaired.size}, filtered=${filtered.size}, localDeviceId=${identity.deviceId}")
+        Log.v(TAG, "🎯 Recomputed targets: auto=${autoTargets.value.size}, manual=${manualTargets.value.size}, candidates=${allCandidates.size}, paired=${pairedDeviceIds.size}, allPairedTargets=${allPairedTargets.size}, discoveredAndPaired=${discoveredAndPaired.size}, filtered=${filtered.size}, localDeviceId=${identity.deviceId}")
         
         if (filtered.size < allCandidates.size) {
             val missing = allCandidates - filtered
-            Log.w(TAG, "⚠️ Excluded ${missing.size} devices without keys: $missing")
+            Log.v(TAG, "⚠️ Excluded ${missing.size} devices without keys: $missing")
             Log.w(TAG, "📋 Available keys in store: $pairedDeviceIds")
             Log.w(TAG, "📋 Candidate device IDs: $allCandidates")
             // Log detailed mismatch info for debugging
@@ -188,18 +188,18 @@ class SyncCoordinator @Inject constructor(
                 // Check if matches current clipboard (latest entry)
                 val matchesCurrentClipboard = latestEntry?.let { latest ->
                     val matches = eventItem.matchesContent(latest)
-                    android.util.Log.d(TAG, "🔍 Checking match with latest entry: eventType=${eventItem.type}, latestType=${latest.type}, matches=$matches")
+                    android.util.Log.v(TAG, "🔍 Checking match with latest entry: eventType=${eventItem.type}, latestType=${latest.type}, matches=$matches")
                     if (eventItem.type == ClipboardType.IMAGE || eventItem.type == ClipboardType.FILE) {
                         val eventHash = eventItem.metadata?.get("hash")
                         val latestHash = latest.metadata?.get("hash")
-                        android.util.Log.d(TAG, "🔍 Hash comparison: eventHash=${eventHash?.take(16)}, latestHash=${latestHash?.take(16)}, hashMatch=${eventHash == latestHash}")
+                        android.util.Log.v(TAG, "🔍 Hash comparison: eventHash=${eventHash?.take(16)}, latestHash=${latestHash?.take(16)}, hashMatch=${eventHash == latestHash}")
                     }
                     matches
                 } ?: false
                 
                 val item: ClipboardItem = if (matchesCurrentClipboard && latestEntry != null) {
                     // Remove old item and create new one at top (ensures it's definitely at top)
-                    android.util.Log.d(TAG, "🔄 Matched current clipboard, removing old item and creating new one at top: id=${latestEntry.id}")
+                    android.util.Log.v(TAG, "🔄 Matched current clipboard, removing old item and creating new one at top: id=${latestEntry.id}")
                     try {
                         repository.delete(latestEntry.id)
                         
@@ -234,7 +234,7 @@ class SyncCoordinator @Inject constructor(
                     }
                 } else {
                     // Check if matches something in history (excluding the latest entry)
-                    android.util.Log.d(TAG, "🔍 Checking for match in history (excluding latest entry)")
+                    android.util.Log.v(TAG, "🔍 Checking for match in history (excluding latest entry)")
                     val matchingEntry = try {
                         repository.findMatchingEntryInHistory(eventItem)
                     } catch (e: Exception) {
@@ -244,7 +244,7 @@ class SyncCoordinator @Inject constructor(
                     
                     if (matchingEntry != null) {
                         // Found matching entry in history - remove old item and create new one at top
-                        android.util.Log.d(TAG, "🔄 Matched history item, removing old item and creating new one at top: id=${matchingEntry.id}")
+                        android.util.Log.v(TAG, "🔄 Matched history item, removing old item and creating new one at top: id=${matchingEntry.id}")
                         try {
                             repository.delete(matchingEntry.id)
                             
@@ -346,7 +346,7 @@ class SyncCoordinator @Inject constructor(
                                 results.add("❌ $target (${error.message?.take(30)})")
                             }
                         }
-                        Log.d(TAG, "📤 Sync: ${pairedDevices.size} device(s) → ${results.joinToString(", ")}")
+                        Log.v(TAG, "📤 Sync: ${pairedDevices.size} device(s) → ${results.joinToString(", ")}")
                     } else {
                         Log.d(TAG, "⏭️ Sync: No paired devices (targets: ${_targets.value})")
                     }

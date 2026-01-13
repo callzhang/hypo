@@ -94,9 +94,9 @@ class OkHttpWebSocketConnector @Inject constructor(
             val readTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
             val writeTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
             builder.connectTimeout(connectTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-            builder.readTimeout(readTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-            builder.writeTimeout(writeTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-            android.util.Log.d("OkHttpWebSocketConnector", "⏱️ Configured timeouts: connect=${connectTimeoutMs}ms, read=${readTimeoutMs}ms, write=${writeTimeoutMs}ms")
+            // builder.readTimeout(readTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            // builder.writeTimeout(writeTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            // android.util.Log.v("OkHttpWebSocketConnector", "⏱️ Configured timeouts: connect=${connectTimeoutMs}ms, read=${readTimeoutMs}ms, write=${writeTimeoutMs}ms")
             // Only apply certificate pinning for secure connections (wss:// -> https://)
             // Skip pinning for non-secure connections (ws:// -> http://)
             val isSecure = urlString.startsWith("wss://", ignoreCase = true)
@@ -354,10 +354,9 @@ class WebSocketTransportClient @Inject constructor(
         ensureConnection()
         // Log connection status before queuing
         val connected = isConnected()
-        android.util.Log.d("WebSocketTransportClient", "📤 Queuing envelope: type=${envelope.type}, target=${envelope.payload.target}, isConnected=$connected, isCloud=${config.environment == "cloud"}")
+        android.util.Log.v("WebSocketTransportClient", "📤 Queuing envelope: type=${envelope.type}, target=${envelope.payload.target}, isConnected=$connected, isCloud=${config.environment == "cloud"}")
         try {
             sendQueue.send(envelope)
-            android.util.Log.d("WebSocketTransportClient", "✅ Envelope queued successfully (will be sent when connection is ready)")
         } catch (e: Exception) {
             android.util.Log.e("WebSocketTransportClient", "❌ Failed to queue envelope: ${e.message}", e)
             throw e
@@ -687,7 +686,7 @@ class WebSocketTransportClient @Inject constructor(
         // Guard against concurrent reconnection attempts
         // Check if reconnection is already in progress (prevents duplicate calls from onClosed/onFailure)
         if (isReconnecting) {
-            android.util.Log.d("WebSocketTransportClient", "⏸️ ensureConnection() skipped - reconnection already in progress (isCloud=$isCloudConnection)")
+            android.util.Log.v("WebSocketTransportClient", "⏸️ ensureConnection() skipped - reconnection already in progress (isCloud=$isCloudConnection)")
             return
         }
         
@@ -754,7 +753,7 @@ class WebSocketTransportClient @Inject constructor(
                     // Keep isReconnecting = true until connection job completes (in finally block)
                     // This prevents duplicate ensureConnection() calls while connection is in progress
                 } else {
-                    android.util.Log.d("WebSocketTransportClient", "⏸️ ensureConnection() skipped - connection job already active (isCloud=$isCloudConnection)")
+                    android.util.Log.v("WebSocketTransportClient", "⏸️ ensureConnection() skipped - connection job already active (isCloud=$isCloudConnection)")
                     // Don't reset isReconnecting here - let the active job's finally block handle it
                     // Resetting here creates a race window where another ensureConnection() can slip through
                 }
@@ -1288,8 +1287,8 @@ class WebSocketTransportClient @Inject constructor(
                     // Notify TransportManager of connection state change (event-driven)
                     // Only update connection state for cloud connections - LAN connections don't affect global status
                     if (transportManager != null && isCloudConnection) {
-                        // Set state to ConnectingCloud immediately (event-driven reconnection)
-                        transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectingCloud)
+                        // Set state to Disconnected immediately (event-driven reconnection)
+                        transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.Disconnected)
                     }
                     
                     android.util.Log.w("WebSocketTransportClient", 
@@ -1346,8 +1345,8 @@ class WebSocketTransportClient @Inject constructor(
                         
                         // Update TransportManager state (same as onClosed)
                         if (transportManager != null && isCloudConnection) {
-                            // Set state to ConnectingCloud immediately (event-driven reconnection)
-                            transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectingCloud)
+                            // Set state to Disconnected immediately (event-driven reconnection)
+                            transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.Disconnected)
                         }
                         
                         // Simplified log - reconnection will be triggered automatically
@@ -1432,18 +1431,18 @@ class WebSocketTransportClient @Inject constructor(
                     handshakeStarted = null
                     
                     // Notify TransportManager of connection state change (event-driven)
-                    if (transportManager != null && isCloudConnection) {
-                        transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectingCloud)
-                        // For DNS failures, increase backoff by setting minimum failure count
-                        // This gives DNS time to be ready after network transition
-                        if (isDnsFailure) {
-                            consecutiveFailures = maxOf(consecutiveFailures + 1, 3) // At least 4 seconds backoff
-                            android.util.Log.d("WebSocketTransportClient", "📈 DNS failure - increased backoff (consecutive failures: $consecutiveFailures)")
-                        } else {
-                        consecutiveFailures++
-                        android.util.Log.d("WebSocketTransportClient", "📈 Consecutive failures: $consecutiveFailures")
+                        if (transportManager != null && isCloudConnection) {
+                            transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.Disconnected)
+                            // For DNS failures, increase backoff by setting minimum failure count
+                            // This gives DNS time to be ready after network transition
+                            if (isDnsFailure) {
+                                consecutiveFailures = maxOf(consecutiveFailures + 1, 3) // At least 4 seconds backoff
+                                android.util.Log.d("WebSocketTransportClient", "📈 DNS failure - increased backoff (consecutive failures: $consecutiveFailures)")
+                            } else {
+                                consecutiveFailures++
+                                android.util.Log.d("WebSocketTransportClient", "📈 Consecutive failures: $consecutiveFailures")
+                            }
                         }
-                    }
                     
                     // Event-driven: immediately trigger reconnection for cloud connections
                     // Only trigger if not already reconnecting (prevents duplicate calls)
@@ -1485,13 +1484,12 @@ class WebSocketTransportClient @Inject constructor(
             android.util.Log.d("WebSocketTransportClient", "   Creating WebSocket connection, waiting for onOpen callback...")
             android.util.Log.d("WebSocketTransportClient", "   Connection job active: ${connectionJob?.isActive}, isCancelled: ${connectionJob?.isCancelled}")
             val socket = connectorToUse.connect(listener)
-            android.util.Log.d("WebSocketTransportClient", "   Socket created, handshake in progress...")
+            android.util.Log.v("WebSocketTransportClient", "   Socket created, handshake in progress...")
             val connectTimeoutMillis = if (config.roundTripTimeoutMillis > 0) config.roundTripTimeoutMillis else 10_000L
-            android.util.Log.d("WebSocketTransportClient", "   Waiting for handshake to complete (timeout: ${connectTimeoutMillis}ms)...")
             val connected = try {
                 withTimeout(connectTimeoutMillis) {
                     handshakeSignal.await()
-                    android.util.Log.d("WebSocketTransportClient", "   ✅ Handshake signal received, connection established")
+                    android.util.Log.v("WebSocketTransportClient", "   ✅ Handshake signal received, connection established")
                     true
                 }
             } catch (t: Throwable) {

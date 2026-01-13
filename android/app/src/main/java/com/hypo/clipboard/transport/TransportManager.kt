@@ -81,10 +81,10 @@ class TransportManager(
                     continue
                 }
                 result[deviceId] = transport
-                android.util.Log.d("TransportManager", "✅ Loaded persisted status: device=$deviceId, transport=$transport")
+                android.util.Log.v("TransportManager", "✅ Loaded persisted status: device=$deviceId, transport=$transport")
             }
         }
-        android.util.Log.d("TransportManager", "📦 Loaded ${result.size} persisted transport status entries")
+        android.util.Log.v("TransportManager", "📦 Loaded ${result.size} persisted transport status entries")
         return result
     }
     
@@ -183,7 +183,7 @@ class TransportManager(
      */
     fun updateConnectionState(newState: ConnectionState) {
         val oldState = _connectionState.value
-        android.util.Log.d("TransportManager", "🔄 Updating connection state: $oldState -> $newState")
+        android.util.Log.v("TransportManager", "🔄 Updating connection state: $oldState -> $newState")
         
         // Update the appropriate state based on connection type
         when (newState) {
@@ -234,7 +234,7 @@ class TransportManager(
         android.util.Log.d("TransportManager", "📝 Calling registrationController.start()...")
         currentConfig = config
         registrationController.start(config)
-        android.util.Log.d("TransportManager", "✅ registrationController.start() called, isAdvertising=${_isAdvertising.value}")
+        android.util.Log.v("TransportManager", "✅ registrationController.start() called, isAdvertising=${_isAdvertising.value}")
         _isAdvertising.value = true
         
         // Start WebSocket server to accept incoming connections
@@ -293,11 +293,6 @@ class TransportManager(
                             // Pass to handler if set
                             if (envelope.type == com.hypo.clipboard.sync.MessageType.CLIPBOARD) {
                                 if (onIncomingClipboard != null) {
-                                    android.util.Log.d("TransportManager", "📤 Invoking incoming clipboard handler")
-                                    onIncomingClipboard?.invoke(envelope, com.hypo.clipboard.domain.model.TransportOrigin.LAN)
-                                } else {
-                                    android.util.Log.w("TransportManager", "⚠️ No incoming clipboard handler set, message dropped")
-                                }
                             } else {
                                 android.util.Log.w("TransportManager", "⚠️ Received non-clipboard message type: ${envelope.type}")
                             }
@@ -308,11 +303,11 @@ class TransportManager(
                 }
                 
                 override fun onConnectionAccepted(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, connectionId: String) {
-                    android.util.Log.d("TransportManager", "✅ Connection accepted: $connectionId")
+                    android.util.Log.v("TransportManager", "✅ Connection accepted: $connectionId")
                 }
                 
                 override fun onConnectionClosed(server: com.hypo.clipboard.transport.ws.LanWebSocketServer, connectionId: String) {
-                    android.util.Log.d("TransportManager", "🔌 Connection closed: $connectionId")
+                    android.util.Log.v("TransportManager", "🔌 Connection closed: $connectionId")
                 }
             }
             webSocketServer?.start()
@@ -583,7 +578,7 @@ class TransportManager(
         val ipChanged = existingPeer != null && existingPeer.host != peer.host
         
         if (pendingRemoval != null) {
-            android.util.Log.d("TransportManager", "✅ Peer ${peer.serviceName} rediscovered (was offline, now online)")
+            android.util.Log.v("TransportManager", "✅ Peer ${peer.serviceName} rediscovered (was offline, now online)")
         }
         if (ipChanged) {
             android.util.Log.d("TransportManager", "🔄 Peer ${peer.serviceName} IP changed: ${existingPeer?.host} -> ${peer.host}")

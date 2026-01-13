@@ -53,9 +53,6 @@ class SyncEngine @Inject constructor(
             android.util.Log.w("SyncEngine", "⚠️ PLAIN TEXT MODE: Sending without encryption")
         }
         
-        // Key lookup handles normalization internally - no need to normalize here
-        android.util.Log.d("SyncEngine", "🔑 Loading key for device: $targetDeviceId")
-        
         val key = if (!plainTextMode) {
             val loadedKey = keyStore.loadKey(targetDeviceId)
             if (loadedKey == null) {
@@ -68,7 +65,7 @@ class SyncEngine @Inject constructor(
                 android.util.Log.e("SyncEngine", "📋 Available keys in store: $availableKeys")
                 throw SyncEngineException.MissingKey(targetDeviceId)
             } else {
-                android.util.Log.d("SyncEngine", "✅ Key loaded: ${loadedKey.size.formattedAsKB()}")
+                android.util.Log.v("SyncEngine", "✅ Key loaded: ${loadedKey.size.formattedAsKB()}")
                 loadedKey
             }
         } else {
@@ -109,7 +106,7 @@ class SyncEngine @Inject constructor(
         
         // Always compress the JSON payload before encryption
         val plaintext = compressGzip(jsonBytes)
-        android.util.Log.d("SyncEngine", "🗜️ Compressed payload: ${jsonBytes.size.formattedAsKB()} -> ${plaintext.size.formattedAsKB()} (${String.format("%.1f", plaintext.size.toDouble() / jsonBytes.size * 100)}%)")
+        android.util.Log.v("SyncEngine", "🗜️ Compressed payload: ${jsonBytes.size.formattedAsKB()} -> ${plaintext.size.formattedAsKB()} (${String.format("%.1f", plaintext.size.toDouble() / jsonBytes.size * 100)}%)")
 
         val (ciphertextBase64, nonceBase64, tagBase64) = if (!plainTextMode && key != null) {
             // Normalize device ID to lowercase for AAD to match decryption (macOS uses lowercase)
@@ -123,13 +120,13 @@ class SyncEngine @Inject constructor(
             val nonce = encrypted.nonce.toBase64()
             val tag = encrypted.tag.toBase64()
         
-            android.util.Log.d("SyncEngine", "🔒 ENCRYPTED: ${item.content.take(20)}... | Ctxt: ${encrypted.ciphertext.size.formattedAsKB()} | CtxtB64: ${ctxt.length} chars (ends with ${ctxt.takeLast(6)}) | Nonce: ${nonce.length} | Tag: ${tag.length}")
+            android.util.Log.v("SyncEngine", "🔒 ENCRYPTED: ${item.content.take(20)}... | Ctxt: ${encrypted.ciphertext.size.formattedAsKB()} | CtxtB64: ${ctxt.length} chars (ends with ${ctxt.takeLast(6)}) | Nonce: ${nonce.length} | Tag: ${tag.length}")
             
             Triple(ctxt, nonce, tag)
         } else {
             // Plain text mode: use plaintext directly as "ciphertext", with empty nonce/tag
-            android.util.Log.d("SyncEngine", "⚠️ PLAIN TEXT MODE: Sending unencrypted payload")
-            android.util.Log.d("SyncEngine", "   Plaintext content: ${item.content.take(50)}")
+            android.util.Log.v("SyncEngine", "⚠️ PLAIN TEXT MODE: Sending unencrypted payload")
+            android.util.Log.v("SyncEngine", "   Plaintext content: ${item.content.take(50)}")
             Triple(base64Encoder.encodeToString(plaintext), "", "")
         }
         
@@ -208,18 +205,17 @@ class SyncEngine @Inject constructor(
             val plaintextBytes = ciphertext.fromBase64()
             // Always decompress (all payloads are compressed by default)
             val decompressed = decompressGzip(plaintextBytes)
-            android.util.Log.d("SyncEngine", "🗜️ Decompressed plaintext payload: ${plaintextBytes.size.formattedAsKB()} -> ${decompressed.size.formattedAsKB()}")
+            android.util.Log.v("SyncEngine", "🗜️ Decompressed plaintext payload: ${plaintextBytes.size.formattedAsKB()} -> ${decompressed.size.formattedAsKB()}")
             decompressed.decodeToString()
         } else {
             val deviceId = envelope.payload.deviceId
             if (deviceId == null) {
                 throw IllegalArgumentException("Missing deviceId in payload")
             }
-            android.util.Log.d("SyncEngine", "🔓 DECODING: deviceId=$deviceId (sender's device ID)")
-            
             // Key lookup handles normalization internally - no need to normalize here
             // The key is stored under the sender's device ID (macOS device ID in this case)
-            android.util.Log.d("SyncEngine", "🔑 Looking up key for sender device: $deviceId")
+            android.util.Log.d("SyncEngine", "🔓 DECODING: deviceId=$deviceId (sender's device ID)")
+            android.util.Log.v("SyncEngine", "🔑 Looking up key for sender device: $deviceId")
             val key = keyStore.loadKey(deviceId)
             if (key == null) {
                 android.util.Log.e("SyncEngine", "❌ Key not found for device: $deviceId")
@@ -233,7 +229,8 @@ class SyncEngine @Inject constructor(
             }
             
             val keyHex = key.take(16).joinToString("") { "%02x".format(it) }
-            android.util.Log.d("SyncEngine", "✅ Key loaded: ${key.size.formattedAsKB()} for $deviceId | KeyHex(16): $keyHex")
+            val keyHex = key.take(16).joinToString("") { "%02x".format(it) }
+            android.util.Log.v("SyncEngine", "✅ Key loaded: ${key.size.formattedAsKB()} for $deviceId | KeyHex(16): $keyHex")
 
             val ciphertextBytes = try {
                 ciphertext.fromBase64()
@@ -260,7 +257,11 @@ class SyncEngine @Inject constructor(
             val aad = normalizedDeviceId.encodeToByteArray()
             val aadHex = aad.take(50).joinToString("") { "%02x".format(it) }
 
-            android.util.Log.d("SyncEngine", "🔓 DECRYPTING: Key=${key.size.formattedAsKB()} | Ctxt=${ciphertextBytes.size.formattedAsKB()} | Nonce=${nonce.size.formattedAsKB()} | Tag=${tag.size.formattedAsKB()} | AAD=${aad.size.formattedAsKB()} ($aadHex)")
+            val normalizedDeviceId = deviceId.lowercase()
+            val aad = normalizedDeviceId.encodeToByteArray()
+            val aadHex = aad.take(50).joinToString("") { "%02x".format(it) }
+
+            android.util.Log.v("SyncEngine", "🔓 DECRYPTING: Key=${key.size.formattedAsKB()} | Ctxt=${ciphertextBytes.size.formattedAsKB()} | Nonce=${nonce.size.formattedAsKB()} | Tag=${tag.size.formattedAsKB()} | AAD=${aad.size.formattedAsKB()} ($aadHex)")
             val decrypted = try {
                 cryptoService.decrypt(
                     encrypted = com.hypo.clipboard.crypto.EncryptedData(
@@ -285,7 +286,7 @@ class SyncEngine @Inject constructor(
             
             // Always decompress (all payloads are compressed by default)
             val decompressed = decompressGzip(decrypted)
-            android.util.Log.d("SyncEngine", "🗜️ Decompressed payload: ${decrypted.size.formattedAsKB()} -> ${decompressed.size.formattedAsKB()}")
+            android.util.Log.v("SyncEngine", "🗜️ Decompressed payload: ${decrypted.size.formattedAsKB()} -> ${decompressed.size.formattedAsKB()}")
             decompressed.decodeToString()
         }
 

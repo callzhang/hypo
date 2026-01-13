@@ -4,6 +4,42 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-01-13
+
+### Added
+- **macOS SecurityManager**: Dedicated service for encryption key summary generation, storage, and UI actions.
+- **ClipboardEventDispatcher**: Multicast clipboard events to replace NotificationCenter wiring between services.
+
+### Changed
+- **macOS Peer Ownership**: `TransportManager` now owns paired-device state and persistence.
+- **Connection Status Probing**: `ConnectionStatusProber` routes discovery + status updates through `TransportManager`.
+- **Settings UI**: Peer status and connection state now observe `TransportManager` directly.
+- **Models**: `PairedDevice` moved to shared models for reuse across services.
+- **Android Settings**: Battery optimization status color reflects blocked (red) vs allowed (primary) states.
+
+### Fixed
+- **Pairing Flow**: Paired devices are registered directly on successful pairing (no notification dependency).
+- **Clipboard Monitoring**: Dispatcher integration ensures remote clipboard applies update changeCount consistently.
+
+## [1.0.12] - 2026-01-12
+
+### Added
+- **Documentation**: Comprehensive documentation for client-side file sync limits (10MB) and RAM constraints in `docs/technical.md`.
+- **Documentation**: Detailed platform-specific battery optimizations and screen-off synchronization behavior.
+
+### Changed
+- **Transport Layer**: Simplified transport framing by removing redundant `encodeWithChunking` logic in favor of native WebSocket fragmentation.
+
+### Fixed
+- **Tooling**: Automated `Cargo.lock` synchronization in `update-version.sh` to ensure CI stability.
+- **macOS UI**: Improved Menu Bar icon visibility and sync consistency issues.
+
+## [1.0.11] - 2026-01-12
+
+### Changed
+- **Scripts**: Comprehensive update and consolidation of CI/CD, build, and deployment scripts.
+- **Backend Deployment**: Refined deployment workflow for better reliability and performance.
+
 ## [1.0.10] - 2025-12-28
 
 ### Fixed
@@ -912,7 +948,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Project Status Summary
 
-**Current Version**: 1.0.6  
+**Current Version**: 1.1.0  
 **Project Phase**: Production Release  
 **Overall Progress**: 100%  
 **Status**: Production-ready, all critical issues resolved
@@ -945,4 +981,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **macOS Development**: Requires macOS 26+ with Xcode 15+
 - **Android Development**: Any platform with Android Studio Hedgehog+
 - **Backend Development**: Any platform with Rust 1.83+ (required for current dependencies)
-

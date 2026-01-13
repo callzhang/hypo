@@ -97,17 +97,30 @@ else
     log_info "App is not signed or signature is invalid (binary may have changed), will sign"
 fi
 
-# Step 1: Clean extended attributes and resource forks (required before signing)
+# Step 1: Cleaning app bundle...
 log_info "Step 1: Cleaning app bundle..."
+
 # Remove any existing signature first (only if we need to re-sign)
 codesign --remove-signature "$APP_BUNDLE" 2>/dev/null || true
-# Remove quarantine attribute (set by macOS when downloading from internet)
-xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
-# Remove extended attributes and resource forks
-xattr -cr "$APP_BUNDLE" 2>/dev/null || true
-# Remove Finder metadata files
+
+# 1. Remove Finder metadata & AppleDouble files FIRST (Nuclear option)
+# These are the source of "resource fork" errors
 find "$APP_BUNDLE" -name .DS_Store -delete 2>/dev/null || true
 find "$APP_BUNDLE" -name "._*" -delete 2>/dev/null || true
+
+# 2. Merge/clean AppleDouble files (._*) using dot_clean if available
+if command -v dot_clean &> /dev/null; then
+    dot_clean -m "$APP_BUNDLE" || true
+fi
+
+# 3. Remove quarantine attribute
+xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
+
+# 4. Strip ALL extended attributes (Recursively)
+# Now that ._ files are gone, this cleans the actual data files
+log_info "Removing extended attributes from all files..."
+xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+
 log_success "Cleaned app bundle"
 
 

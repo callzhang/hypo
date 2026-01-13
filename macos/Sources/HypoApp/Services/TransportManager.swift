@@ -17,8 +17,9 @@ import Darwin
 #endif
 
 @MainActor
-public final class TransportManager {
+public final class TransportManager: ObservableObject {
     private let logger = HypoLogger(category: "TransportManager")
+    private let defaults: UserDefaults
     private let provider: TransportProvider
     private let browser: BonjourBrowser
     private let publisher: BonjourPublishing
@@ -32,6 +33,7 @@ public final class TransportManager {
     private let incomingHandler: IncomingClipboardHandler?
     private weak var historyViewModel: ClipboardHistoryViewModel?
     private var connectionStatusProber: ConnectionStatusProber?
+    public let dispatcher: ClipboardEventDispatcher
 
     private var discoveryTask: Task<Void, Never>?
     private var pruneTask: Task<Void, Never>?
@@ -48,16 +50,39 @@ public final class TransportManager {
     private var lastSeen: [String: Date]
 #if canImport(Combine)
     @Published public private(set) var connectionState: ConnectionState = .disconnected
+    // Peer state managed by TransportManager
+    @Published public private(set) var pairedDevices: [PairedDevice] = []
 #else
     public private(set) var connectionState: ConnectionState = .disconnected
+    public private(set) var pairedDevices: [PairedDevice] = []
 #endif
-    private var lastSuccessfulTransport: [String: TransportChannel] = [:]
+
+    // Cache for synchronous name lookup
+    private var deviceNameCache: [String: String] = [:]
+
+    // Messaging and transport state
+    private var lastSuccessfulTransportMap: [String: TransportChannel] = [:]
+    
+    public func pairingParameters() -> (service: String, port: Int, relayHint: URL?) {
+        let config = currentLanConfiguration()
+        let domain = config.domain
+        let serviceType = config.serviceType
+        let serviceName = config.serviceName
+        let port = config.port
+        let service = "\(serviceName).\(serviceType)\(domain)"
+
+        let relayConfig = CloudRelayDefaults.staging()
+        var relayComponents = URLComponents(url: relayConfig.url, resolvingAgainstBaseURL: false)
+        if relayComponents?.scheme == "wss" { relayComponents?.scheme = "https" }
+        let relayHint = relayComponents?.url
+        return (service: service, port: port, relayHint: relayHint)
+    }
     private var connectionSupervisorTask: Task<Void, Never>?
     private var autoConnectTask: Task<Void, Never>?
     private var initTask: Task<Void, Never>?
     private var manualRetryRequested = false
     private var networkChangeRequested = false
-    private static let lanPairingKeyIdentifier = "lan-discovery-key"
+    static let lanPairingKeyIdentifier = "lan-discovery-key"
 
 #if canImport(Combine)
     public var connectionStatePublisher: Published<ConnectionState>.Publisher { $connectionState }
@@ -80,8 +105,11 @@ public final class TransportManager {
         dateProvider: @escaping () -> Date = Date.init,
         analytics: TransportAnalytics = NoopTransportAnalytics(),
         webSocketServer: LanWebSocketServer,
-        historyStore: HistoryStore? = nil
+        historyStore: HistoryStore? = nil,
+        defaults: UserDefaults = .standard,
+        dispatcher: ClipboardEventDispatcher? = nil // Will be used in later phases
     ) {
+        self.defaults = defaults
         self.provider = provider
         self.browser = browser
         self.publisher = publisher
@@ -97,6 +125,10 @@ public final class TransportManager {
         self.lanPeers = cachedPeers
         logger.info("🔄 [TransportManager] Restored \(cachedPeers.count) peers from cache")
         self.webSocketServer = webSocketServer
+        self.dispatcher = dispatcher ?? ClipboardEventDispatcher()
+
+        // Configure TempFileManager with the dispatcher
+        TempFileManager.shared.configure(dispatcher: self.dispatcher)
 
 
         // Set up incoming clipboard handler if history store is provided
@@ -113,10 +145,20 @@ public final class TransportManager {
                 localPlatform: deviceIdentity.platform
             )
             // Create handler - callback will be set up later via setHistoryViewModel
+            // Note: In future phases, dispatcher will be passed here
             self.incomingHandler = IncomingClipboardHandler(
                 syncEngine: syncEngine,
-                historyStore: historyStore
+                historyStore: historyStore,
+                dispatcher: self.dispatcher
             )
+            
+            // Wire handler callbacks for TransportManager internal needs
+            self.incomingHandler?.onClipboardReceived = { [weak self] deviceId, timestamp in
+                Task { @MainActor in
+                    await self?.updatePairedDeviceLastSeen(deviceId, lastSeen: timestamp)
+                }
+            }
+
             // Allow LanSyncTransport to resolve peers from our discovery cache
             transport.setGetDiscoveredPeers { [weak self] in
                 guard let self else { return [] }
@@ -148,30 +190,18 @@ public final class TransportManager {
                    let envelope = try frameCodec.decode(data)
                    self?.logger.info("🔍 [TransportManager] Envelope details: type=\(envelope.type.rawValue), target=\(envelope.payload.target ?? "nil"), deviceId=\(envelope.payload.deviceId.prefix(8))")
                } catch {
-                   self?.logger.warning("⚠️ [TransportManager] Failed to decode envelope for logging: \(error.localizedDescription)")
+                   self?.logger.error("❌ [TransportManager] Failed to decode envelope for logging: \(error)")
                }
-               if let handler = handler {
-                   self?.logger.info("✅ [TransportManager] Calling incomingHandler.handle()")
-                   await handler.handle(data, transportOrigin: transportOrigin)
-                   self?.logger.info("✅ [TransportManager] incomingHandler.handle() completed")
-               } else {
-                   self?.logger.error("❌ [TransportManager] incomingHandler is nil when message received!")
-               }
+               
+               await handler?.handle(data, transportOrigin: transportOrigin)
            }
-            logger.info("✅ [TransportManager] Cloud relay incoming message handler set")
-        } else {
-            logger.warning("⚠️ [TransportManager] Could not set cloud relay handler: defaultProvider=\(provider is DefaultTransportProvider), incomingHandler=\(incomingHandler != nil)")
         }
-        
-        // Connection status prober will be initialized after historyViewModel is set
-        // (via setHistoryViewModel)
 
         #if canImport(AppKit)
-        // For menu bar apps, we don't want to deactivate services when the window closes
-        // Only deactivate on actual app termination
-        lifecycleObserver = ApplicationLifecycleObserver(
+        // Consolidated Application Lifecycle Observer
+        self.lifecycleObserver = ApplicationLifecycleObserver(
             onActivate: { [weak self] in
-                Task {
+                Task { @MainActor in
                     await self?.activateLanServices()
                     // Probe connections when app becomes active
                     self?.connectionStatusProber?.probeNow()
@@ -181,7 +211,7 @@ public final class TransportManager {
                 // Don't deactivate LAN services on window close for menu bar apps
                 // Services should stay running in the background
                 // Only trigger a probe to update status
-                Task {
+                Task { @MainActor in
                     self?.connectionStatusProber?.probeNow()
                 }
             },
@@ -191,25 +221,138 @@ public final class TransportManager {
         )
         // Start LAN services immediately (menu bar apps don't trigger didBecomeActive on launch)
         initTask = Task { @MainActor [weak self] in
-            guard let self = self else {
-                NSLog("⚠️ [TransportManager] Self deallocated in initTask")
-                return
-            }
+            guard let self = self else { return }
             await self.activateLanServices()
-            
-            // CRITICAL: Add immediate logging to verify execution continues
-            self.logger.info("➡️ [TransportManager] Execution continues after activateLanServices()")
-            
-            // Note: Auto-connect is now handled by ConnectionStatusProber
-            // which is initialized via setHistoryViewModel()
-            // This avoids duplicate connection attempts
-            self.logger.info("ℹ️ [TransportManager] Skipping auto-connect (handled by ConnectionStatusProber)")
+            self.logger.info("➡️ [TransportManager] LAN services activated in initTask")
         }
         #else
         Task { await activateLanServices() }
         #endif
     }
+    // MARK: - Peer State Management
 
+    public func updateDeviceOnlineStatus(deviceId: String, isOnline: Bool) {
+        // Log the exact instance being updated to debug multiple instance issues
+        logger.info("🔍 [TransportManager] updateDeviceOnlineStatus called on instance: \(Unmanaged.passUnretained(self).toOpaque())")
+        
+        guard let index = pairedDevices.firstIndex(where: { $0.id == deviceId }) else {
+            logger.warning("⚠️ [TransportManager] Attempted to update status for unknown device: \(deviceId)")
+            return
+        }
+        
+        if pairedDevices[index].isOnline != isOnline {
+            logger.info("🔄 [TransportManager] Device status changed: \(pairedDevices[index].name) is now \(isOnline ? "Online" : "Offline")")
+            pairedDevices[index].isOnline = isOnline
+        }
+    }
+
+    public func addPairedDevice(_ device: PairedDevice) {
+        if !pairedDevices.contains(where: { $0.id == device.id }) {
+            pairedDevices.append(device)
+            pairedDevices.sort { $0.lastSeen > $1.lastSeen }
+            persistPairedDevices()
+            logger.info("✅ [TransportManager] Added paired device: \(device.name)")
+        }
+    }
+
+    public func removePairedDevice(_ device: PairedDevice) {
+        if let index = pairedDevices.firstIndex(where: { $0.id == device.id }) {
+            pairedDevices.remove(at: index)
+            persistPairedDevices()
+            logger.info("🗑️ [TransportManager] Removed paired device: \(device.name)")
+        }
+    }
+
+    public func updatePairedDeviceLastSeen(_ deviceId: String, lastSeen: Date) {
+        if let index = pairedDevices.firstIndex(where: { $0.id == deviceId }) {
+            var device = pairedDevices[index]
+            device.lastSeen = lastSeen
+            pairedDevices[index] = device
+            pairedDevices.sort { $0.lastSeen > $1.lastSeen }
+            persistPairedDevices()
+        }
+    }
+
+    public func registerPairedDevice(_ device: PairedDevice) {
+        // Create a new array to ensure updates
+        var updatedDevices = pairedDevices
+        
+        if let index = updatedDevices.firstIndex(where: { $0.id == device.id }) {
+            updatedDevices[index] = device
+            logger.info("🔄 [TransportManager] Updated existing device: \(device.name)")
+        } else if let existingIndex = updatedDevices.firstIndex(where: { $0.name == device.name && $0.platform == device.platform }) {
+            updatedDevices[existingIndex] = device
+            logger.info("🔄 [TransportManager] Updated device by name: \(device.name)")
+        } else {
+            updatedDevices.append(device)
+            logger.info("🔄 [TransportManager] Added new device: \(device.name)")
+        }
+        
+        updatedDevices.sort { $0.lastSeen > $1.lastSeen }
+        pairedDevices = updatedDevices
+        persistPairedDevices()
+    }
+
+    // MARK: - Helper Methods
+
+    /// Synchronous name lookup from cache
+    public func deviceName(for deviceId: String) -> String? {
+        deviceNameCache[deviceId.lowercased()]
+    }
+
+    private func updateNameCache() {
+        deviceNameCache = Dictionary(
+            pairedDevices.map { ($0.id.lowercased(), $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    private func loadPairedDevices() {
+        var newDevices: [PairedDevice] = []
+        var oldDevices: [PairedDevice] = []
+
+        if let data = defaults.data(forKey: "transport_paired_devices"),
+           let devices = try? JSONDecoder().decode([PairedDevice].self, from: data) {
+            newDevices = devices
+        }
+
+        if let data = defaults.data(forKey: "paired_devices"),
+           let devices = try? JSONDecoder().decode([PairedDevice].self, from: data) {
+            oldDevices = devices
+        }
+
+        var merged = newDevices
+        if !oldDevices.isEmpty {
+            var existingIds = Set(merged.map { $0.id.lowercased() })
+            for device in oldDevices {
+                let key = device.id.lowercased()
+                if !existingIds.contains(key) {
+                    merged.append(device)
+                    existingIds.insert(key)
+                }
+            }
+        }
+
+        if merged.isEmpty {
+            return
+        }
+
+        let uniqueDevices = Dictionary(grouping: merged, by: { $0.id })
+            .compactMap { $0.value.first }
+            .sorted { $0.lastSeen > $1.lastSeen }
+
+        pairedDevices = uniqueDevices
+        updateNameCache()
+        persistPairedDevices()
+        logger.info("🔄 [TransportManager] Loaded \(pairedDevices.count) paired devices (merged: new=\(newDevices.count), old=\(oldDevices.count))")
+    }
+
+    private func persistPairedDevices() {
+        if let data = try? JSONEncoder().encode(pairedDevices) {
+            defaults.set(data, forKey: "transport_paired_devices")
+        }
+        updateNameCache()
+    }
     public func loadTransport() -> SyncTransport {
         return provider.preferredTransport()
     }
@@ -235,7 +378,6 @@ public final class TransportManager {
             logger.info("🔧 [TransportManager] Initializing ConnectionStatusProber")
             
             connectionStatusProber = ConnectionStatusProber(
-                historyViewModel: viewModel,
                 webSocketServer: webSocketServer,
                 transportManager: self,
                 transportProvider: provider
@@ -250,11 +392,11 @@ public final class TransportManager {
         #endif
     }
     
-/// Update the connection state (used by ConnectionStatusProber)
-@MainActor
-public func updateConnectionState(_ newState: ConnectionState) {
-    if connectionState != newState {
-        let msg = "🔄 [TransportManager] Updating connectionState: \(connectionState) → \(newState)\n"
+    /// Update the connection state (used by ConnectionStatusProber)
+    @MainActor
+    public func updateConnectionState(_ newState: ConnectionState) {
+        if connectionState != newState {
+            let msg = "🔄 [TransportManager] Updating connectionState: \(connectionState) → \(newState)\n"
             logger.info(msg)
             connectionState = newState
         }
@@ -339,9 +481,8 @@ public func updateConnectionState(_ newState: ConnectionState) {
     public func lastSeenTimestamp(for serviceName: String) -> Date? {
         lastSeen[serviceName]
     }
-
     public func lastSuccessfulTransport(for serviceName: String) -> TransportChannel? {
-        lastSuccessfulTransport[serviceName]
+        lastSuccessfulTransportMap[serviceName]
     }
 
     public func pruneLanPeers(olderThan interval: TimeInterval) {
@@ -740,7 +881,7 @@ public func updateConnectionState(_ newState: ConnectionState) {
 
     private func updateLastTransport(for identifier: String?, route: TransportChannel) {
         guard let identifier else { return }
-        lastSuccessfulTransport[identifier] = route
+        lastSuccessfulTransportMap[identifier] = route
     }
 
     public func startConnectionSupervisor(
@@ -1017,9 +1158,7 @@ public func updateConnectionState(_ newState: ConnectionState) {
             
             // Close Cloud connection
             let cloudTransport = provider.getCloudTransport()
-            if let wsTransport = cloudTransport as? WebSocketTransport {
-                await wsTransport.enterSleepMode()
-            }
+            await cloudTransport.disconnect()
         }
     }
     
@@ -1036,9 +1175,7 @@ public func updateConnectionState(_ newState: ConnectionState) {
             
             // Reconnect Cloud connection
             let cloudTransport = provider.getCloudTransport()
-            if let wsTransport = cloudTransport as? WebSocketTransport {
-                await wsTransport.exitSleepMode()
-            }
+            try? await cloudTransport.connect()
         }
     }
 
@@ -1067,7 +1204,7 @@ public func updateConnectionState(_ newState: ConnectionState) {
         
         // Load or create persistent key agreement key for LAN pairing
         do {
-            let agreementKey = try loadOrCreateLanPairingKey()
+            let agreementKey = try TransportManager.loadOrCreateLanPairingKey()
             publicKeyBase64 = agreementKey.publicKey.rawRepresentation.base64EncodedString()
             if let preview = publicKeyBase64?.prefix(16) {
                 NSLog("🔑 [TransportManager] Bonjour config: Using public key \(preview)...")
@@ -1100,11 +1237,11 @@ public func updateConnectionState(_ newState: ConnectionState) {
         let digest = SHA256.hash(data: data)
         return digest.compactMap { String(format: "%02x", $0) }.joined()
     }
-    private static func loadOrCreateLanPairingKey() throws -> Curve25519.KeyAgreement.PrivateKey {
+    static func loadOrCreateLanPairingKey() throws -> Curve25519.KeyAgreement.PrivateKey {
         let logger = HypoLogger(category: "TransportManager")
         let keyStore = FileBasedKeyStore()
-        if let stored = try keyStore.load(for: lanPairingKeyIdentifier) {
-            let data = stored.withUnsafeBytes { Data($0) }
+        if let stored = try keyStore.load(for: TransportManager.lanPairingKeyIdentifier) {
+            let data = Data([UInt8](stored.withUnsafeBytes { $0 }))
             logger.info("🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: \(data.count.formattedAsKB))")
             do {
                 let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data)
@@ -1113,14 +1250,14 @@ public func updateConnectionState(_ newState: ConnectionState) {
             } catch {
                 logger.error("❌ [TransportManager] Failed to reconstruct key from file storage data: \(error)")
                 // If key reconstruction fails, delete the corrupted entry and create a new one
-                try? keyStore.delete(for: lanPairingKeyIdentifier)
+                try? keyStore.delete(for: TransportManager.lanPairingKeyIdentifier)
                 throw error
             }
         }
 
         logger.info("🔑 [TransportManager] Creating new LAN pairing key")
         let key = Curve25519.KeyAgreement.PrivateKey()
-        try keyStore.save(key: SymmetricKey(data: key.rawRepresentation), for: lanPairingKeyIdentifier)
+        try keyStore.save(key: SymmetricKey(data: key.rawRepresentation), for: TransportManager.lanPairingKeyIdentifier)
         logger.info("🔑 [TransportManager] Saved new key to file storage, public key: \(key.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
         return key
     }
@@ -1329,7 +1466,7 @@ extension TransportManager: LanWebSocketServerDelegate {
             logger.info("📝 Starting pairing session...")
             #endif
             logger.info("🔑 [TransportManager] Loading LAN pairing key for challenge handling...")
-            let persistentKey = try Self.loadOrCreateLanPairingKey()
+            let persistentKey = try TransportManager.loadOrCreateLanPairingKey()
             logger.info("🔑 [TransportManager] Loaded key, public key: \(persistentKey.publicKey.rawRepresentation.base64EncodedString().prefix(16))...")
             logger.info("🔵 [TransportManager] Creating PairingSession...")
             let pairingSession = PairingSession(identity: deviceIdentity.deviceId)
@@ -1366,29 +1503,42 @@ extension TransportManager: LanWebSocketServerDelegate {
             webSocketServer.updateConnectionMetadata(connectionId: connectionId, deviceId: challenge.initiatorDeviceId)
             
             logger.info("✅ [TransportManager] Pairing completed: \(challenge.initiatorDeviceName) (\(challenge.initiatorDeviceId.prefix(8)))")
-            
-            // Write to debug log
-            
-            NotificationCenter.default.post(
-                name: NSNotification.Name("PairingCompleted"),
-                object: nil,
-                userInfo: [
-                    "deviceId": challenge.initiatorDeviceId,
-                    "deviceName": challenge.initiatorDeviceName
-                ]
-            )
-            
-            // Also notify that device is now online (connection is established)
-            logger.info("✅ [TransportManager] Marking device as online after pairing: \(challenge.initiatorDeviceId)")
-            NotificationCenter.default.post(
-                name: NSNotification.Name("DeviceConnectionStatusChanged"),
-                object: nil,
-                userInfo: [
-                    "deviceId": challenge.initiatorDeviceId,
-                    "isOnline": true
-                ]
-            )
-            logger.info("✅ [TransportManager] PairingCompleted notification posted")
+
+            // Register paired device directly (no notification dependency)
+            let discoveredPeer = lanDiscoveredPeers().first(where: { peer in
+                if let peerDeviceId = peer.endpoint.metadata["device_id"] {
+                    return peerDeviceId.lowercased() == challenge.initiatorDeviceId.lowercased()
+                }
+                return false
+            })
+            let pairedDevice: PairedDevice
+            if let peer = discoveredPeer {
+                pairedDevice = PairedDevice(
+                    id: challenge.initiatorDeviceId,
+                    name: challenge.initiatorDeviceName,
+                    platform: "Android",
+                    lastSeen: Date(),
+                    isOnline: true,
+                    serviceName: peer.serviceName,
+                    bonjourHost: peer.endpoint.host,
+                    bonjourPort: peer.endpoint.port,
+                    fingerprint: peer.endpoint.fingerprint
+                )
+                logger.info("✅ [TransportManager] Paired device discovered on LAN: \(peer.endpoint.host):\(peer.endpoint.port)")
+            } else {
+                pairedDevice = PairedDevice(
+                    id: challenge.initiatorDeviceId,
+                    name: challenge.initiatorDeviceName,
+                    platform: "Android",
+                    lastSeen: Date(),
+                    isOnline: true
+                )
+                logger.info("✅ [TransportManager] Paired device not yet discovered on LAN (will update when discovered)")
+            }
+            registerPairedDevice(pairedDevice)
+            if discoveredPeer == nil {
+                await probeConnectionStatus()
+            }
             #endif
         } catch {
             #if canImport(os)
@@ -1460,6 +1610,8 @@ extension TransportManager: LanWebSocketServerDelegate {
                         "isOnline": true
                     ]
                 )
+                // Trigger connection status probe to update UI immediately
+                await probeConnectionStatus()
             } else {
                 logger.info("⚠️ [TransportManager] Connection established but no deviceId in metadata yet (will update when handshake completes)")
             }

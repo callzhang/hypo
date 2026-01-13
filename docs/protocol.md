@@ -1,8 +1,8 @@
 # Hypo Clipboard Sync Protocol Specification
 
-Version: 1.0.6  
+Version: 1.1.0  
 Status: Production  
-Date: December 13, 2025
+Date: January 13, 2026
 
 ---
 
@@ -778,6 +778,6 @@ For detailed migration information, see `/workspace/docs/archive/breaking_change
 
 ---
 
-**Document Version**: 1.0.6  
+**Document Version**: 1.1.0  
 **Last Updated**: December 13, 2025  
 **Status**: Production

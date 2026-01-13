@@ -1,8 +1,8 @@
 # Hypo User Guide
 
 **Cross-Platform Clipboard Synchronization**  
-**Version**: 1.0.6  
-**Last Updated**: December 13, 2025
+**Version**: 1.1.0  
+**Last Updated**: January 13, 2026
 
 ---
 
@@ -961,7 +961,13 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ## 📝 Changelog
 
-**Version 1.0.6** (Current - Nonce Reuse Fix for Dual-Send Transport)
+**Version 1.1.0** (Current - macOS Architecture Refactor)
+- TransportManager now owns peer state and persistence
+- SecurityManager manages encryption key summary and UI actions
+- ClipboardEventDispatcher replaces NotificationCenter for clipboard events
+- Pairing flow registers devices directly (no notification dependency)
+
+**Version 1.0.6** (Nonce Reuse Fix for Dual-Send Transport)
 - Fixed decryption failures when sending to both LAN and cloud simultaneously
 - macOS now creates separate envelopes with unique nonces for each transport
 - Prevents `AEADBadTagException` errors on Android when receiving same message twice
@@ -1007,6 +1013,6 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ---
 
-**Last Updated**: December 13, 2025  
-**Version**: 1.0.6  
+**Last Updated**: January 13, 2026  
+**Version**: 1.1.0  
 **For Technical Support**: support@hypo.app

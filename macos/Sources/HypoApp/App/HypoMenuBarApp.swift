@@ -450,7 +450,8 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         let monitor = ClipboardMonitor(
             deviceId: uuid,
             platform: identity.platform,
-            deviceName: identity.deviceName
+            deviceName: identity.deviceName,
+            dispatcher: viewModel.transportManager?.dispatcher
         )
         monitor.delegate = viewModel
         monitor.start()
@@ -719,6 +720,16 @@ public struct HypoMenuBarApp: App {
             logger.info("🆕 [HypoMenuBarApp] Created new HistoryStore")
         }
         
+        let securityManager: SecurityManager
+        if let existingSM = AppContext.shared.securityManager {
+            securityManager = existingSM
+            logger.info("🔄 [HypoMenuBarApp] Reusing existing SecurityManager")
+        } else {
+            securityManager = SecurityManager()
+            AppContext.shared.securityManager = securityManager
+            logger.info("🆕 [HypoMenuBarApp] Created new SecurityManager")
+        }
+        
         let transportManager: TransportManager
         
         if let existingTM = AppContext.shared.transportManager {
@@ -910,7 +921,8 @@ public struct HypoMenuBarApp: App {
         let monitor = ClipboardMonitor(
             deviceId: uuid,
             platform: deviceIdentity.platform,
-            deviceName: deviceIdentity.deviceName
+            deviceName: deviceIdentity.deviceName,
+            dispatcher: viewModel.transportManager?.dispatcher ?? ClipboardEventDispatcher()
         )
         monitor.delegate = viewModel
         monitor.start()
@@ -1084,7 +1096,11 @@ struct MenuBarContentView: View {
                     highlightedItemId: $highlightedItemId
                 )
             case .settings:
-                SettingsSectionView(viewModel: viewModel)
+                if let tm = viewModel.transportManager {
+                    SettingsSectionView(viewModel: viewModel, transportManager: tm, securityManager: AppContext.shared.securityManager)
+                } else {
+                    SettingsSectionView(viewModel: viewModel)
+                }
             }
         }
         .padding(16)
@@ -2042,9 +2058,19 @@ private struct ClipboardRow: View {
 private struct SettingsSectionView: View {
     private let logger = HypoLogger(category: "SettingsSectionView")
     @ObservedObject var viewModel: ClipboardHistoryViewModel
+    @ObservedObject var transportManager: TransportManager
+    @ObservedObject var securityManager: SecurityManager
     @State private var isPresentingPairing = false
     @State private var localHistoryLimit: Double = 200
     @State private var historyLimitUpdateTask: Task<Void, Never>?
+
+    init(viewModel: ClipboardHistoryViewModel, transportManager: TransportManager? = nil, securityManager: SecurityManager? = nil) {
+        self.viewModel = viewModel
+        // If tm is nil, we'll use a dummy or skip, but it should be available
+        self.transportManager = transportManager ?? viewModel.transportManager!
+        self.securityManager = securityManager ?? AppContext.shared.securityManager!
+    }
+    
     
     var body: some View {
         ScrollView {
@@ -2053,11 +2079,11 @@ private struct SettingsSectionView: View {
                     HStack {
                         Text("Status")
                         Spacer()
-                        // Connection Status Icon
-                        Image(systemName: connectionStatusIconName(for: viewModel.connectionState))
-                            .foregroundColor(connectionStatusIconColor(for: viewModel.connectionState))
+                        // Connection Status Icon - Observes transportManager
+                        Image(systemName: connectionStatusIconName(for: transportManager.connectionState))
+                            .foregroundColor(connectionStatusIconColor(for: transportManager.connectionState))
                             .font(.system(size: 14, weight: .medium))
-                            .help(connectionStatusTooltip(for: viewModel.connectionState))
+                            .help(connectionStatusTooltip(for: transportManager.connectionState))
                     }
                 }
                 
@@ -2066,6 +2092,43 @@ private struct SettingsSectionView: View {
                         get: { viewModel.plainTextModeEnabled },
                         set: { viewModel.plainTextModeEnabled = $0 }
                     ))
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Encryption key summary")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        HStack {
+                            Text(securityManager.encryptionKeySummary)
+                                .font(.system(.caption, design: .monospaced))
+                                .padding(6)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(4)
+                            
+                            Spacer()
+                            
+                            Button(action: {
+                                securityManager.copyEncryptionKeyToPasteboard()
+                            }) {
+                                Image(systemName: "doc.on.doc")
+                            }
+                            .buttonStyle(.plain)
+                            .help("Copy to clipboard")
+                            
+                            Button(action: {
+                                securityManager.regenerateEncryptionKey()
+                            }) {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .buttonStyle(.plain)
+                            .help("Regenerate key")
+                        }
+                        
+                        Text("This key must match on all your paired devices for sync to work.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 4)
                 }
 
                 Section("History") {
@@ -2144,11 +2207,11 @@ private struct SettingsSectionView: View {
                 #endif
 
                 Section("Paired devices") {
-                    if viewModel.pairedDevices.isEmpty {
+                    if transportManager.pairedDevices.isEmpty {
                         Text("No devices paired yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(viewModel.pairedDevices) { device in
+                        ForEach(transportManager.pairedDevices) { device in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
@@ -2165,7 +2228,7 @@ private struct SettingsSectionView: View {
                                     .fill(device.isOnline ? Color.green : Color.gray)
                                     .frame(width: 10, height: 10)
                                     .accessibilityLabel(device.isOnline ? "Online" : "Offline")
-                                    .id("\(device.id)-\(device.isOnline)") // Force re-render when isOnline changes
+                                    .id("\(device.id)-\(device.isOnline)")
                                     .onChange(of: device.isOnline) { newValue in
                                         logger.debug("🔄 [UI] Device \(device.name) isOnline changed to: \(newValue)")
                                     }
@@ -2174,7 +2237,7 @@ private struct SettingsSectionView: View {
                                     }
                                     .help(deviceTooltip(for: device))
                                 Button(role: .destructive) {
-                                    viewModel.removePairedDevice(device)
+                                    transportManager.removePairedDevice(device)
                                 } label: {
                                     Image(systemName: "minus.circle")
                                 }
@@ -2187,11 +2250,11 @@ private struct SettingsSectionView: View {
                     Button("Pair new device") { isPresentingPairing = true }
                 }
                 .onAppear {
-                    // Trigger connection status probe when settings section appears to refresh peer status
-                    if let transportManager = viewModel.transportManager {
-                        Task {
-                            await transportManager.probeConnectionStatus()
-                        }
+                    logger.info("👁️ [SettingsSectionView] Paired devices section appeared")
+                    logger.info("👁️ [SettingsSectionView] TransportManager instance: \(Unmanaged.passUnretained(transportManager).toOpaque())")
+                    logger.info("👁️ [SettingsSectionView] Paired devices count: \(transportManager.pairedDevices.count)")
+                    for (idx, device) in transportManager.pairedDevices.enumerated() {
+                        logger.info("👁️ [SettingsSectionView] Device[\(idx)]: \(device.name), isOnline=\(device.isOnline)")
                     }
                 }
 
@@ -2717,7 +2780,8 @@ private struct PairDeviceSheet: View {
     }
 
     private func startIfNeeded(force: Bool = false) {
-        let params = viewModel.pairingParameters()
+        guard let transportManager = viewModel.transportManager else { return }
+        let params = transportManager.pairingParameters()
         if force || !hasStarted {
             remoteViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)
         }

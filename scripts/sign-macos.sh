@@ -113,10 +113,14 @@ if command -v dot_clean &> /dev/null; then
     dot_clean -m "$APP_BUNDLE" || true
 fi
 
-# 3. Remove quarantine attribute
+# 3. Remove Finder info/resource fork attributes explicitly (codesign rejects these)
+xattr -dr com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
+xattr -dr com.apple.ResourceFork "$APP_BUNDLE" 2>/dev/null || true
+
+# 4. Remove quarantine attribute
 xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
 
-# 4. Strip ALL extended attributes (Recursively)
+# 5. Strip ALL extended attributes (Recursively)
 # Now that ._ files are gone, this cleans the actual data files
 log_info "Removing extended attributes from all files..."
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true
@@ -193,4 +197,3 @@ log_info "  - See docs/NOTARIZATION.md for details"
 log_info ""
 log_success "✅ Signing complete!"
 log_info "App bundle: $APP_BUNDLE"
-

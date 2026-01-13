@@ -224,16 +224,10 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     @Published public var autoDeleteAfterHours: Int
     @Published public var plainTextModeEnabled: Bool {
         didSet {
-            logger.debug("🔧 [ClipboardHistoryViewModel] plainTextModeEnabled changed to: \(plainTextModeEnabled)")
             defaults.set(plainTextModeEnabled, forKey: DefaultsKey.plainTextMode)
-            // Verify it was saved
-            let saved = defaults.bool(forKey: DefaultsKey.plainTextMode)
-            logger.debug("🔧 [ClipboardHistoryViewModel] Saved to UserDefaults: \(saved)")
         }
     }
-    @Published public private(set) var pairedDevices: [PairedDevice] = []
-    @Published public private(set) var encryptionKeySummary: String
-    
+    @Published public private(set) var connectionState: ConnectionState = .disconnected
     // Message queue for sync messages with 1-minute window
     private struct QueuedSyncMessage {
         let entry: ClipboardEntry
@@ -244,7 +238,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     private var syncMessageQueue: [QueuedSyncMessage] = []
     private var queueProcessingTask: Task<Void, Never>?
     private var queueProcessingContinuation: CheckedContinuation<Void, Never>?
-    @Published public private(set) var connectionState: ConnectionState = .disconnected
 
     private let store: HistoryStore
     public let transportManager: TransportManager?
@@ -263,8 +256,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         static let allowsCloudFallback = "allow_cloud_fallback"
         static let autoDeleteHours = "auto_delete_hours"
         static let appearance = "appearance_preference"
-        static let pairedDevices = "paired_devices"
-        static let encryptionKey = "encryption_key_summary"
         static let plainTextMode = "plain_text_mode_enabled"
     }
 
@@ -287,23 +278,6 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         } else {
             self.appearancePreference = .system
         }
-        if let storedKey = defaults.string(forKey: DefaultsKey.encryptionKey) {
-            self.encryptionKeySummary = storedKey
-        } else {
-            let generated = Self.generateEncryptionKey()
-            self.encryptionKeySummary = generated
-            defaults.set(generated, forKey: DefaultsKey.encryptionKey)
-        }
-        if let storedDevices = defaults.data(forKey: DefaultsKey.pairedDevices),
-           let decoded = try? JSONDecoder().decode([PairedDevice].self, from: storedDevices) {
-            // Deduplicate devices: keep most recent by ID, then by name+platform
-            let deduplicated = Self.deduplicateDevices(decoded).sorted { $0.lastSeen > $1.lastSeen }
-            self.pairedDevices = deduplicated
-            // Save deduplicated list directly to UserDefaults
-            if let encoded = try? JSONEncoder().encode(deduplicated) {
-                defaults.set(encoded, forKey: DefaultsKey.pairedDevices)
-            }
-        }
 #if canImport(UserNotifications)
         self.notificationController = ClipboardNotificationController()
         if let controller = self.notificationController {
@@ -313,241 +287,25 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             logger.warning("⚠️ Notification controller failed to initialize (may be running from .build directory, not .app bundle)")
         }
 #endif
-        
-        // Listen for pairing completion notifications from TransportManager
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("PairingCompleted"),
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self else { return }
-            let userInfo = notification.userInfo ?? [:]
-            
-            Task { @MainActor in
-                self.logger.debug("🔔 [HistoryStore] PairingCompleted notification received!")
-                self.logger.debug("   Full userInfo: \(userInfo)")
-                
-                // Write to debug log
-                guard let deviceIdString = userInfo["deviceId"] as? String,
-                      let deviceName = userInfo["deviceName"] as? String else {
-                    self.logger.debug("⚠️ [HistoryStore] PairingCompleted notification missing required fields")
-                    self.logger.debug("   userInfo keys: \(userInfo.keys)")
-                    self.logger.debug("   deviceId type: \(type(of: userInfo["deviceId"]))")
-                    self.logger.debug("   deviceName type: \(type(of: userInfo["deviceName"]))")
-#if canImport(os)
-                    self.logger.warning("⚠️ PairingCompleted notification missing required fields")
-#endif
-                    return
-                }
-                
-                self.logger.debug("📱 [HistoryStore] Processing device: \(deviceName), ID: \(deviceIdString)")
-                await self.handlePairingCompleted(deviceId: deviceIdString, deviceName: deviceName)
-            }
-        }
-        
-        // Observe TransportManager's connection state
         if let transportManager = transportManager {
-#if canImport(Combine)
-            // Set initial state first
-            connectionState = transportManager.connectionState
-            logger.debug("🔌 [ClipboardHistoryViewModel] Initial connection state: \(connectionState)")
-            logger.debug("🔌 [ClipboardHistoryViewModel] TransportManager connectionState: \(transportManager.connectionState)")
-            
-            // Observe changes (event-driven via Combine publisher)
-            connectionStateCancellable = transportManager.connectionStatePublisher
+            self.connectionState = transportManager.connectionState
+            self.connectionStateCancellable = transportManager.connectionStatePublisher
                 .receive(on: DispatchQueue.main)
-                .sink { [weak self] newState in
-                    guard let self = self else { return }
-                    logger.debug("🔌 [ClipboardHistoryViewModel] Connection state updated from publisher: \(newState)")
-                    self.connectionState = newState
-                    logger.debug("🔌 [ClipboardHistoryViewModel] Updated self.connectionState to: \(self.connectionState)")
-                    // Trigger sync queue processing when connection becomes available (event-driven)
-                    if newState != .disconnected {
-                        self.triggerSyncQueueProcessing()
+                .sink { [weak self] state in
+                    self?.connectionState = state
+                    // Wake up queue when we connect
+                    if state != .disconnected {
+                        self?.triggerSyncQueueProcessing()
                     }
                 }
-#endif
-        } else {
-            logger.info("⚠️ [ClipboardHistoryViewModel] No TransportManager provided, connection state will remain idle")
-        }
-        
-        // Listen for connection status changes
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("DeviceConnectionStatusChanged"),
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self else { return }
-            let userInfo = notification.userInfo ?? [:]
-            
-            Task { @MainActor in
-                self.logger.debug("🔔 [HistoryStore] DeviceConnectionStatusChanged notification received")
-                self.logger.debug("🔔 [HistoryStore] userInfo: \(userInfo)")
-                guard let deviceId = userInfo["deviceId"] as? String,
-                      let isOnline = userInfo["isOnline"] as? Bool else {
-                    self.logger.info("⚠️ [HistoryStore] Invalid notification userInfo: \(userInfo)")
-                    return
-                }
-                self.logger.debug("🔔 [HistoryStore] Calling updateDeviceOnlineStatus: deviceId=\(deviceId), isOnline=\(isOnline)")
-                await self.updateDeviceOnlineStatus(deviceId: deviceId, isOnline: isOnline)
-            }
-        }
-        
-        // Listen for clipboard received events to update lastSeen
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("ClipboardReceivedFromDevice"),
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let userInfo = notification.userInfo,
-                  let deviceId = userInfo["deviceId"] as? String else {
-                return
-            }
-            guard let self = self else { return }
-            Task { @MainActor [self] in
-                await self.updateDeviceLastSeen(deviceId: deviceId)
-            }
         }
     }
     
-    private func handlePairingCompleted(deviceId: String, deviceName: String) async {
-        logger.info("📝 [HistoryStore] handlePairingCompleted called: \(deviceName) (\(deviceId))")
-        
-        // Check if device is currently discovered on LAN to get discovery info
-        var discoveredPeer: DiscoveredPeer? = nil
-        if let transportManager = transportManager {
-            let discoveredPeers = transportManager.lanDiscoveredPeers()
-            discoveredPeer = discoveredPeers.first(where: { peer in
-                if let peerDeviceId = peer.endpoint.metadata["device_id"] {
-                    return peerDeviceId.lowercased() == deviceId.lowercased()
-                }
-                return false
-            })
-        }
-        
-        // Remove any duplicates first (by ID or by name+platform)
-        pairedDevices.removeAll { $0.id == deviceId || ($0.name == deviceName && $0.platform == "Android") }
-        
-        // Add the device with discovery info if available
-        let device: PairedDevice
-        if let peer = discoveredPeer {
-            // Device is discovered on LAN - include discovery info
-            device = PairedDevice(
-                id: deviceId,
-                name: deviceName,
-                platform: "Android",
-                lastSeen: Date(),
-                isOnline: true,
-                serviceName: peer.serviceName,
-                bonjourHost: peer.endpoint.host,
-                bonjourPort: peer.endpoint.port,
-                fingerprint: peer.endpoint.fingerprint
-            )
-            logger.info("✅ [HistoryStore] Device paired and discovered on LAN: \(peer.endpoint.host):\(peer.endpoint.port)")
-        } else {
-            // Device not discovered yet - will be updated by ConnectionStatusProber when discovered
-            device = PairedDevice(
-                id: deviceId,
-                name: deviceName,
-                platform: "Android",
-                lastSeen: Date(),
-                isOnline: true
-            )
-            logger.info("✅ [HistoryStore] Device paired but not yet discovered on LAN (will update when discovered)")
-        }
-        
-        pairedDevices.append(device)
-        
-        // Deduplicate and sort
-        pairedDevices = Self.deduplicateDevices(pairedDevices).sorted { $0.lastSeen > $1.lastSeen }
-        persistPairedDevices()
-        logger.info("✅ [HistoryStore] Device saved! Total paired devices: \(pairedDevices.count)")
-#if canImport(os)
-        logger.info("✅ Paired device saved: \(deviceName)")
-#endif
-        
-        // Trigger connection status probe to update device with discovery info if not already set
-        // This ensures the device gets updated with LAN connection details if discovered
-        if discoveredPeer == nil, let transportManager = transportManager {
-            // Device not discovered yet - trigger probe to check again
-            await transportManager.probeConnectionStatus()
-        }
-    }
-    
-    private static func deduplicateDevices(_ devices: [PairedDevice]) -> [PairedDevice] {
-        var seenById: [String: PairedDevice] = [:]
-        var seenByNamePlatform: [String: PairedDevice] = [:]
-        
-        // Process devices, keeping the most recent for each ID or name+platform combo
-        for device in devices {
-            // First priority: deduplicate by ID (keep most recent)
-            if let existing = seenById[device.id] {
-                if device.lastSeen > existing.lastSeen {
-                    seenById[device.id] = device
-                }
-            } else {
-                seenById[device.id] = device
-            }
-            
-            // Second priority: deduplicate by name+platform (keep most recent)
-            let namePlatformKey = "\(device.name)|\(device.platform)"
-            if let existing = seenByNamePlatform[namePlatformKey] {
-                if device.lastSeen > existing.lastSeen {
-                    seenByNamePlatform[namePlatformKey] = device
-                }
-            } else {
-                seenByNamePlatform[namePlatformKey] = device
-            }
-        }
-        
-        // Merge results: prefer ID-based deduplication, fall back to name+platform
-        var result: [PairedDevice] = []
-        var addedIds = Set<String>()
-        var addedNamePlatform = Set<String>()
-        
-        // Add devices by ID first
-        for device in seenById.values {
-            if !addedIds.contains(device.id) {
-                result.append(device)
-                addedIds.insert(device.id)
-                addedNamePlatform.insert("\(device.name)|\(device.platform)")
-            }
-        }
-        
-        // Add devices by name+platform if not already added
-        for device in seenByNamePlatform.values {
-            let namePlatformKey = "\(device.name)|\(device.platform)"
-            if !addedNamePlatform.contains(namePlatformKey) {
-                result.append(device)
-                addedNamePlatform.insert(namePlatformKey)
-                addedIds.insert(device.id)
-            }
-        }
-        
-        return result
-    }
-
     deinit {
         loadTask?.cancel()
         NotificationCenter.default.removeObserver(self)
     }
     
-    /// Force reload and deduplicate paired devices (called on app startup)
-    public func reloadPairedDevices() {
-        if let storedDevices = defaults.data(forKey: DefaultsKey.pairedDevices),
-           let decoded = try? JSONDecoder().decode([PairedDevice].self, from: storedDevices) {
-            let beforeCount = decoded.count
-            let deduplicated = Self.deduplicateDevices(decoded).sorted { $0.lastSeen > $1.lastSeen }
-            let afterCount = deduplicated.count
-            if beforeCount != afterCount {
-                logger.info("🔄 [HistoryStore] Reload deduplication: \(beforeCount) → \(afterCount) devices")
-            }
-            self.pairedDevices = deduplicated
-            if let encoded = try? JSONEncoder().encode(deduplicated) {
-                defaults.set(encoded, forKey: DefaultsKey.pairedDevices)
-            }
-        }
-    }
 
     public func start() async {
         // Ensure setHistoryViewModel is called if transportManager is available
@@ -556,12 +314,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             logger.info("🚀 [ClipboardHistoryViewModel] start() called, ensuring setHistoryViewModel")
             transportManager.setHistoryViewModel(self)
         }
-        // Reload and deduplicate paired devices on startup
-        reloadPairedDevices()
         
-        // Initial connection status check on startup
-        // (Periodic checks are handled by ConnectionStatusProber)
-        await checkActiveConnections()
+        // Device online status is managed by ConnectionStatusProber
+        // No need to check active connections here - ConnectionStatusProber will update status
         
 #if canImport(UserNotifications)
         notificationController?.requestAuthorizationIfNeeded()
@@ -648,7 +403,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     
     private func syncToPairedDevices(_ entry: ClipboardEntry) async {
 #if canImport(os)
-        logger.debug("🔄 [HistoryStore] syncToPairedDevices: \(entry.previewText.prefix(30)), devices=\(pairedDevices.count)")
+        logger.debug("🔄 [HistoryStore] syncToPairedDevices: \(entry.previewText.prefix(30)), devices=\(transportManager?.pairedDevices.count ?? 0)")
         logger.debug("🔍 [DEBUG] syncToPairedDevices - entry type: \(entry.content.title)")
 #endif
         guard transportManager != nil else {
@@ -680,7 +435,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
         
 #if canImport(os)
-        logger.debug("✅ [HistoryStore] Entry is local, syncing to \(pairedDevices.count) device(s)")
+        logger.debug("✅ [HistoryStore] Entry is local, syncing to \(transportManager?.pairedDevices.count ?? 0) device(s)")
 #endif
         
         // Convert clipboard entry to payload
@@ -849,7 +604,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         var devicesWithKeys: [PairedDevice] = []
         var devicesWithoutKeys: [PairedDevice] = []
         
-        for device in pairedDevices {
+        let devices = transportManager?.pairedDevices ?? []
+        for device in devices {
             if keyProvider.hasKey(for: device.id) {
                 devicesWithKeys.append(device)
             } else {
@@ -859,7 +615,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         
 #if canImport(os)
         logger.info("📤 [HistoryStore] Queuing for \(devicesWithKeys.count) device(s) with keys (including offline devices - relay will queue)")
-        if pairedDevices.isEmpty {
+        if devices.isEmpty {
             logger.warning("⚠️ [HistoryStore] No paired devices found! Clipboard sync will not be sent to any peers.")
             logger.warning("⚠️ [HistoryStore] To sync clipboard, you need to pair with at least one device first.")
         }
@@ -897,11 +653,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
     
     /// Trigger sync queue processing (event-driven)
-    @MainActor
     private func triggerSyncQueueProcessing() {
-#if canImport(os)
-        logger.debug("🔄 [HistoryStore] triggerSyncQueueProcessing: queue=\(syncMessageQueue.count), state=\(connectionState)")
-#endif
+        logger.debug("🔄 [HistoryStore] triggerSyncQueueProcessing: queue=\(syncMessageQueue.count), state=\(String(describing: transportManager?.connectionState))")
         // Resume continuation if waiting
         if queueProcessingContinuation != nil {
 #if canImport(os)
@@ -1014,7 +767,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             logger.debug("🔄 [HistoryStore] Queue processing completed: retry=\(hasMessagesToRetry), remaining=\(syncMessageQueue.count)")
 #endif
             
-            if hasMessagesToRetry && connectionState != .disconnected {
+            if hasMessagesToRetry && (transportManager.connectionState != .disconnected) {
                 // If we have messages to retry and connection is available, wait for next event
                 // (connection state change or new message queued) instead of polling
 #if canImport(os)
@@ -1102,8 +855,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         logger.info("🔍 [DEBUG] trySendMessage - transmit completed successfully: contentType=\(contentType), payloadSize=\(payloadSize.formattedAsKB)")
 #endif
             // Update lastSeen timestamp after successful sync
-            if let device = pairedDevices.first(where: { $0.id == message.targetDeviceId }) {
-                await updateDeviceLastSeen(deviceId: device.id)
+            if let device = transportManager.pairedDevices.first(where: { $0.id == message.targetDeviceId }) {
+                await transportManager.updatePairedDeviceLastSeen(device.id, lastSeen: Date())
             }
             
             return true // Success
@@ -1178,235 +931,21 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         defaults.set(appearance.rawValue, forKey: DefaultsKey.appearance)
     }
 
-    public func registerPairedDevice(_ device: PairedDevice) {
-        // Create a new array to ensure SwiftUI detects the change
-        var updatedDevices = pairedDevices
-        
-        if let index = updatedDevices.firstIndex(where: { $0.id == device.id }) {
-            updatedDevices[index] = device
-            logger.info("🔄 [HistoryStore] Updated existing device: \(device.name) (id: \(device.id), bonjourHost: \(device.bonjourHost ?? "nil"), bonjourPort: \(device.bonjourPort?.description ?? "nil"))")
-        } else if let existingIndex = updatedDevices.firstIndex(where: { $0.name == device.name && $0.platform == device.platform }) {
-            updatedDevices[existingIndex] = device
-            logger.info("🔄 [HistoryStore] Updated device by name: \(device.name) (id: \(device.id), bonjourHost: \(device.bonjourHost ?? "nil"), bonjourPort: \(device.bonjourPort?.description ?? "nil"))")
-        } else {
-            updatedDevices.append(device)
-            logger.info("🔄 [HistoryStore] Added new device: \(device.name) (id: \(device.id), bonjourHost: \(device.bonjourHost ?? "nil"), bonjourPort: \(device.bonjourPort?.description ?? "nil"))")
-        }
-        
-        updatedDevices.sort { $0.lastSeen > $1.lastSeen }
-        
-        // Replace the entire array to trigger SwiftUI update
-        pairedDevices = updatedDevices
-        persistPairedDevices()
-    }
     
-    public func updateDeviceOnlineStatus(deviceId: String, isOnline: Bool) async {
-        logger.info("🔍 [HistoryStore] updateDeviceOnlineStatus called: deviceId=\(deviceId), isOnline=\(isOnline)")
-        logger.info("🔍 [HistoryStore] Current paired devices count: \(pairedDevices.count)")
-        for (idx, device) in pairedDevices.enumerated() {
-            logger.info("🔍 [HistoryStore] Paired device[\(idx)]: id=\(device.id), name=\(device.name), isOnline=\(device.isOnline)")
-        }
-        
-        guard let index = pairedDevices.firstIndex(where: { $0.id == deviceId }) else {
-            logger.info("⚠️ [HistoryStore] Cannot update online status - device not found: \(deviceId)")
-            logger.info("⚠️ [HistoryStore] Available device IDs: \(pairedDevices.map { $0.id }.joined(separator: ", "))")
-            // Try case-insensitive matching as fallback
-            if let caseInsensitiveIndex = pairedDevices.firstIndex(where: { $0.id.lowercased() == deviceId.lowercased() }) {
-                logger.info("✅ [HistoryStore] Found device with case-insensitive match, updating...")
-                let device = pairedDevices[caseInsensitiveIndex]
-                if device.isOnline != isOnline {
-                    logger.info("🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)")
-                    
-                    // Create a new array with the updated device to ensure SwiftUI detects the change
-                    var updatedDevices: [PairedDevice] = []
-                    for (idx, d) in pairedDevices.enumerated() {
-                        if idx == caseInsensitiveIndex {
-                            updatedDevices.append(PairedDevice(
-                                id: device.id,
-                                name: device.name,
-                                platform: device.platform,
-                                lastSeen: device.lastSeen, // Don't update lastSeen here - only update on actual activity
-                                isOnline: isOnline,
-                                serviceName: device.serviceName,
-                                bonjourHost: device.bonjourHost,
-                                bonjourPort: device.bonjourPort,
-                                fingerprint: device.fingerprint
-                            ))
-                        } else {
-                            updatedDevices.append(d)
-                        }
-                    }
-                    
-                    // Update the ViewModel's @Published property by replacing the entire array
-                    // Since we're already @MainActor, update directly
-                    self.pairedDevices = updatedDevices
-                    
-                    // Force UI update by triggering objectWillChange BEFORE the @Published change
-                    objectWillChange.send()
-                    
-                    logger.info("🔄 [HistoryStore] Updated pairedDevices array (count: \(updatedDevices.count)) and triggered objectWillChange.send() (case-insensitive)")
-                    
-                    // Verify the update immediately
-                    if let updatedDevice = pairedDevices.first(where: { $0.id == device.id }) {
-                        logger.info("✅ [HistoryStore] Verified update: device \(device.name) isOnline=\(updatedDevice.isOnline) in array")
-                    }
-                    
-                    persistPairedDevices()
-                    
-                    logger.info("✅ [HistoryStore] Device \(device.name) status updated (case-insensitive) and persisted: isOnline=\(isOnline)")
-                }
-                return
-            }
-            return
-        }
-        let device = pairedDevices[index]
-        if device.isOnline != isOnline {
-            logger.info("🔄 [HistoryStore] Updating device \(device.name) online status: \(device.isOnline) → \(isOnline)")
-            
-            // Create a new array with the updated device to ensure SwiftUI detects the change
-            // This replaces the entire array, which triggers @Published change detection
-            var updatedDevices: [PairedDevice] = []
-            for (idx, d) in pairedDevices.enumerated() {
-                if idx == index {
-                    updatedDevices.append(PairedDevice(
-                        id: device.id,
-                        name: device.name,
-                        platform: device.platform,
-                        lastSeen: device.lastSeen, // Don't update lastSeen here - only update on actual activity
-                        isOnline: isOnline,
-                        serviceName: device.serviceName,
-                        bonjourHost: device.bonjourHost,
-                        bonjourPort: device.bonjourPort,
-                        fingerprint: device.fingerprint
-                    ))
-                } else {
-                    updatedDevices.append(d)
-                }
-            }
-            
-            // Update the ViewModel's @Published property by replacing the entire array
-            // This triggers SwiftUI's change detection
-            // Since we're already @MainActor, update directly
-            self.pairedDevices = updatedDevices
-            
-            // Force UI update by triggering objectWillChange BEFORE the @Published change
-            // This ensures SwiftUI sees the change
-            objectWillChange.send()
-            
-            logger.info("🔄 [HistoryStore] Updated pairedDevices array (count: \(updatedDevices.count)) and triggered objectWillChange.send()")
-            
-            // Verify the update immediately
-            if let updatedDevice = pairedDevices.first(where: { $0.id == device.id }) {
-                logger.info("✅ [HistoryStore] Verified update: device \(device.name) isOnline=\(updatedDevice.isOnline) in array")
-            } else {
-                logger.error("❌ [HistoryStore] ERROR: Device \(device.name) not found in updated array!")
-            }
-            
-            // Persist to UserDefaults
-            persistPairedDevices()
-            
-            logger.info("✅ [HistoryStore] Device \(device.name) status updated and persisted: isOnline=\(isOnline) (array replaced, count: \(updatedDevices.count))")
-        } else {
-            logger.debug("ℹ️ [HistoryStore] Device \(device.name) online status unchanged: \(isOnline)")
-        }
-    }
+    
     
     /// Check active WebSocket connections and update device online status
-    private func checkActiveConnections() async {
-        // Connection status is managed via DeviceConnectionStatusChanged notifications
-        // which are posted when connections are established/closed.
-        // On startup, we mark all devices as offline initially, and they'll be marked
-        // online when connections are actually established.
-        logger.info("🔍 [HistoryStore] Initializing device status - connections will update via notifications")
-        
-        // Mark all devices as offline initially (they'll be updated when connections are established)
-        var updated = false
-        for (index, device) in pairedDevices.enumerated() {
-            if device.isOnline {
-                logger.info("🔄 [HistoryStore] Marking device \(device.name) as offline on startup (will update when connection established)")
-            pairedDevices[index] = PairedDevice(
-                id: device.id,
-                name: device.name,
-                platform: device.platform,
-                    lastSeen: device.lastSeen,
-                    isOnline: false
-                )
-                updated = true
-            }
-        }
-        if updated {
-            persistPairedDevices()
-        }
-    }
     
     /// Update lastSeen timestamp for a device (public method for external callers)
-    public func updateDeviceLastSeen(deviceId: String) async {
-        guard let index = pairedDevices.firstIndex(where: { $0.id == deviceId }) else {
-            logger.info("⚠️ [HistoryStore] Cannot update lastSeen - device not found: \(deviceId)")
-            return
-        }
-        let device = pairedDevices[index]
-        let now = Date()
-        // Only update if it's been more than 1 second since last update (avoid excessive updates)
-        if now.timeIntervalSince(device.lastSeen) > 1.0 {
-            logger.info("🔄 [HistoryStore] Updating device \(device.name) lastSeen: \(device.lastSeen) → \(now)")
-            pairedDevices[index] = PairedDevice(
-                id: device.id,
-                name: device.name,
-                platform: device.platform,
-                lastSeen: now,
-                isOnline: device.isOnline
-            )
-            persistPairedDevices()
-        }
-    }
 
 
     public func makeRemotePairingViewModel() -> RemotePairingViewModel {
-        RemotePairingViewModel(identity: deviceIdentity, onDevicePaired: { [weak self] device in
-            self?.registerPairedDevice(device)
+        RemotePairingViewModel(identity: deviceIdentity, onDevicePaired: { [weak transportManager] device in
+            transportManager?.registerPairedDevice(device)
         })
     }
-
-    public func pairingParameters() -> (service: String, port: Int, relayHint: URL?) {
-        let config = transportManager?.currentLanConfiguration()
-        let domain = config?.domain ?? "local."
-        let serviceType = config?.serviceType ?? "_hypo._tcp."
-        let serviceName = config?.serviceName ?? ProcessInfo.processInfo.hostName
-        let port = config?.port ?? 7010
-        let service = "\(serviceName).\(serviceType)\(domain)"
-
-        let relayConfig = CloudRelayDefaults.staging()
-        var relayComponents = URLComponents(url: relayConfig.url, resolvingAgainstBaseURL: false)
-        if relayComponents?.scheme == "wss" { relayComponents?.scheme = "https" }
-        let relayHint = relayComponents?.url
-        return (service: service, port: port, relayHint: relayHint)
-    }
-
-    public func pairDevice(name: String, platform: String) {
-        let device = PairedDevice(name: name, platform: platform, lastSeen: Date(), isOnline: true)
-        registerPairedDevice(device)
-    }
-
-    public func removePairedDevice(_ device: PairedDevice) {
-        pairedDevices.removeAll { $0.id == device.id }
-        persistPairedDevices()
-    }
-
-    public func regenerateEncryptionKey() {
-        let key = Self.generateEncryptionKey()
-        encryptionKeySummary = key
-        defaults.set(key, forKey: DefaultsKey.encryptionKey)
-    }
-
-    #if canImport(AppKit)
-    public func copyEncryptionKeyToPasteboard() {
-        guard !encryptionKeySummary.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(encryptionKeySummary, forType: .string)
-    }
     
+    #if canImport(AppKit)
     /// Returns the local device ID for comparing entry origins
     public var localDeviceId: String {
         deviceIdentity.deviceId.uuidString  // UUID string (pure UUID, no prefix)
@@ -1534,17 +1073,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         }
     }
 
-    private func persistPairedDevices() {
-        // Persist the current pairedDevices array to UserDefaults
-        // Note: We don't modify pairedDevices here to avoid overwriting recent updates
-        // Deduplication is handled when loading from UserDefaults, not when persisting
-        guard let data = try? JSONEncoder().encode(pairedDevices) else { return }
-        defaults.set(data, forKey: DefaultsKey.pairedDevices)
-    }
 
-    private static func generateEncryptionKey() -> String {
-        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-    }
 }
 
 #if canImport(AppKit)
@@ -1642,66 +1171,3 @@ public extension ClipboardHistoryViewModel {
 
 #endif
 
-public struct PairedDevice: Identifiable, Equatable, Codable {
-    public let id: String
-    public let name: String
-    public let platform: String
-    public let lastSeen: Date
-    public let isOnline: Bool
-
-    // Bonjour/discovery information
-    public let serviceName: String?
-    public let bonjourHost: String?
-    public let bonjourPort: Int?
-    public let fingerprint: String?
-    
-    public init(
-        id: String = UUID().uuidString,
-        name: String,
-        platform: String,
-        lastSeen: Date,
-        isOnline: Bool,
-        serviceName: String? = nil,
-        bonjourHost: String? = nil,
-        bonjourPort: Int? = nil,
-        fingerprint: String? = nil
-    ) {
-        self.id = id
-        self.name = name
-        self.platform = platform
-        self.lastSeen = lastSeen
-        self.isOnline = isOnline
-        self.serviceName = serviceName
-        self.bonjourHost = bonjourHost
-        self.bonjourPort = bonjourPort
-        self.fingerprint = fingerprint
-    }
-    
-    /// Create a PairedDevice from a DiscoveredPeer
-    public init(from peer: DiscoveredPeer, name: String, platform: String) {
-        self.id = peer.endpoint.metadata["device_id"] ?? peer.serviceName
-        self.name = name
-        self.platform = platform
-        self.lastSeen = peer.lastSeen
-        self.isOnline = true
-        self.serviceName = peer.serviceName
-        self.bonjourHost = peer.endpoint.host
-        self.bonjourPort = peer.endpoint.port
-        self.fingerprint = peer.endpoint.fingerprint
-    }
-    
-    /// Update with discovery information from a DiscoveredPeer
-    public func updating(from peer: DiscoveredPeer) -> PairedDevice {
-        PairedDevice(
-            id: self.id,
-            name: self.name,
-            platform: self.platform,
-            lastSeen: max(self.lastSeen, peer.lastSeen),
-            isOnline: self.isOnline,
-            serviceName: peer.serviceName,
-            bonjourHost: peer.endpoint.host,
-            bonjourPort: peer.endpoint.port,
-            fingerprint: peer.endpoint.fingerprint
-        )
-    }
-}

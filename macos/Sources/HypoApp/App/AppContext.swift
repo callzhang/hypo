@@ -16,6 +16,8 @@ final class AppContext {
     
     /// Shared HistoryStore instance
     var historyStore: HistoryStore?
+    /// Shared SecurityManager instance
+    var securityManager: SecurityManager?
     
     #if canImport(AppKit)
     /// Single clipboard monitor instance shared across app lifecycle to avoid double-captures.

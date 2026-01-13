@@ -37,7 +37,8 @@ public final class ClipboardMonitor {
         throttle: TokenBucket = .clipboardThrottle(),
         deviceId: UUID,
         platform: DevicePlatform,
-        deviceName: String
+        deviceName: String,
+        dispatcher: ClipboardEventDispatcher? = nil
     ) {
         self.pasteboard = pasteboard
         self.changeCount = pasteboard.changeCount
@@ -46,13 +47,9 @@ public final class ClipboardMonitor {
         self.platform = platform
         self.deviceName = deviceName
         
-        // Listen for notifications when remote clipboard is applied
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("ClipboardAppliedFromRemote"),
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            if let changeCount = notification.userInfo?["changeCount"] as? Int {
+        // Listen for events when remote clipboard is applied
+        Task { @MainActor in
+            dispatcher?.addClipboardAppliedHandler { [weak self] changeCount in
                 self?.changeCount = changeCount
             }
         }

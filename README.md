@@ -288,11 +288,16 @@ Hypo takes security seriously:
 ## 📊 Current Status
 
 **Phase**: Production Release ✅  
-**Version**: v1.0.10  
+**Version**: v1.1.0  
 **Progress**: 100%  
-**Last Updated**: December 28, 2025
+**Last Updated**: January 13, 2026
 
 **Recent Milestones**:
+- ✅ **v1.1.0 Released** (Jan 13, 2026): macOS Architecture Refactor & Stability
+  - TransportManager now owns peer state and persistence
+  - SecurityManager manages encryption key summary and UI actions
+  - ClipboardEventDispatcher replaces NotificationCenter for clipboard events
+  - Pairing flow registers devices directly (no notification dependency)
 - ✅ **v1.0.10 Released** (Dec 28, 2025): Reliability & Connectivity Fixes
   - Fixed race conditions in Android WebSocket client causing "Connecting..." hangs
   - Ensured clipboard listener restarts after service crashes for long-term stability
@@ -448,11 +453,10 @@ MIT License - See [LICENSE](LICENSE) for details
 
 This project is in **production release** phase. The system is fully functional and has been extensively tested. All critical bugs have been resolved. Ready for distribution.
 
-**Current Version**: v1.0.10  
+**Current Version**: v1.1.0  
 **Stability**: Production-ready  
 **Next Milestone**: Public beta testing and future feature development
 
 ---
 
 **Built with ❤️ for seamless cross-platform workflows**
-

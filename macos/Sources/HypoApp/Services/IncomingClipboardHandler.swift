@@ -13,9 +13,14 @@ import os
 public final class IncomingClipboardHandler {
     private let syncEngine: SyncEngine
     private let historyStore: HistoryStore
+    private let dispatcher: ClipboardEventDispatcher
     private let pasteboard: NSPasteboard
     private let frameCodec = TransportFrameCodec()
     private var onEntryAdded: ((ClipboardEntry) async -> Void)?
+    
+    // Direct callbacks for TransportManager internal needs
+    public var onClipboardApplied: ((Int) -> Void)?
+    public var onClipboardReceived: ((String, Date) -> Void)?
     
     #if canImport(os)
     private let logger = HypoLogger(category: "incoming")
@@ -24,11 +29,13 @@ public final class IncomingClipboardHandler {
     public init(
         syncEngine: SyncEngine,
         historyStore: HistoryStore,
+        dispatcher: ClipboardEventDispatcher,
         pasteboard: NSPasteboard = .general,
         onEntryAdded: ((ClipboardEntry) async -> Void)? = nil
     ) {
         self.syncEngine = syncEngine
         self.historyStore = historyStore
+        self.dispatcher = dispatcher
         self.pasteboard = pasteboard
         self.onEntryAdded = onEntryAdded
     }
@@ -83,19 +90,13 @@ public final class IncomingClipboardHandler {
             try await applyToClipboard(payload)
             let afterChangeCount = await MainActor.run { pasteboard.changeCount }
             
-            // Notify ClipboardMonitor to update its changeCount
-            NotificationCenter.default.post(
-                name: NSNotification.Name("ClipboardAppliedFromRemote"),
-                object: nil,
-                userInfo: ["changeCount": afterChangeCount]
-            )
+            // Notify dispatcher (multicast) and direct callbacks
+            dispatcher.notifyClipboardApplied(changeCount: afterChangeCount)
+            onClipboardApplied?(afterChangeCount)
             
-            // Notify that clipboard was received from this device (updates lastSeen)
-            NotificationCenter.default.post(
-                name: NSNotification.Name("ClipboardReceivedFromDevice"),
-                object: nil,
-                userInfo: ["deviceId": deviceId]
-            )
+            // Notify dispatcher (multicast) and direct callbacks (updates lastSeen)
+            dispatcher.notifyClipboardReceived(deviceId: deviceId, timestamp: Date())
+            onClipboardReceived?(deviceId, Date())
             
         } catch {
             logger.error("❌ [IncomingClipboardHandler] CLIPBOARD ERROR: \(error.localizedDescription), type: \(String(describing: type(of: error)))")

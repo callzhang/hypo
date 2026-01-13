@@ -21,7 +21,7 @@ public final class TempFileManager {
     #if canImport(AppKit)
     private let pasteboard: NSPasteboard
     #endif
-    private var clipboardObserver: NSObjectProtocol?
+    private var dispatcher: ClipboardEventDispatcher?
     
     #if canImport(os)
     private let logger = HypoLogger(category: "tempfiles")
@@ -43,9 +43,6 @@ public final class TempFileManager {
     
     deinit {
         periodicCleanupTask?.cancel()
-        if let observer = clipboardObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
         // Can't call async cleanupAll() in deinit, so just cancel tasks
         for task in cleanupTasks.values {
             task.cancel()
@@ -163,26 +160,22 @@ public final class TempFileManager {
             #endif
         }
     }
+
+    /// Configure the manager with a dispatcher for event-driven cleanup
+    public func configure(dispatcher: ClipboardEventDispatcher) {
+        self.dispatcher = dispatcher
+        dispatcher.addClipboardAppliedHandler { [weak self] _ in
+            self?.cleanupAll()
+        }
+    }
     
     /// Observe clipboard changes to cleanup temp files when clipboard changes.
     #if canImport(AppKit)
     private func observeClipboardChanges() {
-        // Use a timer to periodically check clipboard changeCount
-        // NSPasteboard doesn't have a direct notification for changes, so we poll
-        var lastChangeCount = pasteboard.changeCount
-        clipboardObserver = NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("ClipboardAppliedFromRemote"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.cleanupAll()
-            }
-        }
-        
-        // Also poll for clipboard changes
+        // Polling for clipboard changes
         Task { @MainActor [weak self] in
             guard let self = self else { return }
+            var lastChangeCount = self.pasteboard.changeCount
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2_000_000_000) // Check every 2 seconds
                 let currentChangeCount = self.pasteboard.changeCount

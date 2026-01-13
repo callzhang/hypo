@@ -1,7 +1,7 @@
 # Hypo Development Tasks
 
-Version: 1.0.6
-Last Updated: December 13, 2025
+Version: 1.1.0
+Last Updated: January 13, 2026
 
 ---
 

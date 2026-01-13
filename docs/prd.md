@@ -4,8 +4,8 @@
 - **Project**: Hypo - Cross-Platform Clipboard Sync
 - **Platforms**: Android (8.0+), macOS (14.0+), with support for additional platforms (iOS, Windows, Linux)
 - **Status**: Production Release (Sprint 11 - Production Release)
-- **Version**: v1.0.6
-- **Last Updated**: December 13, 2025
+- **Version**: v1.1.0
+- **Last Updated**: January 13, 2026
 
 ## 1. Purpose
 Users frequently move between mobile devices (Android, iOS) and desktop computers (macOS, Windows, Linux) but lack a native universal clipboard that works across all platforms. Hypo enables real-time, bi-directional clipboard synchronization across any combination of devices, supporting both LAN (local network) for speed and efficiency and a cloud fallback for mobility. The system provides clipboard history, rich notifications, and cross-format support for text, links, images, and small files.
@@ -380,4 +380,3 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 - Multi-device support: device list in settings.
 - Drag-and-drop files directly into the menu bar app for instant sharing.
 - Contextual actions: for example, links open directly in browser, images preview fullscreen.
-

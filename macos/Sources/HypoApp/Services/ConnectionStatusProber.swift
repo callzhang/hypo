@@ -11,7 +11,6 @@ import Network // For NWPathMonitor
 /// Only checks on network changes and app activation - no periodic polling.
 @MainActor
 public final class ConnectionStatusProber {
-    private weak var historyViewModel: ClipboardHistoryViewModel?
     private let webSocketServer: LanWebSocketServer
     private weak var transportManager: TransportManager?
     private let transportProvider: TransportProvider?
@@ -24,8 +23,7 @@ public final class ConnectionStatusProber {
     
     private let logger = HypoLogger(category: "ConnectionStatusProber")
     
-    public init(historyViewModel: ClipboardHistoryViewModel, webSocketServer: LanWebSocketServer, transportManager: TransportManager, transportProvider: TransportProvider? = nil) {
-        self.historyViewModel = historyViewModel
+    public init(webSocketServer: LanWebSocketServer, transportManager: TransportManager, transportProvider: TransportProvider? = nil) {
         self.webSocketServer = webSocketServer
         self.transportManager = transportManager
         self.transportProvider = transportProvider
@@ -68,12 +66,8 @@ public final class ConnectionStatusProber {
         // Set up name lookup for cloud transport
         if let transportProvider = transportProvider as? DefaultTransportProvider {
             let cloudTransport = transportProvider.getCloudTransport()
-            cloudTransport.setNameLookup { [weak self] deviceId in
-                guard let self = self,
-                      let device = self.historyViewModel?.pairedDevices.first(where: { $0.id.lowercased() == deviceId.lowercased() }) else {
-                    return nil
-                }
-                return device.name
+            cloudTransport.setNameLookup { [weak transportManager] deviceId in
+                transportManager?.deviceName(for: deviceId)
             }
         }
         
@@ -165,13 +159,13 @@ public final class ConnectionStatusProber {
         
         // Probing connection status - no logging needed
         
-        // Get all paired devices from ViewModel
-        guard let historyViewModel = historyViewModel else {
-            logger.info("⚠️ [ConnectionStatusProber] HistoryViewModel is nil, cannot probe")
+        // Get TransportManager (weakly held)
+        guard let transportManager = self.transportManager else {
+            logger.info("⚠️ [ConnectionStatusProber] TransportManager is nil, cannot probe")
             return
         }
         
-        let pairedDevices = historyViewModel.pairedDevices
+        let pairedDevices = transportManager.pairedDevices
         
         // Get active connections from WebSocket server
         let activeConnectionIds = webSocketServer.activeConnections()
@@ -187,45 +181,43 @@ public final class ConnectionStatusProber {
         
         // Get discovered peers via Bonjour
         var discoveredDeviceIds = Set<String>()
-        if let transportManager = transportManager {
-            let discoveredPeers = transportManager.lanDiscoveredPeers()
-            
-            // Get current device ID to filter out self
-            let deviceIdentity = DeviceIdentity()
-            let currentDeviceId = deviceIdentity.deviceId.uuidString.lowercased()
-            
-            for peer in discoveredPeers {
-                if let deviceId = peer.endpoint.metadata["device_id"] {
-                    let peerDeviceIdLower = deviceId.lowercased()
-                    
-                    // Filter out self
-                    if peerDeviceIdLower == currentDeviceId {
-                        continue
+        let discoveredPeers = transportManager.lanDiscoveredPeers()
+        
+        // Get current device ID to filter out self
+        let deviceIdentity = DeviceIdentity()
+        let currentDeviceId = deviceIdentity.deviceId.uuidString.lowercased()
+        
+        for peer in discoveredPeers {
+            if let deviceId = peer.endpoint.metadata["device_id"] {
+                let peerDeviceIdLower = deviceId.lowercased()
+                
+                // Filter out self
+                if peerDeviceIdLower == currentDeviceId {
+                    continue
+                }
+                
+                discoveredDeviceIds.insert(deviceId)
+                
+                // Also check if this device ID matches any paired device (case-insensitive)
+                for device in pairedDevices {
+                    if device.id.lowercased() == peerDeviceIdLower {
+                        // Ensure we're using the paired device's ID (in case of case differences)
+                        discoveredDeviceIds.insert(device.id)
+                        break
                     }
-                    
-                    discoveredDeviceIds.insert(deviceId)
-                    
-                    // Also check if this device ID matches any paired device (case-insensitive)
-                    for device in pairedDevices {
-                        if device.id.lowercased() == peerDeviceIdLower {
-                            // Ensure we're using the paired device's ID (in case of case differences)
-                            discoveredDeviceIds.insert(device.id)
-                            break
-                        }
-                    }
-                } else {
-                    // Fallback: match by service name (but still filter out self by service name)
-                    let serviceNameLower = peer.serviceName.lowercased()
-                    let currentServiceName = deviceIdentity.deviceName.lowercased()
-                    if serviceNameLower.contains(currentServiceName) || serviceNameLower == currentServiceName {
-                        continue
-                    }
-                    
-                    for device in pairedDevices {
-                        if peer.serviceName.contains(device.id) || device.id.contains(peer.serviceName) {
-                            discoveredDeviceIds.insert(device.id)
-                            break
-                        }
+                }
+            } else {
+                // Fallback: match by service name (but still filter out self by service name)
+                let serviceNameLower = peer.serviceName.lowercased()
+                let currentServiceName = deviceIdentity.deviceName.lowercased()
+                if serviceNameLower.contains(currentServiceName) || serviceNameLower == currentServiceName {
+                    continue
+                }
+                
+                for device in pairedDevices {
+                    if peer.serviceName.contains(device.id) || device.id.contains(peer.serviceName) {
+                        discoveredDeviceIds.insert(device.id)
+                        break
                     }
                 }
             }
@@ -251,13 +243,13 @@ public final class ConnectionStatusProber {
         
         // Check network connectivity - update status immediately if disconnected
         if !hasNetworkConnectivity {
-            transportManager?.updateConnectionState(.disconnected)
+            transportManager.updateConnectionState(.disconnected)
         } else {
             // Verify network with HTTP check
             let hasNetwork = await checkNetworkConnectivity()
             if !hasNetwork {
                 hasNetworkConnectivity = false
-                transportManager?.updateConnectionState(.disconnected)
+                transportManager.updateConnectionState(.disconnected)
             } else {
                 hasNetworkConnectivity = true
             }
@@ -271,34 +263,38 @@ public final class ConnectionStatusProber {
             }
             
             if cloudTransportConnected {
-                transportManager?.updateConnectionState(.connectedCloud)
+                transportManager.updateConnectionState(.connectedCloud)
             } else if !isConnecting {
                 // Try to connect to cloud if not already connecting
                 isConnecting = true
-                transportManager?.updateConnectionState(.connectingCloud)
+                transportManager.updateConnectionState(.connectingCloud)
                 
                 // Actually connect to cloud relay (not just check health)
                 if let transportProvider = transportProvider as? DefaultTransportProvider {
                     let cloudTransport = transportProvider.getCloudTransport()
                     do {
                         try await cloudTransport.connect()
-                        transportManager?.updateConnectionState(.connectedCloud)
+                        transportManager.updateConnectionState(.connectedCloud)
                         logger.info("connect", "✅ [ConnectionStatusProber] Successfully connected to cloud relay\n")
+                        // Trigger another probe immediately after cloud connection to query connected peers
+                        // This ensures we detect devices that are already connected via cloud
+                        logger.info("🔄", "[ConnectionStatusProber] Triggering probe after cloud connection\n")
+                        await probeConnections()
                     } catch {
                         // Connection failed, check if we have LAN connections
                         let hasLanConnection = !onlineDeviceIds.isEmpty || !discoveredDeviceIds.isEmpty
-                        transportManager?.updateConnectionState(hasLanConnection ? .connectedLan : .disconnected)
+                        transportManager.updateConnectionState(hasLanConnection ? .connectedLan : .disconnected)
                         logger.info("error", "❌ [ConnectionStatusProber] Cloud connection failed: \(error.localizedDescription)\n")
                     }
                 } else {
                     // No transport provider, check server health as fallback
                     let serverReachable = await checkServerHealth()
                     if serverReachable {
-                        transportManager?.updateConnectionState(.connectedCloud)
+                        transportManager.updateConnectionState(.connectedCloud)
                     } else {
                         // No cloud, check if we have LAN connections
                         let hasLanConnection = !onlineDeviceIds.isEmpty || !discoveredDeviceIds.isEmpty
-                        transportManager?.updateConnectionState(hasLanConnection ? .connectedLan : .disconnected)
+                        transportManager.updateConnectionState(hasLanConnection ? .connectedLan : .disconnected)
                     }
                 }
                 isConnecting = false
@@ -306,7 +302,7 @@ public final class ConnectionStatusProber {
         }
         
         // Get current connection state to determine if server is available
-        let currentConnectionState = transportManager?.connectionState ?? .disconnected
+        let currentConnectionState = transportManager.connectionState
         
         // Update status for each paired device - MIRROR ANDROID LOGIC
         for device in pairedDevices {
@@ -319,7 +315,7 @@ public final class ConnectionStatusProber {
                 discoveredDeviceIds.contains { $0.lowercased() == device.id.lowercased() }
             
             // Update device with discovery information if found
-            if isDiscovered, let transportManager = transportManager {
+            if isDiscovered {
                 let discoveredPeers = transportManager.lanDiscoveredPeers()
                 // Match by device ID (case-insensitive)
                 if let peer = discoveredPeers.first(where: { peer in
@@ -328,11 +324,9 @@ public final class ConnectionStatusProber {
                     }
                     return false
                 }) {
-                    // Update device with discovery info - ensure we're on MainActor
+                    // Update device with discovery info
                     let updatedDevice = device.updating(from: peer)
-                    await MainActor.run {
-                        historyViewModel.registerPairedDevice(updatedDevice)
-                    }
+                    await transportManager.registerPairedDevice(updatedDevice)
                 }
             }
             
@@ -340,21 +334,19 @@ public final class ConnectionStatusProber {
             // Note: TransportManager stores transport by service name/identifier, which may differ from device ID
             // We try multiple lookup strategies to find the stored transport status
             var deviceTransport: TransportChannel? = nil
-            if let transportManager = transportManager {
-                // Try multiple identifiers: device ID, device name, service name, and service name patterns
-                deviceTransport = transportManager.lastSuccessfulTransport(for: device.id)
-                    ?? transportManager.lastSuccessfulTransport(for: device.name)
-                    ?? (device.serviceName != nil ? transportManager.lastSuccessfulTransport(for: device.serviceName!) : nil)
-                    ?? transportManager.lastSuccessfulTransport(for: "\(device.id)-\(device.name)")
-                
-                // Also check discovered peers for matching service names
-                if deviceTransport == nil {
-                    let discoveredPeers = transportManager.lanDiscoveredPeers()
-                    for peer in discoveredPeers {
-                        if let peerDeviceId = peer.endpoint.metadata["device_id"], peerDeviceId == device.id {
-                            deviceTransport = transportManager.lastSuccessfulTransport(for: peer.serviceName)
-                            break
-                        }
+            // Try multiple identifiers: device ID, device name, service name, and service name patterns
+            deviceTransport = transportManager.lastSuccessfulTransport(for: device.id)
+                ?? transportManager.lastSuccessfulTransport(for: device.name)
+                ?? (device.serviceName != nil ? transportManager.lastSuccessfulTransport(for: device.serviceName!) : nil)
+                ?? transportManager.lastSuccessfulTransport(for: "\(device.id)-\(device.name)")
+            
+            // Also check discovered peers for matching service names
+            if deviceTransport == nil {
+                let discoveredPeers = transportManager.lanDiscoveredPeers()
+                for peer in discoveredPeers {
+                    if let peerDeviceId = peer.endpoint.metadata["device_id"], peerDeviceId == device.id {
+                        deviceTransport = transportManager.lastSuccessfulTransport(for: peer.serviceName)
+                        break
                     }
                 }
             }
@@ -387,7 +379,7 @@ public final class ConnectionStatusProber {
             // Only update if status changed
             if device.isOnline != isOnline {
                 logger.info("update", "🔄 [ConnectionStatusProber] Updating device \(device.name) status: \(device.isOnline) → \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), cloudConnected=\(isConnectedViaCloud), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n")
-                await historyViewModel.updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
+                await transportManager.updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
             }
         }
         

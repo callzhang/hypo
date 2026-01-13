@@ -778,9 +778,9 @@ class WebSocketTransportClient @Inject constructor(
      */
     fun startReceiving() {
         val isCloudConnection = config.environment == "cloud"
-        android.util.Log.d("WebSocketTransportClient", "   Starting to receive messages...Config URL: ${config.url ?: "null (LAN - will use peer discovery)"}")
-        android.util.Log.d("WebSocketTransportClient", "   Is cloud connection: $isCloudConnection")
-        android.util.Log.d("WebSocketTransportClient", "   Last known URL: $lastKnownUrl")
+        android.util.Log.v("WebSocketTransportClient", "   Starting to receive messages...Config URL: ${config.url ?: "null (LAN - will use peer discovery)"}")
+        android.util.Log.v("WebSocketTransportClient", "   Is cloud connection: $isCloudConnection")
+        android.util.Log.v("WebSocketTransportClient", "   Last known URL: $lastKnownUrl")
         
         scope.launch {
             // Check if this is a cloud relay connection - never switch URLs for cloud connections
@@ -871,9 +871,9 @@ class WebSocketTransportClient @Inject constructor(
                 }
             } else if (isCloudConnection) {
                 // For cloud connections, use config URL (lastKnownUrl should be null)
-                android.util.Log.d("WebSocketTransportClient", "☁️ Cloud connection detected - using config URL: ${config.url}")
-                android.util.Log.d("WebSocketTransportClient", "   Environment: ${config.environment}")
-                android.util.Log.d("WebSocketTransportClient", "   Has transportManager: ${transportManager != null}")
+                android.util.Log.v("WebSocketTransportClient", "☁️ Cloud connection detected - using config URL: ${config.url}")
+                android.util.Log.v("WebSocketTransportClient", "   Environment: ${config.environment}")
+                android.util.Log.v("WebSocketTransportClient", "   Has transportManager: ${transportManager != null}")
                 lastKnownUrl = null
                 mutex.withLock {
                     // Cloud connections use the connector from DI (which has a valid URL)
@@ -1012,8 +1012,8 @@ class WebSocketTransportClient @Inject constructor(
                     val deviceId = config.headers["X-Device-Id"] ?: "unknown"
                     val transportType = if (isCloudConnection) "☁️ Cloud" else "📡 LAN"
                     android.util.Log.d("WebSocketTransportClient", "$transportType connection opened: $connUrl (device: ${deviceId.take(20)}...)")
-                    android.util.Log.d("WebSocketTransportClient", "   onOpen callback fired - will update connection state")
-                    android.util.Log.d("WebSocketTransportClient", "   isCloudConnection=$isCloudConnection, config.environment=${config.environment}")
+                    android.util.Log.v("WebSocketTransportClient", "   onOpen callback fired - will update connection state")
+                    android.util.Log.v("WebSocketTransportClient", "   isCloudConnection=$isCloudConnection, config.environment=${config.environment}")
                     scope.launch {
                         mutex.withLock {
                             this@WebSocketTransportClient.webSocket = webSocket
@@ -1605,7 +1605,7 @@ class WebSocketTransportClient @Inject constructor(
                     }
                 }
                 // Start watchdog for cloud connection to send pings
-                android.util.Log.d("WebSocketTransportClient", "   Starting watchdog for cloud connection keepalive")
+                android.util.Log.v("WebSocketTransportClient", "   Starting watchdog for cloud connection keepalive")
                 startWatchdog()
             } else {
                 android.util.Log.d("WebSocketTransportClient", "✅ Long-lived LAN connection established, will only reconnect on IP change or disconnect")
@@ -1618,7 +1618,7 @@ class WebSocketTransportClient @Inject constructor(
                         android.util.Log.w("WebSocketTransportClient", "🔌 closedSignal already completed before waitForEvent, breaking inner loop")
                         break@loop
                     }
-                    android.util.Log.d("WebSocketTransportClient", "   Waiting for event (closedSignal completed=${closedSignal.isCompleted})")
+                    android.util.Log.v("WebSocketTransportClient", "   Waiting for event (closedSignal completed=${closedSignal.isCompleted})")
                     when (val event = waitForEvent(closedSignal)) {
                         LoopEvent.ChannelClosed -> {
                             socket.close(1000, "channel closed")
@@ -1761,8 +1761,8 @@ class WebSocketTransportClient @Inject constructor(
         val isCloudRelay = config.environment == "cloud"
         
         if (isCloudRelay) {
-            android.util.Log.d("WebSocketTransportClient", "⏰ Starting ping/pong keepalive for cloud relay connection")
-            android.util.Log.d("WebSocketTransportClient", "   Sending ping every 14 minutes (840s) - Fly.io timeout: 900s (max)")
+            android.util.Log.v("WebSocketTransportClient", "⏰ Starting ping/pong keepalive for cloud relay connection")
+            android.util.Log.v("WebSocketTransportClient", "   Sending ping every 14 minutes (840s) - Fly.io timeout: 900s (max)")
             watchdogJob = scope.launch {
                 while (isActive) {
                     delay(840_000) // Send ping every 14 minutes (840 seconds) to keep connection alive and detect failures

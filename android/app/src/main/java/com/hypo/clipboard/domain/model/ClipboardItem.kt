@@ -37,13 +37,22 @@ data class ClipboardItem(
             return false
         }
         
-        // 2. For IMAGE and FILE types, try metadata hash first (most reliable)
-        // This handles cases where images are re-encoded with different compression
+        // 2. Universal Metadata Hash Comparison (Priority)
+        // If both items have a pre-calculated hash in metadata, use it as the definitive comparison.
+        // This is efficient and handles all types (TEXT, LINK, IMAGE, FILE) uniformly.
+        val hash1 = metadata?.get("hash")
+        val hash2 = other.metadata?.get("hash")
+        
+        if (hash1 != null && hash2 != null) {
+            return hash1 == hash2
+        }
+        
+        // 3. Fallback for IMAGE and FILE types (when hashes are missing)
         if (type == ClipboardType.IMAGE || type == ClipboardType.FILE) {
-            val hash1 = metadata?.get("hash")
-            val hash2 = other.metadata?.get("hash")
-            if (hash1 != null && hash2 != null && hash1 == hash2) {
-                return true
+            // If any content is empty (stored on disk) and we lack hashes, we can't safely match
+            // Returning false ensures we don't treat different files as duplicates
+            if (content.isEmpty() || other.content.isEmpty()) {
+                return false
             }
             
             // If hash comparison failed (e.g., image was re-encoded), compare decoded bytes
@@ -59,16 +68,17 @@ data class ClipboardItem(
             }
         }
         
-        // 3. Check content length first
+        // 4. Generic Fallback (TEXT, LINK, or IMAGE/FILE with inline content)
+        // Check content length first optimization
         if (content.length != other.content.length) {
             return false
         }
         
-        // 4. Hash full content (SHA-256) for comparison to minimize collisions
-        val hash1 = sha256(content.toByteArray(Charsets.UTF_8))
-        val hash2 = sha256(other.content.toByteArray(Charsets.UTF_8))
+        // Hash full content (SHA-256) for comparison to minimize collisions
+        val calcHash1 = sha256(content.toByteArray(Charsets.UTF_8))
+        val calcHash2 = sha256(other.content.toByteArray(Charsets.UTF_8))
         
-        return hash1.contentEquals(hash2)
+        return calcHash1.contentEquals(calcHash2)
     }
     
     /**

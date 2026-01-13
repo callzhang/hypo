@@ -134,7 +134,8 @@ All messages are JSON-encoded with the following schema (see [`docs/protocol.md`
   "metadata": {
     "size": 1024,
     "mime_type": "image/png",
-    "filename": "screenshot.png"
+    "filename": "screenshot.png",
+    "hash": "a1b2c3d4e5f6..."
   },
   "device_id": "macos-macbook-pro-2025",
   "sequence": 42,
@@ -268,6 +269,17 @@ To prevent clipboard ping-pong loops:
 - **Rate**: Max 1 clipboard update per 300ms per device
 - **Burst**: Allow 3 updates in 1s, then throttle
 - **Implementation**: Token bucket algorithm
+
+### 2.6 Universal Hash Comparison ✅ Implemented (January 2026)
+
+To ensure robust duplicate detection without overhead, Hypo uses a **metadata-first hash comparison** strategy:
+1. **Sender**: Calculates SHA-256 of content (Text bytes, URL string, Image bytes, File bytes).
+2. **Protocol**: Sends this hash in `metadata.hash` field.
+3. **Receiver**: 
+   - Uses `metadata.hash` as the **definitive identity** of the content.
+   - If `hash(incoming) == hash(existing)`, treat as duplicate (move to top).
+   - **Zero-Copy**: Prevents need to read large files from disk or decode Base64 just to check for duplicates.
+   - **Universal**: Applied to ALL types (Text, Link, Image, File).
 
 ---
 
@@ -776,11 +788,13 @@ interface ClipboardDao {
   - `findMatchingEntryInHistory()`: Find matching entry by content and type (excluding latest)
   - `updateTimestamp()`: Update entry timestamp to move it to top of history
 
-**Content Matching**:
-- `ClipboardItem.matchesContent()`: Uses SHA-256 hash of content for reliable matching
-  - Compares content type, length, and cryptographic hash
-  - Ensures duplicate detection works across platforms and transport origins
-  - Used to move existing items to top instead of creating duplicates
+**Content Matching (Universal Hash Strategy)**:
+- `ClipboardItem.matchesContent()`: Prioritizes universal metadata hash for O(1) matching:
+  - **Primary**: Compares SHA-256 `hash` from metadata (if present on both items). reliable and efficient for all types (Text, Link, Image, File).
+  - **Fallback (Image/File)**: If hash missing, compares decoded bytes (safeguard for re-encoded images).
+  - **Fallback (Legacy)**: If hash missing, compares content length and computes SHA-256 of content string.
+  - Ensures duplicate detection is robust even when file content is not loaded in memory (empty content string).
+  - Used to move existing items to top instead of creating duplicates.
 
 #### 4.2.4 NSD Discovery & Registration
 

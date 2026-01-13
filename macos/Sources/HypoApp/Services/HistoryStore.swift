@@ -687,16 +687,32 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         let payload: ClipboardPayload
         switch entry.content {
         case .text(let text):
+            let data = Data(text.utf8)
+            let digest = SHA256.hash(data: data)
+            let hashString = digest.compactMap { String(format: "%02x", $0) }.joined()
+            
             payload = ClipboardPayload(
                 contentType: .text,
-                data: Data(text.utf8),
-                metadata: ["device_id": entry.deviceId, "device_name": entry.originDeviceName ?? ""]
+                data: data,
+                metadata: [
+                    "device_id": entry.deviceId,
+                    "device_name": entry.originDeviceName ?? "",
+                    "hash": hashString
+                ]
             )
         case .link(let url):
+            let data = Data(url.absoluteString.utf8)
+            let digest = SHA256.hash(data: data)
+            let hashString = digest.compactMap { String(format: "%02x", $0) }.joined()
+            
             payload = ClipboardPayload(
                 contentType: .link,
-                data: Data(url.absoluteString.utf8),
-                metadata: ["device_id": entry.deviceId, "device_name": entry.originDeviceName ?? ""]
+                data: data,
+                metadata: [
+                    "device_id": entry.deviceId,
+                    "device_name": entry.originDeviceName ?? "",
+                    "hash": hashString
+                ]
             )
         case .image(let metadata):
             // Extract image data from ImageMetadata
@@ -733,9 +749,14 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             logger.debug("🖼️ [HistoryStore] Preparing image sync: \(imageData.count.formattedAsKB)")
 #endif
             
+            // Calculate SHA-256 hash of image data
+            let digest = SHA256.hash(data: imageData)
+            let hashString = digest.compactMap { String(format: "%02x", $0) }.joined()
+            
             var imageMetadata: [String: String] = [
                 "device_id": entry.deviceId,
-                "device_name": entry.originDeviceName ?? ""
+                "device_name": entry.originDeviceName ?? "",
+                "hash": hashString
             ]
             if let altText = metadata.altText {
                 imageMetadata["file_name"] = altText

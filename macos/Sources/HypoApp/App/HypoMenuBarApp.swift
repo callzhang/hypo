@@ -708,27 +708,53 @@ public struct HypoMenuBarApp: App {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
         
-        // Create shared dependencies
-        let historyStore = HistoryStore()
-        let server = LanWebSocketServer()
-        let provider = DefaultTransportProvider(server: server)
+        // Create shared dependencies using AppContext singletons
+        let historyStore: HistoryStore
+        if let existingStore = AppContext.shared.historyStore {
+            historyStore = existingStore
+            logger.info("🔄 [HypoMenuBarApp] Reusing existing HistoryStore")
+        } else {
+            historyStore = HistoryStore()
+            AppContext.shared.historyStore = historyStore
+            logger.info("🆕 [HypoMenuBarApp] Created new HistoryStore")
+        }
         
-        // Create transport manager with history store for incoming clipboard handling
-        let transportManager = TransportManager(
-            provider: provider,
-            webSocketServer: server,
-            historyStore: historyStore
-        )
+        let transportManager: TransportManager
         
-        let viewModel = ClipboardHistoryViewModel(
-            store: historyStore,
-            transportManager: transportManager
-        )
+        if let existingTM = AppContext.shared.transportManager {
+            transportManager = existingTM
+            logger.info("🔄 [HypoMenuBarApp] Reusing existing TransportManager")
+        } else {
+            let server = LanWebSocketServer()
+            let provider = DefaultTransportProvider(server: server)
+            
+            // Create transport manager with history store for incoming clipboard handling
+            transportManager = TransportManager(
+                provider: provider,
+                webSocketServer: server,
+                historyStore: historyStore
+            )
+            AppContext.shared.transportManager = transportManager
+            logger.info("🆕 [HypoMenuBarApp] Created new TransportManager")
+        }
+        
+        let viewModel: ClipboardHistoryViewModel
+        
+        if let existingVM = AppContext.shared.historyViewModel {
+            viewModel = existingVM
+            logger.info("🔄 [HypoMenuBarApp] Reusing existing ClipboardHistoryViewModel")
+        } else {
+            viewModel = ClipboardHistoryViewModel(
+                store: historyStore,
+                transportManager: transportManager
+            )
+            AppContext.shared.historyViewModel = viewModel
+            logger.info("🆕 [HypoMenuBarApp] Created new ClipboardHistoryViewModel")
+        }
         
         transportManager.setHistoryViewModel(viewModel)
         
         _viewModel = StateObject(wrappedValue: viewModel)
-        AppContext.shared.historyViewModel = viewModel
 
         // CRITICAL: Start loading data immediately so popup has data when hotkey is pressed
         Task { @MainActor in
@@ -959,33 +985,46 @@ extension HypoMenuBarApp {
     func menuBarIcon() -> some View {
         // Always return a valid view to ensure MenuBarExtra always has a label
         // Try to load from MenuBarIcon.iconset (monochrome template version)
-        let iconView: AnyView
-        if let iconPath = Bundle.main.path(forResource: "MenuBarIcon", ofType: "iconset"),
-           let iconImage = NSImage(contentsOfFile: "\(iconPath)/icon_16x16.png") {
-            // Menu bar icon is already designed as template
-            iconView = AnyView(
-                Image(nsImage: makeTemplateImage(iconImage))
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 16, height: 16)
-            )
-            logger.debug("✅ [HypoMenuBarApp] MenuBarIcon loaded from bundle: \(iconPath)")
-        } else {
-            // Fallback: Use system clipboard icon
-            // Log error if primary icon is missing (build/packaging issue)
-            iconView = AnyView(
-                Image(systemName: "clipboard")
-                    .frame(width: 16, height: 16)
-                    .onAppear {
-                        logger.error("❌ [HypoMenuBarApp] MenuBarIcon.iconset not found in bundle. Using fallback icon. Bundle path: \(Bundle.main.bundlePath)")
-                        // Log bundle contents for debugging
-                        if let resourcePath = Bundle.main.resourcePath {
-                            logger.debug("📦 [HypoMenuBarApp] Bundle resource path: \(resourcePath)")
-                        }
-                    }
-            )
+        
+        let iconPath = Bundle.main.path(forResource: "MenuBarIcon", ofType: "iconset")
+        logger.error("🔍 [HypoMenuBarApp] Loading menuBarIcon. Path: \(iconPath ?? "nil")")
+        
+        if let iconPath = iconPath {
+            // Determine best resolution based on screen scale
+            let screenScale = NSScreen.main?.backingScaleFactor ?? 2.0
+            let iconFile = screenScale > 1.0 ? "icon_16x16@2x.png" : "icon_16x16.png"
+            let fullPath = "\(iconPath)/\(iconFile)"
+            
+            logger.error("🔍 [HypoMenuBarApp] Trying to load icon from: \(fullPath)")
+            
+            // Try loading specific resolution first, fallback to 1x
+            var nsImage: NSImage?
+            if FileManager.default.fileExists(atPath: fullPath),
+               let image = NSImage(contentsOfFile: fullPath) {
+                nsImage = image
+                logger.error("✅ [HypoMenuBarApp] Loaded \(iconFile)")
+            } else if let image = NSImage(contentsOfFile: "\(iconPath)/icon_16x16.png") {
+                nsImage = image
+                logger.error("✅ [HypoMenuBarApp] Loaded fallback icon_16x16.png")
+            } else {
+                logger.error("❌ [HypoMenuBarApp] Failed to load any image from \(iconPath)")
+            }
+            
+            if let iconImage = nsImage {
+                iconImage.isTemplate = true // Ensure NSImage is template
+                // IMPORTANT: Use .renderingMode(.template) on SwiftUI Image
+                return AnyView(
+                    Image(nsImage: iconImage)
+                        .renderingMode(.template)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 16, height: 16)
+                )
+            }
         }
-        return iconView
+        
+        logger.error("⚠️ [HypoMenuBarApp] Using fallback system icon")
+        return AnyView(Image(systemName: "clipboard").frame(width: 16, height: 16))
     }
 }
 

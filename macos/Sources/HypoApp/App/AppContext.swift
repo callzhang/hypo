@@ -9,7 +9,13 @@ final class AppContext {
     private init() {}
 
     /// Current history view model (set during app init).
-    weak var historyViewModel: ClipboardHistoryViewModel?
+    var historyViewModel: ClipboardHistoryViewModel?
+    
+    /// Shared TransportManager instance
+    var transportManager: TransportManager?
+    
+    /// Shared HistoryStore instance
+    var historyStore: HistoryStore?
     
     #if canImport(AppKit)
     /// Single clipboard monitor instance shared across app lifecycle to avoid double-captures.

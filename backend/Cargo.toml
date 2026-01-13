@@ -1,6 +1,6 @@
 [package]
 name = "hypo-relay"
-version = "1.0.11"
+version = "1.0.12"
 edition = "2021"
 authors = ["Hypo Contributors"]
 license = "MIT"

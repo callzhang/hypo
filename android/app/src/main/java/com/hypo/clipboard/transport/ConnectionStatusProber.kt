@@ -75,16 +75,7 @@ class ConnectionStatusProber @Inject constructor(
             probeConnections()
         }
         
-        // Event-driven: observe peers changes
-        // StateFlow already deduplicates, so we only need debounce to avoid rapid-fire probes
-        peersObserverJob = scope.launch {
-            transportManager.peers
-                .debounce(DEBOUNCE_DELAY_MS)
-                .collect {
-                    Log.d(TAG, "📡 Peers changed (${it.size} peers), triggering probe")
-                    probeConnections()
-                }
-        }
+        // Peer discovery no longer drives LAN online status (WS connection only)
         
         // Event-driven: observe cloud connection state changes
         // StateFlow already deduplicates, so we only need debounce to avoid rapid-fire probes
@@ -262,9 +253,6 @@ class ConnectionStatusProber @Inject constructor(
                 emptySet()
             }
             
-            // Get current peers (discovered devices on LAN)
-            val peers = transportManager.currentPeers()
-            
             // Get active LAN connections (devices with active WebSocket connections)
             val activeLanConnections = transportManager.getActiveLanConnections()
             
@@ -290,16 +278,8 @@ class ConnectionStatusProber @Inject constructor(
                     continue // Skip this device for status checks
                 }
                 
-                // Check LAN status: device is discovered OR has active LAN connection
-                val isDiscovered = peers.any { 
-                    val peerDeviceId = it.attributes["device_id"] ?: it.serviceName
-                    peerDeviceId.equals(deviceId, ignoreCase = true) || 
-                    it.serviceName.equals(deviceId, ignoreCase = true) ||
-                    peerDeviceId == deviceId || 
-                    it.serviceName == deviceId
-                }
                 val hasActiveLanConnection = activeLanConnections.contains(deviceId)
-                val isConnectedViaLan = isDiscovered || hasActiveLanConnection
+                val isConnectedViaLan = hasActiveLanConnection
                 
                 // Check Cloud status: device is in cloud-connected devices list
                 val isConnectedViaCloud = cloudConnectedDevices.any { 

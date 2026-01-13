@@ -33,6 +33,8 @@ public final class TransportManager: ObservableObject {
     private let incomingHandler: IncomingClipboardHandler?
     private weak var historyViewModel: ClipboardHistoryViewModel?
     private var connectionStatusProber: ConnectionStatusProber?
+    private var lanConnectedDeviceIds = Set<String>()
+    private var cloudConnectedDeviceIds = Set<String>()
     public let dispatcher: ClipboardEventDispatcher
 
     private var discoveryTask: Task<Void, Never>?
@@ -164,6 +166,8 @@ public final class TransportManager: ObservableObject {
                 guard let self else { return [] }
                 return self.lanDiscoveredPeers()
             }
+            // Allow LanSyncTransport to resolve device names for logging
+            transport.setTransportManager(self)
         } else {
             self.incomingHandler = nil
         }
@@ -206,17 +210,11 @@ public final class TransportManager: ObservableObject {
             onActivate: { [weak self] in
                 Task { @MainActor in
                     await self?.activateLanServices()
-                    // Probe connections when app becomes active
-                    self?.connectionStatusProber?.probeNow()
                 }
             },
             onDeactivate: { [weak self] in
                 // Don't deactivate LAN services on window close for menu bar apps
                 // Services should stay running in the background
-                // Only trigger a probe to update status
-                Task { @MainActor in
-                    self?.connectionStatusProber?.probeNow()
-                }
             },
             onTerminate: { [weak self] in
                 Task { await self?.shutdownLanServices() }
@@ -247,6 +245,42 @@ public final class TransportManager: ObservableObject {
             logger.info("🔄 [TransportManager] Device status changed: \(pairedDevices[index].name) is now \(isOnline ? "Online" : "Offline")")
             pairedDevices[index].isOnline = isOnline
         }
+    }
+
+    @MainActor
+    private func canonicalDeviceId(for deviceId: String) -> String {
+        if let device = pairedDevices.first(where: { $0.id.caseInsensitiveCompare(deviceId) == .orderedSame }) {
+            return device.id
+        }
+        return deviceId
+    }
+
+    @MainActor
+    public func setLanConnection(deviceId: String, isConnected: Bool) {
+        let canonicalId = canonicalDeviceId(for: deviceId)
+        let normalizedId = canonicalId.lowercased()
+        if isConnected {
+            lanConnectedDeviceIds.insert(normalizedId)
+        } else {
+            lanConnectedDeviceIds.remove(normalizedId)
+        }
+        let isOnline = lanConnectedDeviceIds.contains(normalizedId) || cloudConnectedDeviceIds.contains(normalizedId)
+        updateDeviceOnlineStatus(deviceId: canonicalId, isOnline: isOnline)
+    }
+
+    @MainActor
+    public func updateCloudConnectedDeviceIds(_ deviceIds: Set<String>) {
+        cloudConnectedDeviceIds = Set(deviceIds.map { $0.lowercased() })
+        for device in pairedDevices {
+            let normalizedId = device.id.lowercased()
+            let isOnline = lanConnectedDeviceIds.contains(normalizedId) || cloudConnectedDeviceIds.contains(normalizedId)
+            updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
+        }
+    }
+
+    @MainActor
+    public func hasLanConnections() -> Bool {
+        !lanConnectedDeviceIds.isEmpty
     }
 
     public func addPairedDevice(_ device: PairedDevice) {
@@ -301,6 +335,15 @@ public final class TransportManager: ObservableObject {
     /// Synchronous name lookup from cache
     public func deviceName(for deviceId: String) -> String? {
         deviceNameCache[deviceId.lowercased()]
+    }
+    
+    /// Get device name for logging, with fallback to truncated UUID
+    public func getDeviceName(_ deviceId: String) -> String {
+        if let name = deviceName(for: deviceId) {
+            return name
+        }
+        // Fallback to truncated UUID with ellipsis
+        return "\(deviceId.prefix(8))..."
     }
 
     private func updateNameCache() {
@@ -361,10 +404,10 @@ public final class TransportManager: ObservableObject {
                 transportManager: self,
                 transportProvider: provider
             )
-            // Start event-driven checking (no periodic polling)
+            // Start event-driven checking with periodic cloud status refresh
             connectionStatusProber?.start()
             
-            logger.info("🔧 [TransportManager] ConnectionStatusProber started (event-driven)")
+            logger.info("🔧 [TransportManager] ConnectionStatusProber started (event-driven + periodic)")
         } else {
             logger.info("🔧 [TransportManager] ConnectionStatusProber already initialized")
         }
@@ -1096,6 +1139,13 @@ public final class TransportManager: ObservableObject {
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
             logger.info("🔍 [TransportManager] After adding peer, lanPeers.count=\(lanPeers.count), serviceName=\(peer.serviceName)")
+
+            if let peerDeviceId = peer.endpoint.metadata["device_id"] {
+                if let device = pairedDevices.first(where: { $0.id.caseInsensitiveCompare(peerDeviceId) == .orderedSame }) {
+                    let updatedDevice = device.updating(from: peer)
+                    registerPairedDevice(updatedDevice)
+                }
+            }
             
             // Sync peer connections in LanSyncTransport (maintain persistent connections)
             if let provider = provider as? DefaultTransportProvider {
@@ -1103,9 +1153,6 @@ public final class TransportManager: ObservableObject {
                     await provider.syncPeerConnections()
                 }
             }
-            
-            // Trigger connection status probe when peer is discovered
-            connectionStatusProber?.probeNow()
         case .removed(let serviceName):
             logger.info("🔍 [TransportManager] Peer removed: \(serviceName)")
             lanPeers.removeValue(forKey: serviceName)
@@ -1118,9 +1165,6 @@ public final class TransportManager: ObservableObject {
                     await provider.syncPeerConnections()
                 }
             }
-            
-            // Trigger connection status probe when peer is removed
-            connectionStatusProber?.probeNow()
         }
     }
     
@@ -1515,9 +1559,6 @@ extension TransportManager: LanWebSocketServerDelegate {
                 logger.info("✅ [TransportManager] Paired device not yet discovered on LAN (will update when discovered)")
             }
             registerPairedDevice(pairedDevice)
-            if discoveredPeer == nil {
-                await probeConnectionStatus()
-            }
             #endif
         } catch {
             #if canImport(os)
@@ -1543,17 +1584,18 @@ extension TransportManager: LanWebSocketServerDelegate {
                 let envelope = try frameCodec.decode(data)
                 let deviceId = envelope.payload.deviceId
                 
-                // Update connection metadata if not already set (for ConnectionStatusProber to use)
+                // Update connection metadata and mark LAN connection online
                 if server.connectionMetadata(for: connection)?.deviceId == nil {
                     server.updateConnectionMetadata(connectionId: connection, deviceId: deviceId)
                 }
-                // Note: We do NOT update online status here - that's handled by ConnectionStatusProber periodic checks
+                setLanConnection(deviceId: deviceId, isConnected: true)
             } catch {
                 logger.info("⚠️ [TransportManager] Failed to decode envelope for metadata update: \(error)")
                 // Try to get deviceId from connection metadata as fallback
                 if let metadata = server.connectionMetadata(for: connection),
                    let deviceId = metadata.deviceId {
                     logger.info("✅ [TransportManager] Using deviceId from connection metadata: \(deviceId)")
+                    setLanConnection(deviceId: deviceId, isConnected: true)
                 }
             }
             
@@ -1581,6 +1623,7 @@ extension TransportManager: LanWebSocketServerDelegate {
                let deviceId = metadata.deviceId {
                 let metadataMsg = "✅ [TransportManager] Connection established for device: \(deviceId)"
                 logger.info(metadataMsg)
+                setLanConnection(deviceId: deviceId, isConnected: true)
                 NotificationCenter.default.post(
                     name: NSNotification.Name("DeviceConnectionStatusChanged"),
                     object: nil,
@@ -1589,8 +1632,6 @@ extension TransportManager: LanWebSocketServerDelegate {
                         "isOnline": true
                     ]
                 )
-                // Trigger connection status probe to update UI immediately
-                await probeConnectionStatus()
             } else {
                 logger.info("⚠️ [TransportManager] Connection established but no deviceId in metadata yet (will update when handshake completes)")
             }
@@ -1607,6 +1648,7 @@ extension TransportManager: LanWebSocketServerDelegate {
             // Try to find device ID from connection metadata before it's removed
             if let metadata = server.connectionMetadata(for: id),
                let deviceId = metadata.deviceId {
+                setLanConnection(deviceId: deviceId, isConnected: false)
                 NotificationCenter.default.post(
                     name: NSNotification.Name("DeviceConnectionStatusChanged"),
                     object: nil,

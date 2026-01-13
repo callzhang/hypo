@@ -625,8 +625,28 @@ async fn handle_control_message(
             if let Some(requested_ids) = control.device_ids {
                 let requested_set: std::collections::HashSet<String> = requested_ids.into_iter().collect();
                 connected_devices.retain(|info| requested_set.contains(&info.device_id));
-                info!("Applied privacy filter to connected peers list for {}: returned {}/{} devices", 
-                    sender_id, connected_devices.len(), requested_set.len());
+                let requested_preview: Vec<String> = requested_set.iter().take(5).cloned().collect();
+                let requested_suffix = if requested_set.len() > 5 {
+                    format!(", …(+{})", requested_set.len().saturating_sub(5))
+                } else {
+                    String::new()
+                };
+                let connected_preview: Vec<String> = connected_devices.iter().map(|info| info.device_id.clone()).take(5).collect();
+                let connected_suffix = if connected_devices.len() > 5 {
+                    format!(", …(+{})", connected_devices.len().saturating_sub(5))
+                } else {
+                    String::new()
+                };
+                info!(
+                    "Applied privacy filter to connected peers list for {}: returned {}/{} devices (requested=[{}{}], connected=[{}{}])",
+                    sender_id,
+                    connected_devices.len(),
+                    requested_set.len(),
+                    requested_preview.join(","),
+                    requested_suffix,
+                    connected_preview.join(","),
+                    connected_suffix
+                );
             } else {
                 warn!("Client {} queried connected peers without a filter. For privacy, clients should provide device_ids.", sender_id);
             }

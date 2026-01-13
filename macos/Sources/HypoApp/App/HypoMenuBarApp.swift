@@ -989,7 +989,6 @@ extension HypoMenuBarApp {
         // Try to load from MenuBarIcon.iconset (monochrome template version)
         
         let iconPath = Bundle.main.path(forResource: "MenuBarIcon", ofType: "iconset")
-        logger.error("🔍 [HypoMenuBarApp] Loading menuBarIcon. Path: \(iconPath ?? "nil")")
         
         if let iconPath = iconPath {
             // Determine best resolution based on screen scale
@@ -997,17 +996,13 @@ extension HypoMenuBarApp {
             let iconFile = screenScale > 1.0 ? "icon_16x16@2x.png" : "icon_16x16.png"
             let fullPath = "\(iconPath)/\(iconFile)"
             
-            logger.error("🔍 [HypoMenuBarApp] Trying to load icon from: \(fullPath)")
-            
             // Try loading specific resolution first, fallback to 1x
             var nsImage: NSImage?
             if FileManager.default.fileExists(atPath: fullPath),
                let image = NSImage(contentsOfFile: fullPath) {
                 nsImage = image
-                logger.error("✅ [HypoMenuBarApp] Loaded \(iconFile)")
             } else if let image = NSImage(contentsOfFile: "\(iconPath)/icon_16x16.png") {
                 nsImage = image
-                logger.error("✅ [HypoMenuBarApp] Loaded fallback icon_16x16.png")
             } else {
                 logger.error("❌ [HypoMenuBarApp] Failed to load any image from \(iconPath)")
             }

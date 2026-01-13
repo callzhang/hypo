@@ -744,13 +744,13 @@ class ClipboardSyncService : Service() {
     private fun handleScreenOff() {
         if (isScreenOff) return
         isScreenOff = true
-        Log.d(TAG, "Screen OFF - closing LAN connections to save battery")
-        scope.launch {
-            // Close all LAN connections to save battery
-            transportManager.closeAllLanConnections()
-            // Stop connection supervisor (already stops cloud connection supervision)
-            transportManager.stopConnectionSupervisor()
-        }
+        Log.d(TAG, "Screen OFF - keeping LAN connections active (battery optimization disabled)")
+        // scope.launch {
+        //     // Close all LAN connections to save battery
+        //     transportManager.closeAllLanConnections()
+        //     // Stop connection supervisor (already stops cloud connection supervision)
+        //     transportManager.stopConnectionSupervisor()
+        // }
     }
 
     private fun handleScreenOn() {

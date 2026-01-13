@@ -21,6 +21,7 @@ public final class LanSyncTransport: SyncTransport {
     private var peerURLs: [String: URL] = [:] // deviceId -> URL
     // Track connection tasks for each peer to enable cleanup
     private var connectionTasks: [String: Task<Void, Never>] = [:] // deviceId -> connection maintenance task
+    private weak var transportManager: TransportManager?
     
     #if canImport(os)
     private let logger = HypoLogger(category: "lan-transport")
@@ -37,6 +38,10 @@ public final class LanSyncTransport: SyncTransport {
     
     public func setGetDiscoveredPeers(_ closure: @escaping () -> [DiscoveredPeer]) {
         self.getDiscoveredPeers = closure
+    }
+    
+    public func setTransportManager(_ manager: TransportManager) {
+        self.transportManager = manager
     }
     
     /// Maintain persistent connections to all discovered peers (mirrors Android architecture)
@@ -191,7 +196,8 @@ public final class LanSyncTransport: SyncTransport {
         if let targetDeviceId = targetDeviceId {
             // Encrypted message - unicast to specific target device only
             #if canImport(os)
-            logger.debug("📡 [LanSyncTransport] Unicasting to target device: \(targetDeviceId.prefix(8))...")
+            let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
+            logger.debug("📡 [LanSyncTransport] Unicasting to target device: \(deviceDesc)")
             #endif
             
             // Find connection(s) for target device
@@ -221,17 +227,20 @@ public final class LanSyncTransport: SyncTransport {
                             }
                             try await clientTransport.send(envelope)
                             #if canImport(os)
-                            logger.debug("✅ [LanSyncTransport] Sent to target device \(targetDeviceId.prefix(8)) via persistent connection")
+                            let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
+                            logger.debug("✅ [LanSyncTransport] Sent to target device \(deviceDesc) via persistent connection")
                             #endif
                         } catch {
                             #if canImport(os)
-                            logger.warning("⚠️ [LanSyncTransport] Failed to send to target device \(targetDeviceId.prefix(8)): \(error.localizedDescription)")
+                            let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
+                            logger.warning("⚠️ [LanSyncTransport] Failed to send to target device \(deviceDesc): \(error.localizedDescription)")
                             #endif
                         }
                     }
                 } else {
                     #if canImport(os)
-                    logger.warning("⚠️ [LanSyncTransport] No connection found for target device \(targetDeviceId.prefix(8))")
+                    let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
+                    logger.warning("⚠️ [LanSyncTransport] No connection found for target device \(deviceDesc)")
                     #endif
                 }
             }
@@ -345,7 +354,8 @@ public final class LanSyncTransport: SyncTransport {
         let envelope = try decoder.decode(SyncEnvelope.self, from: data)
         
         #if canImport(os)
-        logger.debug("📥 [LanSyncTransport] Received clipboard envelope: type=\(envelope.type.rawValue), from=\(envelope.payload.deviceId.prefix(8))")
+        let deviceDesc = transportManager?.getDeviceName(envelope.payload.deviceId) ?? "\(envelope.payload.deviceId.prefix(8))..."
+        logger.debug("📥 [LanSyncTransport] Received clipboard envelope: type=\(envelope.type.rawValue), from=\(deviceDesc)")
         #endif
         
         // Notify any registered handlers

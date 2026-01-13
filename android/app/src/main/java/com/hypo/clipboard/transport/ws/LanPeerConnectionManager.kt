@@ -69,7 +69,8 @@ class LanPeerConnectionManager(
             val currentDeviceIds = peerConnections.keys.toSet()
             val removedDeviceIds = currentDeviceIds - discoveredDeviceIds
             for (deviceId in removedDeviceIds) {
-                android.util.Log.d("LanPeerConnectionManager", "🔌 Removing connection for peer $deviceId (no longer discovered)")
+                val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                android.util.Log.d("LanPeerConnectionManager", "🔌 Removing connection for peer $deviceDesc (no longer discovered)")
                 connectionJobs[deviceId]?.cancel()
                 connectionJobs.remove(deviceId)
                 peerConnections.remove(deviceId)
@@ -97,7 +98,8 @@ class LanPeerConnectionManager(
                 
                 // Create connection if it doesn't exist
                 if (!peerConnections.containsKey(deviceId)) {
-                    android.util.Log.d("LanPeerConnectionManager", "🔌 Creating persistent connection for peer ${peer.serviceName} ($deviceId) at $peerUrl")
+                    val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                    android.util.Log.d("LanPeerConnectionManager", "🔌 Creating persistent connection for peer $deviceDesc at $peerUrl")
                     
                     val peerConfig = TlsWebSocketConfig(
                         url = peerUrl,
@@ -127,7 +129,8 @@ class LanPeerConnectionManager(
                     // Set incoming clipboard handler if available
                     onIncomingClipboard?.let { handler ->
                         client.setIncomingClipboardHandler(handler)
-                        android.util.Log.d("LanPeerConnectionManager", "✅ Set incoming clipboard handler for peer $deviceId")
+                        val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                        android.util.Log.d("LanPeerConnectionManager", "✅ Set incoming clipboard handler for peer $deviceDesc")
                     }
                     
                     peerConnections[deviceId] = client
@@ -158,7 +161,8 @@ class LanPeerConnectionManager(
         peerName: String,
         peerUrl: String
     ) {
-        android.util.Log.d("LanPeerConnectionManager", "🔌 Starting connection maintenance for peer $peerName ($deviceId) at $peerUrl")
+        val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+        android.util.Log.d("LanPeerConnectionManager", "🔌 Starting connection maintenance for peer $deviceDesc at $peerUrl")
         
         // Start receiving - this will establish connection and maintain it
         // WebSocketTransportClient handles all reconnection via onClosed() callbacks
@@ -171,7 +175,8 @@ class LanPeerConnectionManager(
             delay(10_000) // Just keep alive - reconnection is handled by WebSocketTransportClient
         }
         
-        android.util.Log.d("LanPeerConnectionManager", "🔌 Connection maintenance ended for peer $peerName ($deviceId)")
+        val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+        android.util.Log.d("LanPeerConnectionManager", "🔌 Connection maintenance ended for peer $deviceDesc")
     }
     
     /**
@@ -199,7 +204,8 @@ class LanPeerConnectionManager(
             client.send(envelope)
             true
         } catch (e: Exception) {
-            android.util.Log.w("LanPeerConnectionManager", "⚠️ Failed to send to peer $deviceId: ${e.message}")
+            val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+            android.util.Log.w("LanPeerConnectionManager", "⚠️ Failed to send to peer $deviceDesc: ${e.message}")
             false
         }
     }
@@ -217,7 +223,8 @@ class LanPeerConnectionManager(
                     successCount++
                 }
             } catch (e: Exception) {
-                android.util.Log.d("LanPeerConnectionManager", "⚠️ Failed to send to peer $deviceId: ${e.message}")
+                val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                android.util.Log.d("LanPeerConnectionManager", "⚠️ Failed to send to peer $deviceDesc: ${e.message}")
             }
         }
         return successCount
@@ -234,9 +241,11 @@ class LanPeerConnectionManager(
                 try {
                     // Use disconnect() instead of close() - closes socket but keeps client ready for reconnection
                     client.disconnect()
-                    android.util.Log.d("LanPeerConnectionManager", "   Disconnected peer $deviceId")
+                    val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                    android.util.Log.d("LanPeerConnectionManager", "   Disconnected peer $deviceDesc")
                 } catch (e: Exception) {
-                    android.util.Log.w("LanPeerConnectionManager", "⚠️ Error disconnecting peer $deviceId: ${e.message}")
+                    val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                    android.util.Log.w("LanPeerConnectionManager", "⚠️ Error disconnecting peer $deviceDesc: ${e.message}")
                 }
             }
             // Cancel connection maintenance jobs
@@ -269,7 +278,8 @@ class LanPeerConnectionManager(
         // Set handler on all existing connections
         for ((deviceId, client) in peerConnections) {
             client.setIncomingClipboardHandler(handler)
-            android.util.Log.d("LanPeerConnectionManager", "✅ Set incoming clipboard handler for existing peer $deviceId")
+            val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+            android.util.Log.d("LanPeerConnectionManager", "✅ Set incoming clipboard handler for existing peer $deviceDesc")
         }
     }
     

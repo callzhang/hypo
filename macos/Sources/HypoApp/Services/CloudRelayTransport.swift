@@ -119,8 +119,9 @@ public final class CloudRelayTransport: SyncTransport {
     /// Query connected peers from cloud relay
     /// Returns list of connected peers with their IDs and names, or empty array if query fails
     /// Device names are looked up using the nameLookup closure if provided
-    public func queryConnectedPeers() async -> [ConnectedPeer] {
-        let deviceIds = await delegate.queryConnectedPeers()
+    /// - Parameter peerIds: Optional list of device IDs to check presence for. If nil, returns all connected peers (server may limit this).
+    public func queryConnectedPeers(peerIds: [String]? = nil) async -> [ConnectedPeer] {
+        let deviceIds = await delegate.queryConnectedPeers(peerIds)
         return deviceIds.map { deviceId in
             let name = nameLookup?(deviceId)
             return ConnectedPeer(deviceId: deviceId, name: name)

@@ -94,6 +94,12 @@ class OkHttpWebSocketConnector @Inject constructor(
             val readTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
             val writeTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
             builder.connectTimeout(connectTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+
+            // Enable Keep-Alive Pings to keep connection alive through NATs/Load Balancers
+            // This is critical for Cloud Relay when the device is idle/screen-off
+            if (config.idleTimeoutMillis > 0) {
+                builder.pingInterval(config.idleTimeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
             // builder.readTimeout(readTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
             // builder.writeTimeout(writeTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
             // android.util.Log.v("OkHttpWebSocketConnector", "⏱️ Configured timeouts: connect=${connectTimeoutMs}ms, read=${readTimeoutMs}ms, write=${writeTimeoutMs}ms")

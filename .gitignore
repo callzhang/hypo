@@ -220,3 +220,4 @@ __pycache__/
 .secrets
 macos/Hypo.app/
 build_log.txt
+build_output.txt

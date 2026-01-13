@@ -124,6 +124,13 @@ class RelayWebSocketClient @Inject constructor(
         }
         
         return try {
+            if (!peerIds.isNullOrEmpty()) {
+                val preview = peerIds.take(5).joinToString(",")
+                val suffix = if (peerIds.size > 5) ", …(+${peerIds.size - 5})" else ""
+                android.util.Log.d("RelayWebSocketClient", "🔎 query_connected_peers request: ${peerIds.size} ids [$preview$suffix]")
+            } else {
+                android.util.Log.d("RelayWebSocketClient", "🔎 query_connected_peers request: no filter ids")
+            }
             val response = delegate.sendControlMessage(
                 action = "query_connected_peers", 
                 timeoutMs = 5000,
@@ -153,7 +160,9 @@ class RelayWebSocketClient @Inject constructor(
                         peers.add(ConnectedPeer(deviceId = deviceId, name = name, lastSeen = lastSeen))
                     }
                 }
-                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${peers.size} devices")
+                val idPreview = peers.map { it.deviceId }.take(5).joinToString(",")
+                val idSuffix = if (peers.size > 5) ", …(+${peers.size - 5})" else ""
+                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${peers.size} devices [$idPreview$idSuffix]")
                 peers
             } else {
                 android.util.Log.w("RelayWebSocketClient", "⚠️ No response from query_connected_peers")

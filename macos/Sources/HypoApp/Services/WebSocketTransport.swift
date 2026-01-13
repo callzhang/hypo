@@ -302,10 +302,9 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         let maxTimeout: TimeInterval = 600.0 // 10 minutes (connection timeout)
         let messageExpiration: TimeInterval = 300.0 // 5 minutes (strict expiration)
         
-
         
         while !messageQueue.isEmpty {
-            _ = messageQueue.count
+            let queueSizeBefore = messageQueue.count
             var queuedMessage = messageQueue.removeFirst()
             
             // Check Message Expiration (5 min strict)
@@ -316,7 +315,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 continue
             }
             
-
             // Check Connection Timeout (10 minutes from queue time - fallback)
             if timeInQueue > maxTimeout {
                 logger.info("❌ [WebSocketTransport] Message timeout after \(queuedMessage.retryCount) retries (10 min elapsed), dropping")
@@ -444,11 +442,11 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 // NEVER mark as successful immediately - wait for server confirmation (success or error)
                 let messageId = queuedMessage.envelope.id
                 let frameSize = queuedMessage.data.count
-                // let contentType = queuedMessage.envelope.payload.contentType
+                let contentType = queuedMessage.envelope.payload.contentType
                 
                 // Track all messages as in-flight until we get server feedback
                 inFlightMessages[messageId] = queuedMessage
-
+                self.logger.debug("📤 [WebSocketTransport] Message in-flight: type=\(contentType), size=\(frameSize.formattedAsKB), id=\(messageId.uuidString.prefix(8))")
                 
                 // Set up timeout to handle cases where server doesn't respond
                 // If no error response is received within timeout, check connection state:
@@ -476,7 +474,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                         
                         if isConnected {
                             // Connection is valid - assume message was sent successfully
-
+                            strongSelf.logger.debug("✅ [WebSocketTransport] Message confirmed (timeout, connection valid): id=\(messageId.uuidString.prefix(8))")
                             Task {
                                 _ = await strongSelf.pendingRoundTrips.remove(id: messageId)
                             }
@@ -507,7 +505,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 // This is especially important for large payloads (images/files) that may take time to send
                 if isCancellationError || isSocketNotConnected {
                     let errorType = isCancellationError ? "cancellation" : "socket closure"
-                    self.logger.debug("⚠️ [WebSocketTransport] \(errorType.capitalized) during send (likely during large payload transmission), requeuing message")
+                    self.logger.info("⚠️ [WebSocketTransport] \(errorType.capitalized) during send (likely during large payload transmission), requeuing message")
                     // Don't increment retry count for transient errors - this is expected for large payloads
                     messageQueue.append(queuedMessage)
                     
@@ -539,7 +537,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                     if queuedMessage.retryCount <= maxRetries {
                         messageQueue.append(queuedMessage)
                     } else {
-                        logger.debug("❌ [WebSocketTransport] Max retries reached, dropping message")
+                        logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
                         _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                     }
                 }
@@ -636,7 +634,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     
     /// Query connected peers from cloud relay (only works for cloud connections)
     /// Returns list of connected device IDs, or empty array if query fails
-    public func queryConnectedPeers() async -> [String] {
+    /// - Parameter peerIds: Optional list of device IDs to check presence for. If nil, returns all connected peers (server may limit this).
+    public func queryConnectedPeers(_ peerIds: [String]? = nil) async -> [String] {
         guard configuration.environment == "cloud" else {
             logger.debug("⚠️ [WebSocketTransport] queryConnectedPeers only works for cloud connections")
             return []
@@ -649,16 +648,22 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         
         let queryId = UUID().uuidString
         
+        var payload: [String: Any] = [
+            "action": "query_connected_peers",
+            "original_message_id": queryId
+        ]
+        
+        if let peerIds = peerIds {
+            payload["device_ids"] = peerIds
+        }
+        
         // Create control message as raw JSON (not SyncEnvelope)
         let controlMessage: [String: Any] = [
             "id": queryId,
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "version": "1.0",
             "type": "control",
-            "payload": [
-                "action": "query_connected_peers",
-                "original_message_id": queryId
-            ]
+            "payload": payload
         ]
         
         guard let jsonData = try? JSONSerialization.data(withJSONObject: controlMessage),
@@ -667,7 +672,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             return []
         }
         
-        let payload = await withCheckedContinuation { continuation in
+        let responsePayload = await withCheckedContinuation { continuation in
             // Store continuation for response handling (thread-safe)
             self.pendingControlQueriesQueue.sync {
                 self.pendingControlQueries[queryId] = continuation
@@ -698,7 +703,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
         
         // Extract connected_devices array from payload
-        if let devicesArray = payload["connected_devices"] as? [String] {
+        if let devicesArray = responsePayload["connected_devices"] as? [String] {
             return devicesArray
         }
         return []

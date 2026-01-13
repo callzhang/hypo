@@ -57,13 +57,13 @@ See `docs/architecture.mermaid` for visual representation.
   - No Keychain dependency - improves Notarization compatibility
   - **Local file entries**: Store only file URL + lightweight metadata (name, size, UTI); no duplicate Base64 blob is kept for files that originated on this Mac. Bytes are loaded on-demand when syncing, previewing, or copying.
   - **Remote file entries**: Store file bytes (Base64) so received files remain available even if the sender goes offline; temp files are created only when needed for clipboard/Finder and scrubbed automatically
-  - **Size Constants**: Single source of truth in `SizeConstants.swift` (10MB sync limit, 50MB copy limit, 25MB transport limit, 7.5MB compression target, 2560px max image dimension)
+  - **Size Constants**: Single source of truth in `SizeConstants.swift` (10MB sync limit, 50MB copy limit, 20MB transport frame limit, 7.5MB compression target)
 - **Networking**: Network.framework for WebSocket server, URLSession for client connections
 - **Crypto**: CryptoKit (AES-256-GCM, Curve25519, Ed25519)
   - Custom encoding: `Data` fields (ciphertext, nonce, tag) encoded as base64 strings for Android compatibility
 - **Discovery**: Bonjour (NetService) for LAN device discovery and advertising
 - **Temp File Management** ✅ Implemented (December 2025): Automatic cleanup of temporary files (30s delay, clipboard change detection, periodic cleanup)
-- **Size Limits**: 50MB copy limit, 10MB sync limit with user notifications
+- **Size Limits**: 50MB copy limit, 10MB sync limit (infrastructure supports 1GB via fragmentation, but currently limited by memory to prevent OOM)
 - **Background**: Launch agent support planned for auto-start
 
 #### Android Client ✅ Implemented
@@ -77,7 +77,7 @@ See `docs/architecture.mermaid` for visual representation.
 - **Discovery**: NSD (Network Service Discovery) for LAN device discovery and registration
 - **Compression** ✅ Implemented (December 2025): Gzip compression of JSON payloads before encryption (always enabled, no backward compatibility). Uses proper gzip format (raw deflate with gzip headers/footers) compatible with Java GZIPInputStream.
 - **Image Compression** ✅ Implemented (December 2025): Automatic compression of large images (scale down >2560px, re-encode as JPEG with quality 85-40%)
-- **Size Constants**: Single source of truth in `SizeConstants.kt` (10MB sync limit, 50MB copy limit, 25MB transport limit, 7.5MB compression target, 2560px max image dimension)
+- **Size Constants**: Single source of truth in `SizeConstants.kt` (10MB sync limit, 50MB copy limit, 20MB transport limit, 7.5MB compression target, 2560px max image dimension)
 - **Background**: Foreground Service with FOREGROUND_SERVICE_DATA_SYNC permission
 - **Battery Optimization**: Screen-state aware connection management (60-80% battery saving)
 - **Temp File Management** ✅ Implemented (December 2025): Automatic cleanup of temporary files (30s delay, clipboard change detection, periodic cleanup)
@@ -154,7 +154,7 @@ All messages are JSON-encoded with the following schema (see [`docs/protocol.md`
 | `text` | UTF-8 string | 100KB | No base64 |
 | `link` | UTF-8 URL | 2KB | Validated URL format |
 | `image` | Base64 PNG/JPEG | 10MB | Auto-compress if >7.5MB (scale down, re-encode) |
-| `file` | Base64 | 10MB | Include filename in metadata |
+| `file` | Base64 | 10MB | Include filename in metadata. macOS supports automatic fragmentation for transport, but application layer limits apply to prevent high memory usage. |
 
 > **macOS storage note**: For files that originate on macOS, the local history store keeps only a pointer (file URL + metadata) and streams bytes from disk when syncing or previewing. The Base64-encoded payload is materialized on-demand for transport. Files received from other devices are stored as Base64 so they remain available even if the original sender is offline.
 
@@ -211,8 +211,10 @@ Server → Client: ACK + session token
 **Optimization Recommendations**:
 1. ✅ **Cloud ping (14 min)**: Optimized from 20s - 98% battery savings achieved (using Fly.io max timeout of 15 min)
 2. **LAN ping (30m)**: Consider increasing to 60 minutes or removing entirely if connection health checks are sufficient
-3. **Screen-off optimization**: Both ping intervals could be increased when screen is off (already implemented via screen-state monitoring)
-4. **Adaptive intervals**: Could implement longer intervals during low activity periods
+3. **Screen-off optimization**: Both ping intervals are increased or connections are paused when the screen is off (implemented via screen-state monitoring on Android and lifecycle observation on macOS).
+4. **Detailed Battery Management** (Android):
+   - **Screen OFF**: To maximize battery life (60-80% saving), the Android client closes all LAN connections and stops cloud connection supervision when the screen is turned off. Incoming syncs from the server will not be received in this state.
+   - **Screen ON**: Connections are automatically re-established when the screen is turned on.
 5. **FCM Push Notifications (Planned)**: Replace persistent WebSocket connections with FCM push notifications to allow app to sleep and wake only when sync messages arrive (see [FCM Implementation Plan](#fcm-implementation-plan))
 
 #### Disconnection
@@ -1155,8 +1157,8 @@ This section compares the implementation details between Android and macOS clien
 - **Error Handling**: Requires at least one transport to succeed (throws if both fail)
 - **Payload / Frame Size**:
   - Per-item attachment limit: **10MB** raw content for `image`/`file` types (after any compression)
-  - Transport frame payload limit: **40MB** JSON payload (excluding 4-byte length prefix) on both Android and macOS to account for Base64 and JSON overhead
-- **Transport Frame Limit**: 25MB frame payload limit (accounts for base64 encoding and JSON overhead)
+  - Transport frame payload limit: **20MB** JSON payload (excluding 4-byte length prefix) on both Android and macOS to account for Base64 and JSON overhead
+- **Transport Frame Limit**: 20MB frame payload limit (accounts for base64 encoding and JSON overhead)
 - **Compression**: Gzip compression of JSON payloads before encryption (always enabled, no backward compatibility)
   - Compression applied to `ClipboardPayload` JSON before encryption
   - Decompression applied after decryption on receiving side

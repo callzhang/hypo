@@ -30,10 +30,11 @@ This directory contains automation scripts for building, testing, and managing t
   ./scripts/deploy.sh verify              # Verify existing deployment
   ./scripts/deploy.sh info                # Show deployment information
   ```
-- **`benchmark-deploy.sh`** - Benchmark local vs remote Fly.io deployments
+  ./scripts/deploy.sh info                # Show deployment information
+  ```
+- **`sign-macos.sh`** - Sign macOS app with local development certificates
   ```bash
-  ./scripts/benchmark-deploy.sh           # Full benchmark (local + remote comparison)
-  ./scripts/benchmark-deploy.sh --quick   # Quick local build benchmark only
+  ./scripts/sign-macos.sh
   ```
 
 ### Testing Scripts
@@ -52,9 +53,6 @@ All test scripts are now in the `tests/` directory:
 - **`tests/test-clipboard-polling.sh`** - Tests clipboard polling implementation
 - **`tests/test-transport-persistence.sh`** - Tests transport status persistence
 
-**Test runner scripts (in `scripts/` directory):**
-- **`run-transport-regression.sh`** - Cross-platform transport metrics regression tests
-
 ### Monitoring Scripts
 - **macOS Logs**: Use unified logging system (see `docs/TROUBLESHOOTING.md` for detailed logging guide)
   ```bash
@@ -67,15 +65,15 @@ All test scripts are now in the `tests/` directory:
 
 ### Setup Scripts
 - **`setup-android-sdk.sh`** - Install Android SDK for headless builds
-- **`setup-android-emulator.sh`** - Set up Android emulator
+- **`setup-android-emulator.sh`** - Set up Android emulator (note: check if script exists, if not remove)
+- **`setup-dev-certs.sh`** - Generate self-signed certificates for local development
 - **`start-android-emulator.sh`** - Start Android emulator
 
 ### Utility Scripts
-- **`check-android-device.sh`** - Check if Android device is connected
-- **`check-accessibility.sh`** - Check Android accessibility service status
-- **`check-notification-status.sh`** - Check Android notification permission and channel status
-- **`reopen-android-app.sh`** - Reopen Android app
-- **`timeout.sh`** - Timeout wrapper for long-running commands
+- **`update-version.sh`** - Update version numbers across the codebase
+  ```bash
+  ./scripts/update-version.sh <new_version>
+  ```
 
 ### Simulation & Testing Tools
 - **`simulate-android-copy.py`** - Simulate Android clipboard sync via LAN WebSocket (see `README-simulate.md`)
@@ -98,11 +96,6 @@ All test scripts are now in the `tests/` directory:
 
 ### Development/Debugging Tools
 These scripts are for specific debugging scenarios:
-- **`diagnose-lan-discovery.sh`** - Comprehensive LAN discovery diagnostic tool (see `DIAGNOSTIC_README.md`)
-- **`analyze-routing-logs.sh`** - Analyze backend routing logs from Fly.io
-- **`screenshot-android.sh`** - Capture Android device cast window screenshots
-- **`analyze-screenshot.sh`** - Analyze screenshots with OCR (requires tesseract)
-- **`capture-crash.sh`** - Monitor and capture crash logs when manually copying text
 
 ## Usage Examples
 
@@ -129,15 +122,6 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep 
 # Build release APK
 ./scripts/build-android.sh release
 
-# Check device connection
-./scripts/check-android-device.sh
-
-# Check accessibility service
-./scripts/check-accessibility.sh
-
-# Check notification status
-./scripts/check-notification-status.sh <device_id>
-
 # Test SMS-to-clipboard functionality
 ./scripts/test-sms-clipboard.sh <device_id>
 ```
@@ -159,8 +143,6 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep 
 # Test all backend endpoints
 ./tests/test-server-all.sh
 
-# Run transport regression tests
-./scripts/run-transport-regression.sh
 
 # Deploy backend to Fly.io (local build by default)
 ./scripts/deploy.sh deploy
@@ -170,10 +152,6 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep 
 
 # Verify deployment
 ./scripts/deploy.sh verify
-
-# Benchmark deployment strategies
-./scripts/benchmark-deploy.sh --quick    # Quick local build benchmark
-./scripts/benchmark-deploy.sh           # Full comparison
 ```
 
 ## Script Dependencies

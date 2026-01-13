@@ -895,7 +895,7 @@ class ClipboardSyncService : Service() {
             ?: TransportManager.DEFAULT_FINGERPRINT
 
         return LanRegistrationConfig(
-            serviceName = deviceIdentity.deviceId,
+            serviceName = buildLanServiceName(),
             port = TransportManager.DEFAULT_PORT,
             fingerprint = fingerprint,
             version = version,
@@ -904,6 +904,33 @@ class ClipboardSyncService : Service() {
             publicKey = publicKeyBase64,
             signingPublicKey = signingPublicKeyBase64
         )
+    }
+
+    private fun buildLanServiceName(): String {
+        val rawName = deviceIdentity.deviceName.trim()
+        val base = if (rawName.isNotEmpty()) rawName else deviceIdentity.deviceId
+        val sanitized = base.replace(Regex("[\\u0000-\\u001F\\u007F]"), " ").trim()
+        val maxBytes = 63
+        val bytes = sanitized.toByteArray(Charsets.UTF_8)
+        if (bytes.size <= maxBytes) {
+            return sanitized
+        }
+        val suffix = "-${deviceIdentity.deviceId.take(4)}"
+        val suffixBytes = suffix.toByteArray(Charsets.UTF_8)
+        val targetBytes = maxBytes - suffixBytes.size
+        if (targetBytes <= 0) {
+            return deviceIdentity.deviceId
+        }
+        // Truncate by UTF-8 byte length to avoid invalid sequences.
+        var byteCount = 0
+        val sb = StringBuilder()
+        for (ch in sanitized) {
+            val chBytes = ch.toString().toByteArray(Charsets.UTF_8)
+            if (byteCount + chBytes.size > targetBytes) break
+            sb.append(ch)
+            byteCount += chBytes.size
+        }
+        return sb.toString().trim().ifEmpty { deviceIdentity.deviceId } + suffix
     }
 
     private fun sha256Hex(bytes: ByteArray): String {

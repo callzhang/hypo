@@ -125,6 +125,11 @@ xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
 log_info "Removing extended attributes from all files..."
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true
 
+# 6. Explicitly clear bundle-root metadata that can still trip codesign
+xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
+xattr -d com.apple.ResourceFork "$APP_BUNDLE" 2>/dev/null || true
+xattr -d com.apple.fileprovider.fpfs#P "$APP_BUNDLE" 2>/dev/null || true
+
 log_success "Cleaned app bundle"
 
 

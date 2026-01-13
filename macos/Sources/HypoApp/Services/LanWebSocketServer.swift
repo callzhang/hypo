@@ -201,14 +201,7 @@ public final class LanWebSocketServer {
     
     public func activeConnections() -> [UUID] {
         let active = Array(connections.keys)
-        logger.info("🔍 [LanWebSocketServer] activeConnections() called: \(active.count) connections")
-        if active.count > 0 {
-            for id in active {
-                if let metadata = connectionMetadata[id] {
-                    logger.info("🔍 [LanWebSocketServer] Connection \(id.uuidString.prefix(8)): deviceId=\(metadata.deviceId ?? "nil"), upgraded=\(connections[id]?.upgraded ?? false)")
-                }
-            }
-        }
+
         return active
     }
     
@@ -387,15 +380,10 @@ public final class LanWebSocketServer {
     }
 
     private func processHandshakeBuffer(for connectionId: UUID, context: ConnectionContext) -> Bool {
-        logger.info("🔍  processHandshakeBuffer: Checking for handshake delimiter")
-        let bufferSnapshot = context.snapshotBuffer()
-        logger.info("🔍  processHandshakeBuffer: Buffer size: \(bufferSnapshot.count) bytes")
-        if let headerString = String(data: bufferSnapshot.prefix(min(200, bufferSnapshot.count)), encoding: .utf8) {
-            logger.info("🔍  processHandshakeBuffer: First 200 chars: \(headerString)")
-        }
+
         
         guard let headerData = context.consumeHeader(upTo: handshakeDelimiter) else {
-            logger.info("⏳  processHandshakeBuffer: Handshake delimiter not found yet, waiting for more data")
+
             return false
         }
         guard let request = String(data: headerData, encoding: .utf8) else {
@@ -418,7 +406,7 @@ public final class LanWebSocketServer {
             let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
             headers[name] = value
         }
-        logger.info("🔍  processHandshakeBuffer: Parsed \(headers.count) headers")
+
         guard
             headers["upgrade"]?.lowercased().contains("websocket") == true,
             headers["connection"]?.lowercased().contains("upgrade") == true,
@@ -432,17 +420,15 @@ public final class LanWebSocketServer {
         // Capture device metadata from headers as early as possible so routing and status work
         if let deviceIdHeader = headers["x-device-id"], !deviceIdHeader.isEmpty {
             updateConnectionMetadata(connectionId: connectionId, deviceId: deviceIdHeader)
-            logger.info("🔍  Captured deviceId from headers: \(deviceIdHeader)")
+            logger.debug("Captured deviceId from headers: \(deviceIdHeader)")
         }
 
-        logger.info("✅  processHandshakeBuffer: All headers valid, sending handshake response")
         let response = handshakeResponse(for: key)
         logger.debug("📤 [LanWebSocketServer] Sending HTTP 101 response (\(response.count) bytes) for connection \(connectionId.uuidString.prefix(8))")
         
         // Use .contentProcessed to ensure the response is fully sent before starting frame reception
         // Mark as upgraded BEFORE sending so connection is ready to receive frames immediately
         context.upgraded = true
-        logger.info("✅ [LanWebSocketServer] Marking connection as upgraded before sending 101 response")
         
         context.connection.send(content: response, completion: .contentProcessed { [weak self] error in
             guard let self = self else { return }
@@ -462,11 +448,10 @@ public final class LanWebSocketServer {
                 // Get device ID from metadata for logging
                 let deviceId = self.connectionMetadata[connectionId]?.deviceId ?? "unknown"
                 #if canImport(os)
-                self.logger.info("✅ CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded for \(connectionId.uuidString.prefix(8))")
+                self.logger.debug("✅ CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded for \(connectionId.uuidString.prefix(8))")
                 #endif
-                self.logger.info("✅ [LanWebSocketServer] HTTP 101 response sent successfully, connection upgraded")
-                self.logger.info("🔗 [LanWebSocketServer] Connection state after handshake: \(context.connection.state)")
-                self.logger.info("📱 [LanWebSocketServer] Client connected: deviceId=\(deviceId), connectionId=\(connectionId.uuidString.prefix(8))")
+                self.logger.debug("🔗 [LanWebSocketServer] Connection state after handshake: \(context.connection.state)")
+                self.logger.debug("📱 [LanWebSocketServer] Client connected: deviceId=\(deviceId), connectionId=\(connectionId.uuidString.prefix(8))")
                 
                 // Notify delegate that connection is accepted
                 self.delegate?.server(self, didAcceptConnection: connectionId)
@@ -477,7 +462,7 @@ public final class LanWebSocketServer {
                 // Start receiving WebSocket frames immediately after handshake
                 // .contentProcessed ensures the HTTP 101 response is fully sent before this callback runs
                 // Starting frame reception immediately ensures OkHttp can read frames as soon as it's ready
-                self.logger.info("📡 [LanWebSocketServer] Starting receiveFrameChunk for connection \(connectionId.uuidString.prefix(8))")
+
                 self.receiveFrameChunk(for: connectionId, context: context)
             }
         })
@@ -488,7 +473,6 @@ public final class LanWebSocketServer {
         #if canImport(os)
         logger.debug("📡 CLIPBOARD RECEIVE: Setting up receive callback for connection \(connectionId.uuidString.prefix(8))")
         #endif
-        logger.info("📡  CLIPBOARD RECEIVE: Setting up receive callback for \(connectionId.uuidString.prefix(8))")
         context.connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
                 guard let self = self else {
                     NSLog("⚠️  Self is nil in receive callback")
@@ -528,18 +512,18 @@ public final class LanWebSocketServer {
                         if connectionState == .ready {
                             // Connection is still ready, this might be a false EOF right after handshake
                             // Continue receiving - OkHttp might not have started reading frames yet
-                            self.logger.info("⏳ [LanWebSocketServer] EOF received but connection still ready (might be false EOF after handshake), continuing to receive...")
+                            self.logger.debug("🔌 [LanWebSocketServer] Ignoring EOF for ready connection \(connectionId.uuidString.prefix(8)) (state=\(connectionState))")
                             self.receiveFrameChunk(for: connectionId, context: context)
                             return
                         }
-                        self.logger.info("🔌 [LanWebSocketServer] Connection \(connectionId.uuidString.prefix(8)) closed by peer (EOF - no data, isComplete=true, buffer empty, state=\(connectionState))")
+                        self.logger.debug("🔌 [LanWebSocketServer] Connection \(connectionId.uuidString.prefix(8)) closed by peer (EOF - no data, isComplete=true, buffer empty, state=\(connectionState))")
                         #if canImport(os)
-                        self.logger.info("Connection \(connectionId.uuidString) closed by peer")
+                        self.logger.debug("Connection \(connectionId.uuidString) closed by peer")
                         #endif
                         self.closeConnection(connectionId)
                         return
                     } else {
-                        self.logger.info("🔌 [LanWebSocketServer] Connection EOF received but \(remainingBuffer.count) bytes still in buffer, processing remaining data")
+                        self.logger.debug("🔌 [LanWebSocketServer] Connection EOF received but \(remainingBuffer.count) bytes still in buffer, processing remaining data")
                         // Process remaining buffer data before closing
                         self.processFrameBuffer(for: connectionId, context: context)
                         // Check again if connection still exists and buffer is empty
@@ -548,7 +532,7 @@ public final class LanWebSocketServer {
                         }
                         let finalBuffer = context.snapshotBuffer()
                         if finalBuffer.isEmpty || finalBuffer.count < 2 {
-                            self.logger.info("🔌 [LanWebSocketServer] All data processed, closing connection")
+                            self.logger.debug("🔌 [LanWebSocketServer] All data processed, closing connection")
                             self.closeConnection(connectionId)
                             return
                         } else {
@@ -558,7 +542,7 @@ public final class LanWebSocketServer {
                     }
                 } else {
                     // No data yet, but connection still open - continue receiving
-                    self.logger.info("⏳ [LanWebSocketServer] No data yet, continuing to wait for frames...")
+                    self.logger.debug("⏳ [LanWebSocketServer] No data yet, continuing to wait for frames...")
                     self.receiveFrameChunk(for: connectionId, context: context)
                 }
             }
@@ -566,9 +550,9 @@ public final class LanWebSocketServer {
     }
 
     private func processFrameBuffer(for connectionId: UUID, context: ConnectionContext) {
-        logger.info("🔍 [LanWebSocketServer] processFrameBuffer called: connectionId=\(connectionId.uuidString.prefix(8)), upgraded=\(context.upgraded)")
+
         guard context.upgraded else {
-            logger.info("⏸️ [LanWebSocketServer] Frame processing skipped - connection not upgraded")
+            logger.debug("⏸️ [LanWebSocketServer] Frame processing skipped - connection not upgraded")
             #if canImport(os)
             logger.debug("⏸️ Frame processing skipped - connection not upgraded: \(connectionId.uuidString)")
             #endif
@@ -576,23 +560,18 @@ public final class LanWebSocketServer {
         }
         // Check if connection still exists (might have been closed)
         guard connections[connectionId] != nil else {
-            logger.info("⏸️ [LanWebSocketServer] Frame processing skipped - connection already closed")
+            logger.debug("⏸️ [LanWebSocketServer] Frame processing skipped - connection already closed")
             return
         }
         while true {
             // Check if connection still exists before each iteration (might be closed by close frame)
             guard connections[connectionId] != nil else {
-                logger.info("⏸️ [LanWebSocketServer] Frame processing stopped - connection closed")
+                logger.debug("⏸️ [LanWebSocketServer] Frame processing stopped - connection closed")
                 return
             }
             // Work on a snapshot to avoid races with concurrent appends
             let bufferSnapshot = context.snapshotBuffer()
-            logger.info("🔍 [LanWebSocketServer] Buffer snapshot size: \(bufferSnapshot.count) bytes")
             guard bufferSnapshot.count >= 2 else {
-                logger.info("⏸️ [LanWebSocketServer] Frame processing paused - buffer too small (\(bufferSnapshot.count) bytes)")
-                #if canImport(os)
-                logger.debug("⏸️ Frame processing paused - buffer too small (\(bufferSnapshot.count) bytes)")
-                #endif
                 return
             }
             
@@ -606,33 +585,31 @@ public final class LanWebSocketServer {
             var offset = 2
             var payloadLength = Int(secondByte & 0x7F)
             
-            logger.info("🔍 [LanWebSocketServer] Frame header: firstByte=0x\(String(firstByte, radix: 16)), secondByte=0x\(String(secondByte, radix: 16)), isFinal=\(isFinal), opcode=\(opcode), isMasked=\(isMasked), initialPayloadLength=\(payloadLength)")
-            
             if payloadLength == 126 {
                 guard bufferSnapshot.count >= offset + 2 else {
-                    logger.info("⏸️ [LanWebSocketServer] Need 2 more bytes for extended length (have \(bufferSnapshot.count), need \(offset + 2))")
+                    logger.debug("⏸️ [LanWebSocketServer] Need 2 more bytes for extended length (have \(bufferSnapshot.count), need \(offset + 2))")
                     return
                 }
                 let lengthBytes = bufferSnapshot.subdata(in: offset..<offset + 2)
                 payloadLength = Int(readUInt16(from: lengthBytes, offset: 0))
                 offset += 2
-                logger.info("🔍 [LanWebSocketServer] Extended length (126): payloadLength=\(payloadLength)")
+                logger.debug("🔍 [LanWebSocketServer] Extended length (126): payloadLength=\(payloadLength)")
             } else if payloadLength == 127 {
                 guard bufferSnapshot.count >= offset + 8 else {
-                    logger.info("⏸️ [LanWebSocketServer] Need 8 more bytes for extended length (have \(bufferSnapshot.count), need \(offset + 8))")
+                    logger.debug("⏸️ [LanWebSocketServer] Need 8 more bytes for extended length (have \(bufferSnapshot.count), need \(offset + 8))")
                     return
                 }
                 let lengthBytes = bufferSnapshot.subdata(in: offset..<offset + 8)
                 payloadLength = Int(readUInt64(from: lengthBytes, offset: 0))
                 offset += 8
-                logger.info("🔍 [LanWebSocketServer] Extended length (127): payloadLength=\(payloadLength)")
+                logger.debug("🔍 [LanWebSocketServer] Extended length (127): payloadLength=\(payloadLength)")
             }
             
             let maskLength = isMasked ? 4 : 0
             let requiredLength = offset + maskLength + payloadLength
-            logger.info("🔍 [LanWebSocketServer] Required length: offset=\(offset), maskLength=\(maskLength), payloadLength=\(payloadLength), required=\(requiredLength), buffer=\(bufferSnapshot.count)")
+
             guard bufferSnapshot.count >= requiredLength else {
-                logger.info("⏸️ [LanWebSocketServer] Need \(requiredLength - bufferSnapshot.count) more bytes (have \(bufferSnapshot.count), need \(requiredLength))")
+                logger.debug("⏸️ [LanWebSocketServer] Need \(requiredLength - bufferSnapshot.count) more bytes (have \(bufferSnapshot.count), need \(requiredLength))")
                 return
             }
             
@@ -648,19 +625,15 @@ public final class LanWebSocketServer {
             
             // Remove processed frame from buffer
             context.dropPrefix(requiredLength)
-            logger.info("📦 [LanWebSocketServer] FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes, masked=\(isMasked), isFinal=\(isFinal), connection=\(connectionId.uuidString.prefix(8))")
-            #if canImport(os)
-            logger.info("📦 FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes, masked=\(isMasked), connection=\(connectionId.uuidString.prefix(8))")
-            #endif
+        #if canImport(os)
+        logger.debug("📦 [LanWebSocketServer] FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes, masked=\(isMasked), isFinal=\(isFinal), connection=\(connectionId.uuidString.prefix(8))")
+        #endif
             
             // Call handleFrame (doesn't throw, so no error handling needed)
-            logger.info("🔵  About to call handleFrame")
             handleFrame(opcode: opcode, isFinal: isFinal, payload: payload, connectionId: connectionId, context: context)
-            logger.info("🔵  Returned from handleFrame")
-            
             // If this was a close frame, mark as pending close but continue processing remaining data
             if opcode == 0x8 {
-                logger.info("🔌 [LanWebSocketServer] Close frame received, marking connection for close after data is depleted")
+                logger.debug("🔌 [LanWebSocketServer] Close frame received, marking connection for close after data is depleted")
                 context.pendingClose = true
                 // Don't return - continue processing any remaining frames in the buffer
             }
@@ -670,11 +643,11 @@ public final class LanWebSocketServer {
                 let remainingBuffer = context.snapshotBuffer()
                 if remainingBuffer.count < 2 {
                     // Buffer is empty or too small for another frame - safe to close
-                    logger.info("🔌 [LanWebSocketServer] All data depleted, closing connection as requested by peer")
+                    logger.debug("🔌 [LanWebSocketServer] All data depleted, closing connection as requested by peer")
                     closeConnection(connectionId)
                     return
                 } else {
-                    logger.info("🔌 [LanWebSocketServer] Close frame received but \(remainingBuffer.count) bytes still in buffer, continuing to process")
+                    logger.debug("🔌 [LanWebSocketServer] Close frame received but \(remainingBuffer.count) bytes still in buffer, continuing to process")
                     // Continue processing remaining frames
                 }
             }
@@ -682,7 +655,7 @@ public final class LanWebSocketServer {
     }
 
     private func handleFrame(opcode: UInt8, isFinal: Bool, payload: Data, connectionId: UUID, context: ConnectionContext) {
-        logger.info("🎯 [LanWebSocketServer] handleFrame called: opcode=\(opcode), isFinal=\(isFinal), payload=\(payload.count) bytes")
+
         guard isFinal else {
             logger.warning("⚠️ [LanWebSocketServer] Fragmented frames are not supported")
             #if canImport(os)
@@ -694,7 +667,7 @@ public final class LanWebSocketServer {
         case 0x1, 0x2:
             // Skip empty payloads (could be ping/pong or malformed frames)
             guard !payload.isEmpty else {
-                logger.info("⏭️ [LanWebSocketServer] Skipping empty data frame from \(connectionId.uuidString.prefix(8))")
+                logger.debug("⏭️ [LanWebSocketServer] Skipping empty data frame from \(connectionId.uuidString.prefix(8))")
                 #if canImport(os)
                 logger.info("⏭️ Skipping empty data frame")
                 #endif
@@ -702,27 +675,24 @@ public final class LanWebSocketServer {
             }
             // Skip frames that are too small to contain a valid frame header (4 bytes minimum for TransportFrameCodec)
             guard payload.count >= 4 else {
-                logger.info("⏭️ [LanWebSocketServer] Skipping truncated frame from \(connectionId.uuidString.prefix(8)) (\(payload.count) bytes < 4)")
+                logger.debug("⏭️ [LanWebSocketServer] Skipping truncated frame from \(connectionId.uuidString.prefix(8)) (\(payload.count) bytes < 4)")
                 #if canImport(os)
-                logger.info("⏭️ Skipping truncated frame (\(payload.count) bytes < 4)")
+                logger.debug("⏭️ Skipping truncated frame (\(payload.count) bytes < 4)")
                 #endif
                 return
             }
-            logger.info("📨 [LanWebSocketServer] FRAME HANDLED: data frame opcode=\(opcode), \(payload.count) bytes")
-            #if canImport(os)
-            logger.info("📨 FRAME HANDLED: data frame opcode=\(opcode), \(payload.count) bytes from \(connectionId.uuidString.prefix(8))")
-            #endif
+
             handleReceivedData(payload, from: connectionId)
         case 0x8:
-            logger.info("🔌  Close frame received from \(connectionId.uuidString)")
+            logger.debug("🔌  Close frame received from \(connectionId.uuidString)")
             // Don't close immediately - mark as pending close and let processFrameBuffer handle it
             // after all data frames are processed
             if let context = connections[connectionId] {
                 context.pendingClose = true
-                logger.info("🔌 [LanWebSocketServer] Marked connection for close, will close after data is depleted")
+                logger.debug("🔌 [LanWebSocketServer] Marked connection for close, will close after data is depleted")
             } else {
                 // Connection already closed, nothing to do
-                logger.info("🔌 [LanWebSocketServer] Close frame received but connection already closed")
+                logger.debug("🔌 [LanWebSocketServer] Close frame received but connection already closed")
             }
         case 0x9:
             sendFrame(payload: payload, opcode: 0xA, context: context) { _ in }
@@ -787,10 +757,7 @@ public final class LanWebSocketServer {
     }
     
     private func handleReceivedData(_ data: Data, from connectionId: UUID) {
-        logger.info("📨 [LanWebSocketServer] CLIPBOARD DATA RECEIVED: \(data.count.formattedAsKB) from \(connectionId.uuidString.prefix(8))")
-        #if canImport(os)
-        logger.info("📨 CLIPBOARD DATA RECEIVED: \(data.count.formattedAsKB) from connection \(connectionId.uuidString.prefix(8))")
-        #endif
+
         
         // Skip empty data (should have been caught in handleFrame, but double-check here)
         guard !data.isEmpty else {
@@ -805,64 +772,44 @@ public final class LanWebSocketServer {
         }
         
         // Simple test log to verify execution continues
-        logger.info("🔍 TEST: After CLIPBOARD DATA RECEIVED log")
+
         
         // Decode the frame-encoded payload (Android sends: 4-byte length + JSON)
         // Try to decode as TransportFrameCodec frame first (for clipboard messages)
-        logger.info("🔍  Attempting to decode frame: \(data.count) bytes")
+
         do {
             let envelope = try frameCodec.decode(data)
-            #if canImport(os)
-            logger.info("✅ CLIPBOARD FRAME DECODED: envelope type=\(envelope.type.rawValue)")
-            #endif
-            logger.info("✅  CLIPBOARD FRAME DECODED: type=\(envelope.type.rawValue)")
+
             
             // Simple test log
-            logger.info("🔍 TEST2: After CLIPBOARD FRAME DECODED")
+
             
             // Handle based on envelope type
-            logger.info("🔍  Switching on envelope type")
+
             switch envelope.type {
             case .error:
                 // Error messages from server - log and ignore
                 logger.warning("⚠️ [LanWebSocketServer] Received error message from server (id: \(envelope.id))")
                 return
             case .clipboard:
-                logger.info("✅  Case .clipboard matched")
+
                 
                 // Check target field - only process if target is nil/empty OR matches local device ID
                 // Compare case-insensitively since UUIDs can be in different cases
                 let target = envelope.payload.target
                 if let target = target, !target.isEmpty {
                     if let localId = localDeviceId, target.lowercased() != localId.lowercased() {
-                        logger.info("⏭️ [LanWebSocketServer] Skipping message - target (\(target)) does not match local device ID (\(localId))")
-                        #if canImport(os)
-                        logger.info("⏭️ Skipping message - target (\(target)) does not match local device ID (\(localId))")
-                        #endif
+                        logger.debug("⏭️ [LanWebSocketServer] Skipping message - target (\(target)) does not match local device ID (\(localId))")
                         return  // Skip this message - it's not for us
                     }
                 }
                 
                 // Forward the original frame-encoded data to the delegate
                 // (it will decode it again in IncomingClipboardHandler)
-                #if canImport(os)
-                logger.info("✅ CLIPBOARD MESSAGE RECEIVED: forwarding to delegate, \(data.count.formattedAsKB)")
-                #endif
-                logger.info("✅  CLIPBOARD MESSAGE RECEIVED: \(data.count.formattedAsKB), forwarding to delegate")
-                logger.info("🔍  About to call delegate?.server()")
-                if let delegate = delegate {
-                    logger.info("✅  Delegate exists: \(type(of: delegate))")
-                    delegate.server(self, didReceiveClipboardData: data, from: connectionId)
-                    logger.info("✅  delegate.server() called")
-                } else {
-                    logger.info("❌  Delegate is nil!")
-                }
+                delegate?.server(self, didReceiveClipboardData: data, from: connectionId)
                 return
             case .control:
-                #if canImport(os)
-                logger.info("📋 CLIPBOARD CONTROL MESSAGE: ignoring for now")
-                #endif
-                logger.info("📋  CLIPBOARD CONTROL MESSAGE: ignoring")
+                logger.debug("📋 CLIPBOARD CONTROL MESSAGE: ignoring")
                 return
             }
         } catch let decodingError as DecodingError {

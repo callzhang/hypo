@@ -21,24 +21,23 @@ require(projectVersion.isNotEmpty()) {
     "VERSION file is empty. Set a valid version (e.g., 1.0.5)."
 }
 
-// Parse version to get versionCode (e.g., 1.0.5 -> 5)
+// Parse version to get versionCode (e.g., 1.1.0 -> 10100)
 // versionCode must be >= 1 for Android apps
 val versionParts = projectVersion.split(".")
 require(versionParts.size >= 3) {
     "Invalid version format: '$projectVersion'. Expected format: MAJOR.MINOR.PATCH (e.g., 1.0.5)."
 }
 
-val patchVersionStr = versionParts[2]
-val patchVersion = patchVersionStr.toIntOrNull()
-require(patchVersion != null) {
-    "Invalid patch version: '$patchVersionStr'. Patch version must be a number."
-}
+val major = versionParts[0].toIntOrNull() ?: 0
+val minor = versionParts[1].toIntOrNull() ?: 0
+val patch = versionParts[2].toIntOrNull() ?: 0
 
-// Validate versionCode >= 1 (Android requirement)
-// After require check, patchVersion is guaranteed non-null
-val versionCodeValue = patchVersion!!
+// Robust versionCode calculation: MAJOR * 10000 + MINOR * 100 + PATCH
+// This allows for up to 99 minors and 99 patches per minor.
+// Example: 1.0.5 -> 10005, 1.1.0 -> 10100, 2.0.0 -> 20000
+val versionCodeValue = major * 10000 + minor * 100 + patch
 require(versionCodeValue >= 1) {
-    "Invalid versionCode: patch version is $versionCodeValue. Android versionCode must be >= 1. Use a version with patch >= 1 (e.g., 1.0.1 instead of 1.0.0)."
+    "Invalid versionCode: $versionCodeValue. Android versionCode must be >= 1."
 }
 
 android {

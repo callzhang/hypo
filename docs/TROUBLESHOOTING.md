@@ -57,13 +57,13 @@ Hypo uses `os_log` (via `HypoLogger`) for system-integrated logging on macOS. Al
 
 ```bash
 # Real-time streaming (recommended)
-log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug --style compact
+log stream --predicate 'subsystem == "com.hypo.clipboard"' --info --debug --style compact
 
 # View recent logs
-log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m --level debug --style compact
+log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m --info --debug --style compact
 
 # Find message by content
-log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m --level debug | grep -F "content: Case 1:"
+log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m --info --debug | grep -F "content: Case 1:"
 
 # Process-based fallback
 log show --predicate 'process == "HypoMenuBar"' --last 5m --style compact
@@ -72,7 +72,7 @@ log show --predicate 'process == "HypoMenuBar"' --last 5m --style compact
 log show --predicate 'subsystem == "com.hypo.clipboard" && category == "LanWebSocketServer"' --last 1h
 
 # View only errors (quick error check)
-log stream --predicate 'subsystem == "com.hypo.clipboard"' --level error --style compact
+log stream --predicate 'subsystem == "com.hypo.clipboard" && eventType == "errorEvent"' --style compact
 ```
 
 #### Method 3: Filter by Process
@@ -82,7 +82,7 @@ log stream --predicate 'subsystem == "com.hypo.clipboard"' --level error --style
 ps aux | grep HypoMenuBar
 
 # Stream logs for that process
-log stream --predicate 'processID == <PID>' --level debug
+log stream --predicate 'processID == <PID>' --info --debug
 ```
 
 ### Android Logs
@@ -180,7 +180,7 @@ log show --predicate 'subsystem == "com.hypo.clipboard" && composedMessage CONTA
 log show --predicate 'subsystem == "com.hypo.clipboard" && (eventType == "errorEvent" || composedMessage CONTAINS "error")' --last 1h
 
 # View WebSocket server activity
-log stream --predicate 'subsystem == "com.hypo.clipboard" && category == "LanWebSocketServer"' --level debug
+log stream --predicate 'subsystem == "com.hypo.clipboard" && category == "LanWebSocketServer"' --info --debug
 
 # Export logs to file
 log show --predicate 'subsystem == "com.hypo.clipboard"' --last 1h > hypo_logs.txt
@@ -935,7 +935,7 @@ python3 scripts/simulate-android-relay.py --text "Test message" --target-device-
 adb shell input text "Test from Android"
 
 # Monitor logs: See [Android Logs](#android-logs) section above, then filter for "Clipboard|Sync|transport"
-log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep -E "Received clipboard|content:"
+log stream --predicate 'subsystem == "com.hypo.clipboard"' --info --debug | grep -E "Received clipboard|content:"
 ```
 
 **macOS → Android**:
@@ -963,7 +963,7 @@ adb -s $device_id shell am broadcast -a android.intent.action.CLIPBOARD_CHANGED
 python3 scripts/simulate-android-copy.py --text "Test from script" --target-device-id <macos_device_id>
 
 # Monitor macOS logs
-log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug | grep -E "Received clipboard|content:"
+log stream --predicate 'subsystem == "com.hypo.clipboard"' --info --debug | grep -E "Received clipboard|content:"
 ```
 
 **Reading Clipboard via ADB**:
@@ -1217,7 +1217,7 @@ curl -s https://hypo.fly.dev/health | jq '.connected_devices'
 ### Key Files
 
 - **macOS crash reports**: `~/Library/Logs/DiagnosticReports/HypoMenuBar-*.ips`
-- **macOS unified logs**: `log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug`
+- **macOS unified logs**: `log stream --predicate 'subsystem == "com.hypo.clipboard"' --info --debug`
 - **Android logs**: See [Android Logs](#android-logs) section above (always filter MIUIInput)
 - **Pairing flow**: `macos/Sources/HypoApp/Services/TransportManager.swift`
 - **Sync flow**: `macos/Sources/HypoApp/Services/HistoryStore.swift`

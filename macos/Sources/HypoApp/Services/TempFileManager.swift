@@ -97,9 +97,7 @@ public final class TempFileManager {
     /// Cleanup all registered temp files.
     public func cleanupAll() {
         let filesToCleanup = Array(tempFiles)
-        #if canImport(os)
-        logger.info("🧹 Cleaning up \(filesToCleanup.count) temp files")
-        #endif
+
         for url in filesToCleanup {
             Task {
                 await cleanupFile(url)

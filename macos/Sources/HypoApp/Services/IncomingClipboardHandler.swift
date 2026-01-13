@@ -56,7 +56,8 @@ public final class IncomingClipboardHandler {
             let deviceId = envelope.payload.deviceId  // UUID string (pure UUID)
             let devicePlatform = envelope.payload.devicePlatform  // Platform string
             let deviceName = envelope.payload.deviceName
-            logger.info("📦 [IncomingClipboardHandler] Decoded envelope: deviceId=\(deviceId.prefix(8)), deviceName=\(deviceName ?? "nil"), platform=\(devicePlatform)")
+            let platformString = devicePlatform ?? "unknown"
+            logger.info("📦 [IncomingClipboardHandler] Decoded envelope: deviceId=\(deviceId.prefix(8)), deviceName=\(deviceName ?? "nil"), platform=\(platformString)")
             
             // Parse platform string to DevicePlatform enum
             let platform: DevicePlatform? = devicePlatform.flatMap { DevicePlatform(rawValue: $0) }
@@ -336,4 +337,3 @@ public final class IncomingClipboardHandler {
         }
     }
 }
-

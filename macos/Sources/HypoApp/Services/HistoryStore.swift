@@ -19,7 +19,7 @@ import UserNotifications
 
 // UserDefaults is thread-safe for reading/writing, safe to mark as Sendable
 // Sendable conformance for SDK type – UserDefaults is thread-safe for reads/writes
-extension UserDefaults: @unchecked Sendable {}
+extension UserDefaults: @unchecked @retroactive Sendable {}
 
 public actor HistoryStore {
     private let logger = HypoLogger(category: "HistoryStore")
@@ -402,14 +402,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     }
     
     private func syncToPairedDevices(_ entry: ClipboardEntry) async {
-#if canImport(os)
-        logger.debug("🔄 [HistoryStore] syncToPairedDevices: \(entry.previewText.prefix(30)), devices=\(transportManager?.pairedDevices.count ?? 0)")
-        logger.debug("🔍 [DEBUG] syncToPairedDevices - entry type: \(entry.content.title)")
-#endif
+
         guard transportManager != nil else {
-#if canImport(os)
-            logger.error("🔍 [DEBUG] syncToPairedDevices - transportManager is nil!")
-#endif
 #if canImport(os)
             logger.warning("⏭️ [HistoryStore] Skipping sync - transportManager is nil")
 #endif
@@ -726,23 +720,11 @@ public final class ClipboardHistoryViewModel: ObservableObject {
                 
                 // Try to send message to this specific device
                 // Note: Each device is processed independently - failure for one doesn't affect others
-#if canImport(os)
-            logger.info("🔄 [HistoryStore] Processing message for device \(message.targetDeviceId.prefix(8))")
-            logger.info("🔍 [DEBUG] Processing message - type: \(message.entry.content.title), target: \(message.targetDeviceId.prefix(8)), queue size: \(syncMessageQueue.count)")
-#endif
                 let sendResult = await trySendMessage(message, transportManager: transportManager)
-#if canImport(os)
-            logger.info("🔍 [DEBUG] trySendMessage result: \(sendResult ? "SUCCESS" : "FAILED") for device \(message.targetDeviceId.prefix(8))")
-#endif
                 if sendResult {
-#if canImport(os)
-                    logger.debug("🔍 [DEBUG] Message sent successfully to device \(message.targetDeviceId.prefix(8))")
-#endif
                     // Success - message cleared from queue
                     successCount += 1
-#if canImport(os)
-                    logger.debug("✅ [HistoryStore] Sent to device \(message.targetDeviceId.prefix(8))")
-#endif
+
                     continue
                 } else {
                     // Failed - keep in queue for retry
@@ -813,9 +795,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         do {
         // Get sync engine with transport
         let transport = transportManager.loadTransport()
-#if canImport(os)
-        logger.debug("🔍 [DEBUG] trySendMessage - transport loaded, type: \(type(of: transport))")
-#endif
+
         let keyProvider = KeychainDeviceKeyProvider()
         let cryptoService = CryptoService()
         
@@ -834,41 +814,28 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         )
         
         // Ensure transport is connected
-#if canImport(os)
-        logger.debug("🔍 [DEBUG] trySendMessage - establishing connection...")
-#endif
+
         await syncEngine.establishConnection()
-#if canImport(os)
-        logger.debug("🔍 [DEBUG] trySendMessage - connection established, transmitting...")
-#endif
+
         
         // Attempt to send (best-effort - try regardless of device online status)
         let payloadSize = message.payload.data.count
         let contentType = message.payload.contentType.rawValue
 #if canImport(os)
-        logger.info("🔍 [DEBUG] trySendMessage - About to transmit: contentType=\(contentType), payloadSize=\(payloadSize.formattedAsKB), targetDeviceId=\(message.targetDeviceId.prefix(8))...")
+        logger.debug("📤 [HistoryStore] Sending \(contentType) (\(payloadSize.formattedAsKB)) to \(message.targetDeviceId.prefix(8))")
 #endif
         try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
         
-#if canImport(os)
-        logger.info("✅ [HistoryStore] Sent to device \(message.targetDeviceId.prefix(8))")
-        logger.info("🔍 [DEBUG] trySendMessage - transmit completed successfully: contentType=\(contentType), payloadSize=\(payloadSize.formattedAsKB)")
-#endif
+
             // Update lastSeen timestamp after successful sync
             if let device = transportManager.pairedDevices.first(where: { $0.id == message.targetDeviceId }) {
-                await transportManager.updatePairedDeviceLastSeen(device.id, lastSeen: Date())
+                transportManager.updatePairedDeviceLastSeen(device.id, lastSeen: Date())
             }
             
             return true // Success
             } catch {
 #if canImport(os)
             logger.error("❌ [HistoryStore] Failed to send queued message to \(message.targetDeviceId): \(error.localizedDescription)")
-            logger.error("🔍 [DEBUG] trySendMessage - error type: \(String(describing: type(of: error)))")
-            logger.error("🔍 [DEBUG] trySendMessage - error details: \(error)")
-            if let nsError = error as NSError? {
-                logger.error("❌ [HistoryStore] NSError domain: \(nsError.domain), code: \(nsError.code)")
-                logger.error("🔍 [DEBUG] trySendMessage - NSError userInfo: \(nsError.userInfo)")
-            }
 #endif
             return false // Failed, will retry
         }
@@ -1170,4 +1137,3 @@ public extension ClipboardHistoryViewModel {
 }
 
 #endif
-

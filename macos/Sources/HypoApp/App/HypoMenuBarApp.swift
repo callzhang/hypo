@@ -787,17 +787,7 @@ public struct HypoMenuBarApp: App {
     }
 
     public var body: some Scene {
-        logger.info("📐 [HypoMenuBarApp] body property accessed - creating MenuBarExtra scene")
-        let currentPolicy = NSApplication.shared.activationPolicy()
-        logger.info("📐 [HypoMenuBarApp] NSApp.activationPolicy() = \(currentPolicy.rawValue)")
-        logger.info("📐 [HypoMenuBarApp] NSApp.isActive = \(NSApplication.shared.isActive)")
-        
-        // Log warning if activation policy is incorrect (should be set in applicationDidFinishLaunching)
-        if currentPolicy != .accessory {
-            logger.warning("⚠️ [HypoMenuBarApp] Activation policy is not .accessory (\(currentPolicy.rawValue)) - should be set in applicationDidFinishLaunching")
-        }
-        
-        return MenuBarExtra(content: {
+        MenuBarExtra(content: {
             MenuBarContentView(viewModel: viewModel, applySwiftUIBackground: false)
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)

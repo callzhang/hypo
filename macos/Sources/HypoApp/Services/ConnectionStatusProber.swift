@@ -71,18 +71,12 @@ public final class ConnectionStatusProber {
             }
         }
         
-        logger.info("🔍", "Started - event-driven only (no periodic polling)")
-        
         // Initial probe on launch (immediate, no delay)
         Task { @MainActor in
-            logger.info("🚀", "Starting initial probe task (immediate)")
             await probeConnections()
-            logger.info("✅", "Initial probe task completed")
         }
         
-        #if canImport(os)
-        logger.info("Connection status prober started (event-driven)")
-        #endif
+
     }
     
     /// Stop connection status checking
@@ -229,14 +223,8 @@ public final class ConnectionStatusProber {
                 let cloudTransport = transportProvider.getCloudTransport()
                 if cloudTransport.isConnected() {
                     let connectedPeers = await cloudTransport.queryConnectedPeers()
-                    // Format device IDs with names for logging
-                    let devicesWithNames = connectedPeers.map { peer in
-                        if let name = peer.name {
-                            return "\(peer.deviceId) (\(name))"
-                        }
-                        return peer.deviceId
-                    }
-                    logger.info("☁️ [ConnectionStatusProber] Cloud query returned \(connectedPeers.count) connected devices: \(devicesWithNames)")
+                    
+
                     cloudConnectedDeviceIds = Set(connectedPeers.map { $0.deviceId })
                 }
             }
@@ -326,7 +314,7 @@ public final class ConnectionStatusProber {
                 }) {
                     // Update device with discovery info
                     let updatedDevice = device.updating(from: peer)
-                    await transportManager.registerPairedDevice(updatedDevice)
+                    transportManager.registerPairedDevice(updatedDevice)
                 }
             }
             
@@ -379,7 +367,7 @@ public final class ConnectionStatusProber {
             // Only update if status changed
             if device.isOnline != isOnline {
                 logger.info("update", "🔄 [ConnectionStatusProber] Updating device \(device.name) status: \(device.isOnline) → \(isOnline) (connection=\(hasActiveConnection), discovered=\(isDiscovered), cloudConnected=\(isConnectedViaCloud), transport=\(deviceTransport?.rawValue ?? "none"), connectionState=\(currentConnectionState))\n")
-                await transportManager.updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
+                transportManager.updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
             }
         }
         

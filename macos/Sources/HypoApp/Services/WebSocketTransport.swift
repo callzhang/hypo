@@ -302,10 +302,10 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         let maxTimeout: TimeInterval = 600.0 // 10 minutes (connection timeout)
         let messageExpiration: TimeInterval = 300.0 // 5 minutes (strict expiration)
         
-        logger.info("🔄 [WebSocketTransport] processMessageQueue started: queue=\(messageQueue.count)")
+
         
         while !messageQueue.isEmpty {
-            let queueSizeBefore = messageQueue.count
+            _ = messageQueue.count
             var queuedMessage = messageQueue.removeFirst()
             
             // Check Message Expiration (5 min strict)
@@ -316,8 +316,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 continue
             }
             
-            logger.info("📤 [WebSocketTransport] Processing message from queue: id=\(queuedMessage.envelope.id.uuidString.prefix(8)), type=\(queuedMessage.envelope.payload.contentType), size=\(queuedMessage.data.count.formattedAsKB), retry=\(queuedMessage.retryCount), queue remaining=\(queueSizeBefore - 1)")
-            
+
             // Check Connection Timeout (10 minutes from queue time - fallback)
             if timeInQueue > maxTimeout {
                 logger.info("❌ [WebSocketTransport] Message timeout after \(queuedMessage.retryCount) retries (10 min elapsed), dropping")
@@ -335,10 +334,10 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             }
             
             // Ensure connection before each attempt
-            logger.debug("🔍 [WebSocketTransport] Ensuring connection before send attempt \(queuedMessage.retryCount + 1)")
+
             do {
                 try await ensureConnected()
-                logger.debug("✅ [WebSocketTransport] Connection ensured successfully")
+
                 
                 // CRITICAL FIX: For large messages (>100KB), add a delay after connection
                 // and verify readiness with ping/pong to ensure the WebSocket handshake is
@@ -355,7 +354,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                     // - 400KB: ~1000ms (1 second)
                     // - 500KB+: ~1500ms (1.5 seconds)
                     let delayMs = min(1500, max(500, Int(messageSize / 400))) // 500-1500ms range
-                    logger.debug("⏳ [WebSocketTransport] Large message (\(messageSize.formattedAsKB)): waiting \(delayMs)ms after connection to ensure handshake completes")
                     try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
                     
                     // Additional safety: Send ping and wait for pong to confirm connection is ready
@@ -371,7 +369,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                         continue
                     }
                     
-                    logger.debug("⏳ [WebSocketTransport] Sending ping to verify connection is ready...")
+
                     do {
                         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                             pingTask.sendPing { error in
@@ -382,7 +380,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                                 }
                             }
                         }
-                        logger.debug("✓ [WebSocketTransport] Pong received, connection is ready for large message")
+
                     } catch {
                         logger.warning("⚠️ [WebSocketTransport] Ping failed, connection may not be ready: \(error.localizedDescription)")
                         // Continue anyway - the delay should be sufficient
@@ -446,11 +444,11 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 // NEVER mark as successful immediately - wait for server confirmation (success or error)
                 let messageId = queuedMessage.envelope.id
                 let frameSize = queuedMessage.data.count
-                let contentType = queuedMessage.envelope.payload.contentType
+                // let contentType = queuedMessage.envelope.payload.contentType
                 
                 // Track all messages as in-flight until we get server feedback
                 inFlightMessages[messageId] = queuedMessage
-                self.logger.debug("📤 [WebSocketTransport] Message in-flight: type=\(contentType), size=\(frameSize.formattedAsKB), id=\(messageId.uuidString.prefix(8))")
+
                 
                 // Set up timeout to handle cases where server doesn't respond
                 // If no error response is received within timeout, check connection state:
@@ -478,7 +476,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                         
                         if isConnected {
                             // Connection is valid - assume message was sent successfully
-                            strongSelf.logger.debug("✅ [WebSocketTransport] Message confirmed (timeout, connection valid): id=\(messageId.uuidString.prefix(8))")
+
                             Task {
                                 _ = await strongSelf.pendingRoundTrips.remove(id: messageId)
                             }
@@ -509,7 +507,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 // This is especially important for large payloads (images/files) that may take time to send
                 if isCancellationError || isSocketNotConnected {
                     let errorType = isCancellationError ? "cancellation" : "socket closure"
-                    self.logger.info("⚠️ [WebSocketTransport] \(errorType.capitalized) during send (likely during large payload transmission), requeuing message")
+                    self.logger.debug("⚠️ [WebSocketTransport] \(errorType.capitalized) during send (likely during large payload transmission), requeuing message")
                     // Don't increment retry count for transient errors - this is expected for large payloads
                     messageQueue.append(queuedMessage)
                     
@@ -541,7 +539,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                     if queuedMessage.retryCount <= maxRetries {
                         messageQueue.append(queuedMessage)
                     } else {
-                        logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
+                        logger.debug("❌ [WebSocketTransport] Max retries reached, dropping message")
                         _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                     }
                 }

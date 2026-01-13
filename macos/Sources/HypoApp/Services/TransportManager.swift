@@ -155,7 +155,7 @@ public final class TransportManager: ObservableObject {
             // Wire handler callbacks for TransportManager internal needs
             self.incomingHandler?.onClipboardReceived = { [weak self] deviceId, timestamp in
                 Task { @MainActor in
-                    await self?.updatePairedDeviceLastSeen(deviceId, lastSeen: timestamp)
+                    self?.updatePairedDeviceLastSeen(deviceId, lastSeen: timestamp)
                 }
             }
 
@@ -167,6 +167,9 @@ public final class TransportManager: ObservableObject {
         } else {
             self.incomingHandler = nil
         }
+
+        // Load persisted paired devices (including migration from legacy key)
+        loadPairedDevices()
 
         // Allow outbound LAN client dials (in DefaultTransportProvider) to reuse discovery/cache results
         if let defaultProvider = provider as? DefaultTransportProvider {
@@ -308,43 +311,19 @@ public final class TransportManager: ObservableObject {
     }
 
     private func loadPairedDevices() {
-        var newDevices: [PairedDevice] = []
-        var oldDevices: [PairedDevice] = []
-
         if let data = defaults.data(forKey: "transport_paired_devices"),
            let devices = try? JSONDecoder().decode([PairedDevice].self, from: data) {
-            newDevices = devices
-        }
-
-        if let data = defaults.data(forKey: "paired_devices"),
-           let devices = try? JSONDecoder().decode([PairedDevice].self, from: data) {
-            oldDevices = devices
-        }
-
-        var merged = newDevices
-        if !oldDevices.isEmpty {
-            var existingIds = Set(merged.map { $0.id.lowercased() })
-            for device in oldDevices {
-                let key = device.id.lowercased()
-                if !existingIds.contains(key) {
-                    merged.append(device)
-                    existingIds.insert(key)
-                }
-            }
-        }
-
-        if merged.isEmpty {
-            return
-        }
-
-        let uniqueDevices = Dictionary(grouping: merged, by: { $0.id })
+            let uniqueDevices = Dictionary(grouping: devices, by: { $0.id })
             .compactMap { $0.value.first }
             .sorted { $0.lastSeen > $1.lastSeen }
 
-        pairedDevices = uniqueDevices
+            pairedDevices = uniqueDevices
+        } else {
+            pairedDevices = []
+        }
+
         updateNameCache()
-        persistPairedDevices()
-        logger.info("🔄 [TransportManager] Loaded \(pairedDevices.count) paired devices (merged: new=\(newDevices.count), old=\(oldDevices.count))")
+        logger.info("🔄 [TransportManager] Loaded \(pairedDevices.count) paired devices")
     }
 
     private func persistPairedDevices() {

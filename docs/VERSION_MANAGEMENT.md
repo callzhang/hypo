@@ -51,8 +51,11 @@ Examples: `1.0.5`, `1.1.0`, `2.0.0`
 
 ## Build Number Derivation
 
-- **Android**: `versionCode` is derived from the patch version (e.g., `1.0.5` → `5`)
-- **macOS**: `CFBundleVersion` is derived from the patch version (e.g., `1.0.5` → `5`)
+To ensure consistency and allow for versions with patch 0 (e.g., `1.1.0`), build numbers are derived using the formula:
+`MAJOR * 10000 + MINOR * 100 + PATCH`
+
+- **Android**: `versionCode` is derived from this formula (e.g., `1.0.5` → `10005`, `1.1.0` → `10100`)
+- **macOS**: `CFBundleVersion` is derived from this formula (e.g., `1.0.5` → `10005`, `1.1.0` → `10100`)
 
 ## Release Process
 

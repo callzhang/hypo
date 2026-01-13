@@ -370,21 +370,17 @@ public final actor SyncEngine {
         } else {
             // Normal encryption mode
             let key = try await keyProvider.key(for: targetDeviceId)
-            let keyData = key.withUnsafeBytes { Data($0) }
-            logger.debug("🔒 [SyncEngine] Key loaded for encryption: targetDeviceId=\(targetDeviceId), keySize=\(keyData.count) bytes")
-            logger.debug("   Key hex (first 16): \(keyData.prefix(16).map { String(format: "%02x", $0) }.joined())")
-            
+
             // Use entry.deviceId as AAD (sender's device ID) so it matches what Android expects
             // Android decrypts using envelope.payload.deviceId as AAD, so they must match
             // deviceId is already normalized to lowercase in ClipboardEntry.init
             aad = Data(entry.deviceId.utf8)
-            logger.debug("🔒 [SyncEngine] Encrypting: deviceId=\(entry.deviceId), targetDeviceId=\(targetDeviceId), aad=\(entry.deviceId) (\(aad.count) bytes)")
-            logger.debug("   AAD hex: \(aad.map { String(format: "%02x", $0) }.joined())")
+
             let sealed = try await cryptoService.encrypt(plaintext: plaintext, key: key, aad: aad)
             ciphertext = sealed.ciphertext
             nonce = sealed.nonce
             tag = sealed.tag
-            logger.debug("🔒 [SyncEngine] Encrypted: \(ciphertext.count.formattedAsKB)")
+
         }
 
         // Create one envelope - DualSyncTransport will handle creating separate envelopes with unique nonces if needed
@@ -401,7 +397,7 @@ public final actor SyncEngine {
             )
         )
         
-        logger.debug("📦 [SyncEngine] Envelope ready: \(envelope.payload.ciphertext.count.formattedAsKB)")
+
         
         try await transport.send(envelope)
     }
@@ -423,23 +419,7 @@ public final actor SyncEngine {
         } else {
             let keyProvider = KeychainDeviceKeyProvider()
             let key = try await keyProvider.key(for: senderId)
-            let keyData = key.withUnsafeBytes { Data($0) }
-            logger.info("🔑 [SyncEngine] Loaded key for device \(senderId): \(keyData.count) bytes")
-            logger.info("   Key hex (first 16): \(keyData.prefix(16).map { String(format: "%02x", $0) }.joined())")
-            
             let aad = Data(senderId.utf8)
-            logger.info("🔑 [SyncEngine] AAD: \(senderId) (\(aad.count) bytes)")
-            logger.info("   AAD hex: \(aad.map { String(format: "%02x", $0) }.joined())")
-            
-            logger.info("🔑 [SyncEngine] Ciphertext: \(envelope.payload.ciphertext.count) bytes")
-            logger.info("   Ciphertext hex (first 16): \(envelope.payload.ciphertext.prefix(16).map { String(format: "%02x", $0) }.joined())")
-            
-            logger.info("🔑 [SyncEngine] Nonce: \(envelope.payload.encryption.nonce.count) bytes")
-            logger.info("   Nonce hex: \(envelope.payload.encryption.nonce.map { String(format: "%02x", $0) }.joined())")
-            
-            logger.info("🔑 [SyncEngine] Tag: \(envelope.payload.encryption.tag.count) bytes")
-            logger.info("   Tag hex: \(envelope.payload.encryption.tag.map { String(format: "%02x", $0) }.joined())")
-            
             do {
                 let encryptedData = try await cryptoService.decrypt(
                     ciphertext: envelope.payload.ciphertext,

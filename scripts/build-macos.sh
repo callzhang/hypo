@@ -19,10 +19,15 @@ else
     log_warn "VERSION file not found, using fallback: $APP_VERSION"
 fi
 
-# Parse version to get build number (e.g., 1.0.5 -> 5)
-BUILD_NUMBER=$(echo "$APP_VERSION" | awk -F. '{print $3}')
-if [ -z "$BUILD_NUMBER" ]; then
-    BUILD_NUMBER="6" # Fallback
+# Parse version to get build number (e.g., 1.1.0 -> 10100)
+# Formula: MAJOR * 10000 + MINOR * 100 + PATCH
+MAJOR=$(echo "$APP_VERSION" | cut -d. -f1)
+MINOR=$(echo "$APP_VERSION" | cut -d. -f2)
+PATCH=$(echo "$APP_VERSION" | cut -d. -f3)
+BUILD_NUMBER=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+
+if [ "$BUILD_NUMBER" -eq 0 ]; then
+    BUILD_NUMBER="10000" # Fallback if version parsing fails or is 0.0.0
 fi
 
 # Colors for output

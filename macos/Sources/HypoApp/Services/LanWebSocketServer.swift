@@ -212,6 +212,10 @@ public final class LanWebSocketServer {
         return active
     }
     
+    public func getConnection(for connectionId: UUID) -> NWConnection? {
+        return connections[connectionId]?.connection
+    }
+    
     public func sendPairingAck(_ ack: PairingAckMessage, to connectionId: UUID) throws {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase

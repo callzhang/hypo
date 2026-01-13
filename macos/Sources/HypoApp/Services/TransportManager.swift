@@ -63,6 +63,8 @@ public final class TransportManager {
     public var connectionStatePublisher: Published<ConnectionState>.Publisher { $connectionState }
 #endif
 
+    public var webSocketServerInstance: LanWebSocketServer { webSocketServer }
+
     #if canImport(AppKit)
     private var lifecycleObserver: ApplicationLifecycleObserver?
     #endif

@@ -1100,15 +1100,8 @@ struct MenuBarContentView: View {
             if historyOnly { selectedSection = .history }
             // Initialize color scheme from viewModel
             currentColorScheme = viewModel.appearancePreference.colorScheme
-            // Trigger connection status probe when window appears to refresh peer status
-            // Defer to avoid blocking paste operations - run after a short delay
-            if let transportManager = viewModel.transportManager {
-                Task {
-                    // Delay probe to avoid blocking paste operations (0.5s delay)
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    await transportManager.probeConnectionStatus()
-                }
-            }
+            // Note: Connection status probe runs continuously in the background via ConnectionStatusProber
+            // No need to trigger it here - the status is always up-to-date
             // Setup keyboard shortcut monitor for Cmd+1 through Cmd+9
             setupKeyboardShortcuts()
         }
@@ -2369,6 +2362,26 @@ private struct SettingsSectionView: View {
             }
         }
         
+        // Also check active WebSocket connections for LAN IP (in case device connected directly without Bonjour)
+        var activeConnectionHost: String? = nil
+        var activeConnectionPort: Int? = nil
+        if let webSocketServer = viewModel.transportManager?.webSocketServerInstance {
+            let activeConnections = webSocketServer.activeConnections()
+            for connectionId in activeConnections {
+                if let metadata = webSocketServer.connectionMetadata(for: connectionId),
+                   metadata.deviceId?.lowercased() == device.id.lowercased() {
+                    // Found active connection for this device - extract IP from NWConnection
+                    // Get the connection's remote endpoint from the WebSocket server
+                    if let connection = webSocketServer.getConnection(for: connectionId),
+                       case .hostPort(let host, let port) = connection.currentPath?.remoteEndpoint {
+                        activeConnectionHost = "\(host)"
+                        activeConnectionPort = Int("\(port)")
+                        break
+                    }
+                }
+            }
+        }
+        
         // Get device transport to determine if it's using cloud (for cloud-only case)
         var deviceTransport: TransportChannel? = nil
         if let transportManager = viewModel.transportManager {
@@ -2378,10 +2391,10 @@ private struct SettingsSectionView: View {
         }
         let isCloudTransport = deviceTransport == .cloud && isServerConnected
         
-        // Use current discovery info if available, otherwise fall back to stored values
-        // Priority: current discovery > stored bonjour info
-        let effectiveHost = discoveredPeerHost ?? device.bonjourHost
-        let effectivePort = discoveredPeerPort ?? device.bonjourPort
+        // Use current discovery info if available, otherwise fall back to stored values, then active connection
+        // Priority: current discovery > stored bonjour info > active connection metadata
+        let effectiveHost = discoveredPeerHost ?? device.bonjourHost ?? activeConnectionHost
+        let effectivePort = discoveredPeerPort ?? device.bonjourPort ?? activeConnectionPort
         let hasEffectiveLan = effectiveHost != nil && effectivePort != nil && effectiveHost != "unknown"
         
         if hasEffectiveLan {
@@ -2410,7 +2423,7 @@ private struct SettingsSectionView: View {
         // Fallback: device is online but we don't know how it's connected
         // This should rarely happen - only if:
         // 1. Device is online (has active connection or is discovered)
-        // 2. No LAN info (bonjourHost/bonjourPort not set and not currently discovered)
+        // 2. No LAN info (bonjourHost/bonjourPort not set and not currently discovered, and no active WebSocket connection)
         // 3. Server is not connected
         // 4. No cloud transport record
         // This could happen if there's a timing issue where the device status is updated before connection details

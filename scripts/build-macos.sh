@@ -397,20 +397,17 @@ else
     log_info "No existing instances to stop"
 fi
 
-# Move app to /Applications folder
+# Define destination path
 APPLICATIONS_APP="/Applications/$(basename "$APP_BUNDLE")"
-log_info "Moving app to /Applications folder..."
+
+# Remove existing app to ensure clean install
 if [ -d "$APPLICATIONS_APP" ]; then
-    log_info "Removing existing app from /Applications..."
     rm -rf "$APPLICATIONS_APP"
 fi
 
 # Copy app to /Applications (use cp -R to preserve permissions and extended attributes)
 if cp -R "$APP_BUNDLE" "/Applications/"; then
     log_success "App copied to /Applications: $APPLICATIONS_APP"
-    # Remove the local app bundle after successful copy (clean up)
-    log_info "Removing local app bundle: $APP_BUNDLE"
-    rm -rf "$APP_BUNDLE"
     # Update APP_BUNDLE to point to /Applications version for launching
     APP_BUNDLE="$APPLICATIONS_APP"
 else

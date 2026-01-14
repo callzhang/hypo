@@ -112,9 +112,12 @@ class ConnectionStatusProber @Inject constructor(
         }
         
         // Event-driven: trigger probe when LAN connections change (connect/disconnect)
+        // Add delay when LAN connects to give peer time to establish cloud connection too
         transportManager.setLanConnectionChangeListener {
-            Log.d(TAG, "🔌 LAN connection changed - triggering immediate probe")
+            Log.d(TAG, "🔌 LAN connection changed - triggering probe after 3 second delay")
             scope.launch {
+                // Give peer 3 seconds to complete cloud connection (typical startup race)
+                delay(3000)
                 probeConnections()
             }
         }

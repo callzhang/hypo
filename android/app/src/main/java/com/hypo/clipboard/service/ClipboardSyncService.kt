@@ -238,15 +238,17 @@ class ClipboardSyncService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        shutdownForRemoval("onTaskRemoved")
+        // Don't shutdown transport - foreground service continues running
+        Log.d(TAG, "📱 Task removed from recents - service continues in background")
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= TRIM_MEMORY_COMPLETE) {
-            shutdownForRemoval("onTrimMemory(level=$level)")
-        }
+        // Not all trim levels mean "app is going away" - most are hints to free caches
+        // Intentionally NOT stopping transport at any level
+        // Let Android kill the service if needed; TransportManager cleanup happens in onDestroy()
+        Log.d(TAG, "💾 Memory trim requested: level=$level")
     }
 
     private fun shutdownForRemoval(reason: String) {

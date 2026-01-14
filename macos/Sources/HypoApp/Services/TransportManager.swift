@@ -240,25 +240,24 @@ public final class TransportManager: ObservableObject {
     }
     // MARK: - Peer State Management
 
-    public func updateDeviceOnlineStatus(deviceId: String, isOnline: Bool) {
-        // Log the exact instance being updated to debug multiple instance issues
-        let instanceAddr = Unmanaged.passUnretained(self).toOpaque()
-        let isMain = Thread.isMainThread
-        logger.info("🔍 [TransportManager] updateDeviceOnlineStatus called on instance: \(instanceAddr) (MainThread: \(isMain))")
-        
+    public func updateDeviceOnlineStatus(deviceId: String, isOnline: Bool, skipLog: Bool = false) {
         guard let index = pairedDevices.firstIndex(where: { $0.id == deviceId }) else {
-            logger.warning("⚠️ [TransportManager] Attempted to update status for unknown device: \(deviceId) on instance \(instanceAddr)")
+            if !skipLog {
+                let instanceAddr = Unmanaged.passUnretained(self).toOpaque()
+                logger.warning("⚠️ [TransportManager] Attempted to update status for unknown device: \(deviceId) on instance \(instanceAddr)")
+            }
             return
         }
         
         if pairedDevices[index].isOnline != isOnline {
-            logger.info("🔄 [TransportManager] Device status changed: \(pairedDevices[index].name) is now \(isOnline ? "Online" : "Offline") on instance \(instanceAddr)")
+            if !skipLog {
+                let instanceAddr = Unmanaged.passUnretained(self).toOpaque()
+                logger.info("🔄 [TransportManager] Device status changed: \(pairedDevices[index].name) is now \(isOnline ? "Online" : "Offline") on instance \(instanceAddr)")
+            }
             pairedDevices[index].isOnline = isOnline
             
             // Explicitly notify change to ensure SwiftUI picks it up across potential actor boundaries
             objectWillChange.send()
-        } else {
-            logger.debug("ℹ️ [TransportManager] Device \(pairedDevices[index].name) already has status isOnline=\(isOnline) on instance \(instanceAddr)")
         }
     }
 
@@ -281,19 +280,38 @@ public final class TransportManager: ObservableObject {
         }
         let isOnline = lanConnectedDeviceIds.contains(normalizedId) || cloudConnectedDeviceIds.contains(normalizedId)
         updateDeviceOnlineStatus(deviceId: canonicalId, isOnline: isOnline)
+        // When LAN connects, delay cloud probe to give peer time to complete cloud connection
+        // Avoids race where we query before peer finishes cloud handshake (typical 1-3 sec startup delay)
         if isConnected, connectionState != .connectedCloud {
-            connectionStatusProber?.probeNow()
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 second delay
+                connectionStatusProber?.probeNow()
+            }
         }
     }
 
     @MainActor
     public func updateCloudConnectedDeviceIds(_ deviceIds: Set<String>) {
         cloudConnectedDeviceIds = Set(deviceIds.map { $0.lowercased() })
+        
+        // Collect status changes for summary logging
+        var statusSummary: [String] = []
+        
         for device in pairedDevices {
             let normalizedId = device.id.lowercased()
             let isOnline = lanConnectedDeviceIds.contains(normalizedId) || cloudConnectedDeviceIds.contains(normalizedId)
-            updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline)
+            let wasOnline = device.isOnline
+            updateDeviceOnlineStatus(deviceId: device.id, isOnline: isOnline, skipLog: true)
+            
+            // Track status for summary
+            let status = isOnline ? "online" : "offline"
+            let changed = wasOnline != isOnline ? " (changed)" : ""
+            statusSummary.append("\(device.name): \(status)\(changed)")
         }
+        
+        // Log single summary line
+        let instanceAddr = Unmanaged.passUnretained(self).toOpaque()
+        logger.info("🔍 [TransportManager] Peer status: [\(statusSummary.joined(separator: ", "))] on instance \(instanceAddr)")
     }
 
     @MainActor
@@ -679,7 +697,7 @@ public final class TransportManager: ObservableObject {
         logger.info("🎬 [TransportManager] activateLanServices completed")
     }
 
-    private func deactivateLanServices() async {
+    public func deactivateLanServices() async {
         discoveryTask?.cancel()
         discoveryTask = nil
         await browser.stop()

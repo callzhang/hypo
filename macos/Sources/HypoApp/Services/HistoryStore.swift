@@ -660,9 +660,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         
         // Start queue processor if not running
         if queueProcessingTask == nil || queueProcessingTask?.isCancelled == true {
-#if canImport(os)
-            logger.debug("🔄 [HistoryStore] Starting queue processing")
-#endif
+
             queueProcessingTask = Task { [weak self] in
                 await self?.processSyncQueue()
             }

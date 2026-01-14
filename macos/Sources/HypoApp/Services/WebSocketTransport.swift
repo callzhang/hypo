@@ -885,7 +885,7 @@ extension WebSocketTransport: @unchecked Sendable {}
 
 extension WebSocketTransport: URLSessionWebSocketDelegate {
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocolName: String?) {
-        logger.debug("✅ [WebSocketTransport] Connection opened")
+
         handleOpen(task: webSocketTask)
     }
 
@@ -1441,7 +1441,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     func handleOpen(task: WebSocketTasking) {
-        logger.debug("✅ [WebSocketTransport] Connection opened")
+
         state = .connected(task)
         touch()
         // Reset receive retry count on successful connection

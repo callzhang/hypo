@@ -85,7 +85,6 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        logger.debug("🚀 [HypoAppDelegate] applicationDidFinishLaunching called")
         
         // CRITICAL: Ensure activation policy is set to .accessory (menu bar only)
         // This is especially important when running from /Applications
@@ -235,7 +234,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func setupCarbonHotkey() {
-        logger.debug("🔧 setupCarbonHotkey() called")
+
         
         // Install event handler once (static check)
         if !Self.eventHandlerInstalled {
@@ -497,6 +496,17 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        logger.info("🛑 [HypoAppDelegate] Application terminating - cleaning up resources")
+        
+        // Stop TransportManager to close WebSocket connections and stop advertising
+        if let viewModel = AppContext.shared.historyViewModel,
+           let transportManager = viewModel.transportManager {
+            Task { @MainActor in
+                logger.info("🛑 [HypoAppDelegate] Stopping TransportManager (closing connections and stopping advertising)")
+                await transportManager.deactivateLanServices()
+            }
+        }
+        
         // Clean up hotkeys
         if let hotKey = hotKeyRef {
             UnregisterEventHotKey(hotKey)
@@ -802,7 +812,6 @@ public struct HypoMenuBarApp: App {
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)
                 .onAppear {
-                    logger.info("📱 [HypoMenuBarApp] MenuBarExtra content appeared")
                     
                     // CRITICAL FALLBACK: If @NSApplicationDelegateAdaptor didn't work, set up delegate manually
                     if NSApplication.shared.delegate == nil || !(NSApplication.shared.delegate is HypoAppDelegate) {
@@ -2244,14 +2253,7 @@ private struct SettingsSectionView: View {
                     }
                     Button("Pair new device") { isPresentingPairing = true }
                 }
-                .onAppear {
-                    logger.info("👁️ [SettingsSectionView] Paired devices section appeared")
-                    logger.info("👁️ [SettingsSectionView] TransportManager instance: \(Unmanaged.passUnretained(transportManager).toOpaque())")
-                    logger.info("👁️ [SettingsSectionView] Paired devices count: \(transportManager.pairedDevices.count)")
-                    for (idx, device) in transportManager.pairedDevices.enumerated() {
-                        logger.info("👁️ [SettingsSectionView] Device[\(idx)]: \(device.name), isOnline=\(device.isOnline)")
-                    }
-                }
+
 
                 Section("About") {
                     VStack(alignment: .leading, spacing: 4) {

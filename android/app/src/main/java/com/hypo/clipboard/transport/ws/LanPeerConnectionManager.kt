@@ -76,6 +76,8 @@ class LanPeerConnectionManager(
                 
                 // Explicitly disconnect the client to ensure socket is closed and listeners are notified
                 peerConnections[deviceId]?.disconnect()
+                // Immediately update LAN connection state so UI reflects peer loss without waiting for onClosed
+                transportManager.setLanConnection(deviceId, false)
                 
                 connectionJobs[deviceId]?.cancel()
                 connectionJobs.remove(deviceId)

@@ -19,7 +19,7 @@ import UserNotifications
 
 // UserDefaults is thread-safe for reading/writing, safe to mark as Sendable
 // Sendable conformance for SDK type – UserDefaults is thread-safe for reads/writes
-extension UserDefaults: @unchecked @retroactive Sendable {}
+extension UserDefaults: @unchecked Sendable {}
 
 public actor HistoryStore {
     private let logger = HypoLogger(category: "HistoryStore")

@@ -35,6 +35,7 @@ public final class TransportManager: ObservableObject {
     private var connectionStatusProber: ConnectionStatusProber?
     private var lanConnectedDeviceIds = Set<String>()
     private var cloudConnectedDeviceIds = Set<String>()
+    private var connectionDeviceIds: [UUID: String] = [:]
     public let dispatcher: ClipboardEventDispatcher
 
     private var discoveryTask: Task<Void, Never>?
@@ -1640,6 +1641,7 @@ extension TransportManager: LanWebSocketServerDelegate {
                 if server.connectionMetadata(for: connection)?.deviceId == nil {
                     server.updateConnectionMetadata(connectionId: connection, deviceId: deviceId)
                 }
+                connectionDeviceIds[connection] = deviceId
                 setLanConnection(deviceId: deviceId, isConnected: true)
             } catch {
                 logger.info("⚠️ [TransportManager] Failed to decode envelope for metadata update: \(error)")
@@ -1647,6 +1649,7 @@ extension TransportManager: LanWebSocketServerDelegate {
                 if let metadata = server.connectionMetadata(for: connection),
                    let deviceId = metadata.deviceId {
                     logger.info("✅ [TransportManager] Using deviceId from connection metadata: \(deviceId)")
+                    connectionDeviceIds[connection] = deviceId
                     setLanConnection(deviceId: deviceId, isConnected: true)
                 }
             }
@@ -1675,6 +1678,7 @@ extension TransportManager: LanWebSocketServerDelegate {
                let deviceId = metadata.deviceId {
                 let metadataMsg = "✅ [TransportManager] Connection established for device: \(deviceId)"
                 logger.info(metadataMsg)
+                connectionDeviceIds[id] = deviceId
                 setLanConnection(deviceId: deviceId, isConnected: true)
                 NotificationCenter.default.post(
                     name: NSNotification.Name("DeviceConnectionStatusChanged"),
@@ -1692,6 +1696,7 @@ extension TransportManager: LanWebSocketServerDelegate {
 
     nonisolated public func server(_ server: LanWebSocketServer, didIdentifyConnection id: UUID, deviceId: String) {
         Task { @MainActor in
+            connectionDeviceIds[id] = deviceId
             setLanConnection(deviceId: deviceId, isConnected: true)
         }
     }
@@ -1715,7 +1720,18 @@ extension TransportManager: LanWebSocketServerDelegate {
                         "isOnline": false
                     ]
                 )
+            } else if let deviceId = connectionDeviceIds[id] {
+                setLanConnection(deviceId: deviceId, isConnected: false)
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("DeviceConnectionStatusChanged"),
+                    object: nil,
+                    userInfo: [
+                        "deviceId": deviceId,
+                        "isOnline": false
+                    ]
+                )
             }
+            connectionDeviceIds.removeValue(forKey: id)
         }
     }
 }

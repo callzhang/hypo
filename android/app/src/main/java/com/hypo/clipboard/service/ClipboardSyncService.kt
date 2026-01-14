@@ -225,16 +225,35 @@ class ClipboardSyncService : Service() {
     }
 
     override fun onDestroy() {
+        shutdownForRemoval("onDestroy")
+        
         notificationJob?.cancel()
         unregisterScreenStateReceiver()
         unregisterNetworkChangeCallback()
         listener.stop()
         syncCoordinator.stop()
         clipboardPermissionJob?.cancel()
+        
+        super.onDestroy()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        shutdownForRemoval("onTaskRemoved")
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_COMPLETE) {
+            shutdownForRemoval("onTrimMemory(level=$level)")
+        }
+    }
+
+    private fun shutdownForRemoval(reason: String) {
+        Log.d(TAG, "🏁 $reason - unregistering LAN advertisement")
         transportManager.stop()
         connectionStatusProber.cleanup()
         scope.coroutineContext.cancelChildren()
-        super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

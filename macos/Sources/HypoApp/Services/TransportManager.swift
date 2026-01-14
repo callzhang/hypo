@@ -125,7 +125,6 @@ public final class TransportManager: ObservableObject {
         // Restore persisted peers from cache
         let cachedPeers = discoveryCache.loadPeers()
         self.lanPeers = cachedPeers
-        logger.info("🔄 [TransportManager] Restored \(cachedPeers.count) peers from cache")
         self.webSocketServer = webSocketServer
         self.dispatcher = dispatcher ?? ClipboardEventDispatcher()
 
@@ -172,6 +171,14 @@ public final class TransportManager: ObservableObject {
             self.incomingHandler = nil
         }
 
+        logger.info("🔄 [TransportManager] Restored \(cachedPeers.count) peers from cache")
+        logger.info("🆕 [TransportManager] Initialized instance: \(Unmanaged.passUnretained(self).toOpaque()) on thread: \(Thread.current)")
+        if Thread.isMainThread {
+            logger.info("✅ [TransportManager] init running on Main Thread")
+        } else {
+            logger.warning("⚠️ [TransportManager] init running on BACKGROUND Thread: \(Thread.current)")
+        }
+
         // Load persisted paired devices (including migration from legacy key)
         loadPairedDevices()
 
@@ -212,7 +219,7 @@ public final class TransportManager: ObservableObject {
                     await self?.activateLanServices()
                 }
             },
-            onDeactivate: { [weak self] in
+            onDeactivate: {
                 // Don't deactivate LAN services on window close for menu bar apps
                 // Services should stay running in the background
             },
@@ -234,16 +241,23 @@ public final class TransportManager: ObservableObject {
 
     public func updateDeviceOnlineStatus(deviceId: String, isOnline: Bool) {
         // Log the exact instance being updated to debug multiple instance issues
-        logger.info("🔍 [TransportManager] updateDeviceOnlineStatus called on instance: \(Unmanaged.passUnretained(self).toOpaque())")
+        let instanceAddr = Unmanaged.passUnretained(self).toOpaque()
+        let isMain = Thread.isMainThread
+        logger.info("🔍 [TransportManager] updateDeviceOnlineStatus called on instance: \(instanceAddr) (MainThread: \(isMain))")
         
         guard let index = pairedDevices.firstIndex(where: { $0.id == deviceId }) else {
-            logger.warning("⚠️ [TransportManager] Attempted to update status for unknown device: \(deviceId)")
+            logger.warning("⚠️ [TransportManager] Attempted to update status for unknown device: \(deviceId) on instance \(instanceAddr)")
             return
         }
         
         if pairedDevices[index].isOnline != isOnline {
-            logger.info("🔄 [TransportManager] Device status changed: \(pairedDevices[index].name) is now \(isOnline ? "Online" : "Offline")")
+            logger.info("🔄 [TransportManager] Device status changed: \(pairedDevices[index].name) is now \(isOnline ? "Online" : "Offline") on instance \(instanceAddr)")
             pairedDevices[index].isOnline = isOnline
+            
+            // Explicitly notify change to ensure SwiftUI picks it up across potential actor boundaries
+            objectWillChange.send()
+        } else {
+            logger.debug("ℹ️ [TransportManager] Device \(pairedDevices[index].name) already has status isOnline=\(isOnline) on instance \(instanceAddr)")
         }
     }
 
@@ -266,6 +280,9 @@ public final class TransportManager: ObservableObject {
         }
         let isOnline = lanConnectedDeviceIds.contains(normalizedId) || cloudConnectedDeviceIds.contains(normalizedId)
         updateDeviceOnlineStatus(deviceId: canonicalId, isOnline: isOnline)
+        if isConnected, connectionState != .connectedCloud {
+            connectionStatusProber?.probeNow()
+        }
     }
 
     @MainActor
@@ -1670,6 +1687,12 @@ extension TransportManager: LanWebSocketServerDelegate {
             } else {
                 logger.info("⚠️ [TransportManager] Connection established but no deviceId in metadata yet (will update when handshake completes)")
             }
+        }
+    }
+
+    nonisolated public func server(_ server: LanWebSocketServer, didIdentifyConnection id: UUID, deviceId: String) {
+        Task { @MainActor in
+            setLanConnection(deviceId: deviceId, isConnected: true)
         }
     }
     

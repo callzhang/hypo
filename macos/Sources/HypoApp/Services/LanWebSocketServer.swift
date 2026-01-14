@@ -19,6 +19,11 @@ public protocol LanWebSocketServerDelegate: AnyObject {
     func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID)
     func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID)
     func server(_ server: LanWebSocketServer, didCloseConnection id: UUID)
+    func server(_ server: LanWebSocketServer, didIdentifyConnection id: UUID, deviceId: String)
+}
+
+public extension LanWebSocketServerDelegate {
+    func server(_ server: LanWebSocketServer, didIdentifyConnection id: UUID, deviceId: String) {}
 }
 
 @MainActor
@@ -88,6 +93,7 @@ public final class LanWebSocketServer {
         } else {
             connectionMetadata[connectionId] = ConnectionMetadata(deviceId: deviceId, connectedAt: Date())
         }
+        delegate?.server(self, didIdentifyConnection: connectionId, deviceId: deviceId)
     }
     
     private let frameCodec = TransportFrameCodec()

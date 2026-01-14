@@ -207,7 +207,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         
-        logger.info("✅ [HypoAppDelegate] Sleep/wake detection registered")
+        logger.debug("✅ [HypoAppDelegate] Sleep/wake detection registered")
         #endif
     }
     
@@ -397,8 +397,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         } else if self.hotKeyRef == nil {
             // If registration failed but we don't have a ref, check if it's just because hotkey already exists
             if status == -9878 { // eventHotKeyExistsErr
-                logger.debug("🔄 [HypoAppDelegate] Hotkey already exists (status=-9878), skipping registration")
-                // Note: We can't unregister without the ref, so we'll just log this
+                // Already exists, this is fine, suppress the log
             } else {
                 // Only log warning for actual errors (not "already exists")
                 logger.warning("⚠️ [HypoAppDelegate] Hotkey registration returned status=\(status). Ref: \(hotKeyRef != nil ? "exists" : "nil")")
@@ -439,7 +438,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 // Log as debug if hotkey already exists (expected behavior), warning for actual errors
                 if status == -9878 { // eventHotKeyExistsErr
-                    logger.debug("🔄 [HypoAppDelegate] Alt+\(num) already registered (status=-9878), skipping")
+                    // Already exists, this is fine, suppress the log
                 } else {
                     logger.warning("⚠️ [HypoAppDelegate] Failed to register Alt+\(num): status=\(status)")
                 }
@@ -453,7 +452,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         // Reuse shared monitor if one already exists
         if let existing = AppContext.shared.clipboardMonitor {
             clipboardMonitor = existing
-            logger.debug("📋 [HypoAppDelegate] ClipboardMonitor already running, reusing shared instance")
+            // Silent reuse
             return
         }
         
@@ -2084,10 +2083,16 @@ private struct SettingsSectionView: View {
                         Text("Status")
                         Spacer()
                         // Connection Status Icon - Observes transportManager
-                        Image(systemName: connectionStatusIconName(for: transportManager.connectionState))
-                            .foregroundColor(connectionStatusIconColor(for: transportManager.connectionState))
-                            .font(.system(size: 14, weight: .medium))
-                            .help(connectionStatusTooltip(for: transportManager.connectionState))
+                        HStack(spacing: 6) {
+                            Text(connectionStatusShortText(for: transportManager.connectionState))
+                                .font(.caption)
+                                .foregroundColor(connectionStatusIconColor(for: transportManager.connectionState))
+                            
+                            Image(systemName: connectionStatusIconName(for: transportManager.connectionState))
+                                .foregroundColor(connectionStatusIconColor(for: transportManager.connectionState))
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .help(connectionStatusTooltip(for: transportManager.connectionState))
                     }
                 }
                 
@@ -2237,7 +2242,7 @@ private struct SettingsSectionView: View {
                                         logger.debug("🔄 [UI] Device \(device.name) isOnline changed to: \(newValue)")
                                     }
                                     .onAppear {
-                                        logger.debug("🎨 [UI] Device \(device.name) rendered: isOnline=\(device.isOnline), id=\(device.id)")
+                                        // logger.debug("🎨 [UI] Device \(device.name) rendered: isOnline=\(device.isOnline), id=\(device.id)")
                                     }
                                     .help(deviceTooltip(for: device))
                                 Button(role: .destructive) {
@@ -2330,6 +2335,19 @@ private struct SettingsSectionView: View {
             return .blue
         case .error:
             return .red
+        }
+    }
+    
+    private func connectionStatusShortText(for state: ConnectionState) -> String {
+        switch state {
+        case .disconnected:
+            return "Disconnected"
+        case .connectingLan, .connectingCloud:
+            return "Connecting..."
+        case .connectedLan, .connectedCloud:
+            return "Connected"
+        case .error:
+            return "Disconnected"
         }
     }
     

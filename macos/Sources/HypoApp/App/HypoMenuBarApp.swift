@@ -131,6 +131,9 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        
+        // Setup right-click manager immediately
+        MenuBarRightClickManager.shared.setup()
     }
     
     // MARK: - NSServices Handler
@@ -858,7 +861,7 @@ public struct HypoMenuBarApp: App {
                 .onOpenURL { url in
                     Task { await viewModel.handleDeepLink(url) }
                 }
-                .background(MenuBarIconRightClickHandler(viewModel: viewModel))
+                // .background(MenuBarIconRightClickHandler(viewModel: viewModel)) // Removed in favor of MenuBarRightClickManager
         }, label: {
             menuBarIcon()
                 .onAppear {

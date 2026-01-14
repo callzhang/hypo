@@ -308,6 +308,17 @@ class ConnectionStatusProber @Inject constructor(
             }
             
             _deviceDualStatus.value = dualStatuses
+            
+            // Update TransportManager global connection state (mirrors macOS behavior)
+            // This ensures the global UI badge updates correctly when peers disconnect
+            val isCloudConnected = cloudWebSocketClient.isConnected()
+            if (isCloudConnected) {
+                transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectedCloud)
+            } else if (activeLanConnections.isNotEmpty()) {
+                transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.ConnectedLan)
+            } else {
+                transportManager.updateConnectionState(com.hypo.clipboard.transport.ConnectionState.Disconnected)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error probing connections: ${e.message}", e)
         } finally {

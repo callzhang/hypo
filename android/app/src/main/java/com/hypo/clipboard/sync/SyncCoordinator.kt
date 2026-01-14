@@ -69,24 +69,9 @@ class SyncCoordinator @Inject constructor(
                 autoTargets.value = deviceIds
                 recomputeTargets()
                 
-                // When paired peers are discovered, start maintaining a connection to receive messages
-                val allowed = pairedDeviceIdsCache.value
-                lanWebSocketClient.setAllowedDeviceIdsProvider { pairedDeviceIdsCache.value }
-                val pairedPeers = peers.filter { p ->
-                    val id = p.attributes["device_id"] ?: p.serviceName
-                    allowed.any { it.equals(id, ignoreCase = true) }
-                }
-                if (pairedPeers.isNotEmpty()) {
-                    android.util.Log.d(TAG, "🔌 Paired peers discovered (${pairedPeers.size}), starting receiving connection...")
-                    lanWebSocketClient.startReceiving()
-                } else if (allowed.isNotEmpty()) {
-                    // We have paired devices (even if not currently discovered), maintain connection
-                    // This ensures we can receive messages when peers come back online
-                    android.util.Log.d(TAG, "ℹ️ No paired peers currently discovered, but ${allowed.size} paired device(s) exist - maintaining LAN receive loop")
-                    lanWebSocketClient.startReceiving()
-                } else {
-                    android.util.Log.d(TAG, "ℹ️ No paired devices and no paired peers discovered; not starting LAN receive loop")
-                }
+                // Note: Connection establishment is now handled by LanPeerConnectionManager (LPM)
+                // which automatically connects to all discovered peers.
+                // We don't need to manually start a receiving loop here anymore.
             }
         }
     }

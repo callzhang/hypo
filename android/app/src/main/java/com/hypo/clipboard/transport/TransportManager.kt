@@ -598,14 +598,18 @@ class TransportManager(
     }
 
     fun removePeer(serviceName: String) {
-        // Peer removal is handled by ConnectionStatusProber based on network connectivity
-        // and discovery status. We don't remove peers here to avoid race conditions.
-        // ConnectionStatusProber will update peer status based on network state and discovery.
-        android.util.Log.d("TransportManager", "📴 Peer $serviceName reported as lost (status will be updated by ConnectionStatusProber)")
+        android.util.Log.d("TransportManager", "📴 Peer $serviceName reported as lost")
         
         // Cancel any pending removal job if peer is rediscovered
         val pendingRemoval = synchronized(stateLock) { pendingPeerRemovalJobs.remove(serviceName) }
         pendingRemoval?.cancel()
+        
+        // Actually remove the peer from internal maps
+        synchronized(stateLock) {
+            peersByService.remove(serviceName)
+            lastSeenByService.remove(serviceName)
+            publishStateLocked()
+        }
         
         // Sync peer connections (event-driven: remove connection for peer that's no longer discovered)
         scope.launch {
@@ -812,11 +816,58 @@ class TransportManager(
         updateLastSuccessfulTransport(deviceId, transport)
     }
     
+    
+    // Event-driven LAN connection tracking (mirrors macOS)
+    private val lanConnections = mutableSetOf<String>()
+    private val lanConnectionsLock = Any()
+    private var onLanConnectionChanged: (() -> Unit)? = null
+    
+    /**
+     * Update LAN connection state for a device (event-driven).
+     * Called when WebSocket connects or disconnects.
+     */
+    fun setLanConnection(deviceId: String, isConnected: Boolean) {
+        synchronized(lanConnectionsLock) {
+            val changed = if (isConnected) {
+                lanConnections.add(deviceId)
+            } else {
+                lanConnections.remove(deviceId)
+            }
+            
+            if (changed) {
+                val deviceName = getDeviceName(deviceId) ?: deviceId.take(8)
+                android.util.Log.d("TransportManager", "🔌 LAN connection state changed: $deviceName -> $isConnected")
+                // Trigger immediate probe via callback (set by ConnectionStatusProber)
+                onLanConnectionChanged?.invoke()
+            }
+        }
+    }
+    
+    /**
+     * Check if any LAN connections exist (for connection state determination).
+     */
+    fun hasLanConnections(): Boolean {
+        synchronized(lanConnectionsLock) {
+            return lanConnections.isNotEmpty()
+        }
+    }
+    
+    /**
+     * Set callback for LAN connection state changes.
+     * Used by ConnectionStatusProber to trigger immediate probes.
+     */
+    fun setLanConnectionChangeListener(listener: () -> Unit) {
+        onLanConnectionChanged = listener
+    }
+    
     /**
      * Get set of device IDs that have active LAN WebSocket connections.
+     * Now returns event-driven tracked set instead of querying clients.
      */
     fun getActiveLanConnections(): Set<String> {
-        return lanPeerConnectionManager?.getActiveLanConnections() ?: emptySet()
+        synchronized(lanConnectionsLock) {
+            return lanConnections.toSet() // Return copy for thread safety
+        }
     }
     
     /**

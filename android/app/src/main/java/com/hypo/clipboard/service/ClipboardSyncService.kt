@@ -193,7 +193,9 @@ class ClipboardSyncService : Service() {
         // so calling startReceiving() on both creates TWO separate connections.
         // Only call startReceiving() on relayWebSocketClient for cloud relay.
         // lanWebSocketClient.startReceiving() is for LAN connections only.
-        lanWebSocketClient.startReceiving()  // For LAN connections
+        // DISABLED: LanPeerConnectionManager now handles per-peer LAN connections with event-driven status
+        // lanWebSocketClient (singleton) caused "ghost" connections with null listeners
+        // lanWebSocketClient.startReceiving()  
         relayWebSocketClient.startReceiving()  // For cloud relay (creates separate connection)
         ensureClipboardPermissionAndStartListener()
         observeLatestItem()

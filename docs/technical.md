@@ -379,7 +379,7 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 - **LAN Discovery**: Bonjour/NSD automatically update IP addresses in service records when services restart
 - **WebSocket Connections**: 
   - **Event-driven**: Clients discover updated IP addresses through mDNS/NSD discovery events (not periodic polling)
-  - **Android**: When peer is discovered via NSD, `lastKnownUrl` is updated and connection is established/updated
+  - **Android**: When peer is discovered via NSD, `LanPeerConnectionManager` automatically establishes a dedicated `WebSocketTransportClient` for that peer. Connections are maintained persistently while the peer is discovered.
   - **macOS**: When peer is discovered via Bonjour, connection is established/updated with new IP
   - No continuous retry loops - connections only happen when peers are discovered or connection disconnects
 - **Cloud Relay**: WebSocket connections automatically reconnect on network changes:
@@ -403,7 +403,7 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 - **No periodic polling**: Discovery events are emitted immediately when peers appear/disappear on the network
 - **StateFlow propagation**: Discovery events update `TransportManager.peers` StateFlow, which triggers connection establishment in `SyncCoordinator`
 - **Connection triggers**: Connections are only established when:
-  1. Peer is discovered (NSD/Bonjour callback → StateFlow update → `startReceiving()`)
+  1. Peer is discovered (NSD/Bonjour callback → StateFlow update → `LanPeerConnectionManager.syncPeerConnections()`)
   2. Connection disconnects (`onClosed`/`onFailure` → reconnection attempt if URL available)
 - **UI updates**: Connection state and device status updates are event-driven via Combine publishers (macOS) and StateFlow (Android)
 - **Sync queue processing**: Event-driven - triggered when connection becomes available or new message is queued (no periodic polling)
@@ -835,19 +835,7 @@ Multicast is a network communication method that allows one sender to transmit d
   3. **Device Detection**: `MiuiAdapter` automatically detects MIUI/HyperOS devices and enables these workarounds
 - **User Guidance**: Settings screen shows MIUI/HyperOS-specific instructions for battery optimization and autostart settings
 
-#### 4.2.5 Android WebSocket Client
 
-**Multi-Peer Connection Architecture** ✅ Implemented (December 2025):
-- **Separate Connections Per Peer**: Maintains persistent `WebSocketTransportClient` connection for each discovered peer (deviceId), mirroring macOS architecture
-- **LanPeerConnectionManager**: Manages peer connection lifecycle - creates connections when peers are discovered, removes connections when peers are no longer available
-- **Event-Driven Connection Management**: Connections are created/removed based on peer discovery events, not periodic polling
-- **Connection Lifecycle**:
-  1. NSD discovery event → `LanDiscoveryEvent.Added(peer)` emitted
-  2. `TransportManager` updates `peers` StateFlow and calls `lanPeerConnectionManager.syncPeerConnections()`
-  3. `LanPeerConnectionManager` creates new `WebSocketTransportClient` for newly discovered peer
-  4. Connection maintenance task starts for each peer, maintaining persistent connection with automatic reconnection
-  5. Reconnection only occurs when:
-     - Peer IP changes (detected via discovery event, connection recreated)
      - Connection disconnects (automatic reconnection with exponential backoff)
      - Peer is no longer discovered (connection removed)
 - **Unified Event-Driven Reconnection with Exponential Backoff** ✅ Implemented (December 2025):

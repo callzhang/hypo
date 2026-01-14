@@ -71,6 +71,10 @@ class LanPeerConnectionManager(
             for (deviceId in removedDeviceIds) {
                 val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
                 android.util.Log.d("LanPeerConnectionManager", "🔌 Removing connection for peer $deviceDesc (no longer discovered)")
+                
+                // Explicitly disconnect the client to ensure socket is closed and listeners are notified
+                peerConnections[deviceId]?.disconnect()
+                
                 connectionJobs[deviceId]?.cancel()
                 connectionJobs.remove(deviceId)
                 peerConnections.remove(deviceId)
@@ -99,7 +103,7 @@ class LanPeerConnectionManager(
                 // Create connection if it doesn't exist
                 if (!peerConnections.containsKey(deviceId)) {
                     val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
-                    android.util.Log.d("LanPeerConnectionManager", "🔌 Creating persistent connection for peer $deviceDesc at $peerUrl")
+                    android.util.Log.d("LanPeerConnectionManager", "🔌 Creating persistent connection for peer $deviceDesc (deviceId=$deviceId) at $peerUrl")
                     
                     val peerConfig = TlsWebSocketConfig(
                         url = peerUrl,
@@ -133,7 +137,17 @@ class LanPeerConnectionManager(
                         android.util.Log.d("LanPeerConnectionManager", "✅ Set incoming clipboard handler for peer $deviceDesc")
                     }
                     
+                    // CRITICAL: Set connection event listener BEFORE starting connection
+                    // This ensures the listener is set before any connect/disconnect events fire
+                    android.util.Log.d("LanPeerConnectionManager", "📝 Setting listener on client instance ${client.hashCode()} for device $deviceDesc (deviceId=$deviceId)")
+                    client.setConnectionEventListener { isConnected ->
+                        val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                        android.util.Log.d("LanPeerConnectionManager", "🔌 Connection event: $deviceDesc -> $isConnected (instance=${client.hashCode()}, deviceId=$deviceId)")
+                        transportManager.setLanConnection(deviceId, isConnected)
+                    }
+                    
                     peerConnections[deviceId] = client
+                    android.util.Log.d("LanPeerConnectionManager", "✅ Added client instance ${client.hashCode()} to peerConnections for $deviceDesc (deviceId=$deviceId)")
                     
                     // Start connection maintenance task
                     connectionJobs[deviceId] = scope.launch {
@@ -167,6 +181,7 @@ class LanPeerConnectionManager(
         // Start receiving - this will establish connection and maintain it
         // WebSocketTransportClient handles all reconnection via onClosed() callbacks
         // with unified exponential backoff (same as cloud connections)
+        // Connection event listener is already set during client creation
         client.startReceiving()
         
         // Keep this coroutine alive while peer is still in our map
@@ -175,7 +190,6 @@ class LanPeerConnectionManager(
             delay(10_000) // Just keep alive - reconnection is handled by WebSocketTransportClient
         }
         
-        val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
         android.util.Log.d("LanPeerConnectionManager", "🔌 Connection maintenance ended for peer $deviceDesc")
     }
     

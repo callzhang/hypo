@@ -110,6 +110,14 @@ class ConnectionStatusProber @Inject constructor(
                 }
             }
         }
+        
+        // Event-driven: trigger probe when LAN connections change (connect/disconnect)
+        transportManager.setLanConnectionChangeListener {
+            Log.d(TAG, "🔌 LAN connection changed - triggering immediate probe")
+            scope.launch {
+                probeConnections()
+            }
+        }
     }
     
     /**

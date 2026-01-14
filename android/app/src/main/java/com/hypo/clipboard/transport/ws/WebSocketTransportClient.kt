@@ -241,8 +241,22 @@ class WebSocketTransportClient @Inject constructor(
         onPairingChallenge = handler
     }
     
+    
     fun setSyncErrorHandler(handler: (String, String) -> Unit) {
         onSyncError = handler
+    }
+    
+    // Connection event listener for event-driven status updates (LAN only)
+    private var onConnectionEvent: ((isConnected: Boolean) -> Unit)? = null
+    
+    /**
+     * Set listener for connection state changes (connect/disconnect events).
+     * Used for event-driven status updates in LAN connections.
+     */
+    fun setConnectionEventListener(listener: (isConnected: Boolean) -> Unit) {
+        android.util.Log.d("WebSocketTransportClient", "📝 setConnectionEventListener called on instance ${this.hashCode()}, listener is being SET")
+        onConnectionEvent = listener
+        android.util.Log.d("WebSocketTransportClient", "✅ onConnectionEvent set successfully on instance ${this.hashCode()}, onConnectionEvent=${onConnectionEvent}")
     }
 
     /** Allow caller to restrict which discovered peers we connect to (e.g., only paired devices). */
@@ -1110,6 +1124,12 @@ class WebSocketTransportClient @Inject constructor(
                         if (!handshakeSignal.isCompleted) {
                             handshakeSignal.complete(Unit)
                         }
+                        
+                        // Trigger connection event for LAN connections (event-driven status update)
+                        if (!isCloudConnection) {
+                            android.util.Log.d("WebSocketTransportClient", "🔌 Triggering onConnectionEvent(true) for instance ${this@WebSocketTransportClient.hashCode()}")
+                            onConnectionEvent?.invoke(true)
+                        }
                     }
                 }
 
@@ -1333,6 +1353,11 @@ class WebSocketTransportClient @Inject constructor(
                         "updated TransportManager=${transportManager != null && isCloudConnection}, " +
                         "event-driven reconnection will be triggered")
                     
+                    // Trigger connection event for LAN connections (event-driven status update)
+                    if (!isCloudConnection) {
+                        onConnectionEvent?.invoke(false)
+                    }
+                    
                     // Event-driven: immediately trigger reconnection for both cloud and LAN connections
                     // Unified reconnection logic - same exponential backoff for both
                     if (!sendQueue.isClosedForReceive) {
@@ -1480,6 +1505,11 @@ class WebSocketTransportClient @Inject constructor(
                                 android.util.Log.d("WebSocketTransportClient", "📈 Consecutive failures: $consecutiveFailures")
                             }
                         }
+                    
+                    // Trigger connection event for LAN connections (event-driven status update)
+                    if (!isCloudConnection) {
+                        onConnectionEvent?.invoke(false)
+                    }
                     
                     // Event-driven: immediately trigger reconnection for cloud connections
                     // Only trigger if not already reconnecting (prevents duplicate calls)
@@ -1738,6 +1768,18 @@ class WebSocketTransportClient @Inject constructor(
                 "sendQueueClosed=${sendQueue.isClosedForReceive}, closedSignal=${closedSignal.isCompleted}, " +
                 "isOpen=${isOpen.get()}, isClosed=${isClosed.get()}, " +
                 "event-driven reconnection will be triggered by onClosed/onFailure")
+            
+            // Trigger connection event for LAN connections if socket closed without callbacks
+            // This handles cases where socket was never opened (reconnection scenario)
+            val socketWasOpen = isOpen.get()
+            if (!isCloudConnection && !socketWasOpen && isClosed.get()) {
+                if (onConnectionEvent != null) {
+                    android.util.Log.d("WebSocketTransportClient", "🔌 Connection closed during reconnection - triggering event (LAN, instance=${this.hashCode()})")
+                    onConnectionEvent?.invoke(false)
+                } else {
+                    android.util.Log.w("WebSocketTransportClient", "⚠️ Connection closed during reconnection but onConnectionEvent is NULL (LAN, instance=${this.hashCode()})")
+                }
+            }
             
             // Exit - event-driven reconnection (via onClosed/onFailure) will handle retry
             return

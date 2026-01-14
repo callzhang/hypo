@@ -8,6 +8,5 @@ interface SettingsRepository {
     suspend fun setLanSyncEnabled(enabled: Boolean)
     suspend fun setCloudSyncEnabled(enabled: Boolean)
     suspend fun setHistoryLimit(limit: Int)
-    suspend fun setAutoDeleteDays(days: Int)
     suspend fun setPlainTextModeEnabled(enabled: Boolean)
 }

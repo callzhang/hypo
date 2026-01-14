@@ -203,7 +203,6 @@ class SettingsViewModel @Inject constructor(
                 SettingsUiState(
                     lanSyncEnabled = settings.lanSyncEnabled,
                     historyLimit = settings.historyLimit,
-                    autoDeleteDays = settings.autoDeleteDays,
                     plainTextModeEnabled = settings.plainTextModeEnabled,
                     discoveredPeers = pairedPeersForUi,
                     isAccessibilityServiceEnabled = isAccessibilityServiceEnabled,
@@ -228,10 +227,6 @@ class SettingsViewModel @Inject constructor(
 
     fun onHistoryLimitChanged(limit: Int) {
         viewModelScope.launch { settingsRepository.setHistoryLimit(limit) }
-    }
-
-    fun onAutoDeleteDaysChanged(days: Int) {
-        viewModelScope.launch { settingsRepository.setAutoDeleteDays(days) }
     }
 
     fun onPlainTextModeChanged(enabled: Boolean) {
@@ -303,7 +298,6 @@ class SettingsViewModel @Inject constructor(
 data class SettingsUiState(
         val lanSyncEnabled: Boolean = true,
         val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT,
-        val autoDeleteDays: Int = UserSettings.DEFAULT_AUTO_DELETE_DAYS,
         val plainTextModeEnabled: Boolean = false,
         val discoveredPeers: List<DiscoveredPeer> = emptyList(),
         val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap(),

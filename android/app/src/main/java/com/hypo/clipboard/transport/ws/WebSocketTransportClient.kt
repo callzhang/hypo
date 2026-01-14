@@ -1413,19 +1413,21 @@ class WebSocketTransportClient @Inject constructor(
                         
                         // Simplified log - reconnection will be triggered automatically
                         
-                        // Event-driven: immediately trigger reconnection for cloud connections
+                        // Event-driven: immediately trigger reconnection for both cloud AND LAN connections
                         // Only trigger if not already reconnecting (prevents duplicate calls)
-                        if (isCloudConnection && !sendQueue.isClosedForReceive && !isReconnecting) {
+                        if (!sendQueue.isClosedForReceive && !isReconnecting) {
                             scope.launch {
                                 // Cancel connection job to ensure runConnectionLoop() exits quickly
                                 // This allows ensureConnection() to start a new connection attempt
                                 mutex.withLock {
                                     if (connectionJob?.isActive == true) {
+                                        android.util.Log.d("WebSocketTransportClient", "🛑 Cancelling connection job to allow reconnection (cloud=$isCloudConnection)")
                                         connectionJob?.cancel()
                                         connectionJob = null
                                     }
                                 }
                                 delay(200)
+                                android.util.Log.d("WebSocketTransportClient", "🔄 Event-driven: triggering ensureConnection() after socket reset (cloud=$isCloudConnection)")
                                 ensureConnection()
                             }
                         }
@@ -1433,6 +1435,7 @@ class WebSocketTransportClient @Inject constructor(
                         // Return early - don't execute the rest of onFailure logic
                         return@onFailure
                     }
+
                     
                     // Actual connection failure (not a normal reset) - log with details
                     val connUrl = if (isCloudConnection) {

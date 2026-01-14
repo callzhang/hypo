@@ -350,12 +350,22 @@ class LanPairingViewModel @Inject constructor(
                                 // Step 2: Ensure sync targets include this device
                                 Log.d(TAG, "🎯 Registering device as manual sync target...")
                                 syncCoordinator.addTargetDevice(deviceId)
-                                val targets = syncCoordinator.targets.value
-                                Log.d(TAG, "✅ Target devices now: $targets (count: ${targets.size})")
                                 
-                                // Verify the device is in sync targets
-                                if (!targets.contains(deviceId)) {
-                                    Log.w(TAG, "⚠️ Device $deviceId not in sync targets after adding! Available keys: ${deviceKeyStore.getAllDeviceIds()}")
+                                // Wait for sync coordinator to refresh and include this device in targets
+                                // (addTargetDevice launches a coroutine to refresh paired device IDs cache)
+                                var targets = syncCoordinator.targets.value
+                                var attempts = 0
+                                while (!targets.contains(deviceId) && attempts < 50) { // Wait up to 5 seconds
+                                    delay(100)
+                                    targets = syncCoordinator.targets.value
+                                    attempts++
+                                }
+                                
+                                if (targets.contains(deviceId)) {
+                                    Log.d(TAG, "✅ Device successfully added to sync targets after ${attempts * 100}ms: $targets (count: ${targets.size})")
+                                } else {
+                                    Log.w(TAG, "⚠️ Device $deviceId not in sync targets after ${attempts * 100}ms! Available keys: ${deviceKeyStore.getAllDeviceIds()}")
+                                    Log.w(TAG, "   Current targets: $targets")
                                 }
                                 
                                 _state.value = LanPairingUiState.Success(device.serviceName)

@@ -37,9 +37,14 @@ public final class LanWebSocketServer {
         private let bufferLock = NSLock()
         var upgraded = false
         var pendingClose = false  // Set to true when close frame is received, but keep connection open until data is depleted
+        var lastActivity = Date()
 
         init(connection: NWConnection) {
             self.connection = connection
+        }
+
+        func touch(_ date: Date = Date()) {
+            lastActivity = date
         }
         
         func appendToBuffer(_ chunk: Data) {
@@ -82,6 +87,9 @@ public final class LanWebSocketServer {
     private var connectionMetadata: [UUID: ConnectionMetadata] = [:]
     public weak var delegate: LanWebSocketServerDelegate?
     private var localDeviceId: String?  // macOS device ID for target filtering
+    private var heartbeatTask: Task<Void, Never>?
+    private let heartbeatInterval: TimeInterval = 60
+    private let idleTimeout: TimeInterval = 180
     
     public func connectionMetadata(for connectionId: UUID) -> ConnectionMetadata? {
         connectionMetadata[connectionId]
@@ -153,6 +161,7 @@ public final class LanWebSocketServer {
         }
         
         listener?.start(queue: .main)
+        startHeartbeatIfNeeded()
     }
     
     public func stop() {
@@ -160,6 +169,7 @@ public final class LanWebSocketServer {
         
         listener?.cancel()
         listener = nil
+        cancelHeartbeat()
         
         for (id, context) in connections {
             context.connection.cancel()
@@ -323,6 +333,7 @@ public final class LanWebSocketServer {
                 }
                 if let data, !data.isEmpty {
                     context.appendToBuffer(data)
+                    context.touch()
                     let processed = self.processHandshakeBuffer(for: connectionId, context: context)
                     if processed {
                         self.logger.debug("✅ [LanWebSocketServer] Handshake complete for \(connectionId.uuidString.prefix(8))")
@@ -524,6 +535,7 @@ public final class LanWebSocketServer {
                 }
                 if let data, !data.isEmpty {
                     context.appendToBuffer(data)
+                    context.touch()
                     self.processFrameBuffer(for: connectionId, context: context)
                     // Continue receiving only if connection still exists (might have been closed by close frame)
                     guard self.connections[connectionId] != nil else {
@@ -694,6 +706,7 @@ public final class LanWebSocketServer {
             #endif
             return
         }
+        context.touch()
         switch opcode {
         case 0x1, 0x2:
             // Skip empty payloads (could be ping/pong or malformed frames)
@@ -802,9 +815,6 @@ public final class LanWebSocketServer {
             return
         }
         
-        // Simple test log to verify execution continues
-
-        
         // Decode the frame-encoded payload (Android sends: 4-byte length + JSON)
         // Try to decode as TransportFrameCodec frame first (for clipboard messages)
 
@@ -840,7 +850,7 @@ public final class LanWebSocketServer {
                 delegate?.server(self, didReceiveClipboardData: data, from: connectionId)
                 return
             case .control:
-                logger.debug("📋 CLIPBOARD CONTROL MESSAGE: ignoring")
+                // logger.debug("📋 CLIPBOARD CONTROL MESSAGE: ignoring")
                 return
             }
         } catch let decodingError as DecodingError {
@@ -1168,11 +1178,61 @@ public final class LanWebSocketServer {
         logger.info("🔌 [LanWebSocketServer] closeConnection call stack: \(stackTrace)")
         connections[id]?.connection.cancel()
         connections.removeValue(forKey: id)
-        connectionMetadata.removeValue(forKey: id)
         delegate?.server(self, didCloseConnection: id)
+        connectionMetadata.removeValue(forKey: id)
         
         #if canImport(os)
         logger.info("Connection closed: \(id.uuidString)")
         #endif
+    }
+
+    private func startHeartbeatIfNeeded() {
+        guard heartbeatTask == nil else { return }
+        heartbeatTask = Task { [weak self] in
+            guard let self else { return }
+            let interval = UInt64(heartbeatInterval * 1_000_000_000)
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: interval)
+                if Task.isCancelled { break }
+                await self.runHeartbeat()
+            }
+        }
+    }
+
+    private func cancelHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+    }
+
+    @MainActor
+    private func runHeartbeat() {
+        guard !connections.isEmpty else { return }
+        let now = Date()
+        var staleConnections: [UUID] = []
+        for (id, context) in connections {
+            let idleFor = now.timeIntervalSince(context.lastActivity)
+            if idleFor >= idleTimeout {
+                logger.warning("⚠️ [LanWebSocketServer] Closing idle connection \(id.uuidString.prefix(8)) after \(Int(idleFor))s with no activity")
+                staleConnections.append(id)
+                continue
+            }
+            guard context.upgraded, !context.pendingClose else { continue }
+            if idleFor >= heartbeatInterval {
+                sendFrame(payload: Data(), opcode: 0x9, context: context) { [weak self] error in
+                    guard let self else { return }
+                    Task { @MainActor in
+                        if let error {
+                            self.logger.warning("⚠️ [LanWebSocketServer] Ping failed for \(id.uuidString.prefix(8)): \(error.localizedDescription)")
+                            self.closeConnection(id)
+                        } else {
+                            self.logger.debug("🏓 [LanWebSocketServer] Ping sent to \(id.uuidString.prefix(8))")
+                        }
+                    }
+                }
+            }
+        }
+        if !staleConnections.isEmpty {
+            staleConnections.forEach { closeConnection($0) }
+        }
     }
 }

@@ -160,10 +160,23 @@ class LanPeerConnectionManager(
                         maintainPeerConnection(deviceId, client, peer.serviceName, peerUrl)
                     }
                 } else {
-                    // Check if peer IP changed (reconnect if needed)
-                    // Note: We can't easily check the URL from WebSocketTransportClient
-                    // For now, we'll rely on the connection failing and reconnecting naturally
-                    // TODO: Track peer URLs separately to detect IP changes
+                    val client = peerConnections[deviceId]
+                    if (client != null) {
+                        val existingJob = connectionJobs[deviceId]
+                        val needsReconnect = !client.isConnected()
+                        val needsJob = existingJob == null || existingJob.isCancelled
+                        if (needsReconnect || needsJob) {
+                            val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                            android.util.Log.d(
+                                "LanPeerConnectionManager",
+                                "🔄 Restarting connection for peer $deviceDesc (deviceId=$deviceId, connected=${client.isConnected()}, job=${existingJob != null && !existingJob.isCancelled})"
+                            )
+                            existingJob?.cancel()
+                            connectionJobs[deviceId] = scope.launch {
+                                maintainPeerConnection(deviceId, client, peer.serviceName, peerUrl)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -315,4 +328,3 @@ class LanPeerConnectionManager(
         peerConnections.clear()
     }
 }
-

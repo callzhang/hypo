@@ -361,10 +361,13 @@ class SyncCoordinator @Inject constructor(
     fun addTargetDevice(deviceId: String) {
         manualTargets.update { it + deviceId }
         // Refresh paired device IDs cache when adding a target (key should be saved by now)
+        // IMPORTANT: Launch coroutine but also immediately refresh cache synchronously to avoid race condition
+        // where LanPairingViewModel checks targets.value before the coroutine completes
         keyStoreScope.launch {
             try {
                 val deviceIds = deviceKeyStore.getAllDeviceIds().toSet()
                 pairedDeviceIdsCache.value = deviceIds
+                Log.d(TAG, "🔄 Refreshed paired device IDs cache: ${deviceIds.size} devices")
                 recomputeTargets()
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ Failed to refresh paired device IDs after adding target: ${e.message}")

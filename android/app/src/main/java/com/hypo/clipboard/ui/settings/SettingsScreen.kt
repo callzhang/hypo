@@ -61,7 +61,6 @@ fun SettingsRoute(
     SettingsScreen(
         state = state,
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
-        onAutoDeleteDaysChanged = viewModel::onAutoDeleteDaysChanged,
         onPlainTextModeChanged = viewModel::onPlainTextModeChanged,
         onOpenBatterySettings = onOpenBatterySettings,
         onRequestSmsPermission = onRequestSmsPermission,
@@ -78,7 +77,6 @@ fun SettingsRoute(
 fun SettingsScreen(
     state: SettingsUiState,
     onHistoryLimitChanged: (Int) -> Unit,
-    onAutoDeleteDaysChanged: (Int) -> Unit,
     onPlainTextModeChanged: (Boolean) -> Unit,
     onOpenBatterySettings: () -> Unit,
     onRequestSmsPermission: () -> Unit,
@@ -115,9 +113,7 @@ fun SettingsScreen(
             item {
                 HistorySection(
                     historyLimit = state.historyLimit,
-                    autoDeleteDays = state.autoDeleteDays,
-                    onHistoryLimitChanged = onHistoryLimitChanged,
-                    onAutoDeleteDaysChanged = onAutoDeleteDaysChanged
+                    onHistoryLimitChanged = onHistoryLimitChanged
                 )
             }
 
@@ -260,9 +256,7 @@ private fun SyncSection(
 @Composable
 private fun HistorySection(
     historyLimit: Int,
-    autoDeleteDays: Int,
-    onHistoryLimitChanged: (Int) -> Unit,
-    onAutoDeleteDaysChanged: (Int) -> Unit
+    onHistoryLimitChanged: (Int) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(
@@ -287,33 +281,6 @@ private fun HistorySection(
             )
             Text(
                 text = stringResource(id = R.string.settings_history_limit_value, historyLimit),
-                style = MaterialTheme.typography.labelLarge
-            )
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                text = stringResource(id = R.string.settings_auto_delete_description),
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Slider(
-                value = autoDeleteDays.toFloat(),
-                onValueChange = { newValue ->
-                    val snapped = newValue.roundToInt().coerceIn(
-                        UserSettings.MIN_AUTO_DELETE_DAYS,
-                        UserSettings.MAX_AUTO_DELETE_DAYS
-                    )
-                    onAutoDeleteDaysChanged(snapped)
-                },
-                valueRange = UserSettings.MIN_AUTO_DELETE_DAYS.toFloat()..UserSettings.MAX_AUTO_DELETE_DAYS.toFloat(),
-                steps = (UserSettings.MAX_AUTO_DELETE_DAYS - UserSettings.MIN_AUTO_DELETE_DAYS) - 1
-            )
-            val autoDeleteLabel = if (autoDeleteDays == 0) {
-                stringResource(id = R.string.settings_auto_delete_never)
-            } else {
-                stringResource(id = R.string.settings_auto_delete_value, autoDeleteDays)
-            }
-            Text(
-                text = autoDeleteLabel,
                 style = MaterialTheme.typography.labelLarge
             )
         }
@@ -367,9 +334,9 @@ private fun BatterySection(
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (isDisabled) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
                         MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
                     }
                 )
                 if (!isDisabled) {
@@ -555,13 +522,11 @@ private fun AccessibilityServiceSection(
                     }
                 }
             }
-            if (!isEnabled) {
-                Text(
-                    text = stringResource(id = R.string.settings_accessibility_service_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Text(
+                text = stringResource(id = R.string.settings_accessibility_service_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

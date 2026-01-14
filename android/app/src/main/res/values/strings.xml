@@ -42,8 +42,6 @@
     <string name="settings_history">History Settings</string>
     <string name="settings_history_limit">History Limit</string>
     <string name="settings_history_limit_description">Maximum number of clipboard items to store</string>
-    <string name="settings_auto_delete">Auto Delete</string>
-    <string name="settings_auto_delete_description">Automatically delete items older than X days</string>
     <string name="settings_devices">Paired Devices</string>
     <string name="settings_add_device">Add Device</string>
     <string name="settings_devices_empty">No paired devices discovered yet.</string>
@@ -72,16 +70,14 @@
     <string name="settings_notification_permission_request_button">Grant Permission</string>
     <string name="settings_notification_permission_note">Note: Without notification permission, the persistent notification showing the latest clipboard item will not be displayed.</string>
     
-    <string name="settings_accessibility_service">Accessibility Service</string>
-    <string name="settings_accessibility_service_description">Enable to allow clipboard updates in background on Android 10+</string>
+    <string name="settings_accessibility_service">Accessibility Service (Optional)</string>
+    <string name="settings_accessibility_service_description">Improves reliability of background clipboard updates on Android 10+</string>
     <string name="settings_accessibility_service_status_enabled">Enabled</string>
     <string name="settings_accessibility_service_status_disabled">Not Enabled</string>
     <string name="settings_accessibility_service_enable_button">Open Settings</string>
-    <string name="settings_accessibility_service_note">Note: On Android 10+, enabling Accessibility Service allows the app to update clipboard in background. Go to Settings → Accessibility → Hypo and enable it.</string>
+    <string name="settings_accessibility_service_note">Note: This is optional. Background clipboard updates work without it, but enabling Accessibility Service may improve reliability on some devices. Go to Settings → Accessibility → Hypo to enable.</string>
     
     <string name="settings_history_limit_value">Storing up to %1$d items</string>
-    <string name="settings_auto_delete_value">Auto delete after %1$d days</string>
-    <string name="settings_auto_delete_never">Never delete automatically</string>
 
     <!-- Pairing Screen -->
     <string name="pairing_title">Pair Device</string>

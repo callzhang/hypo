@@ -2076,8 +2076,11 @@ private struct SettingsSectionView: View {
     
     
     var body: some View {
-        ScrollView {
-            Form {
+        if isPresentingPairing {
+            PairDeviceSheet(viewModel: viewModel, isPresented: $isPresentingPairing)
+        } else {
+            ScrollView {
+                Form {
                 Section("Connection") {
                     HStack {
                         Text("Status")
@@ -2265,8 +2268,6 @@ private struct SettingsSectionView: View {
             .scrollContentBackground(.hidden)
             .formStyle(.grouped)
         }
-        .sheet(isPresented: $isPresentingPairing) {
-            PairDeviceSheet(viewModel: viewModel, isPresented: $isPresentingPairing)
         }
     }
     
@@ -2708,12 +2709,14 @@ private struct PairDeviceSheet: View {
             
             HStack {
                 Button("Close") { 
+                    viewModel.resetPairingViewModel()
                     isPresented = false 
                 }
                 .keyboardShortcut(.cancelAction)
                 Spacer()
                 if isComplete {
                     Button("Done") { 
+                        viewModel.resetPairingViewModel()
                         isPresented = false 
                     }
                     .keyboardShortcut(.defaultAction)
@@ -2721,13 +2724,10 @@ private struct PairDeviceSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 350, height: 380)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
-        .interactiveDismissDisabled()
         .onAppear { startIfNeeded() }
-        .onDisappear {
-            remoteViewModel.reset()
-        }
+
     }
 
     @ViewBuilder
@@ -2811,7 +2811,7 @@ private struct PairDeviceSheet: View {
     private func startIfNeeded(force: Bool = false) {
         guard let transportManager = viewModel.transportManager else { return }
         let params = transportManager.pairingParameters()
-        if force || !hasStarted {
+        if force || (!hasStarted && remoteViewModel.state == .idle) {
             remoteViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)
         }
         hasStarted = true

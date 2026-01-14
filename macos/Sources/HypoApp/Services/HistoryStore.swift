@@ -251,6 +251,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     private let logger = HypoLogger(category: "transport")
 #endif
     private let deviceIdentity: DeviceIdentityProviding
+    private var persistedPairingViewModel: RemotePairingViewModel?
 
     private enum DefaultsKey {
         static let allowsCloudFallback = "allow_cloud_fallback"
@@ -279,7 +280,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             self.appearancePreference = .system
         }
 #if canImport(UserNotifications)
-        self.notificationController = ClipboardNotificationController()
+        self.notificationController = ClipboardNotificationController.shared
         if let controller = self.notificationController {
             controller.configure(handler: self)
             logger.info("✅ Notification controller initialized successfully")
@@ -913,9 +914,20 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 
 
     public func makeRemotePairingViewModel() -> RemotePairingViewModel {
-        RemotePairingViewModel(identity: deviceIdentity, onDevicePaired: { [weak transportManager] device in
-            transportManager?.registerPairedDevice(device)
+        if let existing = persistedPairingViewModel {
+            return existing
+        }
+        let vm = RemotePairingViewModel(identity: deviceIdentity, onDevicePaired: { [weak self] device in
+            self?.transportManager?.registerPairedDevice(device)
         })
+        persistedPairingViewModel = vm
+        return vm
+    }
+    
+    /// Resets the pairing view model so a fresh one is created next time
+    public func resetPairingViewModel() {
+        persistedPairingViewModel?.reset()
+        persistedPairingViewModel = nil
     }
     
     #if canImport(AppKit)

@@ -276,7 +276,7 @@ public final class LanWebSocketServer {
         connections[id] = context
         connectionMetadata[id] = ConnectionMetadata(deviceId: nil, connectedAt: Date())
         
-        logger.debug("🔌 [LanWebSocketServer] New connection: \(id.uuidString.prefix(8))")
+        // Connection logged when handshake completes
         
         // Check initial state - connection might already be ready
         if case .ready = connection.state {
@@ -310,7 +310,6 @@ public final class LanWebSocketServer {
     }
 
     private func beginHandshake(for connectionId: UUID) {
-        logger.debug("🤝 [LanWebSocketServer] beginHandshake for \(connectionId.uuidString.prefix(8))")
         guard let context = connections[connectionId] else {
             logger.info("⚠️  No context found for connection \(connectionId.uuidString.prefix(8))")
             return
@@ -336,7 +335,6 @@ public final class LanWebSocketServer {
                     context.touch()
                     let processed = self.processHandshakeBuffer(for: connectionId, context: context)
                     if processed {
-                        self.logger.debug("✅ [LanWebSocketServer] Handshake complete for \(connectionId.uuidString.prefix(8))")
                         return
                     } else {
                         // Continue receiving even if isComplete is true (might have more data)
@@ -466,7 +464,6 @@ public final class LanWebSocketServer {
         }
 
         let response = handshakeResponse(for: key)
-        logger.debug("📤 [LanWebSocketServer] Sending HTTP 101 response (\(response.count) bytes) for connection \(connectionId.uuidString.prefix(8))")
         
         // Use .contentProcessed to ensure the response is fully sent before starting frame reception
         // Mark as upgraded BEFORE sending so connection is ready to receive frames immediately
@@ -487,14 +484,6 @@ public final class LanWebSocketServer {
                     self.closeConnection(connectionId)
                     return
                 }
-                // Get device ID from metadata for logging
-                let deviceId = self.connectionMetadata[connectionId]?.deviceId ?? "unknown"
-                #if canImport(os)
-                self.logger.debug("✅ CLIPBOARD HANDSHAKE COMPLETE: WebSocket upgraded for \(connectionId.uuidString.prefix(8))")
-                #endif
-                self.logger.debug("🔗 [LanWebSocketServer] Connection state after handshake: \(context.connection.state)")
-                self.logger.debug("📱 [LanWebSocketServer] Client connected: deviceId=\(deviceId), connectionId=\(connectionId.uuidString.prefix(8))")
-                
                 // Notify delegate that connection is accepted
                 self.delegate?.server(self, didAcceptConnection: connectionId)
                 
@@ -512,9 +501,6 @@ public final class LanWebSocketServer {
     }
 
     private func receiveFrameChunk(for connectionId: UUID, context: ConnectionContext) {
-        #if canImport(os)
-        logger.debug("📡 CLIPBOARD RECEIVE: Setting up receive callback for connection \(connectionId.uuidString.prefix(8))")
-        #endif
         context.connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
                 guard let self = self else {
                     NSLog("⚠️  Self is nil in receive callback")
@@ -668,9 +654,6 @@ public final class LanWebSocketServer {
             
             // Remove processed frame from buffer
             context.dropPrefix(requiredLength)
-        #if canImport(os)
-        logger.debug("📦 [LanWebSocketServer] FRAME PROCESSING: opcode=\(opcode), payload=\(payload.count) bytes, masked=\(isMasked), isFinal=\(isFinal), connection=\(connectionId.uuidString.prefix(8))")
-        #endif
             
             // Call handleFrame (doesn't throw, so no error handling needed)
             handleFrame(opcode: opcode, isFinal: isFinal, payload: payload, connectionId: connectionId, context: context)
@@ -1148,10 +1131,7 @@ public final class LanWebSocketServer {
         }
         
         if !interfaces.isEmpty {
-            logger.info("📡 [LanWebSocketServer] Available network interfaces:")
-            for interface in interfaces {
-                logger.info("   - \(interface)")
-            }
+            logger.debug("📡 [LanWebSocketServer] Found \(interfaces.count) available network interfaces")
         } else {
             // Log all interfaces for debugging when none are found
             logger.warning("⚠️ [LanWebSocketServer] No active network interfaces found")
@@ -1224,8 +1204,6 @@ public final class LanWebSocketServer {
                         if let error {
                             self.logger.warning("⚠️ [LanWebSocketServer] Ping failed for \(id.uuidString.prefix(8)): \(error.localizedDescription)")
                             self.closeConnection(id)
-                        } else {
-                            self.logger.debug("🏓 [LanWebSocketServer] Ping sent to \(id.uuidString.prefix(8))")
                         }
                     }
                 }

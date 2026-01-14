@@ -137,10 +137,10 @@ adb -s $device_id shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboa
 
 ```bash
 # View recent logs
-flyctl logs --app hypo --limit 100
+flyctl logs --app hypo
 
 # Check routing
-flyctl logs --app hypo --limit 100 | grep -E "\[ROUTING\]|\[SEND_BINARY\]"
+flyctl logs --app hypo | grep -E "\[ROUTING\]|\[SEND_BINARY\]"
 
 # Check connected devices
 curl -s https://hypo.fly.dev/health | jq '.connected_devices'

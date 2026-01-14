@@ -674,7 +674,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     /// Process the sync message queue (event-driven: triggered when connection available or message queued)
     private func processSyncQueue() async {
 #if canImport(os)
-        logger.debug("🔄 [HistoryStore] processSyncQueue started: queue=\(syncMessageQueue.count)")
+        if !syncMessageQueue.isEmpty {
+            logger.debug("🔄 [HistoryStore] processSyncQueue started: queue=\(syncMessageQueue.count)")
+        }
 #else
         // No-op
 #endif
@@ -698,7 +700,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             }
             
 #if canImport(os)
-            logger.debug("🔄 [HistoryStore] Processing queue: \(syncMessageQueue.count) messages")
+            if !syncMessageQueue.isEmpty {
+                logger.debug("🔄 [HistoryStore] Processing queue: \(syncMessageQueue.count) messages")
+            }
 #endif
             // Process queue - send to all devices independently
             // Each message targets a specific device, so failures for one device don't block others
@@ -744,7 +748,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             syncMessageQueue = remainingMessages
             
 #if canImport(os)
-            logger.debug("🔄 [HistoryStore] Queue processing completed: retry=\(hasMessagesToRetry), remaining=\(syncMessageQueue.count)")
+            if hasMessagesToRetry || !remainingMessages.isEmpty {
+                logger.debug("🔄 [HistoryStore] Queue processing completed: retry=\(hasMessagesToRetry), remaining=\(syncMessageQueue.count)")
+            }
 #endif
             
             if hasMessagesToRetry && (transportManager.connectionState != .disconnected) {
@@ -781,7 +787,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             } else {
                 // No messages to process, exit (will restart when new message is queued)
 #if canImport(os)
-                logger.debug("🔄 [HistoryStore] processSyncQueue exiting")
+                if !syncMessageQueue.isEmpty {
+                    logger.debug("🔄 [HistoryStore] processSyncQueue exiting")
+                }
 #endif
                 return
             }
@@ -1048,7 +1056,7 @@ extension ClipboardHistoryViewModel: ClipboardMonitorDelegate {
         Task { @MainActor in
             let localId = deviceIdentity.deviceId.uuidString.lowercased()
             let isLocal = entry.deviceId == localId
-            logger.info("📋 [ClipboardHistoryViewModel] clipboardMonitor didCapture: \(entry.previewText.prefix(50)), deviceId: \(entry.deviceId), localDeviceId: \(localId), isLocal: \(isLocal), transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
+            logger.debug("📋 [ClipboardHistoryViewModel] clipboardMonitor didCapture: \(entry.previewText.prefix(50)), deviceId: \(entry.deviceId), localDeviceId: \(localId), isLocal: \(isLocal), transportOrigin: \(entry.transportOrigin?.rawValue ?? "nil")")
             await self.add(entry)
         }
     }

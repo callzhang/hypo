@@ -101,7 +101,6 @@ public final class ConnectionStatusProber {
     /// Probe connection status for all paired devices
     private func probeConnections() async {
         guard !isProbing else {
-            logger.debug("⏭️", "Probe already in progress, skipping")
             return
         }
         
@@ -131,7 +130,7 @@ public final class ConnectionStatusProber {
                     cloudConnectedDeviceIds = Set(connectedPeers.map { $0.deviceId })
                     let preview = connectedPeers.prefix(5).map { $0.deviceId }.joined(separator: ",")
                     let suffix = connectedPeers.count > 5 ? ", …(+\(connectedPeers.count - 5))" : ""
-                    logger.info("☁️", "Cloud query returned \(connectedPeers.count) devices [\(preview)\(suffix)]")
+                    logger.debug("☁️", "Cloud query returned \(connectedPeers.count) devices [\(preview)\(suffix)]")
                 } catch {
                     logger.warning("☁️", "Cloud query timeout or error: \(error.localizedDescription)")
                 }

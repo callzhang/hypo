@@ -311,7 +311,7 @@ public final class TransportManager: ObservableObject {
         
         // Log single summary line
         let instanceAddr = Unmanaged.passUnretained(self).toOpaque()
-        logger.info("🔍 [TransportManager] Peer status: [\(statusSummary.joined(separator: ", "))] on instance \(instanceAddr)")
+        logger.debug("🔍 [TransportManager] Peer status: [\(statusSummary.joined(separator: ", "))] on instance \(instanceAddr)")
     }
 
     @MainActor
@@ -351,8 +351,13 @@ public final class TransportManager: ObservableObject {
         var updatedDevices = pairedDevices
         
         if let index = updatedDevices.firstIndex(where: { $0.id == device.id }) {
+            let existing = updatedDevices[index]
+            if existing.id == device.id && existing.isOnline == device.isOnline && existing.serviceName == device.serviceName && existing.bonjourHost == device.bonjourHost && existing.bonjourPort == device.bonjourPort {
+                // No meaningful change, skip logging
+            } else {
+                logger.info("🔄 [TransportManager] Updated existing device: \(device.name)")
+            }
             updatedDevices[index] = device
-            logger.info("🔄 [TransportManager] Updated existing device: \(device.name)")
         } else if let existingIndex = updatedDevices.firstIndex(where: { $0.name == device.name && $0.platform == device.platform }) {
             updatedDevices[existingIndex] = device
             logger.info("🔄 [TransportManager] Updated device by name: \(device.name)")
@@ -489,9 +494,8 @@ public final class TransportManager: ObservableObject {
                     do {
                         try await cloudTransport.connect()
                         connectionState = .connectedCloud
-                        logger.info("✅ [TransportManager] Connected to cloud relay")
+                        logger.debug("✅ [TransportManager] Connected to cloud relay, triggering probe")
                         
-                        logger.info("🔍 [TransportManager] Triggering probe after cloud connect")
                         await probeConnectionStatus()
                     } catch {
                         connectionState = .disconnected
@@ -692,9 +696,9 @@ public final class TransportManager: ObservableObject {
         startNetworkMonitorTaskIfNeeded()
         
         // Start cloud auto-connect (guarded against duplicates)
-        logger.info("☁️ [TransportManager] Calling startAutoConnect from activateLanServices")
+        logger.debug("☁️ [TransportManager] Calling startAutoConnect from activateLanServices")
         await startAutoConnect()
-        logger.info("🎬 [TransportManager] activateLanServices completed")
+        logger.debug("🎬 [TransportManager] activateLanServices completed")
     }
 
     public func deactivateLanServices() async {
@@ -1202,12 +1206,16 @@ public final class TransportManager: ObservableObject {
                 return // Don't add self to discovered peers
             }
             
-            logger.info("🔍 [TransportManager] Peer discovered: \(peer.serviceName) at \(peer.endpoint.host):\(peer.endpoint.port), device_id=\(peer.endpoint.metadata["device_id"] ?? "none")")
+            if lanPeers[peer.serviceName] == nil {
+                logger.info("🔍 [TransportManager] Peer discovered: \(peer.serviceName) at \(peer.endpoint.host):\(peer.endpoint.port), device_id=\(peer.endpoint.metadata["device_id"] ?? "none") (new)")
+            } else {
+                logger.debug("🔍 [TransportManager] Peer updated: \(peer.serviceName) at \(peer.endpoint.host):\(peer.endpoint.port)")
+            }
+
             lanPeers[peer.serviceName] = peer
             lastSeen[peer.serviceName] = peer.lastSeen
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
-            logger.info("🔍 [TransportManager] After adding peer, lanPeers.count=\(lanPeers.count), serviceName=\(peer.serviceName)")
 
             if let peerDeviceId = peer.endpoint.metadata["device_id"] {
                 if let device = pairedDevices.first(where: { $0.id.caseInsensitiveCompare(peerDeviceId) == .orderedSame }) {

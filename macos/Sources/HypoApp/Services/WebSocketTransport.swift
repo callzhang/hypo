@@ -216,7 +216,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         // This allows WebSocket to automatically fragment large messages using RFC 6455 fragmentation
         // The server already supports 1GB frames, so this enables end-to-end large file support
         task.maximumMessageSize = 1_073_741_824 // 1GB
-        logger.info("📏 [WebSocketTransport] Set maximumMessageSize to 1GB for automatic fragmentation")
+        logger.debug("📏 [WebSocketTransport] Set maximumMessageSize to 1GB for automatic fragmentation")
         
         state = .connecting
 
@@ -230,7 +230,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 let _ = retainedSelf
                 let _ = retainedSession
                 
-                retainedSelf.handshakeContinuation = continuation
+                handshakeContinuation = continuation
                 task.resume()
             }
             logger.debug("✅ [WebSocketTransport] Connection established")

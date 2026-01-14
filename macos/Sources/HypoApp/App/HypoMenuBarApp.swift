@@ -380,7 +380,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         let keyCode = UInt32(9) // 'V' key
         let modifiers = UInt32(optionKey) // Alt/Option
         
-        logger.debug("🔧 [HypoAppDelegate] Registering hotkey: keyCode=\(keyCode), modifiers=\(modifiers), signature=\(hotKeyID.signature), id=\(hotKeyID.id)")
+        // logger.debug("🔧 [HypoAppDelegate] Registering hotkey: keyCode=\(keyCode), modifiers=\(modifiers), signature=\(hotKeyID.signature), id=\(hotKeyID.id)")
         
         let status = RegisterEventHotKey(
             keyCode,
@@ -393,7 +393,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         
         if status == noErr, let hotKey = hotKeyRef {
             self.hotKeyRef = hotKey
-            logger.debug("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+V (status: \(status), ref: \(hotKey))")
+            // logger.debug("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+V (status: \(status), ref: \(hotKey))")
         } else if self.hotKeyRef == nil {
             // If registration failed but we don't have a ref, check if it's just because hotkey already exists
             if status == -9878 { // eventHotKeyExistsErr
@@ -434,7 +434,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             
             if status == noErr, let hotKey = hotKeyRef {
                 altNumberHotKeys[num] = hotKey
-                logger.debug("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+\(num) (status: \(status))")
+                // logger.debug("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+\(num) (status: \(status))")
             } else {
                 // Log as debug if hotkey already exists (expected behavior), warning for actual errors
                 if status == -9878 { // eventHotKeyExistsErr
@@ -2083,16 +2083,8 @@ private struct SettingsSectionView: View {
                         Text("Status")
                         Spacer()
                         // Connection Status Icon - Observes transportManager
-                        HStack(spacing: 6) {
-                            Text(connectionStatusShortText(for: transportManager.connectionState))
-                                .font(.caption)
-                                .foregroundColor(connectionStatusIconColor(for: transportManager.connectionState))
-                            
-                            Image(systemName: connectionStatusIconName(for: transportManager.connectionState))
-                                .foregroundColor(connectionStatusIconColor(for: transportManager.connectionState))
-                                .font(.system(size: 14, weight: .medium))
-                        }
-                        .help(connectionStatusTooltip(for: transportManager.connectionState))
+                        ConnectionStatusBadge(state: transportManager.connectionState)
+                            .help(connectionStatusTooltip(for: transportManager.connectionState))
                     }
                 }
                 
@@ -2308,46 +2300,68 @@ private struct SettingsSectionView: View {
         }
     }
     
-    private func connectionStatusIconName(for state: ConnectionState) -> String {
-        switch state {
-        case .disconnected:
-            return "cloud.slash.fill" // Cloud with slash when disconnected (not wifi)
-        case .connectingLan, .connectingCloud:
-            return "arrow.triangle.2.circlepath"
-        case .connectedLan:
-            return "wifi"
-        case .connectedCloud:
-            return "cloud.fill"
-        case .error:
-            return "exclamationmark.triangle.fill"
-        }
-    }
     
-    private func connectionStatusIconColor(for state: ConnectionState) -> Color {
-        switch state {
-        case .disconnected:
-            return .gray
-        case .connectingLan, .connectingCloud:
-            return .orange
-        case .connectedLan:
-            return .green
-        case .connectedCloud:
-            return .blue
-        case .error:
-            return .red
-        }
-    }
     
-    private func connectionStatusShortText(for state: ConnectionState) -> String {
-        switch state {
-        case .disconnected:
-            return "Disconnected"
-        case .connectingLan, .connectingCloud:
-            return "Connecting..."
-        case .connectedLan, .connectedCloud:
-            return "Connected"
-        case .error:
-            return "Disconnected"
+    private struct ConnectionStatusBadge: View {
+        let state: ConnectionState
+        
+        var body: some View {
+            HStack(spacing: 6) {
+                Image(systemName: iconName)
+                    .font(.system(size: 14))
+                Text(statusText)
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(backgroundColor.opacity(0.15))
+            .foregroundColor(foregroundColor)
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(backgroundColor.opacity(0.3), lineWidth: 1)
+            )
+        }
+        
+        private var iconName: String {
+            switch state {
+            case .disconnected: return "cloud.slash.fill"
+            case .connectingLan, .connectingCloud: return "arrow.triangle.2.circlepath"
+            case .connectedLan: return "wifi"
+            case .connectedCloud: return "cloud.fill"
+            case .error: return "exclamationmark.triangle.fill"
+            }
+        }
+        
+        private var statusText: String {
+            switch state {
+            case .disconnected: return "Disconnected"
+            case .connectingLan, .connectingCloud: return "Connecting…"
+            case .connectedLan: return "LAN"
+            case .connectedCloud: return "Connected"
+            case .error: return "Disconnected"
+            }
+        }
+        
+        private var backgroundColor: Color {
+            switch state {
+            case .disconnected: return .gray
+            case .connectingLan, .connectingCloud: return .orange
+            case .connectedLan: return .green
+            case .connectedCloud: return .blue
+            case .error: return .red
+            }
+        }
+        
+        private var foregroundColor: Color {
+            switch state {
+            case .disconnected: return .secondary
+            case .connectingLan, .connectingCloud: return .orange
+            case .connectedLan: return .green
+            case .connectedCloud: return .blue
+            case .error: return .red
+            }
         }
     }
     
@@ -2804,71 +2818,7 @@ private struct PairDeviceSheet: View {
     }
 }
 
-private struct ConnectionStatusView: View {
-    let state: ConnectionState
-    
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: iconName)
-                .foregroundColor(iconColor)
-                .font(.system(size: 14, weight: .medium))
-            Text(statusText)
-                .font(.subheadline)
-                .foregroundColor(.primary)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(iconColor.opacity(0.1))
-        .cornerRadius(8)
-    }
-    
-    private var iconName: String {
-        switch state {
-        case .disconnected:
-            return "cloud.slash.fill" // Cloud with slash when disconnected (not wifi)
-        case .connectingLan, .connectingCloud:
-            return "arrow.triangle.2.circlepath"
-        case .connectedLan:
-            return "wifi"
-        case .connectedCloud:
-            return "cloud.fill"
-        case .error:
-            return "exclamationmark.triangle.fill"
-        }
-    }
-    
-    private var iconColor: Color {
-        switch state {
-        case .disconnected:
-            return .gray
-        case .connectingLan, .connectingCloud:
-            return .orange
-        case .connectedLan:
-            return .green
-        case .connectedCloud:
-            return .blue
-        case .error:
-            return .red
-        }
-    }
-    
-    private var statusText: String {
-        switch state {
-        case .disconnected:
-            return "Offline"
-        case .connectingLan:
-            return "Connecting (LAN)..."
-        case .connectedLan:
-            return "Connected (LAN)"
-        case .connectingCloud:
-            return "Connecting (Cloud)..."
-        case .connectedCloud:
-            return "Connected (Cloud)"
-        case .error(let message):
-            return "Error: \(message)"
-        }
-    }
-}
+
 
 // Detail window for showing full clipboard content
 private struct ClipboardDetailWindow: View {

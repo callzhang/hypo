@@ -176,6 +176,13 @@ class ClipboardSyncService : Service() {
             incomingClipboardHandler.handle(envelope, origin)
         }
         
+        // Handle peer status changes with notifications
+        transportManager.setPeerStatusChangedHandler { deviceId, name, status ->
+             scope.launch {
+                 showStatusNotification(deviceId, "Device Status Changed", "$name is now $status")
+             }
+        }
+        
         // Set handler for LAN peer connections (created by LanPeerConnectionManager)
         // Get LanPeerConnectionManager from TransportManager's internal reference
         val lanPeerConnectionManager = transportManager.getLanPeerConnectionManager()
@@ -227,6 +234,7 @@ class ClipboardSyncService : Service() {
     override fun onDestroy() {
         shutdownForRemoval("onDestroy")
         
+        transportManager.clearPeerStatusChangedHandler()
         notificationJob?.cancel()
         unregisterScreenStateReceiver()
         unregisterNetworkChangeCallback()
@@ -393,6 +401,19 @@ class ClipboardSyncService : Service() {
             } else {
                 Log.e(TAG, "❌ CRITICAL: Failed to create notification channel: $CHANNEL_ID")
             }
+
+            // Peer status channel
+            val peerStatusChannel = NotificationChannel(
+                PEER_STATUS_CHANNEL_ID,
+                getString(R.string.peer_status_notification_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = getString(R.string.peer_status_notification_channel_description)
+                setShowBadge(true)
+                enableLights(false)
+                enableVibration(true)
+            }
+            manager.createNotificationChannel(peerStatusChannel)
             
             // Warning channel (for file size warnings)
             val warningChannel = NotificationChannel(
@@ -501,6 +522,29 @@ class ClipboardSyncService : Service() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to update notification: ${e.message}", e)
+        }
+    }
+
+    private fun showStatusNotification(deviceId: String, title: String, message: String) {
+        if (!notificationManager.areNotificationsEnabled()) return
+        
+        Log.d(TAG, "🔔 Showing status notification: $title - $message")
+        
+        val builder = NotificationCompat.Builder(this, PEER_STATUS_CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            
+        // Per-device coalescing: latest status replaces prior for the same device
+        val notificationId = deviceId.hashCode()
+        
+        try {
+            notificationManager.notify(notificationId, builder.build())
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to show status notification: ${e.message}")
         }
     }
 
@@ -1046,6 +1090,7 @@ class ClipboardSyncService : Service() {
         // Changed channel ID to force recreation with IMPORTANCE_DEFAULT
         // Old channel with IMPORTANCE_LOW cannot be changed programmatically on Android 8.0+
         private const val CHANNEL_ID = "clipboard-sync-v2"
+        private const val PEER_STATUS_CHANNEL_ID = "peer-status-v1"
         private const val WARNING_CHANNEL_ID = "clipboard-warnings"
         private const val NOTIFICATION_ID = 42
         private const val WARNING_NOTIFICATION_ID = 43

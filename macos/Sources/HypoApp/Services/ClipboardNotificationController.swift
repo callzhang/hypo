@@ -19,6 +19,7 @@ public protocol ClipboardNotificationScheduling: AnyObject {
     func configure(handler: ClipboardNotificationHandling)
     func requestAuthorizationIfNeeded()
     func deliverNotification(for entry: ClipboardEntry)
+    func deliverStatusNotification(title: String, body: String)
 }
 
 public final class ClipboardNotificationController: NSObject, ClipboardNotificationScheduling {
@@ -239,6 +240,40 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
         return content
     }
     
+    public func deliverStatusNotification(title: String, body: String) {
+        #if canImport(os)
+        let logger = HypoLogger(category: "ClipboardNotificationController")
+        logger.debug("📢 [ClipboardNotificationController] deliverStatusNotification: title=\(title), body=\(body)")
+        #endif
+        
+        center.getNotificationSettings { [weak self] settings in
+            guard let self else { return }
+            
+            let status = settings.authorizationStatus
+            guard status == .authorized || status == .provisional else { return }
+            
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            // Use a specific category or default
+            // content.categoryIdentifier = ... 
+            
+            // Use a unique ID based on title/body or random to avoid coalescing if multiple events happen
+            let identifier = "status-\(UUID().uuidString)"
+            
+            let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+            
+            self.center.add(request) { error in
+                #if canImport(os)
+                if let error = error {
+                    logger.error("❌ [ClipboardNotificationController] Failed to add status notification: \(error.localizedDescription)")
+                }
+                #endif
+            }
+        }
+    }
+    
     private func formatTimestamp(_ date: Date) -> String {
         let formatter = DateFormatter()
         let calendar = Calendar.current
@@ -363,6 +398,7 @@ final class NoOpNotificationController: NSObject, ClipboardNotificationSchedulin
     func configure(handler: ClipboardNotificationHandling) {}
     func requestAuthorizationIfNeeded() {}
     func deliverNotification(for entry: ClipboardEntry) {}
+    func deliverStatusNotification(title: String, body: String) {}
 }
 
 #endif

@@ -54,6 +54,7 @@ class TransportManager(
     private val _lanConnectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     // Keep track of pending removals for cancellation (but we don't actually remove peers anymore)
     private val pendingPeerRemovalJobs = mutableMapOf<String, Job>()
+    private data class PeerStatusChange(val deviceId: String, val name: String, val status: String)
 
     private val _peers = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
     private val _lastSeen = MutableStateFlow<Map<String, Instant>>(emptyMap())
@@ -167,6 +168,7 @@ class TransportManager(
     private val networkChangeDetected = AtomicBoolean(false)
     private var onPairingChallenge: (suspend (String) -> String?)? = null
     private var onIncomingClipboard: ((com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit)? = null
+    private var onPeerStatusChanged: ((String, String, String) -> Unit)? = null
     private var lanPeerConnectionManager: com.hypo.clipboard.transport.ws.LanPeerConnectionManager? = null
 
     val peers: StateFlow<List<DiscoveredPeer>> = _peers.asStateFlow()
@@ -176,6 +178,14 @@ class TransportManager(
     val cloudConnectionState: StateFlow<ConnectionState> = _cloudConnectionState.asStateFlow()
     val lastSuccessfulTransport: StateFlow<Map<String, ActiveTransport>> =
         _lastSuccessfulTransport.asStateFlow()
+    
+    fun setPeerStatusChangedHandler(handler: (String, String, String) -> Unit) {
+        onPeerStatusChanged = handler
+    }
+
+    fun clearPeerStatusChangedHandler() {
+        onPeerStatusChanged = null
+    }
     
     /**
      * Update the connection state (used by ConnectionStatusProber)
@@ -434,6 +444,7 @@ class TransportManager(
         require(!olderThan.isNegative && !olderThan.isZero) { "Interval must be positive" }
         val threshold = clock.instant().minus(olderThan)
         val removed = mutableListOf<DiscoveredPeer>()
+        val statusChanges = mutableListOf<PeerStatusChange>()
         synchronized(stateLock) {
             val iterator = peersByService.entries.iterator()
             while (iterator.hasNext()) {
@@ -442,11 +453,20 @@ class TransportManager(
                     iterator.remove()
                     lastSeenByService.remove(entry.key)
                     removed += entry.value
+                    
+                    val peer = entry.value
+                    val deviceId = peer.attributes["device_id"]
+                    val name = peer.serviceName
+                    val notificationId = deviceId ?: peer.serviceName
+                    statusChanges += PeerStatusChange(notificationId, name, "Offline")
                 }
             }
             if (removed.isNotEmpty()) {
                 publishStateLocked()
             }
+        }
+        statusChanges.forEach { change ->
+            onPeerStatusChanged?.invoke(change.deviceId, change.name, change.status)
         }
         return removed
     }
@@ -580,6 +600,12 @@ class TransportManager(
         
         if (pendingRemoval != null) {
             android.util.Log.v("TransportManager", "✅ Peer ${peer.serviceName} rediscovered (was offline, now online)")
+        } else if (existingPeer == null) {
+            // New peer discovered
+            val deviceId = peer.attributes["device_id"]
+            val name = peer.serviceName
+            val notificationId = deviceId ?: peer.serviceName
+            onPeerStatusChanged?.invoke(notificationId, name, "Online")
         }
         if (ipChanged) {
             android.util.Log.d("TransportManager", "🔄 Peer ${peer.serviceName} IP changed: ${existingPeer?.host} -> ${peer.host}")
@@ -603,6 +629,21 @@ class TransportManager(
         // Cancel any pending removal job if peer is rediscovered
         val pendingRemoval = synchronized(stateLock) { pendingPeerRemovalJobs.remove(serviceName) }
         pendingRemoval?.cancel()
+        
+        // Notify status change before removal (to look up name)
+        var statusChange: PeerStatusChange? = null
+        synchronized(stateLock) {
+            val peer = peersByService[serviceName]
+            if (peer != null) {
+                val deviceId = peer.attributes["device_id"]
+                val name = serviceName
+                val notificationId = deviceId ?: serviceName
+                statusChange = PeerStatusChange(notificationId, name, "Offline")
+            }
+        }
+        statusChange?.let { change ->
+            onPeerStatusChanged?.invoke(change.deviceId, change.name, change.status)
+        }
         
         // Actually remove the peer from internal maps
         synchronized(stateLock) {

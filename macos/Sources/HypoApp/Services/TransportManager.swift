@@ -97,6 +97,8 @@ public final class TransportManager: ObservableObject {
     private var lifecycleObserver: ApplicationLifecycleObserver?
     #endif
 
+    private let notificationController: ClipboardNotificationScheduling
+
     public init(
         provider: TransportProvider,
         browser: BonjourBrowser = BonjourBrowser(),
@@ -110,7 +112,8 @@ public final class TransportManager: ObservableObject {
         webSocketServer: LanWebSocketServer,
         historyStore: HistoryStore? = nil,
         defaults: UserDefaults = .standard,
-        dispatcher: ClipboardEventDispatcher? = nil // Will be used in later phases
+        dispatcher: ClipboardEventDispatcher? = nil,
+        notificationController: ClipboardNotificationScheduling = ClipboardNotificationController.shared
     ) {
         self.defaults = defaults
         self.provider = provider
@@ -128,6 +131,7 @@ public final class TransportManager: ObservableObject {
         self.lanPeers = cachedPeers
         self.webSocketServer = webSocketServer
         self.dispatcher = dispatcher ?? ClipboardEventDispatcher()
+        self.notificationController = notificationController
 
         // Configure TempFileManager with the dispatcher
         TempFileManager.shared.configure(dispatcher: self.dispatcher)
@@ -255,6 +259,14 @@ public final class TransportManager: ObservableObject {
                 logger.info("🔄 [TransportManager] Device status changed: \(pairedDevices[index].name) is now \(isOnline ? "Online" : "Offline") on instance \(instanceAddr)")
             }
             pairedDevices[index].isOnline = isOnline
+            
+            // Send notification for status change
+            let deviceName = pairedDevices[index].name
+            let statusText = isOnline ? "Online" : "Offline"
+            notificationController.deliverStatusNotification(
+                title: "Device Status Changed",
+                body: "\(deviceName) is now \(statusText)"
+            )
             
             // Explicitly notify change to ensure SwiftUI picks it up across potential actor boundaries
             objectWillChange.send()

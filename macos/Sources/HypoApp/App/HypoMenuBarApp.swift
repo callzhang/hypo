@@ -54,13 +54,32 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
     /// This is critical for menu bar apps, especially when running from /Applications
     private func ensureActivationPolicy() {
         let currentPolicy = NSApplication.shared.activationPolicy()
+        logger.info("🔧 [HypoAppDelegate] Checking activation policy. Current: \(currentPolicy.rawValue)")
+        
+        // Always try to set it if not already correct
         if currentPolicy != .accessory {
-            logger.info("🔧 [HypoAppDelegate] Setting activation policy to .accessory (current: \(currentPolicy.rawValue))")
+            logger.info("🔧 [HypoAppDelegate] Force setting activation policy to .accessory")
             let success = NSApplication.shared.setActivationPolicy(.accessory)
             if success {
                 logger.info("✅ [HypoAppDelegate] Activation policy set to .accessory")
             } else {
                 logger.error("❌ [HypoAppDelegate] Failed to set activation policy to .accessory")
+            }
+        }
+        
+        // Double check after a delay to ensure it stuck
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            let newPolicy = NSApplication.shared.activationPolicy()
+            if newPolicy != .accessory {
+                self?.logger.warning("⚠️ [HypoAppDelegate] Activation policy reverted to \(newPolicy.rawValue). Forcing .accessory again.")
+                let success = NSApplication.shared.setActivationPolicy(.accessory)
+                if success {
+                    self?.logger.info("✅ [HypoAppDelegate] Retry: Activation policy set to .accessory")
+                } else {
+                    self?.logger.error("❌ [HypoAppDelegate] Retry: Failed to set activation policy")
+                }
+            } else {
+                self?.logger.debug("✅ [HypoAppDelegate] Verified activation policy is .accessory")
             }
         }
     }
@@ -782,10 +801,16 @@ public struct HypoMenuBarApp: App {
         globalAppDelegate = delegate  // Store in global to prevent deallocation
         
         // Set up delegate after NSApp is ready
+        let localLogger = self.logger
         DispatchQueue.main.async {
-            NSApplication.shared.delegate = delegate
-            // Call applicationDidFinishLaunching manually
-            delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            if let existingDelegate = NSApplication.shared.delegate as? HypoAppDelegate {
+                localLogger.info("✅ [HypoMenuBarApp] AppDelegate already set by Adaptor (ref: \(existingDelegate))")
+            } else {
+                localLogger.warning("⚠️ [HypoMenuBarApp] AppDelegate missing, setting manual delegate")
+                NSApplication.shared.delegate = delegate
+                // Call applicationDidFinishLaunching manually
+                delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            }
         }
     }
 

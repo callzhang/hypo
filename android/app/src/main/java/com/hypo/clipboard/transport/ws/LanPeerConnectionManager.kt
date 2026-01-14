@@ -1,5 +1,6 @@
 package com.hypo.clipboard.transport.ws
 
+import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
 import com.hypo.clipboard.transport.TransportAnalytics
@@ -30,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap
 class LanPeerConnectionManager(
     private val transportManager: TransportManager,
     private val frameCodec: TransportFrameCodec,
+    private val deviceIdentity: DeviceIdentity,
     private val analytics: TransportAnalytics = NoopTransportAnalytics,
     private val metricsRecorder: TransportMetricsRecorder = NoopTransportMetricsRecorder,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
@@ -83,7 +85,7 @@ class LanPeerConnectionManager(
             // Create/maintain connections for discovered peers
             for (peer in discoveredPeers) {
                 val deviceId = peer.attributes["device_id"] ?: peer.serviceName
-                val peerUrl = when {
+                var peerUrl = when {
                     peer.host != "unknown" && peer.host != "127.0.0.1" -> {
                         "ws://${peer.host}:${peer.port}"
                     }
@@ -100,6 +102,9 @@ class LanPeerConnectionManager(
                     continue
                 }
                 
+                // Append device_id query parameter for compatibility with some servers (e.g. macOS)
+                peerUrl += "?device_id=${deviceIdentity.deviceId}"
+
                 // Create connection if it doesn't exist
                 if (!peerConnections.containsKey(deviceId)) {
                     val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
@@ -109,6 +114,7 @@ class LanPeerConnectionManager(
                         url = peerUrl,
                         fingerprintSha256 = null, // No pinning for ws://
                         headers = mapOf(
+                            "X-Device-Id" to deviceIdentity.deviceId,
                             "X-Device-Platform" to "android"
                         ),
                         environment = "lan",

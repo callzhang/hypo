@@ -427,6 +427,13 @@ public final class TransportManager: ObservableObject {
     /// Start auto-connect to cloud relay
     @MainActor
     private func startAutoConnect() async {
+        guard autoConnectTask == nil else {
+            logger.debug("⏭️ [TransportManager] Auto-connect already in progress/scheduled")
+            return
+        }
+        
+        logger.info("🔄 [TransportManager] Attempting to auto-connect to cloud relay")
+        
         autoConnectTask = Task { @MainActor in
             do {
                 // Auto-connect to cloud relay after a delay to show server availability
@@ -434,18 +441,25 @@ public final class TransportManager: ObservableObject {
                 
                 if let provider = provider as? DefaultTransportProvider {
                     let cloudTransport = provider.getCloudTransport()
-                    if !cloudTransport.isConnected() {
-                        connectionState = .connectingCloud
-                        do {
-                            try await cloudTransport.connect()
-                            connectionState = .connectedCloud
-                            logger.debug("✅ [TransportManager] Connected to cloud relay")
-                        } catch {
-                            connectionState = .disconnected
-                            logger.warning("❌ [TransportManager] Cloud connection failed: \(error.localizedDescription)")
-                        }
-                    } else {
+                    
+                    if cloudTransport.isConnected() {
                         connectionState = .connectedCloud
+                        logger.info("✅ [TransportManager] Already connected to cloud relay. Triggering probe.")
+                        await probeConnectionStatus()
+                        return
+                    }
+                    
+                    connectionState = .connectingCloud
+                    do {
+                        try await cloudTransport.connect()
+                        connectionState = .connectedCloud
+                        logger.info("✅ [TransportManager] Connected to cloud relay")
+                        
+                        logger.info("🔍 [TransportManager] Triggering probe after cloud connect")
+                        await probeConnectionStatus()
+                    } catch {
+                        connectionState = .disconnected
+                        logger.warning("❌ [TransportManager] Cloud connection failed: \(error.localizedDescription)")
                     }
                 }
             } catch {
@@ -596,25 +610,38 @@ public final class TransportManager: ObservableObject {
     }
 
     private func activateLanServices() async {
+        logger.info("🎬 [TransportManager] activateLanServices called")
+        
         if !isAdvertising, lanConfiguration.port > 0 {
+            logger.info("📢 [TransportManager] Starting Bonjour advertising on port \(lanConfiguration.port)")
             publisher.start(with: lanConfiguration)
             isAdvertising = true
+        } else {
+            logger.info("⚠️ [TransportManager] Skipping advertising: isAdvertising=\(isAdvertising), port=\(lanConfiguration.port)")
         }
         
         // Start WebSocket server
         if !isServerRunning, lanConfiguration.port > 0 {
+            logger.info("📡 [TransportManager] Starting WebSocket server on port \(lanConfiguration.port)")
             do {
                 try webSocketServer.start(port: lanConfiguration.port)
                 isServerRunning = true
+                logger.info("✅ [TransportManager] WebSocket server started")
             } catch {
                 #if canImport(os)
                 let serverLogger = HypoLogger(category: "transport")
                 serverLogger.error("Failed to start WebSocket server: \(error.localizedDescription)")
                 #endif
             }
+        } else {
+             logger.info("⚠️ [TransportManager] Skipping server start: isServerRunning=\(isServerRunning), port=\(lanConfiguration.port)")
         }
 
-        guard discoveryTask == nil else { return }
+        guard discoveryTask == nil else { 
+            logger.info("⚠️ [TransportManager] Discovery task already running, skipping browser start")
+            return 
+        }
+
         let stream = await browser.events()
         discoveryTask = Task { [weak self] in
             guard let self else { return }
@@ -622,10 +649,16 @@ public final class TransportManager: ObservableObject {
                 self.handle(event: event)
             }
         }
+        logger.info("🔍 [TransportManager] Starting Bonjour browser")
         await browser.start()
         startPruneTaskIfNeeded()
         startHealthCheckTaskIfNeeded()
         startNetworkMonitorTaskIfNeeded()
+        
+        // Start cloud auto-connect (guarded against duplicates)
+        logger.info("☁️ [TransportManager] Calling startAutoConnect from activateLanServices")
+        await startAutoConnect()
+        logger.info("🎬 [TransportManager] activateLanServices completed")
     }
 
     private func deactivateLanServices() async {
@@ -1203,12 +1236,14 @@ public final class TransportManager: ObservableObject {
     }
 
     private static func defaultLanConfiguration() -> BonjourPublisher.Configuration {
-        let hostName = ProcessInfo.processInfo.hostName
         let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
-        
         // Use DeviceIdentity to get consistent device ID format (macos-{UUID})
         let deviceIdentity = DeviceIdentity()
         let deviceId = deviceIdentity.deviceIdString
+        
+        // Use user-friendly device name for Bonjour service name (e.g. "Derek's MacBook Air")
+        // instead of raw hostname (e.g. "dereks-macbook-air-13.local") which causes mDNS issues
+        let serviceName = deviceIdentity.deviceName
         
         // Load or generate persistent keys for auto-discovery pairing
         let signingKeyStore = FileBasedPairingSigningKeyStore()
@@ -1245,7 +1280,7 @@ public final class TransportManager: ObservableObject {
             fingerprint = "uninitialized"
         }
         return BonjourPublisher.Configuration(
-            serviceName: hostName,
+            serviceName: serviceName,
             port: 7010,
             version: bundleVersion,
             fingerprint: fingerprint,

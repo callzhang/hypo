@@ -193,11 +193,13 @@ object AppModule {
     fun provideLanPeerConnectionManager(
         transportManager: com.hypo.clipboard.transport.TransportManager,
         frameCodec: TransportFrameCodec,
-        analytics: TransportAnalytics
+        analytics: TransportAnalytics,
+        deviceIdentity: DeviceIdentity
     ): com.hypo.clipboard.transport.ws.LanPeerConnectionManager {
         val manager = com.hypo.clipboard.transport.ws.LanPeerConnectionManager(
             transportManager = transportManager,
             frameCodec = frameCodec,
+            deviceIdentity = deviceIdentity,
             analytics = analytics
         )
         // Wire up bidirectional reference

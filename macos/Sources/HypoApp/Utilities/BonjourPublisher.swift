@@ -70,7 +70,6 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
 
     private var configuration: Configuration?
     private var service: NetService?
-    private let queue = DispatchQueue(label: "com.hypo.bonjour.publisher")
     private var stopCompletion: (() -> Void)?
 
     public override init() {
@@ -93,9 +92,18 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
     }
 
     public func start(with configuration: Configuration) {
-        queue.sync {
+        // Ensure we run on main queue for NetService reliability
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
             guard configuration.port > 0 else { return }
+            
             self.configuration = configuration
+            
+            #if canImport(os)
+            let logger = HypoLogger(category: "BonjourPublisher")
+            logger.info("📢 Starting Bonjour service: \(configuration.serviceName) on port \(configuration.port)")
+            #endif
+            
             let service = NetService(
                 domain: configuration.domain,
                 type: configuration.serviceType,
@@ -104,6 +112,7 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
             )
             service.includesPeerToPeer = true
             service.delegate = self
+            // Implicitly scheduled on current run loop (Main, since we are on main queue)
             service.setTXTRecord(Self.encodeTXT(configuration.txtRecord))
             service.publish()
             self.service = service
@@ -111,36 +120,41 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
     }
 
     public func stop() {
-        queue.sync {
-            guard let service = service else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let service = self.service else { return }
             service.delegate = self
             service.stop()
-            // For synchronous stop, we still wait for delegate but don't block
-            // The service will be set to nil in the delegate callback
         }
     }
     
     public func stop(completion: @escaping () -> Void) {
-        queue.sync {
-            guard let service = service else {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let service = self.service else {
                 completion()
                 return
             }
-            stopCompletion = completion
+            self.stopCompletion = completion
             service.delegate = self
             service.stop()
-            // Don't set service to nil yet - wait for delegate callback
         }
     }
 
     public func updateTXTRecord(_ metadata: [String: String]) {
-        queue.sync(execute: {
-            guard let service else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let service = self.service else { return }
+            #if canImport(os)
+            let logger = HypoLogger(category: "BonjourPublisher")
+            logger.debug("📝 Updating TXT record: \(metadata)")
+            #endif
             service.setTXTRecord(Self.encodeTXT(metadata))
-        })
+        }
     }
 
     private static func encodeTXT(_ record: [String: String]) -> Data {
+        #if canImport(os)
+        let logger = HypoLogger(category: "BonjourPublisher")
+        logger.debug("📝 Encoding TXT record: \(record)")
+        #endif
         var dataRecord: [String: Data] = [:]
         for (key, value) in record {
             dataRecord[key] = Data(value.utf8)
@@ -150,15 +164,34 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
 }
 
 extension BonjourPublisher: NetServiceDelegate {
+    public func netServiceDidPublish(_ sender: NetService) {
+        #if canImport(os)
+        let logger = HypoLogger(category: "BonjourPublisher")
+        logger.info("✅ Service published: \(sender.name).\(sender.type)\(sender.domain) port:\(sender.port)")
+        #endif
+    }
+
+    public func netService(_ sender: NetService, didNotPublish errorDict: [String : NSNumber]) {
+        #if canImport(os)
+        let logger = HypoLogger(category: "BonjourPublisher")
+        logger.error("❌ Failed to publish service: \(errorDict)")
+        #endif
+    }
+
     public func netServiceDidStop(_ sender: NetService) {
-        // Use async instead of sync to avoid deadlock when this delegate is called
-        // during a sync operation (e.g., stop(completion:) calling service.stop())
-        queue.async {
+        // Run on main queue to match start/stop calls
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
             if sender === self.service {
                 self.service = nil
+                #if canImport(os)
+                let logger = HypoLogger(category: "BonjourPublisher")
+                logger.info("🛑 Service stopped")
+                #endif
                 let completion = self.stopCompletion
                 self.stopCompletion = nil
-                // Call completion on the queue to ensure it's called after service is nil
+                // Call completion on main queue
                 if let completion = completion {
                     completion()
                 }

@@ -399,6 +399,17 @@ public final class LanWebSocketServer {
             sendHTTPError(status: "400 Bad Request", connectionId: connectionId, context: context)
             return true
         }
+
+        // Parse request line to get path and extract query parameters
+        let requestParts = requestLine.components(separatedBy: " ")
+        var deviceIdFromQuery: String? = nil
+        if requestParts.count >= 2 {
+            let path = requestParts[1]
+            if let urlComponents = URLComponents(string: "http://dummyhost" + path),
+               let queryItems = urlComponents.queryItems {
+                deviceIdFromQuery = queryItems.first(where: { $0.name == "device_id" })?.value
+            }
+        }
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             guard let separator = line.firstIndex(of: ":") else { continue }
@@ -417,10 +428,24 @@ public final class LanWebSocketServer {
             return true
         }
 
-        // Capture device metadata from headers as early as possible so routing and status work
+        // Capture device metadata from headers or query params
+        // Android client often sends deviceId via query param (ws://host:port/?device_id=...)
         if let deviceIdHeader = headers["x-device-id"], !deviceIdHeader.isEmpty {
             updateConnectionMetadata(connectionId: connectionId, deviceId: deviceIdHeader)
             logger.debug("Captured deviceId from headers: \(deviceIdHeader)")
+        } else if let deviceIdQuery = deviceIdFromQuery, !deviceIdQuery.isEmpty {
+            updateConnectionMetadata(connectionId: connectionId, deviceId: deviceIdQuery) 
+            logger.debug("Captured deviceId from query params: \(deviceIdQuery)")
+        } else {
+            let keyPresent = headers["sec-websocket-key"] != nil
+            let xDeviceId = headers["x-device-id"] ?? "nil"
+            let deviceIdQuery = deviceIdFromQuery ?? "nil"
+            let upgrade = headers["upgrade"] ?? "nil"
+            let connection = headers["connection"] ?? "nil"
+            
+            logger.warning(
+                "⚠️ [LanWebSocketServer] Handshake missing deviceId. requestLine=\(requestLine) x-device-id=\(xDeviceId) device_id_query=\(deviceIdQuery) upgrade=\(upgrade) connection=\(connection) sec-websocket-key=\(keyPresent ? "present" : "missing")"
+            )
         }
 
         let response = handshakeResponse(for: key)

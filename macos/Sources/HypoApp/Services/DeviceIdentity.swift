@@ -64,10 +64,19 @@ public final class DeviceIdentity: DeviceIdentityProviding {
         }
         
         if let storedName = userDefaults.string(forKey: DefaultsKey.deviceName) {
-            deviceName = storedName
+            // Migration: Check if stored name contains .local (legacy data)
+            if storedName.contains(".local") {
+                let sanitized = storedName.replacingOccurrences(of: ".local", with: "")
+                userDefaults.set(sanitized, forKey: DefaultsKey.deviceName)
+                deviceName = sanitized
+            } else {
+                deviceName = storedName
+            }
         } else {
-            userDefaults.set(hostname, forKey: DefaultsKey.deviceName)
-            deviceName = hostname
+            // Sanitize nickname: remove .local suffix and specific characters if any
+            let sanitized = hostname.replacingOccurrences(of: ".local", with: "")
+            userDefaults.set(sanitized, forKey: DefaultsKey.deviceName)
+            deviceName = sanitized
         }
     }
 }

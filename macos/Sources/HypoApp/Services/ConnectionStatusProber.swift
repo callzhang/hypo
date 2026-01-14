@@ -135,6 +135,8 @@ public final class ConnectionStatusProber {
                 } catch {
                     logger.warning("☁️", "Cloud query timeout or error: \(error.localizedDescription)")
                 }
+            } else {
+                logger.debug("☁️", "Cloud transport is NOT connected")
             }
         }
         

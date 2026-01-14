@@ -646,7 +646,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             return []
         }
         
-        let queryId = UUID().uuidString
+        let queryId = UUID().uuidString.lowercased()
         
         var payload: [String: Any] = [
             "action": "query_connected_peers",

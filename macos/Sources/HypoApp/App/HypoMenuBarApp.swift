@@ -794,24 +794,6 @@ public struct HypoMenuBarApp: App {
             await viewModel.start()
         }
 
-        // CRITICAL: Set up AppDelegate immediately since @NSApplicationDelegateAdaptor
-        // doesn't work when App struct is in a library called from a different module
-        // Store strong reference in global variable to prevent deallocation
-        let delegate = HypoAppDelegate()
-        globalAppDelegate = delegate  // Store in global to prevent deallocation
-        
-        // Set up delegate after NSApp is ready
-        let localLogger = self.logger
-        DispatchQueue.main.async {
-            if let existingDelegate = NSApplication.shared.delegate as? HypoAppDelegate {
-                localLogger.info("✅ [HypoMenuBarApp] AppDelegate already set by Adaptor (ref: \(existingDelegate))")
-            } else {
-                localLogger.warning("⚠️ [HypoMenuBarApp] AppDelegate missing, setting manual delegate")
-                NSApplication.shared.delegate = delegate
-                // Call applicationDidFinishLaunching manually
-                delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
-            }
-        }
     }
 
     public var body: some Scene {

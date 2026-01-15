@@ -94,7 +94,9 @@ class TransportManager(
             android.util.Log.w("TransportManager", "⚠️ No SharedPreferences available, cannot persist transport status for device: $deviceId")
             return
         }
-        val key = "transport_$deviceId"
+        // Normalize device ID to lowercase for consistent storage
+        val normalizedId = deviceId.lowercase()
+        val key = "transport_$normalizedId"
         try {
             val editor = prefs.edit()
             if (editor == null) {
@@ -111,7 +113,16 @@ class TransportManager(
         }
     }
     
+    private fun clearPersistedTransportStatus(deviceId: String) {
+        if (prefs == null) return
+        // Normalize device ID to lowercase for consistent storage
+        val normalizedId = deviceId.lowercase()
+        val key = "transport_$normalizedId"
+        prefs.edit().remove(key).commit()
+    }
+    
     fun persistDeviceName(deviceId: String, deviceName: String) {
+
         if (prefs == null) {
             android.util.Log.w("TransportManager", "⚠️ No SharedPreferences available, cannot persist device name for device: $deviceId")
             return
@@ -163,9 +174,6 @@ class TransportManager(
         }
     }
     
-    private fun clearPersistedTransportStatus(deviceId: String) {
-        prefs?.edit()?.remove("transport_$deviceId")?.apply()
-    }
 
     private var discoveryJob: Job? = null
     private var pruneJob: Job? = null
@@ -669,14 +677,23 @@ class TransportManager(
 
     fun forgetPairedDevice(deviceId: String) {
         clearPersistedTransportStatus(deviceId)
-        // Also clear device name
-        prefs?.edit()?.remove("device_name_$deviceId")?.apply()
+        // Also clear device name - normalize key to match persistDeviceName
+        val normalizedId = deviceId.lowercase()
+        prefs?.edit()?.remove("device_name_$normalizedId")?.apply()
+        // Fallback for old non-normalized keys if any exist
+        if (deviceId != normalizedId) {
+            prefs?.edit()?.remove("device_name_$deviceId")?.apply()
+        }
+        
         _lastSuccessfulTransport.update { current ->
             val updated = HashMap(current)
             updated.remove(deviceId)
+            if (deviceId != normalizedId) {
+                updated.remove(normalizedId)
+            }
             updated
         }
-        android.util.Log.d("TransportManager", "🗑️ Forgot paired device: $deviceId")
+        android.util.Log.d("TransportManager", "🗑️ Forgot paired device: $deviceId (normalized: $normalizedId)")
     }
 
     private fun publishStateLocked() {

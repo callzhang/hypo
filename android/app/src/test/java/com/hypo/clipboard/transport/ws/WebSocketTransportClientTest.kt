@@ -8,7 +8,6 @@ import com.hypo.clipboard.sync.SyncEnvelope
 import com.hypo.clipboard.transport.TransportAnalytics
 import com.hypo.clipboard.transport.TransportAnalyticsEvent
 import com.hypo.clipboard.transport.TransportMetricsRecorder
-import io.mockk.every
 import android.util.Log
 import java.time.Clock
 import java.time.Duration
@@ -36,6 +35,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.of
+import io.mockk.every
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 
@@ -69,7 +69,7 @@ class WebSocketTransportClientTest {
         val client = WebSocketTransportClient(config, connector, TransportFrameCodec(), scope, FakeClock(Instant.now()))
         client.forceConnectOnce()
 
-        try {
+        val result = runCatching {
             val envelope = sampleEnvelope()
             client.send(envelope)
 
@@ -86,11 +86,12 @@ class WebSocketTransportClientTest {
             val frame = connector.latestSocket().sent.first()
             val decoded = TransportFrameCodec().decode(frame.toByteArray())
             assertEquals("mac-device", decoded.payload.deviceId)
-        } finally {
-            client.close()
-            scope.runCurrent()
-            runCurrent()
         }
+
+        result.getOrThrow()
+        client.close()
+        scope.runCurrent()
+        runCurrent()
     }
 
     @Test
@@ -107,10 +108,10 @@ class WebSocketTransportClientTest {
         val metrics = RecordingMetricsRecorder()
         val codec = TransportFrameCodec()
         val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null, environment = "cloud")
-        val client = WebSocketTransportClient(config, connector, codec, scope, clock, metrics)
+        val client = WebSocketTransportClient(config, connector, TransportFrameCodec(), scope, clock, metrics)
         client.forceConnectOnce()
 
-        try {
+        val result = runCatching {
             val envelope = sampleEnvelope()
             client.send(envelope)
             waitForConnection(scope, connector)
@@ -132,11 +133,12 @@ class WebSocketTransportClientTest {
 
             assertTrue(metrics.handshakeDurations.size <= 1)
             assertTrue(metrics.roundTripDurations.size <= 1)
-        } finally {
-            client.close()
-            scope.runCurrent()
-            runCurrent()
         }
+
+        result.getOrThrow()
+        client.close()
+        scope.runCurrent()
+        runCurrent()
     }
 
     @Test
@@ -177,14 +179,12 @@ class WebSocketTransportClientTest {
         scope.runCurrent()
         runCurrent()
 
-        try {
-            assertEquals(1, connector.socket(1).sent.size)
-            assertEquals(2, connector.connectionCount)
-        } finally {
-            client.close()
-            scope.runCurrent()
-            runCurrent()
-        }
+        assertEquals(1, connector.socket(1).sent.size)
+        assertEquals(2, connector.connectionCount)
+
+        client.close()
+        scope.runCurrent()
+        runCurrent()
     }
 
     @Test
@@ -217,17 +217,14 @@ class WebSocketTransportClientTest {
         runCurrent()
 
         job.cancel()
-        try {
-            val event = analytics.recorded.single() as TransportAnalyticsEvent.PinningFailure
-            assertEquals("cloud", event.environment)
-            assertEquals("relay.example", event.host)
-            assertEquals("pin mismatch", event.message)
-            assertEquals(clock.instant(), event.occurredAt)
-        } finally {
-            client.close()
-            scope.runCurrent()
-            runCurrent()
-        }
+        val event = analytics.recorded.single() as TransportAnalyticsEvent.PinningFailure
+        assertEquals("cloud", event.environment)
+        assertEquals("relay.example", event.host)
+        assertEquals("pin mismatch", event.message)
+        assertEquals(clock.instant(), event.occurredAt)
+        client.close()
+        scope.runCurrent()
+        runCurrent()
     }
 
     @Test
@@ -289,13 +286,11 @@ class WebSocketTransportClientTest {
         scope.runCurrent()
         runCurrent()
 
-        try {
-            assertEquals(2, connector.socket(1).sent.size)
-        } finally {
-            client.close()
-            scope.runCurrent()
-            runCurrent()
-        }
+        assertEquals(2, connector.socket(1).sent.size)
+
+        client.close()
+        scope.runCurrent()
+        runCurrent()
     }
 
     private fun sampleEnvelope(): SyncEnvelope = SyncEnvelope(

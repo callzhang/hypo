@@ -54,7 +54,7 @@ class ClipboardSyncService : Service() {
     @Inject lateinit var deviceIdentity: DeviceIdentity
     @Inject lateinit var repository: ClipboardRepository
     @Inject lateinit var incomingClipboardHandler: com.hypo.clipboard.sync.IncomingClipboardHandler
-    @Inject lateinit var lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient
+    @Inject lateinit var lanTransportClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient
     @Inject lateinit var relayWebSocketClient: com.hypo.clipboard.transport.ws.RelayWebSocketClient
     @Inject lateinit var clipboardAccessChecker: com.hypo.clipboard.sync.ClipboardAccessChecker
     @Inject lateinit var connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber
@@ -78,8 +78,18 @@ class ClipboardSyncService : Service() {
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private lateinit var connectivityManager: android.net.ConnectivityManager
 
+    private var isInitialized = false
+
     override fun onCreate() {
         super.onCreate()
+        if (!isInitialized) {
+            startSyncComponents()
+        }
+    }
+
+    internal fun startSyncComponents() {
+        if (isInitialized) return
+        isInitialized = true
         
         // Log MIUI/HyperOS device information for debugging
         MiuiAdapter.logDeviceInfo()
@@ -151,7 +161,7 @@ class ClipboardSyncService : Service() {
             }
         }
         
-        lanWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
+        lanTransportClient.setIncomingClipboardHandler { envelope, origin ->
             incomingClipboardHandler.handle(envelope, origin)
         }
         relayWebSocketClient.setIncomingClipboardHandler { envelope, origin ->
@@ -171,7 +181,7 @@ class ClipboardSyncService : Service() {
                 ).show()
             }
         }
-        lanWebSocketClient.setSyncErrorHandler(errorHandler)
+        lanTransportClient.setSyncErrorHandler(errorHandler)
         relayWebSocketClient.setSyncErrorHandler(errorHandler)
         // Set handler for LAN WebSocket server (incoming connections from other devices)
         transportManager.setIncomingClipboardHandler { envelope, origin ->
@@ -194,10 +204,10 @@ class ClipboardSyncService : Service() {
         // NOTE: relayWebSocketClient creates its own WebSocketTransportClient instance,
         // so calling startReceiving() on both creates TWO separate connections.
         // Only call startReceiving() on relayWebSocketClient for cloud relay.
-        // lanWebSocketClient.startReceiving() is for LAN connections only.
+        // lanTransportClient.startReceiving() is for LAN connections only.
         // DISABLED: LanPeerConnectionManager now handles per-peer LAN connections with event-driven status
-        // lanWebSocketClient (singleton) caused "ghost" connections with null listeners
-        // lanWebSocketClient.startReceiving()  
+        // lanTransportClient (singleton) caused "ghost" connections with null listeners
+        // lanTransportClient.startReceiving()  
         relayWebSocketClient.startReceiving()  // For cloud relay (creates separate connection)
         ensureClipboardPermissionAndStartListener()
         observeLatestItem()

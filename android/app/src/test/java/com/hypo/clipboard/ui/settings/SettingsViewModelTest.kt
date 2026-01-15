@@ -6,12 +6,15 @@ import com.hypo.clipboard.fakes.FakeSettingsRepository
 import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +41,7 @@ class SettingsViewModelTest {
     private val deviceKeyStore = mockk<com.hypo.clipboard.sync.DeviceKeyStore>(relaxed = true) {
         coEvery { getAllDeviceIds() } returns emptyList()
     }
-    private val lanWebSocketClient = mockk<com.hypo.clipboard.transport.ws.WebSocketTransportClient>(relaxed = true)
+    private val lanTransportClient = mockk<com.hypo.clipboard.transport.ws.WebSocketTransportClient>(relaxed = true)
     private val syncCoordinator = mockk<com.hypo.clipboard.sync.SyncCoordinator>(relaxed = true)
     private val connectionStatusProber = mockk<com.hypo.clipboard.transport.ConnectionStatusProber>(relaxed = true) {
         every { deviceDualStatus } returns MutableStateFlow(emptyMap())
@@ -75,7 +78,7 @@ class SettingsViewModelTest {
             settingsRepository = settingsRepository,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
-            lanWebSocketClient = lanWebSocketClient,
+            lanTransportClient = lanTransportClient,
             syncCoordinator = syncCoordinator,
             connectionStatusProber = connectionStatusProber,
             accessibilityServiceChecker = accessibilityServiceChecker,
@@ -97,7 +100,7 @@ class SettingsViewModelTest {
             settingsRepository = settingsRepository,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
-            lanWebSocketClient = lanWebSocketClient,
+            lanTransportClient = lanTransportClient,
             syncCoordinator = syncCoordinator,
             connectionStatusProber = connectionStatusProber,
             accessibilityServiceChecker = accessibilityServiceChecker,
@@ -113,6 +116,113 @@ class SettingsViewModelTest {
         assertEquals(listOf(false), settingsRepository.lanSyncCalls)
         assertEquals(listOf(150), settingsRepository.historyLimitCalls)
         assertEquals(listOf(true), settingsRepository.plainTextCalls)
+        viewModel.viewModelScope.cancel()
+    }
+    
+    @Test
+    fun `removeDevice clears all related state`() = runTest {
+        val viewModel = SettingsViewModel(
+            settingsRepository = settingsRepository,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanTransportClient = lanTransportClient,
+            syncCoordinator = syncCoordinator,
+            connectionStatusProber = connectionStatusProber,
+            accessibilityServiceChecker = accessibilityServiceChecker,
+            context = context
+        )
+        
+        val peer = DiscoveredPeer(
+            serviceName = "TestDevice",
+            host = "1.1.1.1",
+            port = 1234,
+            fingerprint = null,
+            attributes = mapOf("device_id" to "device-123"),
+            lastSeen = java.time.Instant.now()
+        )
+        
+        viewModel.removeDevice(peer)
+        runCurrent()
+        
+        coVerify { transportManager.removePeer("TestDevice") }
+        coVerify { deviceKeyStore.deleteKey("device-123") }
+        coVerify { transportManager.forgetPairedDevice("device-123") }
+        coVerify { syncCoordinator.removeTargetDevice("device-123") }
+        
+        viewModel.viewModelScope.cancel()
+    }
+    
+    @Test
+    fun `checkPeerStatus triggers probe`() = runTest {
+        val viewModel = SettingsViewModel(
+            settingsRepository = settingsRepository,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanTransportClient = lanTransportClient,
+            syncCoordinator = syncCoordinator,
+            connectionStatusProber = connectionStatusProber,
+            accessibilityServiceChecker = accessibilityServiceChecker,
+            context = context
+        )
+        
+        viewModel.checkPeerStatus()
+        
+        verify { connectionStatusProber.probeNow() }
+        viewModel.viewModelScope.cancel()
+    }
+    
+    @Test
+    fun `state includes paired devices from storage`() = runTest {
+        // Setup paired device in storage
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("device-123")
+        every { transportManager.getDeviceName("device-123") } returns "Test Paired Device"
+        
+        val viewModel = SettingsViewModel(
+            settingsRepository = settingsRepository,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanTransportClient = lanTransportClient,
+            syncCoordinator = syncCoordinator,
+            connectionStatusProber = connectionStatusProber,
+            accessibilityServiceChecker = accessibilityServiceChecker,
+            context = context
+        )
+        runCurrent()
+        
+        val state = viewModel.state.value
+        assertEquals(1, state.discoveredPeers.size)
+        val uiPeer = state.discoveredPeers[0]
+        assertEquals("Test Paired Device", uiPeer.serviceName)
+        assertEquals("device-123", uiPeer.attributes["device_id"])
+        
+        viewModel.viewModelScope.cancel()
+    }
+    
+    @Test
+    fun `orphaned keys are cleaned up`() = runTest {
+        // Setup orphaned key (exists in keystore but no name in transport manager)
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("orphaned-device")
+        every { transportManager.getDeviceName("orphaned-device") } returns null
+        
+        val viewModel = SettingsViewModel(
+            settingsRepository = settingsRepository,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanTransportClient = lanTransportClient,
+            syncCoordinator = syncCoordinator,
+            connectionStatusProber = connectionStatusProber,
+            accessibilityServiceChecker = accessibilityServiceChecker,
+            context = context
+        )
+        runCurrent()
+        
+        // Should trigger deleteKey
+        coVerify { deviceKeyStore.deleteKey("orphaned-device") }
+        coVerify { transportManager.forgetPairedDevice("orphaned-device") }
+        
+        // ui state should be empty
+        assertTrue(viewModel.state.value.discoveredPeers.isEmpty())
+        
         viewModel.viewModelScope.cancel()
     }
 }

@@ -173,7 +173,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideLanWebSocketClient(
+    fun provideLanWebSocketTransportClient(
         @Named("lan_ws_config") config: TlsWebSocketConfig,
         frameCodec: TransportFrameCodec,
         analytics: TransportAnalytics,

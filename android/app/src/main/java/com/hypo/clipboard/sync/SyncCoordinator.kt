@@ -37,7 +37,7 @@ class SyncCoordinator @Inject constructor(
     private val identity: DeviceIdentity,
     private val transportManager: com.hypo.clipboard.transport.TransportManager,
     private val deviceKeyStore: DeviceKeyStore,
-    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
+    private val lanTransportClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
     @ApplicationContext private val context: Context
 ) {
     private var eventChannel: Channel<ClipboardEvent>? = null

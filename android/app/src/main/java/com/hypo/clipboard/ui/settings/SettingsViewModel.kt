@@ -31,7 +31,7 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val transportManager: TransportManager,
     private val deviceKeyStore: com.hypo.clipboard.sync.DeviceKeyStore,
-    private val lanWebSocketClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
+    private val lanTransportClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
     private val syncCoordinator: SyncCoordinator,
     private val connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber,
     private val accessibilityServiceChecker: com.hypo.clipboard.util.AccessibilityServiceChecker,

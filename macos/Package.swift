@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
@@ -18,6 +18,7 @@ let package = Package(
         )
     ],
     dependencies: [
+        .package(url: "https://github.com/apple/swift-testing.git", from: "0.5.0")
     ],
     targets: [
         .target(
@@ -36,7 +37,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HypoAppTests",
-            dependencies: ["HypoApp"],
+            dependencies: [
+                "HypoApp",
+                .product(name: "Testing", package: "swift-testing")
+            ],
             path: "Tests/HypoAppTests"
         )
     ]

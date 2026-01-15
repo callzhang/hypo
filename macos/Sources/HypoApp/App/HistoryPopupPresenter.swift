@@ -41,10 +41,11 @@ private class NonFocusStealingView: NSView {
 }
 
 /// Presents the history view in a floating, centered window when the global hotkey fires.
+@MainActor
 final class HistoryPopupPresenter {
     static let shared = HistoryPopupPresenter()
     private let logger = HypoLogger(category: "HistoryPopupPresenter")
-    private init() {}
+    nonisolated private init() {}
 
     private var window: NSPanel?
     private var isPinned: Bool = false  // Start unpinned - window can be dismissed by clicking outside
@@ -100,10 +101,12 @@ final class HistoryPopupPresenter {
                 context.allowsImplicitAnimation = true
                 window.animator().alphaValue = 0.0
             }, completionHandler: {
-                window.orderOut(nil)
-                window.alphaValue = 1.0  // Reset for next show
-                self.removeClickMonitor()
-                self.removeEscHotkey()  // Unregister ESC key handler
+                Task { @MainActor in
+                    window.orderOut(nil)
+                    window.alphaValue = 1.0  // Reset for next show
+                    self.removeClickMonitor()
+                    self.removeEscHotkey()  // Unregister ESC key handler
+                }
             })
         }
     }
@@ -378,7 +381,7 @@ final class HistoryPopupPresenter {
         }
     }
     
-    private static var eventHandlerInstalled = false
+    nonisolated(unsafe) private static var eventHandlerInstalled = false
     
     private func removeClickMonitor() {
         if let monitor = globalClickMonitor {

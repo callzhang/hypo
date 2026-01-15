@@ -5,12 +5,12 @@ extension CodingUserInfoKey {
     static let skipLargeData = CodingUserInfoKey(rawValue: "skipLargeData")!
 }
 
-public enum TransportOrigin: String, Codable {
+public enum TransportOrigin: String, Codable, Sendable {
     case lan
     case cloud
 }
 
-public struct ClipboardEntry: Identifiable, Equatable, Codable {
+public struct ClipboardEntry: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
     public var timestamp: Date
     public let deviceId: String  // UUID string (pure UUID, no prefix) - normalized to lowercase
@@ -62,7 +62,7 @@ public struct ClipboardEntry: Identifiable, Equatable, Codable {
     }
 }
 
-public enum ClipboardContent: Equatable, Codable {
+public enum ClipboardContent: Equatable, Codable, Sendable {
     case text(String)
     case link(URL)
     case image(ImageMetadata)
@@ -115,7 +115,7 @@ public enum ClipboardContent: Equatable, Codable {
     }
 }
 
-public struct ImageMetadata: Equatable, Codable {
+public struct ImageMetadata: Equatable, Codable, Sendable {
     public let pixelSize: CGSizeValue
     public let byteSize: Int
     public let format: String
@@ -165,7 +165,7 @@ public struct ImageMetadata: Equatable, Codable {
         // Try decoding data directly first
         if let decodedData = try container.decodeIfPresent(Data.self, forKey: .data) {
             data = decodedData
-        } else if let path = localPath {
+        } else if let _ = localPath {
             // If data is missing but specific path exists, try to load it lazily?
             // Since this is a struct, we can't be lazy. We either load now or leave nil.
             // Leaving nil is safer for memory (List View).
@@ -181,7 +181,7 @@ public struct ImageMetadata: Equatable, Codable {
     }
 }
 
-public struct FileMetadata: Equatable, Codable {
+public struct FileMetadata: Equatable, Codable, Sendable {
     public let fileName: String
     public let byteSize: Int
     public let uti: String
@@ -233,7 +233,7 @@ public struct FileMetadata: Equatable, Codable {
     }
 }
 
-public struct CGSizeValue: Equatable, Codable {
+public struct CGSizeValue: Equatable, Codable, Sendable {
     public let width: Int
     public let height: Int
 
@@ -361,7 +361,7 @@ public extension ClipboardEntry {
                let decoded = Data(base64Encoded: base64) {
                 data1 = decoded
             } else if let url = meta1.url,
-                      let loaded = try? Data(contentsOf: url) {
+                       let loaded = try? Data(contentsOf: url) {
                 data1 = loaded
             } else {
                 return false
@@ -372,7 +372,7 @@ public extension ClipboardEntry {
                let decoded = Data(base64Encoded: base64) {
                 data2 = decoded
             } else if let url = meta2.url,
-                      let loaded = try? Data(contentsOf: url) {
+                       let loaded = try? Data(contentsOf: url) {
                 data2 = loaded
             } else {
                 return false

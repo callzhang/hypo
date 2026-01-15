@@ -19,7 +19,7 @@ import UserNotifications
 
 // UserDefaults is thread-safe for reading/writing, safe to mark as Sendable
 // Sendable conformance for SDK type – UserDefaults is thread-safe for reads/writes
-extension UserDefaults: @unchecked Sendable {}
+extension UserDefaults: @retroactive @unchecked Sendable {}
 
 public actor HistoryStore {
     private let logger = HypoLogger(category: "HistoryStore")
@@ -55,7 +55,9 @@ public actor HistoryStore {
             // Clear UserDefaults
             defaults.removeObject(forKey: Self.entriesKey)
             // Initialize storage manager (clears files too if needed, though usually empty on first run)
-            StorageManager.shared.clearAll()
+            Task { @MainActor in
+                StorageManager.shared.clearAll()
+            }
             
             defaults.set(true, forKey: Self.fileStorageMigrationKey)
         }
@@ -800,6 +802,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     /// Attempt to send a queued sync message
     private func trySendMessage(_ message: QueuedSyncMessage, transportManager: TransportManager) async -> Bool {
         do {
+        let entry = message.entry
+        let payload = message.payload
+        let targetDeviceId = message.targetDeviceId
         // Get sync engine with transport
         let transport = transportManager.loadTransport()
 
@@ -826,16 +831,16 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 
         
         // Attempt to send (best-effort - try regardless of device online status)
-        let payloadSize = message.payload.data.count
-        let contentType = message.payload.contentType.rawValue
+        let payloadSize = payload.data.count
+        let contentType = payload.contentType.rawValue
 #if canImport(os)
-        logger.debug("📤 [HistoryStore] Sending \(contentType) (\(payloadSize.formattedAsKB)) to \(message.targetDeviceId.prefix(8))")
+        logger.debug("📤 [HistoryStore] Sending \(contentType) (\(payloadSize.formattedAsKB)) to \(targetDeviceId.prefix(8))")
 #endif
-        try await syncEngine.transmit(entry: message.entry, payload: message.payload, targetDeviceId: message.targetDeviceId)
+        try await syncEngine.transmit(entry: entry, payload: payload, targetDeviceId: targetDeviceId)
         
 
             // Update lastSeen timestamp after successful sync
-            if let device = transportManager.pairedDevices.first(where: { $0.id == message.targetDeviceId }) {
+            if let device = transportManager.pairedDevices.first(where: { $0.id == targetDeviceId }) {
                 transportManager.updatePairedDeviceLastSeen(device.id, lastSeen: Date())
             }
             
@@ -1062,8 +1067,9 @@ public final class ClipboardHistoryViewModel: ObservableObject {
 }
 
 #if canImport(AppKit)
+@MainActor
 extension ClipboardHistoryViewModel: ClipboardMonitorDelegate {
-    nonisolated public func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture entry: ClipboardEntry) {
+    public func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture entry: ClipboardEntry) {
         let logger = HypoLogger(category: "ClipboardHistoryViewModel")
         Task { @MainActor in
             let localId = deviceIdentity.deviceId.uuidString.lowercased()

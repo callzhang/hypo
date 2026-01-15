@@ -5,8 +5,10 @@ import os.log
 
 /// Manages file-based storage for large clipboard items (images, files)
 /// Stores data in ~/Library/Caches/com.hypo.clipboard/images/ to avoid bloating UserDefaults
+@MainActor
 public final class StorageManager {
-    public static let shared = StorageManager()
+    // Accessed from non-MainActor contexts (e.g., model helpers); file IO here is thread-safe.
+    nonisolated public static let shared = StorageManager()
     
     // Use Caches directory so the OS can clean it up if needed, but it persists across reboots
     private let baseDirectory: URL
@@ -16,7 +18,7 @@ public final class StorageManager {
     private let logger = HypoLogger(category: "StorageManager")
     #endif
     
-    private init() {
+    nonisolated private init() {
         // Base: ~/Library/Caches/com.hypo.clipboard/
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         let bundleID = Bundle.main.bundleIdentifier ?? "com.hypo.clipboard"
@@ -26,7 +28,7 @@ public final class StorageManager {
         createDirectoriesIfNeeded()
     }
     
-    private func createDirectoriesIfNeeded() {
+    nonisolated private func createDirectoriesIfNeeded() {
         do {
             try FileManager.default.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
         } catch {
@@ -49,23 +51,30 @@ public final class StorageManager {
     ///   - data: The binary data to save
     ///   - fileName: Optional filename (UUID string usually)
     ///   - extension: File extension (e.g. png, jpg)
-    /// - Returns: The relative path (filename) of the saved file
-    public func save(_ data: Data, id: UUID = UUID(), `extension`: String = "data") throws -> String {
-        let fileName = "\(id.uuidString).\(`extension`)"
+    /// - Returns: The relative path (filename)
+    @discardableResult
+    public nonisolated func save(_ data: Data, id: UUID = UUID(), `extension` ext: String = "data") -> String? {
+        let fileName = "\(id.uuidString).\(ext)"
         let fileURL = imagesDirectory.appendingPathComponent(fileName)
         
-        try data.write(to: fileURL)
-        #if canImport(os)
-        logger.debug("💾 [StorageManager] Saved \(data.count.formattedAsKB) to \(fileName)")
-        #endif
-        
-        return fileName
+        do {
+            try data.write(to: fileURL)
+            #if canImport(os)
+            logger.debug("💾 [StorageManager] Saved \(data.count / 1024)KB to \(fileName)")
+            #endif
+            return fileName
+        } catch {
+            #if canImport(os)
+            logger.error("❌ [StorageManager] Failed to save data: \(error.localizedDescription)")
+            #endif
+            return nil
+        }
     }
     
     /// Read data from a relative path (filename)
     /// - Parameter relativePath: The filename returned by save()
     /// - Returns: The data, or nil if not found
-    public func load(relativePath: String) -> Data? {
+    public nonisolated func load(relativePath: String) -> Data? {
         let fileURL = imagesDirectory.appendingPathComponent(relativePath)
         return try? Data(contentsOf: fileURL)
     }

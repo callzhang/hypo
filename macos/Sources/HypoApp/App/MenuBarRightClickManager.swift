@@ -5,6 +5,7 @@ import SwiftUI
 /// Manages right-click menu for the menu bar icon
 /// This replaces the SwiftUI-based MenuBarIconRightClickHandler to ensure reliable
 /// initialization at app launch, before any user interaction.
+@MainActor
 class MenuBarRightClickManager {
     static let shared = MenuBarRightClickManager()
     
@@ -14,7 +15,7 @@ class MenuBarRightClickManager {
     private var rightClickMenu: NSMenu?
     
     // Prevent external initialization
-    private init() {}
+    nonisolated private init() {}
     
     func setup() {
         guard !isSetup else {
@@ -167,7 +168,7 @@ class MenuBarRightClickManager {
     @discardableResult
     private func attachMenuToButton(in view: NSView, menu: NSMenu) -> Bool {
         // Recursively search for buttons
-        if let button = view as? NSButton {
+        if view is NSButton {
             // Found a button - attach a custom right-click handler if possible
             // or verify if we can subclass/swizzle. 
             // For standard NSStatusItem, the button is internal. 
@@ -193,8 +194,13 @@ class MenuBarRightClickManager {
 
 /// Target object for menu actions (since @objc methods can't be in structs)
 /// Kept here for compatibility with the new manager
+@MainActor
 class MenuActionTarget: NSObject {
     static let shared = MenuActionTarget()
+    
+    nonisolated override init() {
+        super.init()
+    }
     
     var showHistoryAction: (() -> Void)?
     var showSettingsAction: (() -> Void)?

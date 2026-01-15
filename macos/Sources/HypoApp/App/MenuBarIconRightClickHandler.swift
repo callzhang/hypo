@@ -3,17 +3,19 @@ import AppKit
 import SwiftUI
 
 // Global reference to right-click menu so event monitors can access it
+@MainActor
 private var globalRightClickMenu: NSMenu?
 
 /// Handles right-click menu for the menu bar icon by accessing the underlying NSStatusItem
+@MainActor
 struct MenuBarIconRightClickHandler: NSViewRepresentable {
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     private let logger = HypoLogger(category: "MenuBarIconRightClickHandler")
     
     // Store event monitors to prevent deallocation
-    private static var eventMonitors: [Any] = []
+    @MainActor private static var eventMonitors: [Any] = []
     // Track if monitors have been set up to prevent duplicates
-    private static var monitorsSetup = false
+    @MainActor private static var monitorsSetup = false
     
     func makeNSView(context: Context) -> NSView {
         let view = NSView()

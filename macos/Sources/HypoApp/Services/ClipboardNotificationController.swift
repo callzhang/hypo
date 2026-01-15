@@ -15,15 +15,17 @@ public protocol ClipboardNotificationHandling: AnyObject {
     func handleNotificationClick(for id: UUID)
 }
 
-public protocol ClipboardNotificationScheduling: AnyObject {
+@MainActor
+public protocol ClipboardNotificationScheduling: AnyObject, Sendable {
     func configure(handler: ClipboardNotificationHandling)
     func requestAuthorizationIfNeeded()
     func deliverNotification(for entry: ClipboardEntry)
     func deliverStatusNotification(deviceId: String, title: String, body: String)
 }
 
+@MainActor
 public final class ClipboardNotificationController: NSObject, ClipboardNotificationScheduling {
-    public static let shared: ClipboardNotificationScheduling = ClipboardNotificationController() ?? NoOpNotificationController()
+    public static let shared: any ClipboardNotificationScheduling = ClipboardNotificationController() ?? NoOpNotificationController()
 
     private enum Constants {
         static let categoryIdentifier = "clipboard_entry"
@@ -126,6 +128,9 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
                     self.defaults.set(true, forKey: Constants.authorizationRequestedKey)
                 }
             } else if status == .denied {
+                Task { @MainActor in
+                    self.showNotificationPermissionAlert()
+                }
                 #if canImport(os)
                 let logger = HypoLogger(category: "ClipboardNotificationController")
                 logger.warning("⚠️ Notification permission denied. User must enable in System Settings → Notifications → Hypo")
@@ -321,7 +326,7 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
     }
 }
 
-extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
+extension ClipboardNotificationController: @preconcurrency UNUserNotificationCenterDelegate {
     public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -331,6 +336,7 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound, .badge])
     }
     
+    @MainActor
     public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -345,26 +351,11 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
 
         switch actionIdentifier {
         case Constants.copyActionIdentifier:
-            Task { [weak self] in
-                guard let self else { return }
-                await MainActor.run {
-                    self.handler?.handleNotificationCopy(for: id)
-                }
-            }
+            handler?.handleNotificationCopy(for: id)
         case UNNotificationDefaultActionIdentifier:
-            Task { [weak self] in
-                guard let self else { return }
-                await MainActor.run {
-                    self.handler?.handleNotificationClick(for: id)
-                }
-            }
+            handler?.handleNotificationClick(for: id)
         case Constants.deleteActionIdentifier:
-            Task { [weak self] in
-                guard let self else { return }
-                await MainActor.run {
-                    self.handler?.handleNotificationDelete(for: id)
-                }
-            }
+            handler?.handleNotificationDelete(for: id)
         default:
             break
         }
@@ -372,10 +363,11 @@ extension ClipboardNotificationController: UNUserNotificationCenterDelegate {
 }
 
 // Sendable conformance for SDK type – safe because UNUserNotificationCenter is a singleton reference type
-extension UNUserNotificationCenter: @unchecked Sendable {}
+extension UNUserNotificationCenter: @retroactive @unchecked Sendable {}
 
 #if canImport(AppKit)
 extension ClipboardNotificationController {
+    @MainActor
     private func showNotificationPermissionAlert() {
         let alert = NSAlert()
         alert.messageText = "Notification Permission Required"
@@ -396,6 +388,7 @@ extension ClipboardNotificationController {
 #endif
 
 // No-op implementation for when notifications aren't available (debug builds)
+@MainActor
 final class NoOpNotificationController: NSObject, ClipboardNotificationScheduling {
     func configure(handler: ClipboardNotificationHandling) {}
     func requestAuthorizationIfNeeded() {}

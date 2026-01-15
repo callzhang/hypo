@@ -3,6 +3,7 @@ import Foundation
 #if canImport(AppKit)
 import AppKit
 
+@MainActor
 public protocol ClipboardMonitorDelegate: AnyObject {
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture entry: ClipboardEntry)
 }
@@ -21,6 +22,7 @@ extension NSPasteboard: PasteboardProviding {
     }
 }
 
+@MainActor
 public final class ClipboardMonitor {
     private let logger = HypoLogger(category: "ClipboardMonitor")
     private let pasteboard: PasteboardProviding
@@ -48,25 +50,24 @@ public final class ClipboardMonitor {
         self.deviceName = deviceName
         
         // Listen for events when remote clipboard is applied
-        Task { @MainActor in
-            dispatcher?.addClipboardAppliedHandler { [weak self] changeCount in
-                self?.changeCount = changeCount
-            }
+        dispatcher?.addClipboardAppliedHandler { [weak self] changeCount in
+            self?.changeCount = changeCount
         }
         
-        // Initialize storage
-        StorageManager.shared.setup()
+        // Initialize storage on the main actor.
+        Task { @MainActor in
+            StorageManager.shared.setup()
+        }
     }
 
-    deinit {
-        stop()
-    }
 
     public func start(interval: TimeInterval = 0.5) {
         stop()
         logger.info("🚀 [ClipboardMonitor] Starting clipboard monitoring (interval: \(interval)s)")
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.evaluatePasteboard()
+            Task { @MainActor in
+                _ = self?.evaluatePasteboard()
+            }
         }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
         logger.info("✅ [ClipboardMonitor] Timer started, delegate: \(delegate != nil ? "set" : "nil")")
@@ -247,7 +248,7 @@ public final class ClipboardMonitor {
                 
                 // Store processed image data
                 // Save to disk first
-                let localPath = try? StorageManager.shared.save(processedData, extension: format)
+                let localPath = StorageManager.shared.save(processedData, extension: format)
                 
                 // Include filename if available (from file URL)
                 let metadata = ImageMetadata(
@@ -371,7 +372,7 @@ public final class ClipboardMonitor {
                 // Store as image (not file) with filename from file URL
                 // Save to disk first using StorageManager
                 let extensionName = fileURL.pathExtension.isEmpty ? format : fileURL.pathExtension
-                let localPath = try? StorageManager.shared.save(processedData, extension: extensionName)
+                let localPath = StorageManager.shared.save(processedData, extension: extensionName)
                 
                 let metadata = ImageMetadata(
                     pixelSize: processedPixels,

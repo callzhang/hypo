@@ -1,8 +1,10 @@
 package com.hypo.clipboard.sync
 
 import com.hypo.clipboard.crypto.CryptoService
+import com.hypo.clipboard.data.local.StorageManager
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
+import com.hypo.clipboard.fakes.FakeSettingsRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -18,14 +20,22 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class SyncEngineTest {
     private val deviceKeyStore = mockk<DeviceKeyStore>()
     private val transport = mockk<SyncTransport>(relaxed = true)
     private val identity = mockk<DeviceIdentity> {
         every { deviceId } returns "android-device-123"
+        every { deviceName } returns "Pixel"
     }
+    private val settingsRepository = FakeSettingsRepository()
+    private val storageManager = mockk<StorageManager>(relaxed = true)
 
     @Test
     fun encryptsClipboardPayloadsBeforeSending() = runTest {
@@ -36,7 +46,7 @@ class SyncEngineTest {
         coEvery { deviceKeyStore.loadKey("mac-device") } returns key
         coEvery { transport.send(any()) } returns Unit
 
-        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity)
+        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity, settingsRepository, storageManager)
         val item = ClipboardItem(
             id = "clip-1",
             type = ClipboardType.TEXT,
@@ -56,7 +66,8 @@ class SyncEngineTest {
         assertEquals(identity.deviceId, envelope.payload.deviceId)
 
         val ciphertext = Base64.getDecoder().decode(envelope.payload.ciphertext)
-        val nonceValue = Base64.getDecoder().decode(envelope.payload.encryption.nonce)
+        val encryption = requireNotNull(envelope.payload.encryption)
+        val nonceValue = Base64.getDecoder().decode(encryption.nonce)
         assertContentEquals(nonce, nonceValue)
         // Ciphertext should not equal plaintext bytes
         val plaintext = "Hello, Hypo!".encodeToByteArray()
@@ -73,13 +84,14 @@ class SyncEngineTest {
         val key = ByteArray(32) { 9 }
 
         coEvery { deviceKeyStore.loadKey("mac-device") } returns key
+        val compressedPayload = gzip(payloadJson.encodeToByteArray())
         coEvery {
             cryptoService.decrypt(
                 encrypted = any(),
                 key = key,
                 aad = "mac-device".encodeToByteArray()
             )
-        } returns payloadJson.encodeToByteArray()
+        } returns compressedPayload
 
         val envelope = SyncEnvelope(
             type = MessageType.CLIPBOARD,
@@ -95,7 +107,7 @@ class SyncEngineTest {
             )
         )
 
-        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity)
+        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity, settingsRepository, storageManager)
         val payload = engine.decode(envelope)
 
         assertEquals(ClipboardType.TEXT, payload.contentType)
@@ -107,7 +119,8 @@ class SyncEngineTest {
     fun throwsWhenKeyMissing() = runTest {
         val cryptoService = mockk<CryptoService>(relaxed = true)
         coEvery { deviceKeyStore.loadKey(any()) } returns null
-        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity)
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns emptyList()
+        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity, settingsRepository, storageManager)
 
         val item = ClipboardItem(
             id = "clip",
@@ -167,7 +180,7 @@ class SyncEngineTest {
         }
         coEvery { transport.send(any()) } returns Unit
 
-        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity)
+        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity, settingsRepository, storageManager)
         val item = ClipboardItem(
             id = "clip-image",
             type = ClipboardType.IMAGE,
@@ -181,7 +194,15 @@ class SyncEngineTest {
 
         engine.sendClipboard(item, "mac-device")
 
-        val plaintext = requireNotNull(capturedPlaintext).decodeToString()
+        val plaintextBytes = requireNotNull(capturedPlaintext)
+        val decompressed = java.util.zip.GZIPInputStream(plaintextBytes.inputStream()).readBytes()
+        val plaintext = decompressed.decodeToString()
         assertTrue(plaintext.contains("\"data_base64\":\"$rawBase64\""))
+    }
+
+    private fun gzip(data: ByteArray): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        java.util.zip.GZIPOutputStream(output).use { it.write(data) }
+        return output.toByteArray()
     }
 }

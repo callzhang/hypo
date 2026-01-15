@@ -2,7 +2,6 @@ package com.hypo.clipboard.pairing
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import com.google.crypto.tink.subtle.Ed25519Sign
 import com.google.crypto.tink.subtle.X25519
 import com.hypo.clipboard.crypto.CryptoService
 import com.hypo.clipboard.sync.DeviceIdentity
@@ -19,7 +18,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class PairingHandshakeManagerTest {
     private lateinit var context: Context
     private lateinit var trustStore: PairingTrustStore
@@ -38,28 +42,24 @@ class PairingHandshakeManagerTest {
 
     @Test
     fun handshakeStoresKeyOnSuccess() = runTest {
-        val macSigningKey = Ed25519Sign.KeyPair.newKeyPair()
         val macDeviceId = "12345678-90ab-cdef-1234-567890abcdef"
-        trustStore.store(macDeviceId, macSigningKey.publicKey)
 
         val macAgreementPrivate = X25519.generatePrivateKey()
         val macAgreementPublic = X25519.publicFromPrivate(macAgreementPrivate)
 
         val payload = PairingPayload(
             version = "1",
-            macDeviceId = macDeviceId,
-            macPublicKey = Base64.getEncoder().encodeToString(macAgreementPublic),
+            peerDeviceId = macDeviceId,
+            peerPublicKey = Base64.getEncoder().encodeToString(macAgreementPublic),
+            peerSigningPublicKey = "",
             service = "_hypo._tcp.local",
             port = 7010,
             relayHint = "https://relay",
             issuedAt = clock.instant().toString(),
             expiresAt = clock.instant().plusSeconds(300).toString(),
-            signature = ""
+            signature = "LAN_AUTO_DISCOVERY"
         )
-        val payloadJson = json.encodeToString(payload)
-        val signature = macSigningKey.privateKey.sign(payloadJson.toByteArray())
-        val signedPayload = payload.copy(signature = Base64.getEncoder().encodeToString(signature))
-        val signedPayloadJson = json.encodeToString(signedPayload)
+        val signedPayloadJson = json.encodeToString(payload)
 
         val crypto = CryptoService()
         val manager = PairingHandshakeManager(
@@ -71,7 +71,7 @@ class PairingHandshakeManagerTest {
             json = json
         )
 
-        val initiation = manager.initiate(signedPayloadJson)
+        val initiation = manager.initiatePayload(signedPayloadJson)
         assertTrue(initiation is PairingInitiationResult.Success)
         val state = (initiation as PairingInitiationResult.Success).state
 
@@ -86,8 +86,8 @@ class PairingHandshakeManagerTest {
         )
         val ack = PairingAckMessage(
             challengeId = state.challenge.challengeId,
-            macDeviceId = macDeviceId,
-            macDeviceName = "Test Mac",
+            responderDeviceId = macDeviceId,
+            responderDeviceName = "Test Mac",
             nonce = Base64.getEncoder().encodeToString(ackCipher.nonce),
             ciphertext = Base64.getEncoder().encodeToString(ackCipher.ciphertext),
             tag = Base64.getEncoder().encodeToString(ackCipher.tag)
@@ -96,7 +96,7 @@ class PairingHandshakeManagerTest {
 
         val completion = manager.complete(state, ackJson)
         assertTrue(completion is PairingCompletionResult.Success)
-        assertEquals(macDeviceId, (completion as PairingCompletionResult.Success).macDeviceId)
+        assertEquals(macDeviceId, (completion as PairingCompletionResult.Success).peerDeviceId)
         assertTrue(keyStore.savedKeys.containsKey(macDeviceId))
     }
 
@@ -106,9 +106,9 @@ class PairingHandshakeManagerTest {
         val macAgreementPublic = X25519.publicFromPrivate(macAgreementPrivate)
         val macDeviceId = "12345678-90ab-cdef-1234-567890abcdef"
         val claim = PairingClaim(
-            macDeviceId = macDeviceId,
-            macDeviceName = "Test Mac",
-            macPublicKey = Base64.getEncoder().encodeToString(macAgreementPublic),
+            initiatorDeviceId = macDeviceId,
+            initiatorDeviceName = "Test Mac",
+            initiatorPublicKey = Base64.getEncoder().encodeToString(macAgreementPublic),
             expiresAt = clock.instant().plusSeconds(120)
         )
 
@@ -139,8 +139,8 @@ class PairingHandshakeManagerTest {
         )
         val ack = PairingAckMessage(
             challengeId = state.challenge.challengeId,
-            macDeviceId = macDeviceId,
-            macDeviceName = "Test Mac",
+            responderDeviceId = macDeviceId,
+            responderDeviceName = "Test Mac",
             nonce = Base64.getEncoder().encodeToString(ackCipher.nonce),
             ciphertext = Base64.getEncoder().encodeToString(ackCipher.ciphertext),
             tag = Base64.getEncoder().encodeToString(ackCipher.tag)
@@ -149,7 +149,7 @@ class PairingHandshakeManagerTest {
 
         val completion = manager.complete(state, ackJson)
         assertTrue(completion is PairingCompletionResult.Success)
-        assertEquals(macDeviceId, (completion as PairingCompletionResult.Success).macDeviceId)
+        assertEquals(macDeviceId, (completion as PairingCompletionResult.Success).peerDeviceId)
         assertTrue(keyStore.savedKeys.containsKey(macDeviceId))
     }
 
@@ -166,5 +166,6 @@ class PairingHandshakeManagerTest {
 
         override suspend fun loadKey(deviceId: String): ByteArray? = savedKeys[deviceId]
         override suspend fun deleteKey(deviceId: String) { savedKeys.remove(deviceId) }
+        override suspend fun getAllDeviceIds(): List<String> = savedKeys.keys.toList()
     }
 }

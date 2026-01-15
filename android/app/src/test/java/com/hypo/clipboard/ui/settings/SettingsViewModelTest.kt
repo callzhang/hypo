@@ -1,88 +1,118 @@
 package com.hypo.clipboard.ui.settings
 
+import androidx.lifecycle.viewModelScope
 import com.hypo.clipboard.data.settings.UserSettings
 import com.hypo.clipboard.fakes.FakeSettingsRepository
 import com.hypo.clipboard.transport.TransportManager
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
-import java.time.Instant
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class SettingsViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val settingsRepository = FakeSettingsRepository()
     private val peersFlow = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
-    private val transportManager: TransportManager = mockk(relaxed = true) {
-        every { this@mockk.peers } returns peersFlow
+    private val transportFlow = MutableStateFlow<Map<String, com.hypo.clipboard.transport.ActiveTransport>>(emptyMap())
+    private val cloudConnectionState = MutableStateFlow(com.hypo.clipboard.transport.ConnectionState.Disconnected)
+    private lateinit var transportManager: TransportManager
+    private val deviceKeyStore = mockk<com.hypo.clipboard.sync.DeviceKeyStore>(relaxed = true) {
+        coEvery { getAllDeviceIds() } returns emptyList()
     }
+    private val lanWebSocketClient = mockk<com.hypo.clipboard.transport.ws.WebSocketTransportClient>(relaxed = true)
+    private val syncCoordinator = mockk<com.hypo.clipboard.sync.SyncCoordinator>(relaxed = true)
+    private val connectionStatusProber = mockk<com.hypo.clipboard.transport.ConnectionStatusProber>(relaxed = true) {
+        every { deviceDualStatus } returns MutableStateFlow(emptyMap())
+    }
+    private val accessibilityServiceChecker = mockk<com.hypo.clipboard.util.AccessibilityServiceChecker>(relaxed = true)
+    private val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
 
     @BeforeTest
     fun setUp() {
-        setMain(dispatcher)
+        Dispatchers.setMain(dispatcher)
+        transportManager = mockk(relaxed = true)
+        every { transportManager.peers } returns peersFlow
+        every { transportManager.lastSuccessfulTransport } returns transportFlow
+        every { transportManager.cloudConnectionState } returns cloudConnectionState
     }
 
     @AfterTest
     fun tearDown() {
-        resetMain()
+        Dispatchers.resetMain()
     }
 
     @Test
     fun `state combines settings and discovered peers`() = runTest {
-        val peer = DiscoveredPeer(
-            serviceName = "Hypo#1",
-            host = "192.168.1.10",
-            port = 8080,
-            fingerprint = "abc",
-            attributes = emptyMap(),
-            lastSeen = Instant.parse("2024-01-01T00:00:00Z")
-        )
-        peersFlow.value = listOf(peer)
         settingsRepository.emit(
             UserSettings(
                 lanSyncEnabled = false,
                 cloudSyncEnabled = false,
                 historyLimit = 120,
-                autoDeleteDays = 7
+                plainTextModeEnabled = true
             )
         )
 
-        val viewModel = SettingsViewModel(settingsRepository, transportManager)
+        val viewModel = SettingsViewModel(
+            settingsRepository = settingsRepository,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanWebSocketClient = lanWebSocketClient,
+            syncCoordinator = syncCoordinator,
+            connectionStatusProber = connectionStatusProber,
+            accessibilityServiceChecker = accessibilityServiceChecker,
+            context = context
+        )
         runCurrent()
 
         val state = viewModel.state.value
         assertEquals(false, state.lanSyncEnabled)
-        assertEquals(false, state.cloudSyncEnabled)
         assertEquals(120, state.historyLimit)
-        assertEquals(7, state.autoDeleteDays)
-        assertEquals(listOf(peer), state.discoveredPeers)
+        assertEquals(true, state.plainTextModeEnabled)
+        assertEquals(emptyList<DiscoveredPeer>(), state.discoveredPeers)
+        viewModel.viewModelScope.cancel()
     }
 
     @Test
     fun `callbacks delegate to repository`() = runTest {
-        val viewModel = SettingsViewModel(settingsRepository, transportManager)
+        val viewModel = SettingsViewModel(
+            settingsRepository = settingsRepository,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanWebSocketClient = lanWebSocketClient,
+            syncCoordinator = syncCoordinator,
+            connectionStatusProber = connectionStatusProber,
+            accessibilityServiceChecker = accessibilityServiceChecker,
+            context = context
+        )
         runCurrent()
 
         viewModel.onLanSyncChanged(false)
-        viewModel.onCloudSyncChanged(false)
         viewModel.onHistoryLimitChanged(150)
-        viewModel.onAutoDeleteDaysChanged(5)
+        viewModel.onPlainTextModeChanged(true)
         runCurrent()
 
         assertEquals(listOf(false), settingsRepository.lanSyncCalls)
-        assertEquals(listOf(false), settingsRepository.cloudSyncCalls)
         assertEquals(listOf(150), settingsRepository.historyLimitCalls)
-        assertEquals(listOf(5), settingsRepository.autoDeleteCalls)
+        assertEquals(listOf(true), settingsRepository.plainTextCalls)
+        viewModel.viewModelScope.cancel()
     }
 }

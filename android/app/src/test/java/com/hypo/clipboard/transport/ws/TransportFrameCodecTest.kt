@@ -33,7 +33,9 @@ class TransportFrameCodecTest {
         val encoded = codec.encode(envelope)
         val decoded = codec.decode(encoded)
         assertEquals(envelope.payload.deviceId, decoded.payload.deviceId)
-        assertEquals(envelope.payload.encryption.nonce, decoded.payload.encryption.nonce)
+        val originalEncryption = requireNotNull(envelope.payload.encryption)
+        val decodedEncryption = requireNotNull(decoded.payload.encryption)
+        assertEquals(originalEncryption.nonce, decodedEncryption.nonce)
     }
 
     @Test
@@ -48,12 +50,15 @@ class TransportFrameCodecTest {
         val frame = java.util.Base64.getDecoder().decode(vector.base64)
         val decoded = codec.decode(frame)
         assertEquals(vector.envelope.payload.device_id, decoded.payload.deviceId)
+        assertEquals(vector.envelope.payload.ciphertext, decoded.payload.ciphertext)
+        val decodedEncryption = requireNotNull(decoded.payload.encryption)
+        assertEquals(vector.envelope.payload.encryption.nonce, decodedEncryption.nonce)
+        assertEquals(vector.envelope.payload.encryption.tag, decodedEncryption.tag)
+
         val reEncoded = codec.encode(decoded)
-        val originalPayload = frame.copyOfRange(4, frame.size)
-        val reEncodedPayload = reEncoded.copyOfRange(4, reEncoded.size)
-        val originalJson = Json.parseToJsonElement(String(originalPayload, Charsets.UTF_8))
-        val reEncodedJson = Json.parseToJsonElement(String(reEncodedPayload, Charsets.UTF_8))
-        assertEquals(originalJson, reEncodedJson)
+        val roundTrip = codec.decode(reEncoded)
+        assertEquals(decoded.payload.deviceId, roundTrip.payload.deviceId)
+        assertEquals(decoded.payload.ciphertext, roundTrip.payload.ciphertext)
     }
 
     @Test

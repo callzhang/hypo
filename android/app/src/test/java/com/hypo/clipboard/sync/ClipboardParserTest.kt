@@ -3,7 +3,6 @@ package com.hypo.clipboard.sync
 import android.content.ClipData
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
-import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hypo.clipboard.domain.model.ClipboardType
 import java.io.File
 import java.io.FileOutputStream
@@ -13,14 +12,18 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-@RunWith(AndroidJUnit4::class)
+@RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ClipboardParserTest {
 
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-    private val parser = ClipboardParser(context.contentResolver)
+    private val parser = ClipboardParser(
+        context.contentResolver,
+        com.hypo.clipboard.data.local.StorageManager(context)
+    )
 
     @Test
     fun parsesPlainTextClip() {
@@ -66,7 +69,7 @@ class ClipboardParserTest {
 
         assertNotNull(event)
         assertEquals(ClipboardType.IMAGE, event.type)
-        assertTrue(event.content.isNotEmpty())
+        assertTrue(event.content.isNotEmpty() || event.localPath != null)
         assertTrue(event.preview.startsWith("Image"))
         assertEquals("10", event.metadata["width"])
         assertEquals("20", event.metadata["height"])
@@ -87,7 +90,7 @@ class ClipboardParserTest {
         assertEquals(ClipboardType.FILE, event.type)
         assertEquals(file.name, event.metadata["filename"])
         assertEquals("text/plain", event.metadata["mime_type"])
-        assertTrue(event.content.isNotEmpty())
+        assertTrue(event.content.isNotEmpty() || event.localPath != null)
         assertTrue(event.preview.contains(file.name))
     }
 }

@@ -7,14 +7,20 @@ import com.hypo.clipboard.sync.Payload
 import com.hypo.clipboard.sync.SyncEnvelope
 import com.hypo.clipboard.transport.TransportAnalytics
 import com.hypo.clipboard.transport.TransportAnalyticsEvent
+import android.util.Log
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import javax.net.ssl.SSLPeerUnverifiedException
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.Request
@@ -23,9 +29,32 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RelayWebSocketClientTest {
+    @BeforeTest
+    fun setUp() {
+        mockkStatic(Log::class)
+        every { Log.v(any(), any()) } returns 0
+        every { Log.v(any(), any(), any()) } returns 0
+        every { Log.d(any(), any()) } returns 0
+        every { Log.d(any(), any(), any()) } returns 0
+        every { Log.i(any(), any()) } returns 0
+        every { Log.i(any(), any(), any()) } returns 0
+        every { Log.w(any(), any<String>()) } returns 0
+        every { Log.w(any(), any<Throwable>()) } returns 0
+        every { Log.w(any(), any(), any()) } returns 0
+        every { Log.e(any(), any()) } returns 0
+        every { Log.e(any(), any(), any()) } returns 0
+    }
+
+    @AfterTest
+    fun tearDown() {
+        unmockkStatic(Log::class)
+    }
 
     @Test
     fun `records pinning failures with cloud environment`() = runTest {
@@ -34,6 +63,10 @@ class RelayWebSocketClientTest {
         val connector = FakeConnector()
         val analytics = RecordingAnalytics()
         val clock = FrozenClock(Instant.parse("2025-10-08T12:00:00Z"))
+        val transportManager = mockk<com.hypo.clipboard.transport.TransportManager>(relaxed = true)
+        val deviceIdentity = mockk<com.hypo.clipboard.sync.DeviceIdentity>(relaxed = true) {
+            every { deviceId } returns "android-device"
+        }
         val client = RelayWebSocketClient(
             config = TlsWebSocketConfig(
                 url = "wss://hypo.fly.dev/ws",
@@ -43,12 +76,15 @@ class RelayWebSocketClientTest {
             connector = connector,
             frameCodec = TransportFrameCodec(),
             analytics = analytics,
+            transportManager = transportManager,
+            deviceIdentity = deviceIdentity,
             scope = scope,
             clock = clock
         )
+        client.startReceiving()
 
         val job = scope.launch { runCatching { client.send(sampleEnvelope()) } }
-        scope.runCurrent()
+        waitForConnection(scope, connector)
         connector.fail(SSLPeerUnverifiedException("pin mismatch"))
         scope.runCurrent()
         job.cancel()
@@ -81,6 +117,8 @@ class RelayWebSocketClientTest {
             sockets += socket
             return socket
         }
+
+        fun listenersCount(): Int = listeners.size
 
         fun fail(error: Throwable, index: Int = listeners.lastIndex) {
             listeners[index].onFailure(sockets[index], error, null)
@@ -116,5 +154,16 @@ class RelayWebSocketClientTest {
         override fun getZone(): ZoneId = ZoneId.systemDefault()
         override fun withZone(zone: ZoneId?): Clock = this
         override fun instant(): Instant = instant
+    }
+
+    private suspend fun waitForConnection(scope: TestScope, connector: FakeConnector, index: Int = 0) {
+        repeat(5) {
+            scope.runCurrent()
+            scope.advanceUntilIdle()
+            if (connector.listenersCount() > index) {
+                return
+            }
+        }
+        assertTrue(connector.listenersCount() > index)
     }
 }

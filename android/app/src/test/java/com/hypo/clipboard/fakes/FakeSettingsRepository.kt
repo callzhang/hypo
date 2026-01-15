@@ -12,7 +12,7 @@ class FakeSettingsRepository(initial: UserSettings = UserSettings()) : SettingsR
     val lanSyncCalls = mutableListOf<Boolean>()
     val cloudSyncCalls = mutableListOf<Boolean>()
     val historyLimitCalls = mutableListOf<Int>()
-    val autoDeleteCalls = mutableListOf<Int>()
+    val plainTextCalls = mutableListOf<Boolean>()
 
     override val settings: Flow<UserSettings> = settingsFlow.asStateFlow()
 
@@ -31,9 +31,9 @@ class FakeSettingsRepository(initial: UserSettings = UserSettings()) : SettingsR
         settingsFlow.value = settingsFlow.value.copy(historyLimit = limit)
     }
 
-    override suspend fun setAutoDeleteDays(days: Int) {
-        autoDeleteCalls += days
-        settingsFlow.value = settingsFlow.value.copy(autoDeleteDays = days)
+    override suspend fun setPlainTextModeEnabled(enabled: Boolean) {
+        plainTextCalls += enabled
+        settingsFlow.value = settingsFlow.value.copy(plainTextModeEnabled = enabled)
     }
 
     fun emit(settings: UserSettings) {

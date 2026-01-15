@@ -4,10 +4,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
-import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
@@ -23,10 +23,11 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
-@RunWith(AndroidJUnit4::class)
+@RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ClipboardPipelineTest {
 
@@ -34,8 +35,16 @@ class ClipboardPipelineTest {
     private val clipboardManager = context.getSystemService(ClipboardManager::class.java)
     private val identity = mockk<DeviceIdentity> {
         every { deviceId } returns "android-device"
+        every { deviceName } returns "Pixel"
     }
     private val syncEngine = mockk<SyncEngine>(relaxed = true)
+    private val transportManager = mockk<com.hypo.clipboard.transport.TransportManager>(relaxed = true) {
+        every { peers } returns MutableStateFlow(emptyList())
+    }
+    private val deviceKeyStore = mockk<DeviceKeyStore>(relaxed = true) {
+        coEvery { getAllDeviceIds() } returns listOf("mac-device")
+    }
+    private val lanWebSocketClient = mockk<com.hypo.clipboard.transport.ws.WebSocketTransportClient>(relaxed = true)
 
     @Before
     fun setUp() {
@@ -46,19 +55,30 @@ class ClipboardPipelineTest {
     fun processesTextClipEndToEnd() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val repository = RecordingRepository()
-        val coordinator = SyncCoordinator(repository, syncEngine, identity)
+        val coordinator = SyncCoordinator(
+            repository = repository,
+            syncEngine = syncEngine,
+            identity = identity,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanWebSocketClient = lanWebSocketClient,
+            context = context
+        )
         coordinator.start(this)
 
         val listener = ClipboardListener(
             clipboardManager = clipboardManager,
-            parser = ClipboardParser(context.contentResolver),
+            parser = ClipboardParser(
+                context.contentResolver,
+                com.hypo.clipboard.data.local.StorageManager(context)
+            ),
             onClipboardChanged = { coordinator.onClipboardEvent(it) },
             scope = this,
             dispatcher = dispatcher
         )
 
-        clipboardManager.setPrimaryClip(ClipData.newPlainText("label", "Hello from Hypo"))
         listener.start()
+        clipboardManager.setPrimaryClip(ClipData.newPlainText("label", "Hello from Hypo"))
         advanceUntilIdle()
 
         assertEquals(1, repository.items.size)
@@ -75,12 +95,23 @@ class ClipboardPipelineTest {
     fun processesImageClipEndToEnd() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val repository = RecordingRepository()
-        val coordinator = SyncCoordinator(repository, syncEngine, identity)
+        val coordinator = SyncCoordinator(
+            repository = repository,
+            syncEngine = syncEngine,
+            identity = identity,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanWebSocketClient = lanWebSocketClient,
+            context = context
+        )
         coordinator.start(this)
 
         val listener = ClipboardListener(
             clipboardManager = clipboardManager,
-            parser = ClipboardParser(context.contentResolver),
+            parser = ClipboardParser(
+                context.contentResolver,
+                com.hypo.clipboard.data.local.StorageManager(context)
+            ),
             onClipboardChanged = { coordinator.onClipboardEvent(it) },
             scope = this,
             dispatcher = dispatcher
@@ -93,15 +124,14 @@ class ClipboardPipelineTest {
             bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, stream)
         }
         val uri = Uri.fromFile(file)
-        clipboardManager.setPrimaryClip(ClipData.newUri(context.contentResolver, "image", uri))
-
         listener.start()
+        clipboardManager.setPrimaryClip(ClipData.newUri(context.contentResolver, "image", uri))
         advanceUntilIdle()
 
         assertEquals(1, repository.items.size)
         val item = repository.items.first()
         assertEquals(ClipboardType.IMAGE, item.type)
-        assertTrue(item.content.isNotEmpty())
+        assertTrue(item.content.isNotEmpty() || item.localPath != null)
         assertTrue(item.preview.startsWith("Image"))
         assertEquals("image/png", item.metadata?.get("mime_type"))
 
@@ -113,12 +143,23 @@ class ClipboardPipelineTest {
     fun processesFileClipEndToEnd() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val repository = RecordingRepository()
-        val coordinator = SyncCoordinator(repository, syncEngine, identity)
+        val coordinator = SyncCoordinator(
+            repository = repository,
+            syncEngine = syncEngine,
+            identity = identity,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanWebSocketClient = lanWebSocketClient,
+            context = context
+        )
         coordinator.start(this)
 
         val listener = ClipboardListener(
             clipboardManager = clipboardManager,
-            parser = ClipboardParser(context.contentResolver),
+            parser = ClipboardParser(
+                context.contentResolver,
+                com.hypo.clipboard.data.local.StorageManager(context)
+            ),
             onClipboardChanged = { coordinator.onClipboardEvent(it) },
             scope = this,
             dispatcher = dispatcher
@@ -127,15 +168,14 @@ class ClipboardPipelineTest {
         val file = File.createTempFile("hypo-doc", ".txt", context.cacheDir)
         file.writeText("Document contents for Hypo")
         val uri = Uri.fromFile(file)
-        clipboardManager.setPrimaryClip(ClipData.newUri(context.contentResolver, "file", uri))
-
         listener.start()
+        clipboardManager.setPrimaryClip(ClipData.newUri(context.contentResolver, "file", uri))
         advanceUntilIdle()
 
         assertEquals(1, repository.items.size)
         val item = repository.items.first()
         assertEquals(ClipboardType.FILE, item.type)
-        assertTrue(item.content.isNotEmpty())
+        assertTrue(item.content.isNotEmpty() || item.localPath != null)
         assertEquals(file.name, item.metadata?.get("filename"))
 
         listener.stop()
@@ -160,6 +200,22 @@ class ClipboardPipelineTest {
 
         override suspend fun clear() {
             state.value = emptyList()
+        }
+
+        override suspend fun getLatestEntry(): ClipboardItem? = state.value.firstOrNull()
+
+        override suspend fun findMatchingEntryInHistory(item: ClipboardItem): ClipboardItem? {
+            return state.value.firstOrNull { it.content == item.content && it.type == item.type }
+        }
+
+        override suspend fun updateTimestamp(id: String, newTimestamp: java.time.Instant) {
+            state.value = state.value.map { existing ->
+                if (existing.id == id) existing.copy(createdAt = newTimestamp) else existing
+            }
+        }
+
+        override suspend fun loadFullContent(itemId: String): String? {
+            return state.value.firstOrNull { it.id == itemId }?.content
         }
     }
 }

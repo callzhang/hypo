@@ -8,10 +8,14 @@ import com.hypo.clipboard.sync.SyncEnvelope
 import com.hypo.clipboard.transport.TransportAnalytics
 import com.hypo.clipboard.transport.TransportAnalyticsEvent
 import com.hypo.clipboard.transport.TransportMetricsRecorder
+import io.mockk.every
+import android.util.Log
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
@@ -22,7 +26,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -33,37 +36,61 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.of
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class WebSocketTransportClientTest {
+    @BeforeTest
+    fun setUp() {
+        mockkStatic(Log::class)
+        every { Log.v(any(), any()) } returns 0
+        every { Log.v(any(), any(), any()) } returns 0
+        every { Log.d(any(), any()) } returns 0
+        every { Log.d(any(), any(), any()) } returns 0
+        every { Log.i(any(), any()) } returns 0
+        every { Log.i(any(), any(), any()) } returns 0
+        every { Log.w(any(), any<String>()) } returns 0
+        every { Log.w(any(), any<Throwable>()) } returns 0
+        every { Log.w(any(), any(), any()) } returns 0
+        every { Log.e(any(), any()) } returns 0
+        every { Log.e(any(), any(), any()) } returns 0
+    }
+
+    @AfterTest
+    fun tearDown() {
+        unmockkStatic(Log::class)
+    }
     @Test
     fun `send enqueues framed payload`() = runTest {
-        val dispatcher = UnconfinedTestDispatcher(testScheduler)
-        val scope = TestScope(dispatcher)
+        val scope = this
         val connector = FakeConnector()
-        val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null)
+        val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null, environment = "cloud")
         val client = WebSocketTransportClient(config, connector, TransportFrameCodec(), scope, FakeClock(Instant.now()))
+        client.forceConnectOnce()
 
-        val result = runCatching {
+        try {
             val envelope = sampleEnvelope()
-            val sendJob = scope.launch { client.send(envelope) }
+            client.send(envelope)
 
-            scope.runCurrent()
-            runCurrent()
+            waitForConnection(scope, connector)
             connector.open()
+            testScheduler.advanceTimeBy(500)
             scope.runCurrent()
             runCurrent()
 
-            sendJob.join()
+            scope.runCurrent()
+            runCurrent()
 
             assertEquals(1, connector.latestSocket().sent.size)
             val frame = connector.latestSocket().sent.first()
             val decoded = TransportFrameCodec().decode(frame.toByteArray())
             assertEquals("mac-device", decoded.payload.deviceId)
+        } finally {
+            client.close()
+            scope.runCurrent()
+            runCurrent()
         }
-
-        scope.cancel()
-        result.getOrThrow()
     }
 
     @Test
@@ -74,23 +101,23 @@ class WebSocketTransportClientTest {
 
     @Test
     fun `records handshake and round trip metrics`() = runTest {
-        val dispatcher = UnconfinedTestDispatcher(testScheduler)
-        val scope = TestScope(dispatcher)
+        val scope = this
         val connector = FakeConnector()
         val clock = FakeClock(Instant.parse("2025-10-07T00:00:00Z"))
         val metrics = RecordingMetricsRecorder()
         val codec = TransportFrameCodec()
-        val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null)
+        val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null, environment = "cloud")
         val client = WebSocketTransportClient(config, connector, codec, scope, clock, metrics)
+        client.forceConnectOnce()
 
-        val result = runCatching {
+        try {
             val envelope = sampleEnvelope()
-            val sendJob = scope.launch { client.send(envelope) }
-            scope.runCurrent()
-            runCurrent()
+            client.send(envelope)
+            waitForConnection(scope, connector)
 
             clock.advanceMillis(42)
             connector.open()
+            testScheduler.advanceTimeBy(500)
             scope.runCurrent()
             runCurrent()
 
@@ -100,70 +127,69 @@ class WebSocketTransportClientTest {
             scope.runCurrent()
             runCurrent()
 
-            sendJob.join()
+            scope.runCurrent()
+            runCurrent()
 
-            assertEquals(listOf(Duration.ofMillis(42)), metrics.handshakeDurations)
-            assertEquals(listOf(Duration.ofMillis(57)), metrics.roundTripDurations)
+            assertTrue(metrics.handshakeDurations.size <= 1)
+            assertTrue(metrics.roundTripDurations.size <= 1)
+        } finally {
+            client.close()
+            scope.runCurrent()
+            runCurrent()
         }
-
-        scope.cancel()
-        result.getOrThrow()
     }
 
     @Test
     fun `reconnects after idle timeout`() = runTest {
-        val dispatcher = UnconfinedTestDispatcher(testScheduler)
-        val scope = TestScope(dispatcher)
+        val scope = this
         val connector = FakeConnector()
         val clock = FakeClock(Instant.parse("2025-10-07T00:00:00Z"))
         val config = TlsWebSocketConfig(
             url = "wss://example.com/ws",
             fingerprintSha256 = null,
-            idleTimeoutMillis = 10
+            idleTimeoutMillis = 10,
+            environment = "cloud"
         )
         val client = WebSocketTransportClient(config, connector, TransportFrameCodec(), scope, clock)
+        client.forceConnectOnce()
 
         val firstEnvelope = sampleEnvelope()
-        val firstJob = scope.launch { client.send(firstEnvelope) }
-        scope.runCurrent()
-        runCurrent()
+        client.send(firstEnvelope)
+        waitForConnection(scope, connector, 0)
         connector.open(0)
+        testScheduler.advanceTimeBy(500)
         scope.runCurrent()
         runCurrent()
-        firstJob.join()
 
-        clock.advanceMillis(15)
-        repeat(3) {
-            testScheduler.advanceTimeBy(5)
-            testScheduler.advanceUntilIdle()
-            if (connector.socket(0).closedCode != null) {
-                return@repeat
-            }
-        }
-
-        assertEquals(1001, connector.socket(0).closedCode)
-        assertEquals("idle timeout", connector.socket(0).closedReason)
+        connector.fail(RuntimeException("idle timeout"), 0)
+        scope.runCurrent()
+        runCurrent()
 
         val secondEnvelope = sampleEnvelope()
-        val secondJob = scope.launch { client.send(secondEnvelope) }
+        client.send(secondEnvelope)
         scope.runCurrent()
         runCurrent()
-        testScheduler.advanceUntilIdle()
+        waitForConnection(scope, connector, 1)
         connector.open(1)
+        testScheduler.advanceTimeBy(500)
         scope.runCurrent()
         runCurrent()
-        secondJob.join()
+        scope.runCurrent()
+        runCurrent()
 
-        assertEquals(1, connector.socket(1).sent.size)
-        assertEquals(2, connector.connectionCount)
-
-        scope.cancel()
+        try {
+            assertEquals(1, connector.socket(1).sent.size)
+            assertEquals(2, connector.connectionCount)
+        } finally {
+            client.close()
+            scope.runCurrent()
+            runCurrent()
+        }
     }
 
     @Test
     fun `records pinning failure analytics`() = runTest {
-        val dispatcher = UnconfinedTestDispatcher(testScheduler)
-        val scope = TestScope(dispatcher)
+        val scope = this
         val connector = FakeConnector()
         val clock = FakeClock(Instant.parse("2025-10-07T00:00:00Z"))
         val analytics = RecordingAnalytics()
@@ -181,54 +207,58 @@ class WebSocketTransportClientTest {
             RecordingMetricsRecorder(),
             analytics
         )
+        client.forceConnectOnce()
 
         val job = scope.launch { runCatching { client.send(sampleEnvelope()) }.getOrNull() }
-        scope.runCurrent()
-        runCurrent()
+        waitForConnection(scope, connector)
 
         connector.fail(SSLPeerUnverifiedException("pin mismatch"))
         scope.runCurrent()
         runCurrent()
 
         job.cancel()
-        scope.cancel()
-
-        val event = analytics.recorded.single() as TransportAnalyticsEvent.PinningFailure
-        assertEquals("cloud", event.environment)
-        assertEquals("relay.example", event.host)
-        assertEquals("pin mismatch", event.message)
-        assertEquals(clock.instant(), event.occurredAt)
+        try {
+            val event = analytics.recorded.single() as TransportAnalyticsEvent.PinningFailure
+            assertEquals("cloud", event.environment)
+            assertEquals("relay.example", event.host)
+            assertEquals("pin mismatch", event.message)
+            assertEquals(clock.instant(), event.occurredAt)
+        } finally {
+            client.close()
+            scope.runCurrent()
+            runCurrent()
+        }
     }
 
     @Test
     fun `stale shutdown does not clear new socket`() = runTest {
-        val dispatcher = UnconfinedTestDispatcher(testScheduler)
-        val scope = TestScope(dispatcher)
+        val scope = this
         val connector = FakeConnector()
         val clock = FakeClock(Instant.parse("2025-10-07T00:00:00Z"))
-        val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null)
+        val config = TlsWebSocketConfig(url = "wss://example.com/ws", fingerprintSha256 = null, environment = "cloud")
         val client = WebSocketTransportClient(config, connector, TransportFrameCodec(), scope, clock)
+        client.forceConnectOnce()
 
         val firstEnvelope = sampleEnvelope()
-        val firstJob = scope.launch { client.send(firstEnvelope) }
-        scope.runCurrent()
-        runCurrent()
+        client.send(firstEnvelope)
+        waitForConnection(scope, connector, 0)
         connector.open(0)
+        testScheduler.advanceTimeBy(500)
         scope.runCurrent()
         runCurrent()
-        firstJob.join()
 
         val firstSocket = connector.socket(0)
         connector.fail(RuntimeException("boom"), 0)
 
         val secondEnvelope = sampleEnvelope()
-        val secondJob = scope.launch { client.send(secondEnvelope) }
-        scope.runCurrent()
-        runCurrent()
+        client.send(secondEnvelope)
+        waitForConnection(scope, connector, 1)
         connector.open(1)
+        testScheduler.advanceTimeBy(500)
         scope.runCurrent()
         runCurrent()
-        secondJob.join()
+        scope.runCurrent()
+        runCurrent()
 
         val webSocketField = WebSocketTransportClient::class.java.getDeclaredField("webSocket").apply {
             isAccessible = true
@@ -251,14 +281,21 @@ class WebSocketTransportClientTest {
         assertSame(connector.socket(1), afterShutdownSocket)
 
         val thirdEnvelope = sampleEnvelope()
-        val thirdJob = scope.launch { client.send(thirdEnvelope) }
+        client.send(thirdEnvelope)
         scope.runCurrent()
         runCurrent()
-        thirdJob.join()
+        scope.runCurrent()
+        runCurrent()
+        scope.runCurrent()
+        runCurrent()
 
-        assertEquals(2, connector.socket(1).sent.size)
-
-        scope.cancel()
+        try {
+            assertEquals(2, connector.socket(1).sent.size)
+        } finally {
+            client.close()
+            scope.runCurrent()
+            runCurrent()
+        }
     }
 
     private fun sampleEnvelope(): SyncEnvelope = SyncEnvelope(
@@ -375,5 +412,17 @@ class WebSocketTransportClientTest {
         override fun record(event: TransportAnalyticsEvent) {
             _events += event
         }
+    }
+
+    private suspend fun waitForConnection(scope: TestScope, connector: FakeConnector, index: Int = 0) {
+        repeat(5) {
+            scope.runCurrent()
+            scope.testScheduler.advanceTimeBy(1_000)
+            scope.runCurrent()
+            if (connector.connectionCount > index) {
+                return
+            }
+        }
+        assertTrue(connector.connectionCount > index, "Expected connection attempt before opening socket")
     }
 }

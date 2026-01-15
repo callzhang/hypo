@@ -2,6 +2,7 @@ package com.hypo.clipboard.fakes
 
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardItem
+import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +26,22 @@ class FakeClipboardRepository(initialItems: List<ClipboardItem> = emptyList()) :
     override suspend fun clear() {
         clearCallCount += 1
         historyFlow.value = emptyList()
+    }
+
+    override suspend fun getLatestEntry(): ClipboardItem? = historyFlow.value.firstOrNull()
+
+    override suspend fun findMatchingEntryInHistory(item: ClipboardItem): ClipboardItem? {
+        return historyFlow.value.firstOrNull { it.content == item.content && it.type == item.type }
+    }
+
+    override suspend fun updateTimestamp(id: String, newTimestamp: Instant) {
+        historyFlow.value = historyFlow.value.map { existing ->
+            if (existing.id == id) existing.copy(createdAt = newTimestamp) else existing
+        }
+    }
+
+    override suspend fun loadFullContent(itemId: String): String? {
+        return historyFlow.value.firstOrNull { it.id == itemId }?.content
     }
 
     fun setHistory(items: List<ClipboardItem>) {

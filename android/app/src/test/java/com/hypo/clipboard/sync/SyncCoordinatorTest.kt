@@ -2,6 +2,7 @@ package com.hypo.clipboard.sync
 
 import com.hypo.clipboard.data.ClipboardRepository
 import com.hypo.clipboard.domain.model.ClipboardType
+import androidx.test.core.app.ApplicationProvider
 import io.mockk.Runs
 import io.mockk.clearMocks
 import io.mockk.coEvery
@@ -13,22 +14,39 @@ import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class SyncCoordinatorTest {
     private val repository = mockk<ClipboardRepository>(relaxed = true)
     private val syncEngine = mockk<SyncEngine>(relaxed = true)
     private val identity = mockk<DeviceIdentity> {
         every { deviceId } returns "android-device-123"
+        every { deviceName } returns "Pixel"
     }
-    private val coordinator = SyncCoordinator(repository, syncEngine, identity)
+    private val transportManager = mockk<com.hypo.clipboard.transport.TransportManager>(relaxed = true) {
+        every { peers } returns MutableStateFlow(emptyList())
+    }
+    private val deviceKeyStore = mockk<DeviceKeyStore>(relaxed = true) {
+        coEvery { getAllDeviceIds() } returns listOf("mac-device")
+    }
+    private val lanWebSocketClient = mockk<com.hypo.clipboard.transport.ws.WebSocketTransportClient>(relaxed = true)
+    private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
 
     @Test
     fun upsertsClipboardEventsIntoRepository() = runTest {
         coEvery { repository.upsert(any()) } just Runs
+        coEvery { repository.getLatestEntry() } returns null
+        coEvery { repository.findMatchingEntryInHistory(any()) } returns null
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
         coEvery { syncEngine.sendClipboard(any(), any()) } answers {
             SyncEnvelope(
                 type = MessageType.CLIPBOARD,
@@ -40,6 +58,15 @@ class SyncCoordinatorTest {
                 )
             )
         }
+        val coordinator = SyncCoordinator(
+            repository = repository,
+            syncEngine = syncEngine,
+            identity = identity,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanWebSocketClient = lanWebSocketClient,
+            context = context
+        )
         coordinator.setTargetDevices(setOf("mac-device"))
         coordinator.start(this)
 
@@ -50,7 +77,8 @@ class SyncCoordinatorTest {
             content = "Hello",
             preview = "Hello",
             metadata = emptyMap(),
-            createdAt = timestamp
+            createdAt = timestamp,
+            skipBroadcast = true
         )
 
         coordinator.onClipboardEvent(event)
@@ -68,9 +96,10 @@ class SyncCoordinatorTest {
             })
         }
 
-        coVerify(exactly = 1) { syncEngine.sendClipboard(any(), "mac-device") }
+        coVerify(exactly = 0) { syncEngine.sendClipboard(any(), any()) }
 
         coordinator.stop()
+        advanceUntilIdle()
         clearMocks(repository)
         clearMocks(syncEngine)
     }
@@ -78,6 +107,18 @@ class SyncCoordinatorTest {
     @Test
     fun startIsIdempotent() = runTest {
         coEvery { repository.upsert(any()) } just Runs
+        coEvery { repository.getLatestEntry() } returns null
+        coEvery { repository.findMatchingEntryInHistory(any()) } returns null
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns emptyList()
+        val coordinator = SyncCoordinator(
+            repository = repository,
+            syncEngine = syncEngine,
+            identity = identity,
+            transportManager = transportManager,
+            deviceKeyStore = deviceKeyStore,
+            lanWebSocketClient = lanWebSocketClient,
+            context = context
+        )
         coordinator.start(this)
         coordinator.start(this)
 
@@ -87,7 +128,8 @@ class SyncCoordinatorTest {
             content = "World",
             preview = "World",
             metadata = emptyMap(),
-            createdAt = Instant.parse("2024-03-22T08:00:00Z")
+            createdAt = Instant.parse("2024-03-22T08:00:00Z"),
+            skipBroadcast = true
         )
         coordinator.onClipboardEvent(event)
         advanceUntilIdle()
@@ -96,6 +138,7 @@ class SyncCoordinatorTest {
         coVerify(exactly = 0) { syncEngine.sendClipboard(any(), any()) }
 
         coordinator.stop()
+        advanceUntilIdle()
         clearMocks(repository)
         clearMocks(syncEngine)
     }

@@ -22,8 +22,13 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class LanDiscoveryRepositoryTest {
     private val context: Context = mockk(relaxed = true)
     private val nsdManager: NsdManager = mockk(relaxed = true)
@@ -79,13 +84,13 @@ class LanDiscoveryRepositoryTest {
         networkEvents.emit(Unit)
         advanceUntilIdle()
         assertEquals(2, discoverCount)
-        assertEquals(2, stopCount)
+        assertEquals(1, stopCount)
         assertTrue(stoppedListeners.isNotEmpty())
         assertTrue(stoppedListeners.all { it === listeners.first() })
 
         job.cancelAndJoin()
         advanceUntilIdle()
-        assertEquals(3, stopCount)
+        assertEquals(2, stopCount)
         assertEquals(1, multicastLock.releaseCount)
         assertTrue(stoppedListeners.all { it === listeners.first() })
     }
@@ -131,7 +136,7 @@ class LanDiscoveryRepositoryTest {
 
         assertTrue(events.isNotEmpty())
         assertEquals(1, multicastLock.releaseCount)
-        assertEquals(2, stopCalls)
+        assertEquals(1, stopCalls)
         assertTrue(stoppedListeners.isNotEmpty())
         assertTrue(stoppedListeners.all { it === listeners.first() })
         verify(exactly = 1) { nsdManager.resolveService(any(), any()) }

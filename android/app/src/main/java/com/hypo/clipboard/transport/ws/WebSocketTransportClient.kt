@@ -1168,6 +1168,47 @@ class WebSocketTransportClient @Inject constructor(
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     touch()
                     // Message received - decode and handle below
+                    val rawPayload = bytes.toByteArray()
+                    val rawJson = runCatching {
+                        var idx = 0
+                        while (idx < rawPayload.size && rawPayload[idx].toInt().toChar().isWhitespace()) {
+                            idx++
+                        }
+                        if (idx < rawPayload.size && rawPayload[idx].toInt().toChar() == '{') {
+                            String(rawPayload, idx, rawPayload.size - idx, Charsets.UTF_8)
+                        } else {
+                            null
+                        }
+                    }.getOrNull()
+                    
+                    if (rawJson != null) {
+                        val isRawPairingAck = rawJson.contains("\"challenge_id\"") &&
+                            rawJson.contains("\"responder_device_id\"")
+                        if (isRawPairingAck) {
+                            android.util.Log.d("WebSocketTransportClient", "📋 Pairing: ACK received (raw binary)")
+                            onPairingAck?.invoke(rawJson)
+                            return
+                        }
+                        val isRawPairingChallenge = rawJson.contains("\"initiator_device_id\"") &&
+                            rawJson.contains("\"initiator_pub_key\"")
+                        if (isRawPairingChallenge) {
+                            android.util.Log.d("WebSocketTransportClient", "📋 Pairing: Challenge received (raw binary)")
+                            scope.launch {
+                                val ackJson = onPairingChallenge?.invoke(rawJson)
+                                if (ackJson != null) {
+                                    try {
+                                        webSocket.send(ackJson)
+                                        android.util.Log.d("WebSocketTransportClient", "📤 Pairing: ACK sent (${ackJson.length} chars)")
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("WebSocketTransportClient", "❌ Pairing: Failed to send ACK - ${e.message}", e)
+                                    }
+                                } else {
+                                    android.util.Log.w("WebSocketTransportClient", "⚠️ Pairing: Handler returned null ACK")
+                                }
+                            }
+                            return
+                        }
+                    }
                     
                     // Decode the binary frame first (handles 4-byte length prefix)
                     // Then check if it's a pairing message or clipboard message
@@ -1192,6 +1233,37 @@ class WebSocketTransportClient @Inject constructor(
                     }
                     
                     if (frameJson == null) {
+                        return
+                    }
+
+                    val isPairingAck = frameJson.contains("\"challenge_id\"") &&
+                        frameJson.contains("\"responder_device_id\"")
+                    if (isPairingAck) {
+                        android.util.Log.d("WebSocketTransportClient", "📋 Pairing: ACK received (length-prefixed)")
+                        onPairingAck?.invoke(frameJson)
+                        return
+                    }
+                    val isPairingChallenge = frameJson.contains("\"initiator_device_id\"") &&
+                        frameJson.contains("\"initiator_pub_key\"")
+                    if (isPairingChallenge) {
+                        android.util.Log.d("WebSocketTransportClient", "📋 Pairing: Challenge received (length-prefixed)")
+                        scope.launch {
+                            try {
+                                val ackJson = onPairingChallenge?.invoke(frameJson)
+                                if (ackJson != null) {
+                                    try {
+                                        webSocket.send(ackJson)
+                                        android.util.Log.d("WebSocketTransportClient", "📤 Pairing: ACK sent (${ackJson.length} chars)")
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("WebSocketTransportClient", "❌ Pairing: Failed to send ACK - ${e.message}", e)
+                                    }
+                                } else {
+                                    android.util.Log.w("WebSocketTransportClient", "⚠️ Pairing: Handler returned null ACK")
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("WebSocketTransportClient", "❌ Pairing: Handler error - ${e.message}", e)
+                            }
+                        }
                         return
                     }
                     

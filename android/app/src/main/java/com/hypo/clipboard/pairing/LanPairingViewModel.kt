@@ -169,11 +169,11 @@ class LanPairingViewModel @Inject constructor(
             Log.d(TAG, "🔵 Starting pairing coroutine...")
             try {
                 // Step 1: Validate device attributes
-                val qrPayload = createQrPayloadFromDevice(device)
-                Log.d(TAG, "Created QR payload from device: ${device.serviceName}")
+                val pairingPayload = createLanPairingPayloadFromDevice(device)
+                Log.d(TAG, "Created LAN pairing payload from device: ${device.serviceName}")
                 
                 // Step 2: Initiate pairing handshake to generate challenge
-                val initiationResult = pairingHandshakeManager.initiate(qrPayload)
+                val initiationResult = pairingHandshakeManager.initiatePayload(pairingPayload)
                 when (initiationResult) {
                     is PairingInitiationResult.Failure -> {
                         Log.e(TAG, "Handshake initiation failed: ${initiationResult.reason}")
@@ -393,7 +393,7 @@ class LanPairingViewModel @Inject constructor(
         }
     }
     
-    private fun createQrPayloadFromDevice(device: DiscoveredPeer): String {
+    private fun createLanPairingPayloadFromDevice(device: DiscoveredPeer): String {
         // Create a pairing payload from Bonjour-discovered device
         // Use the persistent public key advertised via Bonjour
         // Include both new and old field names for compatibility

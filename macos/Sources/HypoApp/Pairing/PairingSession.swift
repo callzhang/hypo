@@ -3,12 +3,6 @@ import CryptoKit
 #if canImport(AppKit)
 import AppKit
 #endif
-#if canImport(CoreGraphics)
-import CoreGraphics
-public typealias PairingQRCodeImage = CGImage
-#else
-public typealias PairingQRCodeImage = AnyObject
-#endif
 
 @MainActor
 public protocol PairingSessionDelegate: AnyObject {
@@ -27,9 +21,9 @@ public enum PairingSessionError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalidSignature:
-            return "QR signature verification failed"
+            return "Pairing signature verification failed"
         case .payloadExpired:
-            return "Pairing QR code expired"
+            return "Pairing payload expired"
         case .duplicateChallenge:
             return "Challenge already processed"
         case .challengeWindowTooOld:
@@ -47,7 +41,7 @@ public final class PairingSession: @unchecked Sendable {
         public var service: String
         public var port: Int
         public var relayHint: URL?
-        public var qrValidity: TimeInterval
+        public var payloadValidity: TimeInterval
         public var challengeTolerance: TimeInterval
         public var deviceName: String
 
@@ -55,14 +49,14 @@ public final class PairingSession: @unchecked Sendable {
             service: String,
             port: Int,
             relayHint: URL?,
-            qrValidity: TimeInterval = 300,
+            payloadValidity: TimeInterval = 300,
             challengeTolerance: TimeInterval = 30,
             deviceName: String
         ) {
             self.service = service
             self.port = port
             self.relayHint = relayHint
-            self.qrValidity = qrValidity
+            self.payloadValidity = payloadValidity
             self.challengeTolerance = challengeTolerance
             self.deviceName = deviceName
         }
@@ -70,8 +64,8 @@ public final class PairingSession: @unchecked Sendable {
 
     public enum State {
         case idle
-        case displaying(payload: PairingPayload, image: PairingQRCodeImage?)
-        case awaitingChallenge(payload: PairingPayload, image: PairingQRCodeImage?)
+        case displaying(payload: PairingPayload)
+        case awaitingChallenge(payload: PairingPayload)
         case completed(device: PairedDevice)
         case failed(String)
     }
@@ -124,7 +118,7 @@ public final class PairingSession: @unchecked Sendable {
         self.ephemeralKey = agreementKey
 
         let issuedAt = clock()
-        let expiresAt = issuedAt.addingTimeInterval(configuration.qrValidity)
+        let expiresAt = issuedAt.addingTimeInterval(configuration.payloadValidity)
         let payload = PairingPayload(
             peerDeviceId: identity,
             peerPublicKey: agreementKey.publicKey.rawRepresentation,
@@ -151,33 +145,12 @@ public final class PairingSession: @unchecked Sendable {
             signature: signature
         )
 
-        let qrImage = generateQRCodeImage(from: signedPayload)
-        state = .awaitingChallenge(payload: signedPayload, image: qrImage)
-    }
-
-    public func qrPayloadJSON() throws -> String {
-        guard case .awaitingChallenge(let payload, _) = state else {
-            throw PairingSessionError.payloadExpired
-        }
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(payload)
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    public func qrCodeImage() -> PairingQRCodeImage? {
-        switch state {
-        case .awaitingChallenge(_, let image), .displaying(_, let image):
-            return image
-        default:
-            return nil
-        }
+        state = .awaitingChallenge(payload: signedPayload)
     }
 
     public func currentPayload() -> PairingPayload? {
         switch state {
-        case .awaitingChallenge(let payload, _), .displaying(let payload, _):
+        case .awaitingChallenge(let payload), .displaying(let payload):
             return payload
         default:
             return nil
@@ -187,7 +160,7 @@ public final class PairingSession: @unchecked Sendable {
     @discardableResult
     public func handleChallenge(_ message: PairingChallengeMessage) async -> PairingAckMessage? {
         guard
-            case .awaitingChallenge(let payload, _) = state,
+            case .awaitingChallenge(let payload) = state,
             let configuration
         else { return nil }
         do {
@@ -236,24 +209,6 @@ public final class PairingSession: @unchecked Sendable {
         payloadCopy.signature = Data()
         let data = try encoder.encode(payloadCopy)
         return try signingKey.signature(for: data)
-    }
-
-    private func generateQRCodeImage(from payload: PairingPayload) -> PairingQRCodeImage? {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(payload) else { return nil }
-        #if canImport(CoreImage)
-        if let filter = CIFilter(name: "CIQRCodeGenerator") {
-            filter.setValue(data, forKey: "inputMessage")
-            filter.setValue("M", forKey: "inputCorrectionLevel")
-            if let output = filter.outputImage {
-                let transform = CGAffineTransform(scaleX: 6, y: 6)
-                return output.transformed(by: transform).toCGImage()
-            }
-        }
-        #endif
-        return nil
     }
 
     private func verifyChallenge(_ message: PairingChallengeMessage) throws {
@@ -339,14 +294,3 @@ public final class PairingSession: @unchecked Sendable {
         _ = ack
     }
 }
-
-#if canImport(CoreImage)
-import CoreImage
-
-private extension CIImage {
-    func toCGImage() -> CGImage? {
-        let context = CIContext(options: nil)
-        return context.createCGImage(self, from: extent)
-    }
-}
-#endif

@@ -243,7 +243,7 @@ androidComponents {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.google.crypto.tink:tink-android:1.13.0")
 
-    // QR Code Scanning - REMOVED: No longer using barcode scanning
+    // Barcode scanning removed
     // Pairing now uses LAN auto-discovery and manual code entry
 
     // Accompanist (Permissions) - REMOVED: Not used

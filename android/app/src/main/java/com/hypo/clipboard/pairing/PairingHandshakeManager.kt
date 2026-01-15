@@ -32,10 +32,10 @@ class PairingHandshakeManager @Inject constructor(
         encodeDefaults = false
     }
 ) {
-    suspend fun initiate(qrContent: String): PairingInitiationResult = withContext(Dispatchers.Default) {
+    suspend fun initiatePayload(payloadJson: String): PairingInitiationResult = withContext(Dispatchers.Default) {
         runCatching {
-            Log.d(TAG, "Pairing initiate: Parsing QR content (${qrContent.length} chars)")
-            val payload = json.decodeFromString<PairingPayload>(qrContent)
+            Log.d(TAG, "Pairing initiate: Parsing pairing payload (${payloadJson.length} chars)")
+            val payload = json.decodeFromString<PairingPayload>(payloadJson)
             Log.d(TAG, "Pairing initiate: Decoded payload - version=${payload.version}, deviceId=${payload.peerDeviceId}")
             Log.d(TAG, "Pairing initiate: publicKey length=${payload.peerPublicKey.length}, signingPublicKey length=${payload.peerSigningPublicKey.length}, signature length=${payload.signature.length}")
             
@@ -217,7 +217,7 @@ class PairingHandshakeManager @Inject constructor(
         require(payload.version == "1") { "Unsupported pairing version" }
         val now = clock.instant()
         require(payload.issuedInstant() <= now.plusSeconds(60)) { "Payload not yet valid" }
-        require(payload.expiryInstant() >= now) { "Pairing QR expired" }
+        require(payload.expiryInstant() >= now) { "Pairing payload expired" }
         
         // Handle platform-prefixed formats (macos-{UUID}, android-{UUID}, etc.) and legacy "{UUID}" formats
         val uuidString = payload.peerDeviceId
@@ -244,7 +244,7 @@ class PairingHandshakeManager @Inject constructor(
         } catch (error: GeneralSecurityException) {
             Log.e(TAG, "verifySignature: Signature verification FAILED - ${error.javaClass.simpleName}: ${error.message}", error)
             Log.e(TAG, "verifySignature: Signing key size=${signingKey.size}, payload.signature length=${payload.signature.length}")
-            throw PairingException("Invalid QR signature: ${error.message}")
+            throw PairingException("Invalid pairing payload signature: ${error.message}")
         } catch (error: Exception) {
             Log.e(TAG, "verifySignature: Unexpected error - ${error.javaClass.simpleName}: ${error.message}", error)
             throw PairingException("Signature verification error: ${error.message}")

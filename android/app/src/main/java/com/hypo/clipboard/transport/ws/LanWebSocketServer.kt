@@ -74,6 +74,7 @@ class LanWebSocketServer(
                 val id = connectionIds[conn] ?: return
                 val payload = bytes.toByteArray()
                 Log.d(TAG, "📥 Binary frame received: ${payload.size} bytes from $id")
+                var handledPairing = false
                 // Try to detect pairing challenge inline (mirrors prior behaviour)
                 if (payload.size >= 4) {
                     val length = ((payload[0].toInt() and 0xFF) shl 24) or
@@ -88,12 +89,32 @@ class LanWebSocketServer(
                                 val challenge = json.decodeFromString<PairingChallengeMessage>(message)
                                 Log.d(TAG, "📋 Detected pairing challenge for $id")
                                 delegate?.onPairingChallenge(this@LanWebSocketServer, challenge, id)
-                                return
+                                handledPairing = true
                             }
                         }.onFailure {
                             Log.w(TAG, "⚠️ Failed to decode potential pairing challenge: ${it.message}")
                         }
                     }
+                }
+                if (handledPairing) {
+                    return
+                }
+                // Fallback: raw JSON payloads without length prefix (Android-to-Android pairing)
+                if (payload.isNotEmpty()) {
+                    runCatching {
+                        val message = String(payload, Charsets.UTF_8)
+                        if (message.contains("\"initiator_device_id\"") && message.contains("\"initiator_pub_key\"")) {
+                            val challenge = json.decodeFromString<PairingChallengeMessage>(message)
+                            Log.d(TAG, "📋 Detected raw pairing challenge for $id")
+                            delegate?.onPairingChallenge(this@LanWebSocketServer, challenge, id)
+                            handledPairing = true
+                        }
+                    }.onFailure {
+                        Log.w(TAG, "⚠️ Failed to decode raw pairing challenge: ${it.message}")
+                    }
+                }
+                if (handledPairing) {
+                    return
                 }
                 delegate?.onClipboardData(this@LanWebSocketServer, payload, id)
             }

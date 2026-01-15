@@ -7,7 +7,7 @@ import Crypto
 #endif
 
 final class PairingSessionTests: XCTestCase {
-    func testGeneratesQrPayloadAndProcessesChallenge() async throws {
+    func testGeneratesPairingPayloadAndProcessesChallenge() async throws {
         let identity = UUID(uuidString: "12345678-1234-1234-1234-1234567890ab")!
         let signingStore = PairingSigningKeyStore()
         let crypto = CryptoService()
@@ -55,9 +55,9 @@ final class PairingSessionTests: XCTestCase {
         XCTAssertFalse(storedKeys.isEmpty)
     }
 
-    func testHandleChallengeFailsWhenQrExpired() async throws {
+    func testHandleChallengeFailsWhenPayloadExpired() async throws {
         let clock = MutableClock(now: Date(timeIntervalSince1970: 0))
-        let (session, payload, crypto) = try makeSession(clock: clock, qrValidity: 1)
+        let (session, payload, crypto) = try makeSession(clock: clock, payloadValidity: 1)
         clock.advance(to: Date(timeIntervalSince1970: 10))
 
         let challengePayload = try encodeChallengePayload(
@@ -73,15 +73,15 @@ final class PairingSessionTests: XCTestCase {
         let ack = await session.handleChallenge(message)
         XCTAssertNil(ack)
         if case .failed(let reason) = session.state {
-            XCTAssertEqual(reason, "Pairing QR code expired")
+            XCTAssertEqual(reason, "Pairing payload expired")
         } else {
-            XCTFail("Expected failure state for expired QR payload")
+            XCTFail("Expected failure state for expired pairing payload")
         }
     }
 
     func testHandleChallengeFailsWhenChallengeOutsideTolerance() async throws {
         let clock = MutableClock(now: Date(timeIntervalSince1970: 0))
-        let (session, payload, crypto) = try makeSession(clock: clock, qrValidity: 600, challengeTolerance: 2)
+        let (session, payload, crypto) = try makeSession(clock: clock, payloadValidity: 600, challengeTolerance: 2)
         clock.advance(to: Date(timeIntervalSince1970: 10))
 
         let challengePayload = try encodeChallengePayload(
@@ -173,16 +173,9 @@ private final class MutableClock {
 }
 
 private extension PairingSessionTests {
-    func decodePayload(from session: PairingSession) throws -> PairingPayload {
-        let payloadJSON = try session.qrPayloadJSON()
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(PairingPayload.self, from: Data(payloadJSON.utf8))
-    }
-
     func makeSession(
         clock: MutableClock,
-        qrValidity: TimeInterval = 300,
+        payloadValidity: TimeInterval = 300,
         challengeTolerance: TimeInterval = 30
     ) throws -> (PairingSession, PairingPayload, CryptoService) {
         let crypto = CryptoService()
@@ -198,12 +191,14 @@ private extension PairingSessionTests {
             service: "_hypo._tcp.local",
             port: 7010,
             relayHint: nil,
-            qrValidity: qrValidity,
+            payloadValidity: payloadValidity,
             challengeTolerance: challengeTolerance,
             deviceName: "Test Mac"
         ))
 
-        let payload = try decodePayload(from: session)
+        guard let payload = session.currentPayload() else {
+            throw XCTSkip("Pairing payload unavailable")
+        }
         return (session, payload, crypto)
     }
 

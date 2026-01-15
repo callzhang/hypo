@@ -581,7 +581,7 @@ private fun DevicesSection(
             }
         }
         Button(onClick = onStartPairing) {
-            Text(text = stringResource(id = R.string.pairing_scan_qr))
+            Text(text = stringResource(id = R.string.pairing_start))
         }
     }
 }

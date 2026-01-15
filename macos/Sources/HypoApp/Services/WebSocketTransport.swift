@@ -88,22 +88,23 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     private var handshakeStartedAt: Date?
     private let pendingRoundTrips: PendingRoundTripStore
     private var onIncomingMessage: ((Data, TransportOrigin) async -> Void)?
+    private let dateProvider: @Sendable () -> Date
     
     // Message queue with retry logic
-    private struct QueuedMessage {
+    internal struct QueuedMessage {
         let envelope: SyncEnvelope
         var data: Data
         let queuedAt: Date
         var retryCount: UInt
     }
-    private var messageQueue: [QueuedMessage] = []
+    internal var messageQueue: [QueuedMessage] = []
     private var isProcessingQueue = false
     private var queueProcessingTask: Task<Void, Never>?
     private var receiveRetryCount: UInt = 0
     private var lastReceiveFailure: Date?
     private var reconnectingTask: Task<Void, Never>? // Guard to prevent concurrent reconnection attempts
     // Track messages that are "in flight" - send callback fired but transmission may not be complete
-    private var inFlightMessages: [UUID: QueuedMessage] = [:] // message ID -> queued message
+    internal var inFlightMessages: [UUID: QueuedMessage] = [:] // message ID -> queued message
     // Track pending control message queries (query ID -> continuation)
     // Thread-safe access using a serial queue
     private let pendingControlQueriesQueue = DispatchQueue(label: "com.hypo.clipboard.pendingControlQueries")
@@ -127,6 +128,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             config.allowsCellularAccess = true
             return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         },
+        dateProvider: @escaping @Sendable () -> Date = { Date() },
         onIncomingMessage: ((Data, TransportOrigin) async -> Void)? = nil
     ) {
         self.configuration = configuration
@@ -134,6 +136,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         self.metricsRecorder = metricsRecorder
         self.analytics = analytics
         self.sessionFactory = sessionFactory
+        self.dateProvider = dateProvider
         self.pendingRoundTrips = PendingRoundTripStore(maxAge: configuration.roundTripTimeout)
         self.onIncomingMessage = onIncomingMessage
     }
@@ -172,8 +175,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
 
         state = .connecting
-        handshakeStartedAt = Date()
-        lastActivity = Date()
+        handshakeStartedAt = dateProvider()
+        lastActivity = dateProvider()
 
         let session = sessionFactory(self, configuration.idleTimeout)
         self.session = session
@@ -249,7 +252,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     public func send(_ envelope: SyncEnvelope) async throws {
         // Encode message - WebSocket will automatically fragment if needed (up to 1GB)
         let encodedData = try frameCodec.encode(envelope)
-        await pendingRoundTrips.store(date: Date(), for: envelope.id)
+        await pendingRoundTrips.store(date: dateProvider(), for: envelope.id)
         
         // Queue Overflow Protection: Max 100 messages
         // Drop oldest messages if queue is full
@@ -275,7 +278,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         let queuedMessage = QueuedMessage(
             envelope: envelope,
             data: encodedData,
-            queuedAt: Date(),
+            queuedAt: dateProvider(),
             retryCount: 0
         )
         messageQueue.append(queuedMessage)
@@ -307,7 +310,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             var queuedMessage = messageQueue.removeFirst()
             
             // Check Message Expiration (5 min strict)
-            let timeInQueue = Date().timeIntervalSince(queuedMessage.queuedAt)
+            let timeInQueue = dateProvider().timeIntervalSince(queuedMessage.queuedAt)
             if timeInQueue > messageExpiration {
                 logger.info("❌ [WebSocketTransport] Message expired (queued \(Int(timeInQueue))s ago), dropping: id=\(queuedMessage.envelope.id.uuidString.prefix(8))")
                 _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
@@ -756,7 +759,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
         
         receiveRetryCount += 1
-        lastReceiveFailure = Date()
+        lastReceiveFailure = dateProvider()
         
         logger.debug("🔄 [WebSocketTransport] Scheduling reconnection (retry \(receiveRetryCount)) after \(Int(backoff))s")
         

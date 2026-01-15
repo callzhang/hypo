@@ -21,6 +21,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.yield
@@ -91,6 +92,64 @@ class HistoryViewModelTest {
         awaitState(viewModel.state, dispatcher) { it.items.isEmpty() }
 
         assertEquals(1, repository.clearCallCount)
+        viewModel.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `loadFullContent delegates to repository`() = runTest {
+        val viewModel = HistoryViewModel(repository, settingsRepository, identity, transportManager)
+        repository.setFullContent("item-1", "Full content here")
+        
+        val result = viewModel.loadFullContent("item-1")
+        assertEquals("Full content here", result)
+        viewModel.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `connectionState reflects transportManager state`() = runTest {
+        val viewModel = HistoryViewModel(repository, settingsRepository, identity, transportManager)
+        awaitState(viewModel.state, dispatcher) { it.connectionState == ConnectionState.Disconnected }
+        
+        connectionState.value = ConnectionState.ConnectedCloud
+        awaitState(viewModel.state, dispatcher) { it.connectionState == ConnectionState.ConnectedCloud }
+        
+        assertEquals(ConnectionState.ConnectedCloud, viewModel.state.value.connectionState)
+        viewModel.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `currentDeviceId returns identity id`() {
+        val viewModel = HistoryViewModel(repository, settingsRepository, identity, transportManager)
+        assertEquals("device", viewModel.currentDeviceId)
+        viewModel.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `query filters on content field too`() = runTest {
+        repository.setHistory(listOf(
+            item("1", "preview").copy(content = "hidden secret"),
+            item("2", "world")
+        ))
+        val viewModel = HistoryViewModel(repository, settingsRepository, identity, transportManager)
+        awaitState(viewModel.state, dispatcher) { it.items.isNotEmpty() }
+
+        viewModel.onQueryChange("secret")
+        awaitState(viewModel.state, dispatcher) { it.query == "secret" }
+
+        assertEquals(1, viewModel.state.value.items.size)
+        assertEquals("preview", viewModel.state.value.items[0].preview)
+        viewModel.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `refresh updates state`() = runTest {
+        val viewModel = HistoryViewModel(repository, settingsRepository, identity, transportManager)
+        awaitState(viewModel.state, dispatcher) { true }
+        
+        // This should run without issues
+        viewModel.refresh()
+        runCurrent()
+        
         viewModel.viewModelScope.cancel()
     }
 

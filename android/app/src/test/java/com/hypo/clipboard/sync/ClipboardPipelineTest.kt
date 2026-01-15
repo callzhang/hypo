@@ -44,7 +44,7 @@ class ClipboardPipelineTest {
     private val deviceKeyStore = mockk<DeviceKeyStore>(relaxed = true) {
         coEvery { getAllDeviceIds() } returns listOf("mac-device")
     }
-    private val lanWebSocketClient = mockk<com.hypo.clipboard.transport.ws.WebSocketTransportClient>(relaxed = true)
+    private val lanTransportClient = mockk<com.hypo.clipboard.transport.ws.WebSocketTransportClient>(relaxed = true)
 
     @Before
     fun setUp() {
@@ -61,7 +61,7 @@ class ClipboardPipelineTest {
             identity = identity,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
-            lanWebSocketClient = lanWebSocketClient,
+            lanTransportClient = lanTransportClient,
             context = context
         )
         coordinator.start(this)
@@ -101,7 +101,7 @@ class ClipboardPipelineTest {
             identity = identity,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
-            lanWebSocketClient = lanWebSocketClient,
+            lanTransportClient = lanTransportClient,
             context = context
         )
         coordinator.start(this)
@@ -149,7 +149,7 @@ class ClipboardPipelineTest {
             identity = identity,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
-            lanWebSocketClient = lanWebSocketClient,
+            lanTransportClient = lanTransportClient,
             context = context
         )
         coordinator.start(this)

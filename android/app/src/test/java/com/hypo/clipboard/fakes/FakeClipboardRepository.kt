@@ -11,6 +11,7 @@ class FakeClipboardRepository(initialItems: List<ClipboardItem> = emptyList()) :
     private val historyFlow = MutableStateFlow(initialItems)
     var clearCallCount: Int = 0
         private set
+    private val fullContents = mutableMapOf<String, String>()
 
     override fun observeHistory(limit: Int): Flow<List<ClipboardItem>> = historyFlow.asStateFlow()
 
@@ -41,10 +42,14 @@ class FakeClipboardRepository(initialItems: List<ClipboardItem> = emptyList()) :
     }
 
     override suspend fun loadFullContent(itemId: String): String? {
-        return historyFlow.value.firstOrNull { it.id == itemId }?.content
+        return fullContents[itemId] ?: historyFlow.value.firstOrNull { it.id == itemId }?.content
     }
 
     fun setHistory(items: List<ClipboardItem>) {
         historyFlow.value = items
+    }
+
+    fun setFullContent(itemId: String, content: String) {
+        fullContents[itemId] = content
     }
 }

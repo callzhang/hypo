@@ -20,6 +20,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import com.hypo.clipboard.sync.TransportPayloadTooLargeException
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -198,6 +199,61 @@ class SyncEngineTest {
         val decompressed = java.util.zip.GZIPInputStream(plaintextBytes.inputStream()).readBytes()
         val plaintext = decompressed.decodeToString()
         assertTrue(plaintext.contains("\"data_base64\":\"$rawBase64\""))
+    }
+
+    @Test
+    fun `sendClipboard uses plain text mode when enabled`() = runTest {
+        settingsRepository.setPlainTextModeEnabled(true)
+        val engine = SyncEngine(mockk(), deviceKeyStore, transport, identity, settingsRepository, storageManager)
+        
+        val item = ClipboardItem(
+            id = "plain",
+            type = ClipboardType.TEXT,
+            content = "Plain Hello",
+            preview = "Plain Hello",
+            metadata = emptyMap(),
+            deviceId = identity.deviceId,
+            createdAt = Instant.now(),
+            isPinned = false
+        )
+        
+        val envelope = engine.sendClipboard(item, "mac-device")
+        
+        assertEquals("", envelope.payload.encryption?.nonce)
+        assertEquals("", envelope.payload.encryption?.tag)
+        
+        // Decode should also work in plain text mode
+        val decoded = engine.decode(envelope)
+        assertEquals("Plain Hello", Base64.getDecoder().decode(decoded.dataBase64).decodeToString())
+    }
+
+    @Test
+    fun `decode throws for corrupted gzip data`() = runTest {
+        val cryptoService = mockk<CryptoService>()
+        val key = ByteArray(32) { 1 }
+        coEvery { deviceKeyStore.loadKey(any()) } returns key
+        
+        // Return non-gzip data from decrypt
+        coEvery { cryptoService.decrypt(any(), any(), any()) } returns "not-gzip".encodeToByteArray()
+        
+        val envelope = SyncEnvelope(
+            type = MessageType.CLIPBOARD,
+            payload = Payload(
+                contentType = ClipboardType.TEXT,
+                ciphertext = Base64.getEncoder().encodeToString("cipher".encodeToByteArray()),
+                deviceId = "sender",
+                encryption = EncryptionMetadata(
+                    nonce = Base64.getEncoder().encodeToString(ByteArray(12)),
+                    tag = Base64.getEncoder().encodeToString(ByteArray(16))
+                )
+            )
+        )
+        
+        val engine = SyncEngine(cryptoService, deviceKeyStore, transport, identity, settingsRepository, storageManager)
+        
+        assertFailsWith<java.util.zip.ZipException> {
+            engine.decode(envelope)
+        }
     }
 
     private fun gzip(data: ByteArray): ByteArray {

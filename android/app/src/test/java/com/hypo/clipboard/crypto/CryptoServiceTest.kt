@@ -70,6 +70,23 @@ class CryptoServiceTest {
         }
     }
 
+    @Test
+    fun decryptFailsWithCorruptedTag() = runTest {
+        val service = CryptoService { ByteArray(12) { 0 } }
+        val key = ByteArray(32) { 1 }
+        val plaintext = "secret".encodeToByteArray()
+        
+        val encrypted = service.encrypt(plaintext, key)
+        val corruptedTag = encrypted.tag.copyOf()
+        corruptedTag[0] = corruptedTag[0].inc()
+        
+        val corruptedEncrypted = encrypted.copy(tag = corruptedTag)
+        
+        assertFailsWith<GeneralSecurityException> {
+            service.decrypt(corruptedEncrypted, key)
+        }
+    }
+
     private fun loadVectors(): CryptoVectors {
         val path = locateRepositoryRoot().resolve("tests/crypto_test_vectors.json")
         val content = Files.readAllBytes(path).decodeToString()

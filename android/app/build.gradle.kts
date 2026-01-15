@@ -8,6 +8,47 @@ plugins {
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
     id("io.sentry.android.gradle")
+    id("jacoco")
+}
+
+jacoco {
+    toolVersion = "0.8.11"
+}
+
+tasks.register<JacocoReport>("jacocoTestReport") {
+    dependsOn("testDebugUnitTest")
+
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
+
+    val fileFilter = listOf(
+        "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*", "**/*Test*.*", "android/**/*.*",
+        "**/*_MembersInjector.class",
+        "**/Dagger*Component.class",
+        "**/Dagger*Component\$Builder.class",
+        "**/*User_Factory.class",
+        "**/*_Factory.class",
+        "**/*_HiltModules*.*",
+        "**/Hilt_*",
+        "**/*_Impl*",
+        "**/*TypeAdapter*"
+    )
+    
+    val kotlinClasses = fileTree("${project.layout.buildDirectory.get()}/intermediates/classes/debug/transformDebugClassesWithAsm/dirs") {
+        exclude(fileFilter)
+    }
+    val javaClasses = fileTree("${project.layout.buildDirectory.get()}/intermediates/javac/debug/classes") {
+        exclude(fileFilter)
+    }
+
+    sourceDirectories.setFrom(files("src/main/java"))
+    classDirectories.setFrom(files(kotlinClasses, javaClasses))
+    executionData.setFrom(fileTree(project.buildDir).include(
+        "jacoco/testDebugUnitTest.exec",
+        "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec"
+    ))
 }
 
 // Read version from centralized VERSION file
@@ -81,6 +122,7 @@ android {
         }
         debug {
             isDebuggable = true
+            enableUnitTestCoverage = true
             // Removed applicationIdSuffix to allow debug and release builds to share the same database
             // Note: This means debug and release cannot be installed simultaneously
             versionNameSuffix = "-debug"
@@ -116,6 +158,18 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all {
+                it.extensions.configure(JacocoTaskExtension::class.java) {
+                    isIncludeNoLocationClasses = true
+                    excludes = listOf("jdk.internal.*")
+                }
+            }
         }
     }
 }

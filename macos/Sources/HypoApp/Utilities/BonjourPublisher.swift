@@ -1,6 +1,7 @@
 import Foundation
 
-public protocol BonjourPublishing: AnyObject {
+@MainActor
+public protocol BonjourPublishing: AnyObject, Sendable {
     func start(with configuration: BonjourPublisher.Configuration)
     func stop()
     func updateTXTRecord(_ metadata: [String: String])
@@ -9,8 +10,9 @@ public protocol BonjourPublishing: AnyObject {
 }
 
 #if canImport(Darwin)
+@MainActor
 public final class BonjourPublisher: NSObject, BonjourPublishing {
-    public struct Configuration: Equatable {
+    public struct Configuration: Equatable, Sendable {
         public let domain: String
         public let serviceType: String
         public let serviceName: String
@@ -86,68 +88,61 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
         return LanEndpoint(
             host: host,
             port: configuration.port,
+            deviceId: configuration.deviceId,
+            deviceName: configuration.serviceName,
             fingerprint: configuration.fingerprint,
             metadata: configuration.txtRecord
         )
     }
 
     public func start(with configuration: Configuration) {
-        // Ensure we run on main queue for NetService reliability
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            guard configuration.port > 0 else { return }
-            
-            self.configuration = configuration
-            
-            #if canImport(os)
-            let logger = HypoLogger(category: "BonjourPublisher")
-            logger.info("📢 Starting Bonjour service: \(configuration.serviceName) on port \(configuration.port)")
-            #endif
-            
-            let service = NetService(
-                domain: configuration.domain,
-                type: configuration.serviceType,
-                name: configuration.serviceName,
-                port: Int32(configuration.port)
-            )
-            service.includesPeerToPeer = true
-            service.delegate = self
-            // Implicitly scheduled on current run loop (Main, since we are on main queue)
-            service.setTXTRecord(Self.encodeTXT(configuration.txtRecord))
-            service.publish()
-            self.service = service
-        }
+        // Now isolated to @MainActor, DispatchQueue.main.async is redundant if called from MainActor.
+        // But for safety and consistency with existing code, we can keep it or use Task.
+        guard configuration.port > 0 else { return }
+        
+        self.configuration = configuration
+        
+        #if canImport(os)
+        let logger = HypoLogger(category: "BonjourPublisher")
+        logger.info("📢 Starting Bonjour service: \(configuration.serviceName) on port \(configuration.port)")
+        #endif
+        
+        let service = NetService(
+            domain: configuration.domain,
+            type: configuration.serviceType,
+            name: configuration.serviceName,
+            port: Int32(configuration.port)
+        )
+        service.includesPeerToPeer = true
+        service.delegate = self
+        service.setTXTRecord(Self.encodeTXT(configuration.txtRecord))
+        service.publish()
+        self.service = service
     }
 
     public func stop() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, let service = self.service else { return }
-            service.delegate = self
-            service.stop()
-        }
+        guard let service = self.service else { return }
+        service.delegate = self
+        service.stop()
     }
     
-    public func stop(completion: @escaping () -> Void) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, let service = self.service else {
-                completion()
-                return
-            }
-            self.stopCompletion = completion
-            service.delegate = self
-            service.stop()
+    public func stop(completion: @escaping @MainActor @Sendable () -> Void) {
+        guard let service = self.service else {
+            completion()
+            return
         }
+        self.stopCompletion = completion
+        service.delegate = self
+        service.stop()
     }
 
     public func updateTXTRecord(_ metadata: [String: String]) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, let service = self.service else { return }
-            #if canImport(os)
-            let logger = HypoLogger(category: "BonjourPublisher")
-            logger.debug("📝 Updating TXT record: \(metadata)")
-            #endif
-            service.setTXTRecord(Self.encodeTXT(metadata))
-        }
+        guard let service = self.service else { return }
+        #if canImport(os)
+        let logger = HypoLogger(category: "BonjourPublisher")
+        logger.debug("📝 Updating TXT record: \(metadata)")
+        #endif
+        service.setTXTRecord(Self.encodeTXT(metadata))
     }
 
     private static func encodeTXT(_ record: [String: String]) -> Data {
@@ -163,7 +158,7 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
     }
 }
 
-extension BonjourPublisher: NetServiceDelegate {
+extension BonjourPublisher: @preconcurrency NetServiceDelegate {
     public func netServiceDidPublish(_ sender: NetService) {
         #if canImport(os)
         let logger = HypoLogger(category: "BonjourPublisher")
@@ -179,29 +174,24 @@ extension BonjourPublisher: NetServiceDelegate {
     }
 
     public func netServiceDidStop(_ sender: NetService) {
-        // Run on main queue to match start/stop calls
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            
-            if sender === self.service {
-                self.service = nil
-                #if canImport(os)
-                let logger = HypoLogger(category: "BonjourPublisher")
-                logger.info("🛑 Service stopped")
-                #endif
-                let completion = self.stopCompletion
-                self.stopCompletion = nil
-                // Call completion on main queue
-                if let completion = completion {
-                    completion()
-                }
+        if sender === self.service {
+            self.service = nil
+            #if canImport(os)
+            let logger = HypoLogger(category: "BonjourPublisher")
+            logger.info("🛑 Service stopped")
+            #endif
+            let completion = self.stopCompletion
+            self.stopCompletion = nil
+            if let completion = completion {
+                completion()
             }
         }
     }
 }
 #else
+@MainActor
 public final class BonjourPublisher: BonjourPublishing {
-    public struct Configuration: Equatable {
+    public struct Configuration: Sendable, Equatable {
         public let domain: String
         public let serviceType: String
         public let serviceName: String
@@ -209,6 +199,7 @@ public final class BonjourPublisher: BonjourPublishing {
         public let version: String
         public let fingerprint: String
         public let protocols: [String]
+        public let deviceId: String?
 
         public init(
             domain: String = "local.",
@@ -217,7 +208,8 @@ public final class BonjourPublisher: BonjourPublishing {
             port: Int,
             version: String,
             fingerprint: String,
-            protocols: [String]
+            protocols: [String],
+            deviceId: String? = nil
         ) {
             self.domain = domain
             self.serviceType = serviceType
@@ -226,6 +218,7 @@ public final class BonjourPublisher: BonjourPublishing {
             self.version = version
             self.fingerprint = fingerprint
             self.protocols = protocols
+            self.deviceId = deviceId
         }
 
         public var txtRecord: [String: String] {
@@ -234,6 +227,9 @@ public final class BonjourPublisher: BonjourPublishing {
                 "protocols": protocols.joined(separator: ",")
             ]
             record["fingerprint_sha256"] = fingerprint
+            if let deviceId = deviceId {
+                record["device_id"] = deviceId
+            }
             return record
         }
     }
@@ -250,6 +246,8 @@ public final class BonjourPublisher: BonjourPublishing {
         return LanEndpoint(
             host: host,
             port: configuration.port,
+            deviceId: configuration.deviceId,
+            deviceName: configuration.serviceName,
             fingerprint: configuration.fingerprint,
             metadata: configuration.txtRecord
         )
@@ -275,7 +273,8 @@ public final class BonjourPublisher: BonjourPublishing {
             port: configuration.port,
             version: version,
             fingerprint: fingerprint,
-            protocols: protocols
+            protocols: protocols,
+            deviceId: configuration.deviceId
         )
     }
 }

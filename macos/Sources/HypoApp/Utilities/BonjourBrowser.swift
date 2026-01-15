@@ -3,21 +3,27 @@ import Foundation
 import Darwin
 #endif
 
-public struct LanEndpoint: Equatable {
+// MARK: - Models
+
+public struct LanEndpoint: Equatable, Sendable {
     public let host: String
     public let port: Int
+    public let deviceId: String?
+    public let deviceName: String?
     public let fingerprint: String?
     public let metadata: [String: String]
 
-    public init(host: String, port: Int, fingerprint: String?, metadata: [String: String]) {
+    public init(host: String, port: Int, deviceId: String? = nil, deviceName: String? = nil, fingerprint: String? = nil, metadata: [String: String] = [:]) {
         self.host = host
         self.port = port
+        self.deviceId = deviceId
+        self.deviceName = deviceName
         self.fingerprint = fingerprint
         self.metadata = metadata
     }
 }
 
-public struct DiscoveredPeer: Equatable {
+public struct DiscoveredPeer: Equatable, Sendable {
     public let serviceName: String
     public let endpoint: LanEndpoint
     public let lastSeen: Date
@@ -29,23 +35,12 @@ public struct DiscoveredPeer: Equatable {
     }
 }
 
-public enum LanDiscoveryEvent: Equatable {
+public enum LanDiscoveryEvent: Equatable, Sendable {
     case added(DiscoveredPeer)
     case removed(String)
 }
 
-public protocol BonjourBrowsingDriver: AnyObject {
-    func startBrowsing(serviceType: String, domain: String)
-    func stopBrowsing()
-    func setEventHandler(_ handler: @escaping (BonjourBrowsingDriverEvent) -> Void)
-}
-
-public enum BonjourBrowsingDriverEvent: Equatable {
-    case resolved(BonjourServiceRecord)
-    case removed(String)
-}
-
-public struct BonjourServiceRecord: Equatable {
+public struct BonjourServiceRecord: Equatable, Sendable {
     public let serviceName: String
     public let host: String
     public let port: Int
@@ -59,11 +54,26 @@ public struct BonjourServiceRecord: Equatable {
     }
 }
 
+public enum BonjourBrowsingDriverEvent: Equatable, Sendable {
+    case resolved(BonjourServiceRecord)
+    case removed(String)
+}
+
+// MARK: - Driver Protocol
+
+public protocol BonjourBrowsingDriver: AnyObject, Sendable {
+    @MainActor func startBrowsing(serviceType: String, domain: String)
+    @MainActor func stopBrowsing()
+    @MainActor func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void)
+}
+
+// MARK: - BonjourBrowser Actor
+
 public actor BonjourBrowser {
     private let serviceType: String
     private let domain: String
     private let driver: BonjourBrowsingDriver
-    private let clock: () -> Date
+    private let clock: @Sendable () -> Date
     private let driverEventStream: AsyncStream<BonjourBrowsingDriverEvent>
     private let driverEventContinuation: AsyncStream<BonjourBrowsingDriverEvent>.Continuation
 
@@ -72,42 +82,56 @@ public actor BonjourBrowser {
     private var didStart = false
     private var driverEventTask: Task<Void, Never>?
 
+    @MainActor
     public init(
         serviceType: String = "_hypo._tcp.",
         domain: String = "local.",
-        driver: BonjourBrowsingDriver = NetServiceBonjourBrowsingDriver(),
-        clock: @escaping () -> Date = Date.init
+        driver: BonjourBrowsingDriver? = nil,
+        clock: @escaping @Sendable () -> Date = Date.init
     ) {
         var continuation: AsyncStream<BonjourBrowsingDriverEvent>.Continuation!
         self.driverEventStream = AsyncStream { continuation = $0 }
         self.driverEventContinuation = continuation
         self.serviceType = serviceType
         self.domain = domain
-        self.driver = driver
+        self.driver = driver ?? NetServiceBonjourBrowsingDriver()
         self.clock = clock
-        driver.setEventHandler { [weak self] event in
-            guard let self else { return }
-            self.driverEventContinuation.yield(event)
+        
+        // Use a detached task to avoid capturing 'self' before it's fully initialized
+        // and to bridge to @MainActor for driver setup
+        let d = self.driver
+        let continuationToCapture = self.driverEventContinuation
+        Task { @MainActor in
+            d.setEventHandler { event in
+                continuationToCapture.yield(event)
+            }
         }
     }
 
     deinit {
-        driver.stopBrowsing()
+        let d = driver
+        Task { @MainActor in
+            d.stopBrowsing()
+        }
         driverEventTask?.cancel()
     }
 
-    public func start() {
+    public func start() async {
         guard !didStart else { return }
         didStart = true
         startDriverEventLoopIfNeeded()
-        driver.startBrowsing(serviceType: serviceType, domain: domain)
+        await MainActor.run {
+            driver.startBrowsing(serviceType: serviceType, domain: domain)
+        }
     }
 
-    public func stop() {
+    public func stop() async {
         guard didStart else { return }
         didStart = false
-        driver.stopBrowsing()
-        let removed = peers.keys
+        await MainActor.run {
+            driver.stopBrowsing()
+        }
+        let removed = Array(peers.keys)
         peers.removeAll()
         removed.forEach { broadcast(.removed($0)) }
     }
@@ -115,12 +139,16 @@ public actor BonjourBrowser {
     public func events() -> AsyncStream<LanDiscoveryEvent> {
         AsyncStream { continuation in
             let token = UUID()
-            continuations[token] = continuation
             continuation.onTermination = { [weak self] _ in
                 guard let self = self else { return }
                 Task { await self.removeContinuation(for: token) }
             }
+            self.addContinuation(continuation, for: token)
         }
+    }
+    
+    private func addContinuation(_ continuation: AsyncStream<LanDiscoveryEvent>.Continuation, for token: UUID) {
+        continuations[token] = continuation
     }
 
     public func currentPeers() -> [DiscoveredPeer] {
@@ -144,6 +172,8 @@ public actor BonjourBrowser {
             let endpoint = LanEndpoint(
                 host: record.host,
                 port: record.port,
+                deviceId: metadata["device_id"],
+                deviceName: metadata["device_name"],
                 fingerprint: metadata["fingerprint_sha256"],
                 metadata: metadata
             )
@@ -180,10 +210,13 @@ public actor BonjourBrowser {
     }
 }
 
+// MARK: - NetService Implementation
+
 #if canImport(Darwin)
-public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDriver {
+@MainActor
+public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDriver, @unchecked Sendable {
     private let browser: NetServiceBrowser
-    private var handler: ((BonjourBrowsingDriverEvent) -> Void)?
+    private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
     private var services: [ObjectIdentifier: NetService] = [:]
 
     public override init() {
@@ -192,7 +225,7 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
         browser.delegate = self
     }
 
-    public func setEventHandler(_ handler: @escaping (BonjourBrowsingDriverEvent) -> Void) {
+    public func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void) {
         self.handler = handler
     }
 
@@ -208,27 +241,22 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
     private func emitResolved(for service: NetService) {
         guard let host = service.hostName else { return }
         
-        // Extract IP address from NetService.addresses (preferred) or fallback to hostname
         var ipAddress: String? = nil
         if let addresses = service.addresses, !addresses.isEmpty {
-            // NetService.addresses contains Data objects representing sockaddr structures
-            // Try to extract IPv4 or IPv6 address from the first address
             for addressData in addresses {
                 var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
                 let result = addressData.withUnsafeBytes { bytes -> Int32 in
-                    let sockaddrPtr = bytes.bindMemory(to: sockaddr.self).baseAddress!
-                    return getnameinfo(sockaddrPtr, socklen_t(addressData.count), &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
+                    let addr = bytes.baseAddress!.assumingMemoryBound(to: sockaddr.self)
+                    return getnameinfo(addr, socklen_t(addressData.count), &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
                 }
                 if result == 0 {
-                    ipAddress = String(cString: hostname)
-                    break // Use first valid IP address
+                    ipAddress = hostname.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+                    break 
                 }
             }
         }
         
-        // Use IP address if available, otherwise fallback to hostname
         let displayHost = ipAddress ?? host
-        
         let txt = NetService.dictionary(fromTXTRecord: service.txtRecordData() ?? Data())
         var metadata: [String: String] = [:]
         for (key, value) in txt {
@@ -244,7 +272,7 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
     }
 }
 
-extension NetServiceBonjourBrowsingDriver: NetServiceBrowserDelegate {
+extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceBrowserDelegate {
     public func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
         services[ObjectIdentifier(service)] = service
         service.delegate = self
@@ -265,7 +293,7 @@ extension NetServiceBonjourBrowsingDriver: NetServiceBrowserDelegate {
     }
 }
 
-extension NetServiceBonjourBrowsingDriver: NetServiceDelegate {
+extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceDelegate {
     public func netServiceDidResolveAddress(_ sender: NetService) {
         emitResolved(for: sender)
     }
@@ -279,12 +307,13 @@ extension NetServiceBonjourBrowsingDriver: NetServiceDelegate {
     }
 }
 #else
-public final class NetServiceBonjourBrowsingDriver: BonjourBrowsingDriver {
-    private var handler: ((BonjourBrowsingDriverEvent) -> Void)?
+@MainActor
+public final class NetServiceBonjourBrowsingDriver: BonjourBrowsingDriver, @unchecked Sendable {
+    private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
 
     public init() {}
 
-    public func setEventHandler(_ handler: @escaping (BonjourBrowsingDriverEvent) -> Void) {
+    public func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void) {
         self.handler = handler
     }
 

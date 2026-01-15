@@ -152,93 +152,7 @@ struct WebSocketTransportTests {
     }
 }
 
-private final class StubSession: URLSessionProviding, @unchecked Sendable {
-    private let task: StubWebSocketTask
 
-    init(task: StubWebSocketTask) {
-        self.task = task
-    }
-
-    func webSocketTask(with request: URLRequest) -> WebSocketTasking {
-        task.createdRequest = request
-        return task
-    }
-
-    func invalidateAndCancel() {}
-}
-
-private final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
-    var maximumMessageSize: Int = Int.max
-    var createdRequest: URLRequest?
-    var onResume: (() -> Void)?
-    var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
-    var sentData: [Data] = []
-    var receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
-    var sendError: Error?
-
-    func resume() {
-        onResume?()
-    }
-
-    func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping (Error?) -> Void) {
-        if let error = sendError {
-            completionHandler(error)
-            return
-        }
-        switch message {
-        case .data(let data):
-            sentData.append(data)
-        case .string(let string):
-            if let data = string.data(using: .utf8) {
-                sentData.append(data)
-            }
-        @unknown default:
-            break
-        }
-        completionHandler(nil)
-    }
-
-    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        onCancel?(closeCode, reason)
-    }
-
-    func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
-        receiveHandler = completionHandler
-    }
-
-    func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) {
-        pongReceiveHandler(nil)
-    }
-}
-
-private final class RecordingMetricsRecorder: TransportMetricsRecorder, @unchecked Sendable {
-    private let lock = NSLock()
-    private var _handshakes: [TimeInterval] = []
-    private var _roundTrips: [String: [TimeInterval]] = [:]
-
-    var recordedHandshakes: [TimeInterval] { lock.withLock { _handshakes } }
-    var recordedRoundTrips: [String: [TimeInterval]] { lock.withLock { _roundTrips } }
-
-    func recordHandshake(duration: TimeInterval, timestamp: Date) {
-        lock.withLock { _handshakes.append(duration) }
-    }
-
-    func recordRoundTrip(envelopeId: String, duration: TimeInterval) {
-        lock.withLock {
-            var durations = _roundTrips[envelopeId, default: []]
-            durations.append(duration)
-            _roundTrips[envelopeId] = durations
-        }
-    }
-}
-
-private extension NSLock {
-    func withLock<T>(_ body: () -> T) -> T {
-        self.lock()
-        defer { self.unlock() }
-        return body()
-    }
-}
 
     @Test
     func testQueueOverflowProtection() async throws {
@@ -327,33 +241,37 @@ private extension NSLock {
     func testSleepModeBehavesCorrectly() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = await MainActor.run { WebSocketTransport(
+        let transport = WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             sessionFactory: { _, _ in session }
-        ) }
+        )
         
         stubTask.onResume = {
             transport.handleOpen(task: stubTask)
         }
         
         try await transport.connect()
-        #expect(await transport.isConnected())
+        #expect(transport.isConnected())
         
         // Mock send error so message stays in queue
         stubTask.sendError = NSError(domain: "test", code: -1, userInfo: [NSLocalizedDescriptionKey: "fail"])
         
-         let envelope = SyncEnvelope(type: .clipboard, payload: .init(
+        let envelope = SyncEnvelope(type: .clipboard, payload: .init(
             contentType: .text,
             ciphertext: Data(),
             deviceId: "device",
             target: "peer",
             encryption: .init(nonce: Data(), tag: Data())
         ))
+        // Send requires wait for queue processing to catch the error
         try await transport.send(envelope)
+        try await Task.sleep(nanoseconds: 50_000_000) // 50ms to let queue processor run and fail
         
         // Enter sleep mode
         await transport.enterSleepMode()
-        #expect(await transport.isConnected() == false)
+        
+        // State update should be immediate, but queue cancellation might be async
+        #expect(transport.isConnected() == false)
         
         let queueCount = await MainActor.run { transport.messageQueue.count }
         #expect(queueCount > 0)
@@ -399,14 +317,4 @@ private extension NSLock {
     }
 
 
-private final class MutableClock: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _now: Date
-    
-    init(now: Date) { _now = now }
-    
-    var now: Date {
-        get { lock.withLock { _now } }
-        set { lock.withLock { _now = newValue } }
-    }
-}
+

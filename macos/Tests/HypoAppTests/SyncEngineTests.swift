@@ -96,6 +96,70 @@ struct SyncEngineTests {
             }
         }
     }
+    @Test
+    func testTransmitThrowsWhenNotConnected() async {
+        let engine = SyncEngine(
+            transport: NoopTransport(),
+            keyProvider: InMemoryDeviceKeyProvider(),
+            localDeviceId: "mac-device"
+        )
+        // Ensure state is idle
+        let payload = ClipboardPayload(contentType: .text, data: Data())
+        let entry = ClipboardEntry(
+            deviceId: "mac-device",
+            originPlatform: .macOS,
+            originDeviceName: "Mac",
+            content: .text("test")
+        )
+        
+        await #expect(throws: Error.self) {
+            try await engine.transmit(entry: entry, payload: payload, targetDeviceId: "target")
+        }
+    }
+    
+    @Test
+    func testTransmitUsingPlainTextMode() async throws {
+        // Use separate suite to avoid polluting standard defaults
+        let defaults = UserDefaults(suiteName: "SyncEngineTests")!
+        defaults.set(true, forKey: "plain_text_mode_enabled")
+        defer { defaults.removePersistentDomain(forName: "SyncEngineTests") }
+        
+        let transport = RecordingTransport()
+        let engine = SyncEngine(
+            transport: transport,
+            keyProvider: InMemoryDeviceKeyProvider(),
+            localDeviceId: "mac-device",
+            defaults: defaults
+        )
+        await engine.establishConnection()
+        
+        let payload = ClipboardPayload(contentType: .text, data: Data("plain".utf8))
+        let entry = ClipboardEntry(
+            deviceId: "mac-device", 
+            originPlatform: .macOS, 
+            originDeviceName: "Mac", 
+            content: .text("plain")
+        )
+        
+        try await engine.transmit(entry: entry, payload: payload, targetDeviceId: "target")
+        
+        let envelope = try #require(transport.sentEnvelopes.first)
+        // Nonce and tag should be empty for plain text mode
+        #expect(envelope.payload.encryption.nonce.isEmpty)
+        #expect(envelope.payload.encryption.tag.isEmpty)
+        
+        // Also verify receipt handling in plain text mode
+        let receiverEngine = SyncEngine(
+             transport: NoopTransport(),
+             keyProvider: InMemoryDeviceKeyProvider(),
+             localDeviceId: "target"
+        )
+        
+        // Encode the envelope we just sent
+        let encoded = try TransportFrameCodec().encode(envelope)
+        let decoded = try await receiverEngine.decode(encoded)
+        #expect(decoded.data == payload.data)
+    }
 }
 
 private final class RecordingTransport: SyncTransport, @unchecked Sendable {

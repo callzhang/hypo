@@ -54,49 +54,4 @@ struct CloudRelayTransportTests {
     }
 }
 
-private final class StubSession: URLSessionProviding, @unchecked Sendable {
-    private let task: StubWebSocketTask
 
-    init(task: StubWebSocketTask) {
-        self.task = task
-    }
-
-    func webSocketTask(with request: URLRequest) -> WebSocketTasking {
-        task.createdRequest = request
-        return task
-    }
-
-    func invalidateAndCancel() {}
-}
-
-private final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
-    var maximumMessageSize: Int = Int.max
-    var createdRequest: URLRequest?
-    var onResume: (() -> Void)?
-    var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
-    var sentData: [Data] = []
-    var receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
-
-    func resume() {
-        onResume?()
-    }
-
-    func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping (Error?) -> Void) {
-        if case .data(let data) = message {
-            sentData.append(data)
-        }
-        completionHandler(nil)
-    }
-
-    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        onCancel?(closeCode, reason)
-    }
-
-    func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
-        receiveHandler = completionHandler
-    }
-
-    func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) {
-        pongReceiveHandler(nil)
-    }
-}

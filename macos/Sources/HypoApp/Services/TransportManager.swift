@@ -199,21 +199,21 @@ public final class TransportManager: ObservableObject {
         webSocketServer.delegate = self
         
         // Set up cloud relay incoming message handler
-        if let defaultProvider = provider as? DefaultTransportProvider,
-           let handler = incomingHandler {
-           defaultProvider.setCloudIncomingMessageHandler { [weak self, weak handler] data, transportOrigin in
-               self?.logger.info("📥 [TransportManager] Cloud relay incoming message received: \(data.count.formattedAsKB), origin=\(transportOrigin.rawValue)")
-               // Decode envelope to log target device ID
-               do {
-                   let frameCodec = TransportFrameCodec()
-                   let envelope = try frameCodec.decode(data)
-                   self?.logger.info("🔍 [TransportManager] Envelope details: type=\(envelope.type.rawValue), target=\(envelope.payload.target ?? "nil"), deviceId=\(envelope.payload.deviceId.prefix(8))")
-               } catch {
-                   self?.logger.error("❌ [TransportManager] Failed to decode envelope for logging: \(error)")
-               }
-               
-               await handler?.handle(data, transportOrigin: transportOrigin)
-           }
+        if let handler = incomingHandler {
+            provider.setCloudIncomingMessageHandler { [weak self, weak handler] data, transportOrigin in
+                self?.logger.info("📥 [TransportManager] Cloud relay incoming message received: \(data.count.formattedAsKB), origin=\(transportOrigin.rawValue)")
+                // Decode envelope to log target device ID
+                do {
+                    let frameCodec = TransportFrameCodec()
+                    let envelope = try frameCodec.decode(data)
+                    self?.logger.info("🔍 [TransportManager] Envelope details: type=\(envelope.type.rawValue), target=\(envelope.payload.target ?? "nil"), deviceId=\(envelope.payload.deviceId.prefix(8))")
+                    
+                    // Route to handler
+                    await handler?.handle(data, transportOrigin: transportOrigin)
+                } catch {
+                    self?.logger.error("❌ [TransportManager] Failed to decode envelope: \(error.localizedDescription)")
+                }
+            }
         }
 
         #if canImport(AppKit)
@@ -665,20 +665,31 @@ public final class TransportManager: ObservableObject {
     private func activateLanServices() async {
         logger.info("🎬 [TransportManager] activateLanServices called")
         
-        if !isAdvertising, lanConfiguration.port > 0 {
-            logger.info("📢 [TransportManager] Starting Bonjour advertising on port \(lanConfiguration.port)")
-            publisher.start(with: lanConfiguration)
-            isAdvertising = true
-        } else {
-            logger.info("⚠️ [TransportManager] Skipping advertising: isAdvertising=\(isAdvertising), port=\(lanConfiguration.port)")
-        }
-        
-        // Start WebSocket server
-        if !isServerRunning, lanConfiguration.port > 0 {
+        // Start WebSocket server first to resolve port if ephemeral
+        if !isServerRunning, lanConfiguration.port >= 0 {
             logger.info("📡 [TransportManager] Starting WebSocket server on port \(lanConfiguration.port)")
             do {
                 try webSocketServer.start(port: lanConfiguration.port)
                 isServerRunning = true
+                
+                // Update configuration with actual port if it was ephemeral
+                if lanConfiguration.port == 0 {
+                    // Wait for port assignment (async)
+                    if let assigned = try? await webSocketServer.waitForPort() {
+                         logger.info("✅ [TransportManager] WebSocket server bound to ephemeral port: \(assigned)")
+                         lanConfiguration = BonjourPublisher.Configuration(
+                            domain: lanConfiguration.domain,
+                            serviceType: lanConfiguration.serviceType,
+                            serviceName: lanConfiguration.serviceName,
+                            port: assigned,
+                            version: lanConfiguration.version,
+                            fingerprint: lanConfiguration.fingerprint,
+                            protocols: lanConfiguration.protocols
+                        )
+                    } else {
+                        logger.error("❌ [TransportManager] Failed to resolve ephemeral port")
+                    }
+                }
                 logger.info("✅ [TransportManager] WebSocket server started")
             } catch {
                 #if canImport(os)
@@ -688,6 +699,15 @@ public final class TransportManager: ObservableObject {
             }
         } else {
              logger.info("⚠️ [TransportManager] Skipping server start: isServerRunning=\(isServerRunning), port=\(lanConfiguration.port)")
+        }
+
+        // Start Bonjour advertising with (possibly updated) port
+        if !isAdvertising, lanConfiguration.port > 0 {
+            logger.info("📢 [TransportManager] Starting Bonjour advertising on port \(lanConfiguration.port)")
+            publisher.start(with: lanConfiguration)
+            isAdvertising = true
+        } else {
+            logger.info("⚠️ [TransportManager] Skipping advertising: isAdvertising=\(isAdvertising), port=\(lanConfiguration.port)")
         }
 
         guard discoveryTask == nil else { 
@@ -1453,6 +1473,7 @@ private enum ConnectionMonitorOutcome {
 @MainActor
 public protocol TransportProvider {
     func preferredTransport() -> SyncTransport
+    func setCloudIncomingMessageHandler(_ handler: @escaping @Sendable (Data, TransportOrigin) async -> Void)
 }
 
 public protocol LanDiscoveryCache {

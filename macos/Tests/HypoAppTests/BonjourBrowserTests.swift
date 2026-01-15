@@ -79,31 +79,7 @@ struct BonjourBrowserTests {
 }
 
 @MainActor
-private final class MockBonjourDriver: BonjourBrowsingDriver, @unchecked Sendable {
-    private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
-    private(set) var startCount = 0
 
-    func startBrowsing(serviceType: String, domain: String) {
-        startCount += 1
-    }
-
-    func stopBrowsing() {
-        startCount = max(0, startCount - 1)
-    }
-
-    func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void) {
-        self.handler = handler
-    }
-
-    func emit(_ event: BonjourBrowsingDriverEvent) {
-        handler?(event)
-    }
-}
-
-private final class MutableClock: @unchecked Sendable {
-    var now: Date
-    init(now: Date) { self.now = now }
-}
 
 private func waitForPeerCount(
     _ browser: BonjourBrowser,

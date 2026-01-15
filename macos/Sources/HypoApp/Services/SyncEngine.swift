@@ -346,9 +346,9 @@ public final actor SyncEngine {
         }
 
         // Check if plain text mode is enabled
+        // Check if plain text mode is enabled
         // Use the same UserDefaults domain as the app (com.hypo.clipboard)
-        let appDefaults = UserDefaults.standard
-        let plainTextMode = appDefaults.bool(forKey: "plain_text_mode_enabled")
+        let plainTextMode = defaults.bool(forKey: "plain_text_mode_enabled")
         
         // Always compress the JSON payload before encryption
         let jsonData = try encoder.encode(payload)
@@ -415,7 +415,8 @@ public final actor SyncEngine {
         if isPlainText {
             logger.warning("⚠️ [SyncEngine] PLAIN TEXT MODE: Receiving unencrypted")
             // Use ciphertext directly as plaintext (it's not actually encrypted)
-            plaintext = envelope.payload.ciphertext
+            // But it IS compressed (see transmit logic)
+            plaintext = try CompressionUtils.decompress(envelope.payload.ciphertext)
         } else {
             let key = try await keyProvider.key(for: senderId)
             let aad = Data(senderId.utf8)

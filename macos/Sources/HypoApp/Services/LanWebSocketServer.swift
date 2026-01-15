@@ -129,6 +129,17 @@ public final class LanWebSocketServer {
     public var listeningPort: NWEndpoint.Port? {
         listener?.port
     }
+
+    public func waitForPort(timeout: TimeInterval = 1.0) async throws -> Int {
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            if let port = listeningPort?.rawValue, port > 0 {
+                return Int(port)
+            }
+            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        }
+        throw NSError(domain: "LanWebSocketServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Timeout waiting for port assignment"])
+    }
     
     public func start(port: Int) throws {
         logger.info("🚀 Starting WebSocket server on port \(port)")

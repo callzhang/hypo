@@ -143,7 +143,7 @@ struct LanWebSocketTransportTests {
         ) }
         
         let receivedEnvelope = Locked<SyncEnvelope?>(nil)
-        await transport.setOnIncomingMessage { data, origin in
+        transport.setOnIncomingMessage { data, origin in
             if let envelope = try? codec.decode(data) {
                 receivedEnvelope.withLock { $0 = envelope }
             }
@@ -232,81 +232,4 @@ struct LanWebSocketTransportTests {
     }
 }
 
-private final class StubSession: URLSessionProviding, @unchecked Sendable {
-    private let task: StubWebSocketTask
 
-    init(task: StubWebSocketTask) {
-        self.task = task
-    }
-
-    func webSocketTask(with request: URLRequest) -> WebSocketTasking {
-        task.createdRequest = request
-        return task
-    }
-
-    func invalidateAndCancel() {}
-}
-
-private final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
-    var maximumMessageSize: Int = Int.max
-    var createdRequest: URLRequest?
-    var onResume: (() -> Void)?
-    var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
-    var onPing: (() -> Void)?
-    var sentData: [Data] = []
-    var receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
-
-    func resume() {
-        onResume?()
-    }
-
-
-    func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping (Error?) -> Void) {
-        if case .data(let data) = message {
-            sentData.append(data)
-        }
-        completionHandler(nil)
-    }
-
-    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        onCancel?(closeCode, reason)
-    }
-
-    func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
-        receiveHandler = completionHandler
-    }
-
-    func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) {
-        onPing?()
-        pongReceiveHandler(nil)
-    }
-}
-
-private final class RecordingMetricsRecorder: TransportMetricsRecorder, @unchecked Sendable {
-    private let lock = NSLock()
-    private var _handshakes: [TimeInterval] = []
-    private var _roundTrips: [String: [TimeInterval]] = [:]
-
-    var recordedHandshakes: [TimeInterval] { lock.withLock { _handshakes } }
-    var recordedRoundTrips: [String: [TimeInterval]] { lock.withLock { _roundTrips } }
-
-    func recordHandshake(duration: TimeInterval, timestamp: Date) {
-        lock.withLock { _handshakes.append(duration) }
-    }
-
-    func recordRoundTrip(envelopeId: String, duration: TimeInterval) {
-        lock.withLock {
-            var durations = _roundTrips[envelopeId, default: []]
-            durations.append(duration)
-            _roundTrips[envelopeId] = durations
-        }
-    }
-}
-
-private extension NSLock {
-    func withLock<T>(_ body: () -> T) -> T {
-        self.lock()
-        defer { self.unlock() }
-        return body()
-    }
-}

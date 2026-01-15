@@ -168,17 +168,6 @@ struct PairingSessionTests {
     }
 }
 
-private final class MutableClock: @unchecked Sendable {
-    var now: Date
-
-    init(now: Date) {
-        self.now = now
-    }
-
-    func advance(to newValue: Date) {
-        now = newValue
-    }
-}
 
 private extension PairingSessionTests {
     func makeSession(

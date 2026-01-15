@@ -177,6 +177,7 @@ public final class ClipboardMonitor {
             (NSPasteboard.PasteboardType("public.gif"), "gif"),
             (NSPasteboard.PasteboardType("public.webp"), "webp"),
             (NSPasteboard.PasteboardType("public.bmp"), "bmp"),
+            (.tiff, "tiff"),
             (.png, "png")
         ]
         

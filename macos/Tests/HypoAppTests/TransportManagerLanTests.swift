@@ -18,7 +18,7 @@ struct TransportManagerLanTests {
             discoveryCache: cache,
             lanConfiguration: BonjourPublisher.Configuration(
                 serviceName: "local-device",
-                port: 7010,
+                port: 0,
                 version: "1.0",
                 fingerprint: "fingerprint",
                 protocols: ["ws+tls"]
@@ -29,6 +29,8 @@ struct TransportManagerLanTests {
         await manager.ensureLanDiscoveryActive()
         let startCount = await MainActor.run { publisher.startCount }
         #expect(startCount == 1)
+        let publishedConfig = await MainActor.run { publisher.currentConfiguration }
+        #expect(publishedConfig?.port ?? 0 > 0)
 
         let record = BonjourServiceRecord(
             serviceName: "peer-one",
@@ -74,7 +76,7 @@ struct TransportManagerLanTests {
             discoveryCache: cache,
             lanConfiguration: BonjourPublisher.Configuration(
                 serviceName: "local-device",
-                port: 7010,
+                port: 0,
                 version: "1.0",
                 fingerprint: "fingerprint",
                 protocols: ["ws+tls"]
@@ -310,106 +312,4 @@ struct TransportManagerLanTests {
     }
 }
 
-private final class MockBonjourPublisher: BonjourPublishing {
-    private(set) var startCount = 0
-    private(set) var stopCount = 0
-    private(set) var metadataUpdates: [[String: String]] = []
-    private var configuration: BonjourPublisher.Configuration?
 
-    var currentConfiguration: BonjourPublisher.Configuration? { configuration }
-    var currentEndpoint: LanEndpoint? {
-        guard let configuration else { return nil }
-        return LanEndpoint(
-            host: "localhost",
-            port: configuration.port,
-            deviceId: configuration.deviceId,
-            deviceName: configuration.serviceName
-        )
-    }
-
-    func start(with configuration: BonjourPublisher.Configuration) {
-        startCount += 1
-        self.configuration = configuration
-    }
-
-    func stop() {
-        stopCount += 1
-        configuration = nil
-    }
-
-    func updateTXTRecord(_ metadata: [String : String]) {
-        metadataUpdates.append(metadata)
-        guard let configuration else { return }
-        let fingerprint = metadata["fingerprint_sha256"] ?? configuration.fingerprint
-        let version = metadata["version"] ?? configuration.version
-        let protocols = (metadata["protocols"] ?? configuration.protocols.joined(separator: ",")).split(separator: ",").map(String.init)
-        self.configuration = BonjourPublisher.Configuration(
-            domain: configuration.domain,
-            serviceType: configuration.serviceType,
-            serviceName: configuration.serviceName,
-            port: configuration.port,
-            version: version,
-            fingerprint: fingerprint,
-            protocols: protocols
-        )
-    }
-}
-
-private final class MutableClock: @unchecked Sendable {
-    var now: Date
-    init(now: Date) { self.now = now }
-}
-
-private final class InMemoryLanDiscoveryCache: LanDiscoveryCache {
-    var storage: [String: Date] = [:]
-    var peerStorage: [String: DiscoveredPeer] = [:]
-
-    func load() -> [String : Date] {
-        storage
-    }
-
-    func save(_ lastSeen: [String : Date]) {
-        storage = lastSeen
-    }
-
-    func loadPeers() -> [String : DiscoveredPeer] {
-        peerStorage
-    }
-
-    func savePeers(_ peers: [String : DiscoveredPeer]) {
-        peerStorage = peers
-    }
-}
-
-private final class MockTransportProvider: TransportProvider {
-    func preferredTransport() -> SyncTransport {
-        MockSyncTransport()
-    }
-}
-
-private struct MockSyncTransport: SyncTransport {
-    func connect() async throws {}
-    func send(_ envelope: SyncEnvelope) async throws {}
-    func disconnect() async {}
-}
-
-private final class MockBonjourDriver: BonjourBrowsingDriver, @unchecked Sendable {
-    private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
-
-    func startBrowsing(serviceType: String, domain: String) {}
-
-    func stopBrowsing() {}
-
-    func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void) {
-        self.handler = handler
-    }
-
-    func emit(_ event: BonjourBrowsingDriverEvent) {
-        handler?(event)
-    }
-}
-
-@MainActor
-private func makeWebSocketServer() -> LanWebSocketServer {
-    LanWebSocketServer()
-}

@@ -2,10 +2,11 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-import XCTest
+import Testing
 @testable import HypoApp
 
-final class CloudRelayTransportTests: XCTestCase {
+struct CloudRelayTransportTests {
+    @Test @MainActor
     func testSendDelegatesToUnderlyingTransport() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
@@ -35,10 +36,11 @@ final class CloudRelayTransportTests: XCTestCase {
         )
 
         try await transport.send(envelope)
-        XCTAssertEqual(stubTask.sentData.count, 1)
+        #expect(stubTask.sentData.count == 1)
     }
 
-    func testConfigurationUsesCloudEnvironment() {
+    @Test @MainActor
+    func testConfigurationUsesCloudEnvironment() async {
         let transport = CloudRelayTransport(
             configuration: .init(
                 url: URL(string: "wss://hypo-relay-staging.fly.dev/ws")!,
@@ -48,11 +50,11 @@ final class CloudRelayTransportTests: XCTestCase {
 
         let mirror = Mirror(reflecting: transport.underlying)
         let configuration = mirror.descendant("configuration") as? WebSocketConfiguration
-        XCTAssertEqual(configuration?.environment, "cloud")
+        #expect(configuration?.environment == "cloud")
     }
 }
 
-private final class StubSession: URLSessionProviding {
+private final class StubSession: URLSessionProviding, @unchecked Sendable {
     private let task: StubWebSocketTask
 
     init(task: StubWebSocketTask) {
@@ -67,7 +69,8 @@ private final class StubSession: URLSessionProviding {
     func invalidateAndCancel() {}
 }
 
-private final class StubWebSocketTask: WebSocketTasking {
+private final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
+    var maximumMessageSize: Int = Int.max
     var createdRequest: URLRequest?
     var onResume: (() -> Void)?
     var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
@@ -91,5 +94,9 @@ private final class StubWebSocketTask: WebSocketTasking {
 
     func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
         receiveHandler = completionHandler
+    }
+
+    func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) {
+        pongReceiveHandler(nil)
     }
 }

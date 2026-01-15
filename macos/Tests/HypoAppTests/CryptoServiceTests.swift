@@ -1,4 +1,5 @@
-import XCTest
+import Foundation
+import Testing
 #if canImport(CryptoKit)
 import CryptoKit
 #else
@@ -6,7 +7,8 @@ import Crypto
 #endif
 @testable import HypoApp
 
-final class CryptoServiceTests: XCTestCase {
+struct CryptoServiceTests {
+    @Test
     func testEncryptDecryptRoundTrip() async throws {
         let nonce = Data(repeating: 0xAB, count: 12)
         let service = CryptoService(nonceGenerator: DeterministicNonceGenerator(nonce: nonce))
@@ -15,11 +17,12 @@ final class CryptoServiceTests: XCTestCase {
         let aad = Data("device-id".utf8)
 
         let result = try await service.encrypt(plaintext: plaintext, key: key, aad: aad)
-        XCTAssertEqual(result.nonce, nonce)
+        #expect(result.nonce == nonce)
         let decrypted = try await service.decrypt(ciphertext: result.ciphertext, key: key, nonce: result.nonce, tag: result.tag, aad: aad)
-        XCTAssertEqual(decrypted, plaintext)
+        #expect(decrypted == plaintext)
     }
 
+    @Test
     func testDecryptFailsWithTamperedCiphertext() async throws {
         let nonce = Data(repeating: 0xCD, count: 12)
         let service = CryptoService(nonceGenerator: DeterministicNonceGenerator(nonce: nonce))
@@ -28,13 +31,10 @@ final class CryptoServiceTests: XCTestCase {
 
         let result = try await service.encrypt(plaintext: plaintext, key: key, aad: nil)
         var corruptedCiphertext = Array(result.ciphertext)
-        if corruptedCiphertext.isEmpty {
-            XCTFail("Expected ciphertext to contain data")
-            return
-        }
+        try #require(!corruptedCiphertext.isEmpty)
         corruptedCiphertext[0] ^= 0x01
 
-        await XCTAssertThrowsErrorAsync(
+        await expectThrows {
             try await service.decrypt(
                 ciphertext: Data(corruptedCiphertext),
                 key: key,
@@ -42,9 +42,10 @@ final class CryptoServiceTests: XCTestCase {
                 tag: result.tag,
                 aad: nil
             )
-        )
+        }
     }
 
+    @Test
     func testDeriveKeyProducesMatchingMaterial() async throws {
         let service = CryptoService()
         let aliceKey = Curve25519.KeyAgreement.PrivateKey()
@@ -55,15 +56,13 @@ final class CryptoServiceTests: XCTestCase {
 
         let aliceData = aliceDerived.withUnsafeBytes { Data($0) }
         let bobData = bobDerived.withUnsafeBytes { Data($0) }
-        XCTAssertEqual(aliceData, bobData)
+        #expect(aliceData == bobData)
     }
 
+    @Test
     func testDecryptMatchesSharedVector() async throws {
         let vectors = try loadCryptoVectors()
-        guard let vector = vectors.testCases.first else {
-            XCTFail("Expected at least one vector")
-            return
-        }
+        let vector = try #require(vectors.testCases.first)
 
         let service = CryptoService(nonceGenerator: DeterministicNonceGenerator(nonce: vector.nonce))
         let key = SymmetricKey(data: vector.key)
@@ -75,9 +74,10 @@ final class CryptoServiceTests: XCTestCase {
             aad: vector.aad.isEmpty ? nil : vector.aad
         )
 
-        XCTAssertEqual(decrypted, vector.plaintext)
+        #expect(decrypted == vector.plaintext)
     }
 
+    @Test
     func testDeriveKeyMatchesSharedVector() async throws {
         let vectors = try loadCryptoVectors()
         let service = CryptoService()
@@ -88,7 +88,7 @@ final class CryptoServiceTests: XCTestCase {
         let derived = try await service.deriveKey(privateKey: alice, publicKey: bob.publicKey)
         let derivedData = derived.withUnsafeBytes { Data($0) }
 
-        XCTAssertEqual(derivedData, vectors.keyAgreement.sharedKey)
+        #expect(derivedData == vectors.keyAgreement.sharedKey)
     }
 }
 
@@ -172,13 +172,4 @@ private struct CryptoVectors: Decodable {
         case keyAgreement = "key_agreement"
     }
 
-}
-
-private func XCTAssertThrowsErrorAsync<T>(_ expression: @autoclosure () async throws -> T, file: StaticString = #filePath, line: UInt = #line) async {
-    do {
-        _ = try await expression()
-        XCTFail("Expected error", file: file, line: line)
-    } catch {
-        // Success
-    }
 }

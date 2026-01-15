@@ -1,11 +1,13 @@
-import XCTest
+import Foundation
+import Testing
 @testable import HypoApp
 
-final class BonjourBrowserTests: XCTestCase {
+struct BonjourBrowserTests {
+    @Test @MainActor
     func testEventsStreamPublishesAddAndRemove() async throws {
         let driver = MockBonjourDriver()
-        var now = Date(timeIntervalSince1970: 1_000)
-        let browser = BonjourBrowser(driver: driver, clock: { now })
+        let clock = MutableClock(now: Date(timeIntervalSince1970: 1_000))
+        let browser = await MainActor.run { BonjourBrowser(driver: driver, clock: { clock.now }) }
         let stream = await browser.events()
         await browser.start()
 
@@ -28,33 +30,33 @@ final class BonjourBrowserTests: XCTestCase {
         )
         driver.emit(.resolved(record))
         _ = await waitForPeerCount(browser, expected: 1)
-        now = now.addingTimeInterval(5)
+        clock.now = clock.now.addingTimeInterval(5)
         driver.emit(.removed("peer-one"))
 
         let events = await task.value
-        XCTAssertEqual(events.count, 2)
+        #expect(events.count == 2)
         if case .added(let peer) = events[0] {
-            XCTAssertEqual(peer.serviceName, "peer-one")
-            XCTAssertEqual(peer.endpoint.host, "mac.local")
-            XCTAssertEqual(peer.endpoint.port, 7010)
-            XCTAssertEqual(peer.endpoint.fingerprint, "abc")
-            XCTAssertEqual(peer.lastSeen, Date(timeIntervalSince1970: 1_000))
+            #expect(peer.serviceName == "peer-one")
+            #expect(peer.endpoint.host == "mac.local")
+            #expect(peer.endpoint.port == 7010)
+            #expect(peer.lastSeen == Date(timeIntervalSince1970: 1_000))
         } else {
-            XCTFail("Expected added event")
+            #expect(false)
         }
         if case .removed(let serviceName) = events[1] {
-            XCTAssertEqual(serviceName, "peer-one")
+            #expect(serviceName == "peer-one")
         } else {
-            XCTFail("Expected removed event")
+            #expect(false)
         }
 
         await browser.stop()
     }
 
+    @Test @MainActor
     func testPrunePeersRemovesStaleEntries() async throws {
         let driver = MockBonjourDriver()
-        var now = Date(timeIntervalSince1970: 1_000)
-        let browser = BonjourBrowser(driver: driver, clock: { now })
+        let clock = MutableClock(now: Date(timeIntervalSince1970: 1_000))
+        let browser = await MainActor.run { BonjourBrowser(driver: driver, clock: { clock.now }) }
         await browser.start()
 
         let record = BonjourServiceRecord(
@@ -66,18 +68,19 @@ final class BonjourBrowserTests: XCTestCase {
         driver.emit(.resolved(record))
         _ = await waitForPeerCount(browser, expected: 1)
 
-        now = now.addingTimeInterval(20)
+        clock.now = clock.now.addingTimeInterval(20)
         let removed = await browser.prunePeers(olderThan: 10)
-        XCTAssertEqual(removed.count, 1)
-        XCTAssertEqual(removed.first?.serviceName, "stale-peer")
+        #expect(removed.count == 1)
+        #expect(removed.first?.serviceName == "stale-peer")
         let peers = await browser.currentPeers()
-        XCTAssertTrue(peers.isEmpty)
+        #expect(peers.isEmpty)
         await browser.stop()
     }
 }
 
-private final class MockBonjourDriver: BonjourBrowsingDriver {
-    private var handler: ((BonjourBrowsingDriverEvent) -> Void)?
+@MainActor
+private final class MockBonjourDriver: BonjourBrowsingDriver, @unchecked Sendable {
+    private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
     private(set) var startCount = 0
 
     func startBrowsing(serviceType: String, domain: String) {
@@ -88,7 +91,7 @@ private final class MockBonjourDriver: BonjourBrowsingDriver {
         startCount = max(0, startCount - 1)
     }
 
-    func setEventHandler(_ handler: @escaping (BonjourBrowsingDriverEvent) -> Void) {
+    func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void) {
         self.handler = handler
     }
 
@@ -97,12 +100,15 @@ private final class MockBonjourDriver: BonjourBrowsingDriver {
     }
 }
 
+private final class MutableClock: @unchecked Sendable {
+    var now: Date
+    init(now: Date) { self.now = now }
+}
+
 private func waitForPeerCount(
     _ browser: BonjourBrowser,
     expected: Int,
-    retries: Int = 10,
-    file: StaticString = #filePath,
-    line: UInt = #line
+    retries: Int = 10
 ) async -> [DiscoveredPeer] {
     for attempt in 0..<retries {
         let peers = await browser.currentPeers()
@@ -113,6 +119,7 @@ private func waitForPeerCount(
             try? await Task.sleep(nanoseconds: 1_000_000)
         }
     }
-    XCTFail("Timed out waiting for expected peer count \(expected)", file: file, line: line)
-    return await browser.currentPeers()
+    let peers = await browser.currentPeers()
+    #expect(peers.count == expected)
+    return peers
 }

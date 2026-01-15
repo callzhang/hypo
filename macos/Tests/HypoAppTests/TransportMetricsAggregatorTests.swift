@@ -1,7 +1,9 @@
-import XCTest
+import Foundation
+import Testing
 @testable import HypoApp
 
-final class TransportMetricsAggregatorTests: XCTestCase {
+struct TransportMetricsAggregatorTests {
+    @Test
     func testPublishRecordsMetricsEvent() {
         let analytics = InMemoryTransportAnalytics()
         let date = Date(timeIntervalSince1970: 0)
@@ -10,29 +12,30 @@ final class TransportMetricsAggregatorTests: XCTestCase {
         recordHandshakeSamples(aggregator: aggregator)
         recordRoundTripSamples(aggregator: aggregator)
 
-        aggregator.publish(transport: .lan, analytics: analytics)
+        aggregator.publish(transport: TransportChannel.lan, analytics: analytics)
 
         let events = analytics.events()
-        XCTAssertEqual(1, events.count)
+        #expect(events.count == 1)
         guard case let .metrics(transport, snapshot) = events.first else {
-            XCTFail("Expected metrics event")
+            #expect(false)
             return
         }
-        XCTAssertEqual(.lan, transport)
-        XCTAssertEqual("loopback", snapshot.environment)
-        XCTAssertEqual(5, snapshot.handshake?.samples.count)
-        XCTAssertEqual(snapshot.handshake?.p95 ?? 0, 44.2, accuracy: 0.05)
-        XCTAssertEqual(snapshot.roundTrip?.p95 ?? 0, 16.2, accuracy: 0.05)
+        #expect(transport == .lan)
+        #expect(snapshot.environment == "loopback")
+        #expect(snapshot.handshake?.samples.count == 5)
+        expectApproxEqual(snapshot.handshake?.p95 ?? 0, 44.2, tolerance: 0.05)
+        expectApproxEqual(snapshot.roundTrip?.p95 ?? 0, 16.2, tolerance: 0.05)
 
-        XCTAssertNil(aggregator.snapshot())
+        #expect(aggregator.snapshot() == nil)
     }
 
+    @Test
     func testSnapshotNilWhenEmpty() {
         let analytics = InMemoryTransportAnalytics()
         let aggregator = TransportMetricsAggregator(environment: "loopback")
-        XCTAssertNil(aggregator.snapshot())
-        aggregator.publish(transport: .cloud, analytics: analytics)
-        XCTAssertTrue(analytics.events().isEmpty)
+        #expect(aggregator.snapshot() == nil)
+        aggregator.publish(transport: TransportChannel.cloud, analytics: analytics)
+        #expect(analytics.events().isEmpty)
     }
 
     private func recordHandshakeSamples(aggregator: TransportMetricsAggregator) {

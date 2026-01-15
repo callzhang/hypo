@@ -1,39 +1,65 @@
-import XCTest
+import Foundation
+import Testing
 @testable import HypoApp
 
-final class HistoryStoreTests: XCTestCase {
+struct HistoryStoreTests {
+    @Test
     func testInsertDeDuplicatesEntriesByContent() async {
-        let store = HistoryStore(maxEntries: 10)
-        let textEntry = ClipboardEntry(originDeviceId: "macos", content: .text("Hello"))
+        let store = makeStore(maxEntries: 10)
+        let textEntry = ClipboardEntry(
+            deviceId: "macos",
+            originPlatform: .macOS,
+            originDeviceName: "Test Mac",
+            content: .text("Hello")
+        )
         _ = await store.insert(textEntry)
         _ = await store.insert(textEntry)
 
         let items = await store.all()
-        XCTAssertEqual(items.count, 1)
-        XCTAssertEqual(items.first?.content, .text("Hello"))
+        #expect(items.count == 1)
+        #expect(items.first?.content == .text("Hello"))
     }
 
+    @Test
     func testInsertCapsByMaxEntries() async {
-        let store = HistoryStore(maxEntries: 3)
+        let store = makeStore(maxEntries: 3)
         for index in 0..<5 {
-            let entry = ClipboardEntry(originDeviceId: "macos", content: .text("Item \(index)"))
+            let entry = ClipboardEntry(
+                deviceId: "macos",
+                originPlatform: .macOS,
+                originDeviceName: "Test Mac",
+                content: .text("Item \(index)")
+            )
             _ = await store.insert(entry)
         }
 
         let items = await store.all()
-        XCTAssertEqual(items.count, 3)
-        XCTAssertEqual(items.first?.content, .text("Item 4"))
-        XCTAssertEqual(items.last?.content, .text("Item 2"))
+        #expect(items.count == 3)
+        #expect(items.first?.content == .text("Item 4"))
+        #expect(items.last?.content == .text("Item 2"))
     }
 
+    @Test
     func testEntryLookupByIdentifierReturnsMatchingEntry() async {
-        let store = HistoryStore(maxEntries: 5)
-        let expected = ClipboardEntry(originDeviceId: "macos", content: .text("Lookup"))
+        let store = makeStore(maxEntries: 5)
+        let expected = ClipboardEntry(
+            deviceId: "macos",
+            originPlatform: .macOS,
+            originDeviceName: "Test Mac",
+            content: .text("Lookup")
+        )
         _ = await store.insert(expected)
 
         let result = await store.entry(withID: expected.id)
 
-        XCTAssertEqual(result?.id, expected.id)
-        XCTAssertEqual(result?.content, expected.content)
+        #expect(result?.id == expected.id)
+        #expect(result?.content == expected.content)
     }
+}
+
+private func makeStore(maxEntries: Int) -> HistoryStore {
+    let suiteName = "HistoryStoreTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+    defaults.removePersistentDomain(forName: suiteName)
+    return HistoryStore(maxEntries: maxEntries, defaults: defaults)
 }

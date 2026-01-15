@@ -1,35 +1,51 @@
 #if canImport(AppKit)
-import XCTest
+import Testing
 import AppKit
 @testable import HypoApp
 
-final class ClipboardMonitorTests: XCTestCase {
+struct ClipboardMonitorTests {
+    @MainActor
+    private func makeMonitor(pasteboard: PasteboardProviding, throttle: TokenBucket) -> ClipboardMonitor {
+        ClipboardMonitor(
+            pasteboard: pasteboard,
+            throttle: throttle,
+            deviceId: UUID(),
+            platform: .macOS,
+            deviceName: "Test Mac"
+        )
+    }
+
+    @Test
+    @MainActor
     func testEvaluatePasteboardCapturesString() {
         let pasteboard = MockPasteboard()
-        pasteboard.setString("Hello", for: .string)
-
-        let monitor = ClipboardMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
         let delegate = CapturingDelegate()
         monitor.delegate = delegate
 
+        pasteboard.setString("Hello", for: .string)
         let entry = monitor.evaluatePasteboard()
 
-        XCTAssertEqual(delegate.entries.count, 1)
-        XCTAssertEqual(entry?.content, ClipboardContent.text("Hello"))
+        #expect(delegate.entries.count == 1)
+        #expect(entry?.content == ClipboardContent.text("Hello"))
     }
 
+    @Test
+    @MainActor
     func testRateLimiterPreventsRapidCaptures() {
         let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 1, refillInterval: 5))
         pasteboard.setString("One", for: .string)
-        let monitor = ClipboardMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 1, refillInterval: 5))
         monitor.evaluatePasteboard()
 
         pasteboard.setString("Two", for: .string)
         let secondEntry = monitor.evaluatePasteboard()
 
-        XCTAssertNil(secondEntry)
+        #expect(secondEntry == nil)
     }
 
+    @Test
+    @MainActor
     func testCapturesFileMetadataWithinLimit() throws {
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let data = Data(repeating: 0xA, count: 2048)
@@ -37,21 +53,24 @@ final class ClipboardMonitorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fileURL) }
 
         let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 1, refillInterval: 0.01))
         pasteboard.setFile(url: fileURL)
-        let monitor = ClipboardMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 1, refillInterval: 0.01))
 
         let entry = monitor.evaluatePasteboard()
 
         guard case let .file(metadata)? = entry?.content else {
-            return XCTFail("Expected file metadata")
+            #expect(false)
+            return
         }
-        XCTAssertEqual(metadata.byteSize, data.count)
-        XCTAssertEqual(metadata.fileName, fileURL.lastPathComponent)
-        XCTAssertEqual(metadata.url, fileURL)
+        #expect(metadata.byteSize == data.count)
+        #expect(metadata.fileName == fileURL.lastPathComponent)
+        #expect(metadata.url == fileURL)
         // Local-origin files should not duplicate bytes in base64; we only store a pointer.
-        XCTAssertNil(metadata.base64)
+        #expect(metadata.base64 == nil)
     }
 
+    @Test
+    @MainActor
     func testSkipsFilesOverSizeLimit() throws {
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let largeData = Data(repeating: 0xB, count: 1_200_000)
@@ -60,9 +79,9 @@ final class ClipboardMonitorTests: XCTestCase {
 
         let pasteboard = MockPasteboard()
         pasteboard.setFile(url: fileURL)
-        let monitor = ClipboardMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 1, refillInterval: 0.01))
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 1, refillInterval: 0.01))
 
-        XCTAssertNil(monitor.evaluatePasteboard())
+        #expect(monitor.evaluatePasteboard() == nil)
     }
 }
 

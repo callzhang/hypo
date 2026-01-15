@@ -1,22 +1,19 @@
-import XCTest
+import Testing
 @testable import HypoApp
 
-final class TokenBucketTests: XCTestCase {
+struct TokenBucketTests {
+    @Test
     func testConsumeRespectsCapacity() {
         let bucket = TokenBucket(capacity: 1, refillInterval: 1)
-        XCTAssertTrue(bucket.consume())
-        XCTAssertFalse(bucket.consume())
+        #expect(bucket.consume())
+        #expect(!bucket.consume())
     }
 
-    func testTokensRefillAfterInterval() throws {
+    @Test
+    func testTokensRefillAfterInterval() async throws {
         let bucket = TokenBucket(capacity: 1, refillInterval: 0.1)
-        XCTAssertTrue(bucket.consume())
-        let expectation = XCTestExpectation(description: "Refill")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) {
-            if bucket.consume() {
-                expectation.fulfill()
-            }
-        }
-        wait(for: [expectation], timeout: 1)
+        #expect(bucket.consume())
+        try await Task.sleep(nanoseconds: 200_000_000)
+        #expect(bucket.consume())
     }
 }

@@ -1,13 +1,16 @@
-import XCTest
+import Foundation
+import Testing
 @testable import HypoApp
 
-final class TransportManagerLanTests: XCTestCase {
+struct TransportManagerLanTests {
+    @Test @MainActor
     func testDiscoveryEventsUpdateStateAndDiagnostics() async throws {
         let driver = MockBonjourDriver()
         let now = Date(timeIntervalSince1970: 1_000)
-        let browser = BonjourBrowser(driver: driver, clock: { now })
+        let browser = await MainActor.run { BonjourBrowser(driver: driver, clock: { now }) }
         let publisher = MockBonjourPublisher()
         let cache = InMemoryLanDiscoveryCache()
+        let webSocketServer = await makeWebSocketServer()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
             browser: browser,
@@ -19,11 +22,13 @@ final class TransportManagerLanTests: XCTestCase {
                 version: "1.0",
                 fingerprint: "fingerprint",
                 protocols: ["ws+tls"]
-            )
+            ),
+            webSocketServer: webSocketServer
         )
 
         await manager.ensureLanDiscoveryActive()
-        XCTAssertEqual(publisher.startCount, 1)
+        let startCount = await MainActor.run { publisher.startCount }
+        #expect(startCount == 1)
 
         let record = BonjourServiceRecord(
             serviceName: "peer-one",
@@ -35,30 +40,33 @@ final class TransportManagerLanTests: XCTestCase {
         try await Task.sleep(nanoseconds: 5_000_000)
 
         let peers = await manager.lanDiscoveredPeers()
-        XCTAssertEqual(peers.count, 1)
-        XCTAssertEqual(peers.first?.serviceName, "peer-one")
-        XCTAssertEqual(cache.storage["peer-one"], Date(timeIntervalSince1970: 1_000))
+        #expect(peers.count == 1)
+        #expect(peers.first?.serviceName == "peer-one")
+        #expect(cache.storage["peer-one"] == Date(timeIntervalSince1970: 1_000))
 
         let diagnostics = await manager.handleDeepLink(URL(string: "hypo://debug/lan")!)
-        XCTAssertNotNil(diagnostics)
-        XCTAssertTrue(diagnostics?.contains("peer-one") ?? false)
+        #expect(diagnostics != nil)
+        #expect(diagnostics?.contains("peer-one") ?? false)
 
         driver.emit(.removed("peer-one"))
         try await Task.sleep(nanoseconds: 5_000_000)
         let remainingPeers = await manager.lanDiscoveredPeers()
-        XCTAssertTrue(remainingPeers.isEmpty)
-        XCTAssertNotNil(cache.storage["peer-one"])
+        #expect(remainingPeers.isEmpty)
+        #expect(cache.storage["peer-one"] != nil)
 
         await manager.suspendLanDiscovery()
-        XCTAssertEqual(publisher.stopCount, 1)
+        let stopCount = await MainActor.run { publisher.stopCount }
+        #expect(stopCount == 1)
     }
 
+    @Test @MainActor
     func testAutomaticPruneRemovesStalePeers() async throws {
         let driver = MockBonjourDriver()
-        var now = Date(timeIntervalSince1970: 10_000)
-        let browser = BonjourBrowser(driver: driver, clock: { now })
+        let clock = MutableClock(now: Date(timeIntervalSince1970: 10_000))
+        let browser = await MainActor.run { BonjourBrowser(driver: driver, clock: { clock.now }) }
         let publisher = MockBonjourPublisher()
         let cache = InMemoryLanDiscoveryCache()
+        let webSocketServer = await makeWebSocketServer()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
             browser: browser,
@@ -73,7 +81,8 @@ final class TransportManagerLanTests: XCTestCase {
             ),
             pruneInterval: 0.05,
             stalePeerInterval: 0.1,
-            dateProvider: { now }
+            dateProvider: { clock.now },
+            webSocketServer: webSocketServer
         )
 
         await manager.ensureLanDiscoveryActive()
@@ -88,42 +97,48 @@ final class TransportManagerLanTests: XCTestCase {
         try await Task.sleep(nanoseconds: 10_000_000)
 
         var peers = await manager.lanDiscoveredPeers()
-        XCTAssertEqual(peers.count, 1)
+        #expect(peers.count == 1)
 
-        now = now.addingTimeInterval(0.2)
+        clock.now = clock.now.addingTimeInterval(0.2)
         try await Task.sleep(nanoseconds: 200_000_000)
 
         peers = await manager.lanDiscoveredPeers()
-        XCTAssertTrue(peers.isEmpty)
-        XCTAssertTrue(cache.storage.isEmpty)
+        #expect(peers.isEmpty)
+        #expect(cache.storage.isEmpty)
 
         await manager.suspendLanDiscovery()
     }
 
+    @Test
     func testConnectPrefersLan() async {
+        let webSocketServer = await makeWebSocketServer()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
-            analytics: InMemoryTransportAnalytics()
+            analytics: InMemoryTransportAnalytics(),
+            webSocketServer: webSocketServer
         )
 
         let state = await manager.connect(
-            lanDialer: { .success },
-            cloudDialer: { XCTFail("Cloud should not be invoked"); return false },
+            lanDialer: { LanDialResult.success },
+            cloudDialer: { #expect(false); return false },
             peerIdentifier: "peer"
         )
 
-        XCTAssertEqual(state, .connectedLan)
+        #expect(state == .connectedLan)
         let recordedState = await MainActor.run { manager.connectionState }
-        XCTAssertEqual(recordedState, .connectedLan)
+        #expect(recordedState == .connectedLan)
         let lastRoute = await MainActor.run { manager.lastSuccessfulTransport(for: "peer") }
-        XCTAssertEqual(lastRoute, .lan)
+        #expect(lastRoute == .lan)
     }
 
+    @Test
     func testConnectFallsBackOnTimeout() async {
         let analytics = InMemoryTransportAnalytics()
+        let webSocketServer = await makeWebSocketServer()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
-            analytics: analytics
+            analytics: analytics,
+            webSocketServer: webSocketServer
         )
 
         let task = Task {
@@ -140,21 +155,24 @@ final class TransportManagerLanTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         let state = await task.value
-        XCTAssertEqual(state, .connectedCloud)
+        #expect(state == .connectedCloud)
         let events = analytics.events()
-        XCTAssertEqual(events.count, 1)
+        #expect(events.count == 1)
         if case let .fallback(reason, _, _) = events.first {
-            XCTAssertEqual(reason, .lanTimeout)
+            #expect(reason == .lanTimeout)
         } else {
-            XCTFail("Expected fallback analytics event")
+            #expect(false)
         }
     }
 
+    @Test
     func testConnectRecordsLanFailureReason() async {
         let analytics = InMemoryTransportAnalytics()
+        let webSocketServer = await makeWebSocketServer()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
-            analytics: analytics
+            analytics: analytics,
+            webSocketServer: webSocketServer
         )
 
         let state = await manager.connect(
@@ -163,38 +181,40 @@ final class TransportManagerLanTests: XCTestCase {
             peerIdentifier: "peer"
         )
 
-        XCTAssertEqual(state, .error("Cloud connection failed"))
+        #expect(state == .error("Cloud connection failed"))
         let events = analytics.events()
-        XCTAssertEqual(events.count, 1)
+        #expect(events.count == 1)
         if case let .fallback(reason, metadata, _) = events.first {
-            XCTAssertEqual(reason, .lanRejected)
-            XCTAssertEqual(metadata["reason"], "lan_rejected")
+            #expect(reason == .lanRejected)
+            #expect(metadata["reason"] == "lan_rejected")
         } else {
-            XCTFail("Expected fallback analytics event")
+            #expect(false)
         }
         let route = await MainActor.run { manager.lastSuccessfulTransport(for: "peer") }
-        XCTAssertNil(route)
+        #expect(route == nil)
     }
 
+    @Test
     func testConnectionSupervisorReconnectsAfterHeartbeatFailure() async {
         let analytics = InMemoryTransportAnalytics()
+        let webSocketServer = await makeWebSocketServer()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
-            analytics: analytics
+            analytics: analytics,
+            webSocketServer: webSocketServer
         )
 
-        var lanAttempts = 0
-        var heartbeatCalls = 0
+        let lanAttempts = Locked(0)
+        let heartbeatCalls = Locked(0)
         await manager.startConnectionSupervisor(
             peerIdentifier: "peer",
             lanDialer: {
-                lanAttempts += 1
+                lanAttempts.withLock { $0 += 1 }
                 return .success
             },
             cloudDialer: { true },
             sendHeartbeat: {
-                heartbeatCalls += 1
-                return heartbeatCalls < 2
+                heartbeatCalls.withLock { $0 += 1; return $0 < 2 }
             },
             awaitAck: { true },
             configuration: ConnectionSupervisorConfiguration(
@@ -210,26 +230,29 @@ final class TransportManagerLanTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 600_000_000)
 
-        let attempts = lanAttempts
-        XCTAssertGreaterThanOrEqual(attempts, 2)
+        let attempts = lanAttempts.withLock { $0 }
+        #expect(attempts >= 2)
         let last = await manager.lastSuccessfulTransport(for: "peer")
-        XCTAssertEqual(last, .lan)
+        #expect(last == .lan)
 
         await manager.stopConnectionSupervisor()
     }
 
+    @Test
     func testManualRetrySkipsBackoffDelay() async {
+        let webSocketServer = await makeWebSocketServer()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
-            analytics: InMemoryTransportAnalytics()
+            analytics: InMemoryTransportAnalytics(),
+            webSocketServer: webSocketServer
         )
 
-        var attempts = 0
+        let attempts = Locked(0)
         await manager.startConnectionSupervisor(
             peerIdentifier: "peer",
             lanDialer: {
-                attempts += 1
-                if attempts == 1 {
+                let currentAttempt = attempts.withLock { $0 += 1; return $0 }
+                if currentAttempt == 1 {
                     return .failure(reason: .lanTimeout, error: nil)
                 }
                 return .success
@@ -255,16 +278,19 @@ final class TransportManagerLanTests: XCTestCase {
         await manager.stopConnectionSupervisor()
         await Task.yield()
         let last = await manager.lastSuccessfulTransport(for: "peer")
-        XCTAssertEqual(last, .lan)
+        #expect(last == .lan)
     }
 
+    @Test
     func testShutdownTransportFlushesCallback() async {
+        let webSocketServer = await makeWebSocketServer()
         let manager = await TransportManager(
             provider: MockTransportProvider(),
-            analytics: InMemoryTransportAnalytics()
+            analytics: InMemoryTransportAnalytics(),
+            webSocketServer: webSocketServer
         )
 
-        var flushed = false
+        let flushed = Locked(false)
         await manager.startConnectionSupervisor(
             peerIdentifier: "peer",
             lanDialer: { .success },
@@ -273,13 +299,14 @@ final class TransportManagerLanTests: XCTestCase {
             awaitAck: { true }
         )
 
-        await manager.shutdownTransport {
-            flushed = true
+        let onShutdown: @Sendable () async -> Void = {
+            flushed.withLock { $0 = true }
         }
+        await manager.shutdownTransport(gracefully: onShutdown)
 
-        XCTAssertTrue(flushed)
+        #expect(flushed.withLock { $0 })
         let state = await MainActor.run { manager.connectionState }
-        XCTAssertEqual(state, .idle)
+        #expect(state == .disconnected)
     }
 }
 
@@ -295,8 +322,8 @@ private final class MockBonjourPublisher: BonjourPublishing {
         return LanEndpoint(
             host: "localhost",
             port: configuration.port,
-            fingerprint: configuration.fingerprint,
-            metadata: configuration.txtRecord
+            deviceId: configuration.deviceId,
+            deviceName: configuration.serviceName
         )
     }
 
@@ -328,8 +355,14 @@ private final class MockBonjourPublisher: BonjourPublishing {
     }
 }
 
+private final class MutableClock: @unchecked Sendable {
+    var now: Date
+    init(now: Date) { self.now = now }
+}
+
 private final class InMemoryLanDiscoveryCache: LanDiscoveryCache {
     var storage: [String: Date] = [:]
+    var peerStorage: [String: DiscoveredPeer] = [:]
 
     func load() -> [String : Date] {
         storage
@@ -337,6 +370,14 @@ private final class InMemoryLanDiscoveryCache: LanDiscoveryCache {
 
     func save(_ lastSeen: [String : Date]) {
         storage = lastSeen
+    }
+
+    func loadPeers() -> [String : DiscoveredPeer] {
+        peerStorage
+    }
+
+    func savePeers(_ peers: [String : DiscoveredPeer]) {
+        peerStorage = peers
     }
 }
 
@@ -352,18 +393,23 @@ private struct MockSyncTransport: SyncTransport {
     func disconnect() async {}
 }
 
-private final class MockBonjourDriver: BonjourBrowsingDriver {
-    private var handler: ((BonjourBrowsingDriverEvent) -> Void)?
+private final class MockBonjourDriver: BonjourBrowsingDriver, @unchecked Sendable {
+    private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
 
     func startBrowsing(serviceType: String, domain: String) {}
 
     func stopBrowsing() {}
 
-    func setEventHandler(_ handler: @escaping (BonjourBrowsingDriverEvent) -> Void) {
+    func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void) {
         self.handler = handler
     }
 
     func emit(_ event: BonjourBrowsingDriverEvent) {
         handler?(event)
     }
+}
+
+@MainActor
+private func makeWebSocketServer() -> LanWebSocketServer {
+    LanWebSocketServer()
 }

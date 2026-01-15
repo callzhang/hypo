@@ -1,4 +1,5 @@
-import XCTest
+import Foundation
+import Testing
 #if canImport(CryptoKit)
 import CryptoKit
 #else
@@ -6,7 +7,8 @@ import Crypto
 #endif
 @testable import HypoApp
 
-final class SyncEngineTests: XCTestCase {
+struct SyncEngineTests {
+    @Test
     func testTransmitEncryptsPayloadAndDecodeRecoversPlaintext() async throws {
         let sharedKey = SymmetricKey(size: .bits256)
         let senderProvider = InMemoryDeviceKeyProvider()
@@ -22,7 +24,9 @@ final class SyncEngineTests: XCTestCase {
         await senderEngine.establishConnection()
 
         let clipboardEntry = ClipboardEntry(
-            originDeviceId: "mac-device",
+            deviceId: "mac-device",
+            originPlatform: .macOS,
+            originDeviceName: "Test Mac",
             content: .text("Hello world")
         )
         let payload = ClipboardPayload(
@@ -36,15 +40,12 @@ final class SyncEngineTests: XCTestCase {
             targetDeviceId: "android-device"
         )
 
-        guard let envelope = transport.sentEnvelopes.first else {
-            XCTFail("expected envelope to be sent")
-            return
-        }
+        let envelope = try #require(transport.sentEnvelopes.first)
 
-        XCTAssertEqual(envelope.payload.deviceId, "mac-device")
-        XCTAssertEqual(envelope.payload.target, "android-device")
-        XCTAssertEqual(envelope.payload.encryption.algorithm, "AES-256-GCM")
-        XCTAssertNotEqual(envelope.payload.ciphertext, payload.data)
+        #expect(envelope.payload.deviceId == "mac-device")
+        #expect(envelope.payload.target == "android-device")
+        #expect(envelope.payload.encryption.algorithm == "AES-256-GCM")
+        #expect(envelope.payload.ciphertext != payload.data)
 
         let receiverProvider = InMemoryDeviceKeyProvider()
         await receiverProvider.setKey(sharedKey, for: "mac-device")
@@ -54,12 +55,13 @@ final class SyncEngineTests: XCTestCase {
             localDeviceId: "android-device"
         )
 
-        let encoded = try makeEnvelopeEncoder().encode(envelope)
+        let encoded = try TransportFrameCodec().encode(envelope)
         let decoded = try await receiverEngine.decode(encoded)
-        XCTAssertEqual(decoded.contentType, payload.contentType)
-        XCTAssertEqual(decoded.data, payload.data)
+        #expect(decoded.contentType == payload.contentType)
+        #expect(decoded.data == payload.data)
     }
 
+    @Test
     func testDecodeThrowsWhenKeyMissing() async {
         let engine = SyncEngine(
             transport: NoopTransport(),
@@ -78,22 +80,25 @@ final class SyncEngineTests: XCTestCase {
             )
         )
 
-        let encoded = try! makeEnvelopeEncoder().encode(envelope)
+        let encoded = try! TransportFrameCodec().encode(envelope)
 
-        await assertThrowsErrorAsync(try await engine.decode(encoded)) { error in
+        do {
+            _ = try await engine.decode(encoded)
+            #expect(false)
+        } catch {
             guard let providerError = error as? DeviceKeyProviderError else {
-                XCTFail("expected DeviceKeyProviderError")
+                #expect(false)
                 return
             }
             switch providerError {
             case .missingKey(let deviceId):
-                XCTAssertEqual(deviceId, "mac-device")
+                #expect(deviceId == "mac-device")
             }
         }
     }
 }
 
-private final class RecordingTransport: SyncTransport {
+private final class RecordingTransport: SyncTransport, @unchecked Sendable {
     private(set) var sentEnvelopes: [SyncEnvelope] = []
     private(set) var connectCallCount = 0
 
@@ -108,29 +113,8 @@ private final class RecordingTransport: SyncTransport {
     func disconnect() async {}
 }
 
-private func makeEnvelopeEncoder() -> JSONEncoder {
-    let encoder = JSONEncoder()
-    encoder.dateEncodingStrategy = .iso8601
-    encoder.keyEncodingStrategy = .convertToSnakeCase
-    return encoder
-}
-
 private struct NoopTransport: SyncTransport {
     func connect() async throws {}
     func send(_ envelope: SyncEnvelope) async throws {}
     func disconnect() async {}
-}
-
-private func assertThrowsErrorAsync<T>(
-    _ expression: @autoclosure () async throws -> T,
-    file: StaticString = #filePath,
-    line: UInt = #line,
-    _ errorHandler: (Error) -> Void
-) async {
-    do {
-        _ = try await expression()
-        XCTFail("Expected error", file: file, line: line)
-    } catch {
-        errorHandler(error)
-    }
 }

@@ -1,6 +1,6 @@
 import Foundation
 import Network
-import XCTest
+import Testing
 @testable import HypoApp
 
 /// Tests for thread-safe buffer operations in LanWebSocketServer
@@ -9,21 +9,22 @@ import XCTest
 /// Note: These tests validate the thread-safety through integration testing
 /// since ConnectionContext is private. The tests simulate real-world concurrent
 /// frame processing scenarios.
-final class LanWebSocketServerBufferTests: XCTestCase {
+struct LanWebSocketServerBufferTests {
     
     // Helper to create a test server instance
+    @MainActor
     private func createTestServer() -> LanWebSocketServer {
-        let server = LanWebSocketServer(port: 0) // Use random port for testing
-        return server
+        LanWebSocketServer()
     }
     
+    @MainActor
+    @Test
     func testConcurrentFrameProcessing() async throws {
         // This test validates that concurrent frame processing doesn't crash
         // by simulating rapid incoming data
         
-        let server = createTestServer()
-        let expectation = XCTestExpectation(description: "Server handles concurrent frames")
-        expectation.expectedFulfillmentCount = 10
+        _ = createTestServer()
+        let processed = Locked(0)
         
         // Simulate concurrent frame delivery
         await withTaskGroup(of: Void.self) { group in
@@ -33,12 +34,16 @@ final class LanWebSocketServerBufferTests: XCTestCase {
                     let frameData = self.createMockWebSocketFrame(payload: "test\(i)")
                     // Note: This would need to go through the actual server API
                     // For now, we validate the server doesn't crash under load
-                    expectation.fulfill()
+                    _ = frameData
+                    processed.withLock { $0 += 1 }
                 }
             }
         }
         
-        await fulfillment(of: [expectation], timeout: 5.0)
+        let fulfilled = await waitUntil(timeout: .seconds(5)) {
+            processed.withLock { $0 == 10 }
+        }
+        #expect(fulfilled)
     }
     
     private func createMockWebSocketFrame(payload: String) -> Data {
@@ -62,9 +67,11 @@ final class LanWebSocketServerBufferTests: XCTestCase {
         return frame
     }
     
+    @MainActor
+    @Test
     func testServerHandlesRapidIncomingData() async throws {
         // Integration test: Server should handle rapid incoming data without crashing
-        let server = createTestServer()
+        _ = createTestServer()
         
         // Simulate rapid data chunks (like Network.framework might deliver)
         let chunks = (0..<100).map { "chunk\($0)" }
@@ -76,21 +83,23 @@ final class LanWebSocketServerBufferTests: XCTestCase {
                     let data = chunk.data(using: .utf8)!
                     // In real scenario, this would go through receiveFrameChunk
                     // For testing, we validate the server structure handles concurrency
+                    _ = data
                 }
             }
         }
         
         // If we get here without crashing, the thread-safety is working
-        XCTAssertTrue(true, "Server handled concurrent data without crashing")
+        #expect(Bool(true))
     }
     
+    @MainActor
+    @Test
     func testNoDataRaceInFrameProcessing() async {
         // This test should be run with Thread Sanitizer enabled
         // It validates that buffer operations don't have data races
         
-        let server = createTestServer()
-        var processedCount = 0
-        let lock = NSLock()
+        _ = createTestServer()
+        let processedCount = Locked(0)
         
         // Simulate concurrent frame processing
         await withTaskGroup(of: Int.self) { group in
@@ -98,15 +107,12 @@ final class LanWebSocketServerBufferTests: XCTestCase {
                 group.addTask {
                     // Simulate frame processing
                     // In real code, this would call processFrameBuffer
-                    lock.lock()
-                    processedCount += 1
-                    lock.unlock()
+                    processedCount.withLock { $0 += 1 }
                     return i
                 }
             }
         }
         
-        XCTAssertEqual(processedCount, 50, "All frames should be processed")
+        #expect(processedCount.withLock { $0 == 50 })
     }
 }
-

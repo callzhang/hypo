@@ -2,37 +2,42 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-import XCTest
+import Testing
 @testable import HypoApp
 
-final class WebSocketTransportTests: XCTestCase {
+struct LanWebSocketTransportTests {
+    @Test
     func testConnectResolvesAfterHandshake() async throws {
-        let expectation = expectation(description: "handshake")
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = WebSocketTransport(
+        let transport = await MainActor.run {  WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             sessionFactory: { _, _ in session }
-        )
+        ) }
 
+        let handshakeCompleted = Locked(false)
         stubTask.onResume = {
             transport.handleOpen(task: stubTask)
-            expectation.fulfill()
+            handshakeCompleted.withLock { $0 = true }
         }
 
         try await transport.connect()
-        await fulfillment(of: [expectation], timeout: 0.5)
+        let fulfilled = await waitUntil(timeout: .milliseconds(500)) {
+            handshakeCompleted.withLock { $0 }
+        }
+        #expect(fulfilled)
     }
 
+    @Test
     func testSendUsesFrameCodec() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
         let codec = TransportFrameCodec()
-        let transport = WebSocketTransport(
+        let transport = await MainActor.run { WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             frameCodec: codec,
             sessionFactory: { _, _ in session }
-        )
+        ) }
 
         stubTask.onResume = {
             transport.handleOpen(task: stubTask)
@@ -48,44 +53,50 @@ final class WebSocketTransportTests: XCTestCase {
         ))
 
         try await transport.send(envelope)
-        XCTAssertEqual(stubTask.sentData.count, 1)
-        let decoded = try codec.decode(stubTask.sentData[0])
-        XCTAssertEqual(decoded.payload.deviceId, "device")
+        let fulfilled = await waitUntil(timeout: .seconds(1)) {
+            stubTask.sentData.count == 1
+        }
+        #expect(fulfilled)
+        let firstData = try #require(stubTask.sentData.first)
+        let decoded = try codec.decode(firstData)
+        #expect(decoded.payload.deviceId == "device")
     }
 
+    @Test
     func testIdleTimeoutCancelsTask() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = WebSocketTransport(
-            configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil, idleTimeout: 0.05),
+        let transport = await MainActor.run { WebSocketTransport(
+            configuration: .init(url: URL(string: "ws://example.com")!, pinnedFingerprint: nil, idleTimeout: 0.05),
             sessionFactory: { _, _ in session }
-        )
-        let cancelExpectation = expectation(description: "cancelled")
-        stubTask.onCancel = { (_: URLSessionWebSocketTask.CloseCode, _: Data?) in cancelExpectation.fulfill() }
+        ) }
+        let cancelled = Locked(false)
+        stubTask.onCancel = { (_: URLSessionWebSocketTask.CloseCode, _: Data?) in
+            cancelled.withLock { $0 = true }
+        }
         stubTask.onResume = {
             transport.handleOpen(task: stubTask)
         }
 
         try await transport.connect()
-        await fulfillment(of: [cancelExpectation], timeout: 1.0)
+        let fulfilled = await waitUntil(timeout: .seconds(1)) {
+            cancelled.withLock { $0 }
+        }
+        #expect(fulfilled)
     }
 
+    @Test
     func testMetricsRecorderCapturesHandshakeAndRoundTrip() async throws {
-        let handshakeExpectation = expectation(description: "handshake metric")
-        let roundTripExpectation = expectation(description: "round trip metric")
-        let metrics = RecordingMetricsRecorder(
-            handshakeExpectation: handshakeExpectation,
-            roundTripExpectation: roundTripExpectation
-        )
+        let metrics = RecordingMetricsRecorder()
         let codec = TransportFrameCodec()
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = WebSocketTransport(
+        let transport = await MainActor.run { WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             frameCodec: codec,
             metricsRecorder: metrics,
             sessionFactory: { _, _ in session }
-        )
+        ) }
 
         stubTask.onResume = {
             transport.handleOpen(task: stubTask)
@@ -104,18 +115,23 @@ final class WebSocketTransportTests: XCTestCase {
         let echo = try codec.encode(envelope)
         stubTask.receiveHandler?(.success(.data(echo)))
 
-        await fulfillment(of: [handshakeExpectation, roundTripExpectation], timeout: 1.0)
-        XCTAssertEqual(metrics.recordedHandshakes.count, 1)
-        XCTAssertEqual(metrics.recordedRoundTrips[envelope.id.uuidString]?.count ?? 0, 1)
+        let fulfilled = await waitUntil(timeout: .seconds(1)) {
+            metrics.recordedHandshakes.count == 1 &&
+                (metrics.recordedRoundTrips[envelope.id.uuidString]?.count ?? 0) == 1
+        }
+        #expect(fulfilled)
+        #expect(metrics.recordedHandshakes.count == 1)
+        #expect((metrics.recordedRoundTrips[envelope.id.uuidString]?.count ?? 0) == 1)
     }
 
+    @Test
     func testReconnectAfterDisconnect() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = WebSocketTransport(
+        let transport = await MainActor.run { WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             sessionFactory: { _, _ in session }
-        )
+        ) }
 
         var resumeCount = 0
         stubTask.onResume = {
@@ -132,11 +148,11 @@ final class WebSocketTransportTests: XCTestCase {
         }
 
         try await transport.connect()
-        XCTAssertEqual(resumeCount, 2)
+        #expect(resumeCount == 2)
     }
 }
 
-private final class StubSession: URLSessionProviding {
+private final class StubSession: URLSessionProviding, @unchecked Sendable {
     private let task: StubWebSocketTask
 
     init(task: StubWebSocketTask) {
@@ -151,7 +167,8 @@ private final class StubSession: URLSessionProviding {
     func invalidateAndCancel() {}
 }
 
-private final class StubWebSocketTask: WebSocketTasking {
+private final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
+    var maximumMessageSize: Int = Int.max
     var createdRequest: URLRequest?
     var onResume: (() -> Void)?
     var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
@@ -176,28 +193,37 @@ private final class StubWebSocketTask: WebSocketTasking {
     func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
         receiveHandler = completionHandler
     }
+
+    func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) {
+        pongReceiveHandler(nil)
+    }
 }
 
-private final class RecordingMetricsRecorder: TransportMetricsRecorder {
-    private(set) var recordedHandshakes: [TimeInterval] = []
-    private(set) var recordedRoundTrips: [String: [TimeInterval]] = [:]
-    private let handshakeExpectation: XCTestExpectation?
-    private let roundTripExpectation: XCTestExpectation?
+private final class RecordingMetricsRecorder: TransportMetricsRecorder, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _handshakes: [TimeInterval] = []
+    private var _roundTrips: [String: [TimeInterval]] = [:]
 
-    init(handshakeExpectation: XCTestExpectation?, roundTripExpectation: XCTestExpectation?) {
-        self.handshakeExpectation = handshakeExpectation
-        self.roundTripExpectation = roundTripExpectation
-    }
+    var recordedHandshakes: [TimeInterval] { lock.withLock { _handshakes } }
+    var recordedRoundTrips: [String: [TimeInterval]] { lock.withLock { _roundTrips } }
 
     func recordHandshake(duration: TimeInterval, timestamp: Date) {
-        recordedHandshakes.append(duration)
-        handshakeExpectation?.fulfill()
+        lock.withLock { _handshakes.append(duration) }
     }
 
     func recordRoundTrip(envelopeId: String, duration: TimeInterval) {
-        var durations = recordedRoundTrips[envelopeId, default: []]
-        durations.append(duration)
-        recordedRoundTrips[envelopeId] = durations
-        roundTripExpectation?.fulfill()
+        lock.withLock {
+            var durations = _roundTrips[envelopeId, default: []]
+            durations.append(duration)
+            _roundTrips[envelopeId] = durations
+        }
+    }
+}
+
+private extension NSLock {
+    func withLock<T>(_ body: () -> T) -> T {
+        self.lock()
+        defer { self.unlock() }
+        return body()
     }
 }

@@ -2,10 +2,11 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-import XCTest
+import Testing
 @testable import HypoApp
 
-final class TransportFrameCodecTests: XCTestCase {
+struct TransportFrameCodecTests {
+    @Test
     func testRoundTrip() throws {
         let codec = TransportFrameCodec()
         let envelope = SyncEnvelope(
@@ -24,11 +25,12 @@ final class TransportFrameCodecTests: XCTestCase {
 
         let encoded = try codec.encode(envelope)
         let decoded = try codec.decode(encoded)
-        XCTAssertEqual(decoded.payload.deviceId, "deviceA")
-        XCTAssertEqual(decoded.payload.target, "deviceB")
-        XCTAssertEqual(decoded.payload.ciphertext, Data([0x01, 0x02, 0x03]))
+        #expect(decoded.payload.deviceId == "deviceA")
+        #expect(decoded.payload.target == "deviceB")
+        #expect(decoded.payload.ciphertext == Data([0x01, 0x02, 0x03]))
     }
 
+    @Test
     func testEncodesKnownVector() throws {
         let codec = TransportFrameCodec()
         let fileURL = URL(fileURLWithPath: #filePath)
@@ -40,30 +42,35 @@ final class TransportFrameCodecTests: XCTestCase {
         let vectorsURL = repoRoot.appendingPathComponent("tests/transport/frame_vectors.json")
         let data = try Data(contentsOf: vectorsURL)
         let json = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]]
-        let vector = try XCTUnwrap(json?.first)
-        let base64 = try XCTUnwrap(vector["base64"] as? String)
-        let envelope = try XCTUnwrap(vector["envelope"] as? [String: Any])
-        let payload = try XCTUnwrap(envelope["payload"] as? [String: Any])
-        let deviceId = try XCTUnwrap(payload["device_id"] as? String)
+        let vector = try #require(json?.first)
+        let base64 = try #require(vector["base64"] as? String)
+        let envelope = try #require(vector["envelope"] as? [String: Any])
+        let payload = try #require(envelope["payload"] as? [String: Any])
+        let deviceId = try #require(payload["device_id"] as? String)
 
-        let frame = try XCTUnwrap(Data(base64Encoded: base64))
+        let frame = try #require(Data(base64Encoded: base64))
         let decoded = try codec.decode(frame)
-        XCTAssertEqual(decoded.payload.deviceId, deviceId)
+        #expect(decoded.payload.deviceId == deviceId)
         let reEncoded = try codec.encode(decoded)
         let originalPayloadData = frame.subdata(in: 4..<frame.count)
         let reEncodedPayloadData = reEncoded.subdata(in: 4..<reEncoded.count)
         let originalPayload = try JSONSerialization.jsonObject(with: originalPayloadData) as? NSDictionary
         let reEncodedPayload = try JSONSerialization.jsonObject(with: reEncodedPayloadData) as? NSDictionary
-        XCTAssertEqual(originalPayload, reEncodedPayload)
+        #expect(originalPayload == reEncodedPayload)
     }
 
+    @Test
     func testDecodeTruncatedThrows() {
         let codec = TransportFrameCodec()
-        XCTAssertThrowsError(try codec.decode(Data([0x00, 0x00, 0x00, 0x05, 0x01]))) { error in
-            XCTAssertEqual(error as? TransportFrameError, .truncated)
+        do {
+            _ = try codec.decode(Data([0x00, 0x00, 0x00, 0x05, 0x01]))
+            #expect(false)
+        } catch {
+            #expect(error as? TransportFrameError == .truncated)
         }
     }
 
+    @Test
     func testPayloadTooLargeThrows() {
         let codec = TransportFrameCodec(maxPayloadSize: 1)
         let envelope = SyncEnvelope(type: .clipboard, payload: .init(
@@ -73,11 +80,15 @@ final class TransportFrameCodecTests: XCTestCase {
             target: nil,
             encryption: .init(nonce: Data([0x00]), tag: Data([0x01]))
         ))
-        XCTAssertThrowsError(try codec.encode(envelope)) { error in
-            XCTAssertEqual(error as? TransportFrameError, .payloadTooLarge)
+        do {
+            _ = try codec.encode(envelope)
+            #expect(false)
+        } catch {
+            #expect(error as? TransportFrameError == .payloadTooLarge)
         }
     }
 
+    @Test
     func testDecodeRejectsOversizedPayload() throws {
         let codec = TransportFrameCodec()
         let envelope = SyncEnvelope(type: .clipboard, payload: .init(
@@ -89,8 +100,11 @@ final class TransportFrameCodecTests: XCTestCase {
         ))
         let frame = try codec.encode(envelope)
         let strict = TransportFrameCodec(maxPayloadSize: 8)
-        XCTAssertThrowsError(try strict.decode(frame)) { error in
-            XCTAssertEqual(error as? TransportFrameError, .payloadTooLarge)
+        do {
+            _ = try strict.decode(frame)
+            #expect(false)
+        } catch {
+            #expect(error as? TransportFrameError == .payloadTooLarge)
         }
     }
 }

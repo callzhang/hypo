@@ -427,18 +427,25 @@ class ClipboardParser(
         val resolverType = runCatching { contentResolver.getType(uri) }.getOrNull()
         if (!resolverType.isNullOrEmpty()) return resolverType
 
-        for (index in 0 until description.mimeTypeCount) {
-            val type = description.getMimeType(index)
-            if (!type.isNullOrEmpty()) {
-                return type
-            }
-        }
-
+        // Prefer file extension for file:// URIs so we don't get stuck with generic types.
         if (uri.scheme == ContentResolver.SCHEME_FILE) {
             val extension = MimeTypeMap.getFileExtensionFromUrl(uri.toString())
                 ?.lowercase(Locale.US)
+                ?.ifEmpty {
+                    uri.path?.substringAfterLast('.', "")?.lowercase(Locale.US).orEmpty()
+                }
             if (!extension.isNullOrEmpty()) {
-                return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+                val mime = mimeTypeFromExtension(extension)
+                if (!mime.isNullOrEmpty()) {
+                    return mime
+                }
+            }
+        }
+
+        for (index in 0 until description.mimeTypeCount) {
+            val type = description.getMimeType(index)
+            if (!type.isNullOrEmpty() && type != "*/*" && type != "application/octet-stream") {
+                return type
             }
         }
         return null
@@ -524,6 +531,20 @@ class ClipboardParser(
         }
     }
 
+    private fun mimeTypeFromExtension(extension: String): String? {
+        val normalized = extension.lowercase(Locale.US)
+        val fromMap = MimeTypeMap.getSingleton().getMimeTypeFromExtension(normalized)
+        if (!fromMap.isNullOrEmpty()) return fromMap
+        return when (normalized) {
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "txt" -> "text/plain"
+            else -> null
+        }
+    }
+
     private fun queryMetadata(uri: Uri): FileMetadata? {
         return when (uri.scheme) {
             ContentResolver.SCHEME_FILE -> uri.path?.let { path ->
@@ -532,8 +553,7 @@ class ClipboardParser(
                 FileMetadata(
                     displayName = file.name,
                     size = file.length(),
-                    mimeType = MimeTypeMap.getSingleton()
-                        .getMimeTypeFromExtension(file.extension.lowercase(Locale.US))
+                    mimeType = mimeTypeFromExtension(file.extension.lowercase(Locale.US))
                 )
             }
             ContentResolver.SCHEME_CONTENT, ContentResolver.SCHEME_ANDROID_RESOURCE -> {

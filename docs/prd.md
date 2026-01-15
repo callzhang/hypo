@@ -27,7 +27,7 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 - ✅ Rich notifications with content preview
 - ✅ Modern, native UI (SwiftUI on macOS, Material 3 on Android)
 - ✅ End-to-end encryption (AES-256-GCM)
-- ✅ Device pairing (LAN auto-discovery, QR code, remote code entry)
+- ✅ Device pairing (LAN auto-discovery, remote code entry)
 - ✅ Battery-optimized for mobile (screen-state aware, 60-80% reduction)
 - ✅ Production backend deployed (https://hypo.fly.dev)
 - ✅ SMS auto-sync (Android): Automatically copies incoming SMS to clipboard and syncs to macOS
@@ -113,7 +113,7 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
   - Full clipboard history with search
   - Connection status indicators
 - **Settings**:
-  - Device pairing (auto-discovery, QR code, code entry)
+  - Device pairing (auto-discovery, code entry)
   - Paired device management
   - Transport preferences
   - History retention controls
@@ -188,7 +188,6 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 - **End-to-end encryption**: AES-256-GCM with authenticated encryption
 - **Device pairing**:
   - LAN auto-discovery with tap-to-pair
-  - QR code pairing with signature verification
   - Remote pairing via secure 6-digit codes (60s TTL)
   - Device-agnostic (any device can initiate/respond)
 - **Key management**:
@@ -234,38 +233,37 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 4. As a user, if I’m away from my LAN, I want the clipboard to still sync via the cloud.
 5. As a user, I want notifications on macOS when a new clipboard item arrives from my phone.
 
-### 6.1 Local Pairing via QR (LAN-First)
+### 6.1 Local Pairing via LAN Auto-Discovery
 
-- **Entry Point**: Any device → *Pair New Device*.
+- **Entry Point**: Any device → *Pair New Device* (LAN).
 - **Prerequisites**: Both devices connected to LAN, on same subnet, Bonjour/mDNS enabled.
 - **Device-Agnostic**: Any device can pair with any other device (Android↔Android, macOS↔macOS, Android↔macOS, etc.).
-- **QR Payload Schema**:
+- **Pairing Payload Schema** (advertised over mDNS):
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `ver` | string | Semantic version of the pairing payload (`"1"` for v1). |
-| `peer_device_id` | UUID v4 | Stable device identifier of the device generating the QR code. |
+| `peer_device_id` | UUID v4 | Stable device identifier of the advertising device. |
 | `peer_pub_key` | base64 (32 bytes) | Curve25519 public key for ephemeral ECDH. |
-| `peer_signing_pub_key` | base64 (32 bytes) | Ed25519 public key for signature verification. |
+| `peer_signing_pub_key` | base64 (32 bytes) | Ed25519 public key (optional for LAN auto-discovery). |
 | `service` | string | Bonjour service name advertised (e.g., `_hypo._tcp.local`). |
-| `port` | number | TCP port for the provisional LAN WebSocket endpoint. |
+| `port` | number | TCP port for the LAN WebSocket endpoint. |
 | `relay_hint` | URL | Optional HTTPS fallback relay endpoint if LAN negotiation fails. |
 | `issued_at` | ISO8601 | Creation timestamp (UTC). |
 | `expires_at` | ISO8601 | Expiry timestamp (issued_at + 5 min). |
-| `signature` | base64 (64 bytes) | Ed25519 signature over concatenated fields using long-term pairing key. |
+| `signature` | base64 (64 bytes) | Optional signature over concatenated fields using long-term pairing key. |
 
 - **Flow**:
-  1. Initiator device generates new ephemeral Curve25519 key pair and QR payload, signs it with its long-term pairing key, and renders QR using high-contrast theme.
-  2. Responder device scans QR, validates schema version, timestamp window (±5 min), and Ed25519 signature using initiator's long-term public key from previous pairing (or bootstrap list bundled with app).
-  3. Responder resolves the Bonjour service using `service` + `port`; if discovery fails within 3 s, prompt to retry or fall back to remote pairing.
-  4. Responder generates its own ephemeral Curve25519 key pair and derives shared secret via X25519(peer_pub_key, responder_priv_key) → HKDF-SHA256 (info: `"hypo/pairing"`, salt: 32 bytes of `0x00`).
-  5. Responder sends encrypted `PAIRING_CHALLENGE` over LAN WebSocket with payload `{ initiator_device_id, initiator_device_name, initiator_pub_key, nonce, ciphertext, tag }` using AES-256-GCM and associated data `initiator_device_id`.
-  6. Initiator decrypts challenge, verifies monotonic nonce (store last 32 challenge IDs), detects responder's platform from device ID or metadata, and responds with `PAIRING_ACK` containing device profile (device name, platform) encrypted with same shared key.
+  1. Devices advertise pairing payload metadata via mDNS/Bonjour.
+  2. Initiator selects a nearby device from the LAN list (tap-to-pair).
+  3. Initiator resolves the Bonjour service using `service` + `port`; if discovery fails within 3 s, prompt to retry or fall back to remote pairing.
+  4. Initiator generates an ephemeral Curve25519 key pair and derives a shared secret via X25519(peer_pub_key, initiator_priv_key) → HKDF-SHA256 (info: `"hypo/pairing"`, salt: 32 bytes of `0x00`).
+  5. Initiator sends encrypted `PAIRING_CHALLENGE` over LAN WebSocket with payload `{ initiator_device_id, initiator_device_name, initiator_pub_key, nonce, ciphertext, tag }` using AES-256-GCM and associated data `initiator_device_id`.
+  6. Responder decrypts challenge, verifies monotonic nonce (store last 32 challenge IDs), and responds with `PAIRING_ACK` containing device profile (device name, platform) encrypted with the same shared key.
   7. Both devices persist derived shared key (platform-specific secure storage) and store counterpart device metadata with detected platform information.
   8. Both devices update UI to display success; pairing is complete and devices can begin syncing.
 - **Error Handling**:
-  - If signature validation fails → display security warning, block pairing, log telemetry event `pairing_qr_signature_invalid`.
-  - If handshake times out → allow user to retry scanning without generating a new QR until expiry.
+  - If handshake times out → allow user to retry pairing.
   - If LAN WebSocket negotiation fails repeatedly → provide CTA to switch to remote pairing flow.
 
 ### 6.2 Remote Pairing via Relay (Code Entry)
@@ -364,7 +362,7 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
   - History section: chronological list with type icons, searchable.
 - **Settings Screen**
   - Toggles: Enable LAN sync / Enable Cloud sync.
-  - Encryption keys management (pair device via QR code).
+  - Encryption keys management (pair device via LAN auto-discovery or remote code).
   - Data retention settings (history size, auto-delete after N days).
   - Battery optimization whitelist instructions.
 - **Foreground Service Notification**

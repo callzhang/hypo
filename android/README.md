@@ -12,7 +12,7 @@ The Android client provides:
 - Real-time clipboard sync to macOS
 - Local history storage with Room database
 - Full-text search across clipboard history
-- Device pairing via QR code scanning
+- Device pairing via LAN auto-discovery and secure relay codes
 - **Battery optimization**: Auto-idles WebSocket connections when screen is off
 
 ---
@@ -46,8 +46,7 @@ app/src/main/
 │   │   │   ├── SettingsScreen.kt
 │   │   │   └── SettingsViewModel.kt
 │   │   ├── pairing/
-│   │   │   ├── PairingScreen.kt
-│   │   │   └── QrScannerView.kt
+│   │   │   └── PairingScreen.kt
 │   │   └── theme/
 │   │       ├── Theme.kt
 │   │       └── Color.kt
@@ -204,7 +203,7 @@ cd android
 
 3. **Grant Permissions (First Launch)**
    - **Notifications**: Required for sync status updates
-   - **Camera**: Required for QR code pairing
+   - **Camera**: Not required
 
 #### Xiaomi/HyperOS Specific Setup
 
@@ -420,9 +419,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
     
-    // QR Code
-    implementation("com.google.mlkit:barcode-scanning:17.2.0")
-    
     // Security
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     
@@ -445,8 +441,6 @@ In `AndroidManifest.xml`:
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-<uses-permission android:name="android.permission.CAMERA" /> <!-- For QR scanning -->
-
 <application>
     <service
         android:name=".service.ClipboardSyncService"
@@ -478,7 +472,6 @@ In `AndroidManifest.xml`:
 - [ ] Foreground service persists after app close
 - [ ] Battery optimization exemption requested
 - [ ] Notification displays on received clipboard
-- [ ] QR scanner successfully pairs with macOS
 - [ ] Search history for text
 
 ---
@@ -806,4 +799,3 @@ When submitting PRs:
 **Status**: Alpha Development - Sprint 8 (90% Complete)  
 **Last Updated**: October 12, 2025  
 **Tested On**: Xiaomi 15 Pro (HyperOS), Pixel 7 (Android 14)
-

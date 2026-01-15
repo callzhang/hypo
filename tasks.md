@@ -40,7 +40,7 @@ Last Updated: January 13, 2026
   - [x] AES-256-GCM encryption/decryption
   - [x] Nonce generation
   - [x] Key derivation from ECDH
-- [x] Design device pairing flow (QR code format) *(see PRD §6.1/6.2 and technical spec §3.2)*
+- [x] Design device pairing flow (LAN auto-discovery + remote code) *(see PRD §6.1/6.2 and technical spec §3.2)*
 
 ### Phase 1.4: Product Definition & Planning
 - [x] Draft Product Requirements Document (`docs/prd.md`)
@@ -233,16 +233,14 @@ Last Updated: January 13, 2026
 
 ## Sprint 6: Device Pairing (Weeks 11-12)
 
-### Phase 6.1: QR Code Pairing
-- [x] macOS: Generate QR code with pairing data
-- [x] macOS: Display QR in pairing view
-- [x] Android: Implement QR scanner (ML Kit)
-- [x] Android: Parse QR data, extract public key
+### Phase 6.1: LAN Auto-Discovery Pairing
+- [x] macOS: Advertise pairing payload via Bonjour
+- [x] Android: Advertise pairing payload via NSD
+- [x] Android: Show LAN device list and tap-to-pair
 - [x] Implement ECDH key exchange
 - [x] Challenge-response authentication
 - [x] Store shared key in encrypted storage (macOS: file-based, Android: EncryptedSharedPreferences)
 - [x] UI feedback for pairing success/failure
-- [x] macOS: Unit tests for pairing failure paths (expired QR, stale challenge, tampering)
 
 ### Phase 6.2: Remote Pairing
 - [x] Generate 6-digit pairing code

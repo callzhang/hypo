@@ -251,7 +251,7 @@ invoking Gradle.
 Hypo takes security seriously:
 
 - **End-to-End Encryption**: All clipboard data encrypted with AES-256-GCM
-- **Device Pairing**: ECDH key exchange via QR code (LAN) or secure relay (cloud)
+- **Device Pairing**: ECDH key exchange via LAN auto-discovery or secure relay (cloud)
 - **Certificate Pinning**: Prevents MITM attacks on cloud relay
 - **No Data Storage**: Backend relay never stores clipboard content
 - **Key Rotation**: Automatic 30-day key rotation with backward compatibility
@@ -276,7 +276,7 @@ Hypo takes security seriously:
 | **Sprint 3** | Weeks 5-6 | Transport Layer (LAN + Cloud) ✅ |
 | **Sprint 4** | Weeks 7-8 | Content Type Handling (Text, Images, Files) ✅ |
 | **Sprint 5** | Weeks 9-10 | User Interface Polish ✅ |
-| **Sprint 6** | Weeks 11-12 | Device Pairing (QR + Remote) ✅ |
+| **Sprint 6** | Weeks 11-12 | Device Pairing (LAN + Remote) ✅ |
 | **Sprint 7** | Weeks 13-14 | Testing & Optimization ✅ |
 | **Sprint 8** | Weeks 15-16 | Polish & Deployment ✅ |
 | **Sprint 9+** | Weeks 17+ | Production Release & Future Features |

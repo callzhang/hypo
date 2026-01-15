@@ -68,7 +68,7 @@
 ## Security & Configuration Tips
 - Copy secrets from `.env.example` and keep production values in the shared vault; never commit Fly.io or signing credentials.
 - Regenerate TLS fingerprints with `backend/scripts/cert_fingerprint.sh` after certificate updates.
-- Prefer the repo-scoped Android SDK (`.android-sdk`) to keep builds reproducible; ensure QR pairing flows respect signed entitlements during macOS testing.
+- Prefer the repo-scoped Android SDK (`.android-sdk`) to keep builds reproducible; ensure pairing flows respect signed entitlements during macOS testing.
 - **GitHub Secrets**: Store sensitive values (e.g., `SENTRY_AUTH_TOKEN`) in GitHub repository secrets, not in code or config files.
 - **macOS Key Storage**: Uses encrypted file-based storage (`~/Library/Application Support/Hypo/`) instead of Keychain for better Notarization compatibility.
 

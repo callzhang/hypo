@@ -12,7 +12,7 @@ The macOS client provides:
 - Rich notifications when receiving clipboard from Android
 - Local history storage with Core Data
 - Full-text search across clipboard history
-- Device pairing via QR code generation
+- Device pairing via LAN auto-discovery and secure relay codes
 
 ---
 
@@ -34,7 +34,6 @@ HypoApp/
 │   ├── MenuBarView.swift       # Main menu bar dropdown UI
 │   ├── HistoryListView.swift   # Scrollable history with search
 │   ├── SettingsView.swift      # App settings and preferences
-│   ├── PairingView.swift       # QR code generation for pairing
 │   └── Components/
 │       ├── ClipboardItemRow.swift
 │       └── ContentPreview.swift
@@ -246,7 +245,7 @@ xcodebuild test -scheme Hypo -destination 'platform=macOS'
 - [ ] Receive image from Android → verify notification with thumbnail
 - [ ] Search clipboard history
 - [ ] Delete history item
-- [ ] Generate QR code for pairing
+- [ ] Pair device via LAN auto-discovery or remote code
 - [ ] Toggle LAN/Cloud sync in settings
 
 ---
@@ -321,4 +320,3 @@ Requires sandbox adjustments:
 
 **Status**: In Development  
 **Last Updated**: October 1, 2025
-

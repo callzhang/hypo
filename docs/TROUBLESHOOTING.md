@@ -782,7 +782,7 @@ log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -E "De
 **Re-generate Encryption Keys**:
 ```
 1. Both devices: Settings → Security → Reset encryption keys
-2. Re-pair devices using QR code or remote pairing
+2. Re-pair devices using LAN auto-discovery or remote pairing
 3. Test sync with simple text
 ```
 
@@ -923,9 +923,9 @@ python3 scripts/simulate-android-relay.py --text "Test message" --target-device-
 2. Android: Pair → LAN tab → Tap macOS device
 3. Verify pairing completes
 
-**QR Code Pairing**:
-1. macOS: Settings → Pair new device → QR tab
-2. Android: Pair → Scan QR Code
+**Remote Pairing (Code)**:
+1. macOS: Settings → Pair new device → Code tab
+2. Android: Pair → Code tab → Enter code
 
 #### Clipboard Sync Testing
 
@@ -1227,7 +1227,7 @@ curl -s https://hypo.fly.dev/health | jq '.connected_devices'
 
 ### Testing Checklist
 
-- [ ] Devices paired (LAN or QR)
+- [ ] Devices paired (LAN or remote code)
 - [ ] Both apps running with latest build
 - [ ] Log monitoring set up
 - [ ] Test matrix run: `./tests/test-sync-matrix.sh`

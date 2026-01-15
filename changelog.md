@@ -344,7 +344,7 @@ All notable changes to the Hypo project will be documented in this file.
   - Health checks on HTTP and TCP
   - Prometheus metrics endpoint
 - **Device-Agnostic Pairing**: Pairing system supports pairing between any devices
-  - Any device can act as initiator (QR code creator) or responder (QR code scanner)
+  - Any device can act as initiator (pairing payload publisher) or responder (pairing responder)
   - Any device can create or claim pairing codes in remote pairing
   - Platform automatically detected from device ID prefixes
 - **Automated Build and Release Pipeline**: GitHub Actions workflow for releases
@@ -462,7 +462,7 @@ All notable changes to the Hypo project will be documented in this file.
 ## [0.3.3] - 2025-12-02 - Device-Agnostic Pairing & Storage Improvements
 
 ### Added
-- **Device-Agnostic Pairing**: Pairing system now supports pairing between any devices (Android↔Android, macOS↔macOS, Android↔macOS, etc.), not just Android↔macOS. Any device can act as initiator (QR code creator) or responder (QR code scanner) in LAN pairing, and any device can create or claim pairing codes in remote pairing.
+- **Device-Agnostic Pairing**: Pairing system now supports pairing between any devices (Android↔Android, macOS↔macOS, Android↔macOS, etc.), not just Android↔macOS. Any device can act as initiator or responder in LAN pairing, and any device can create or claim pairing codes in remote pairing.
 
 ### Changed
 - **Pairing Protocol**: Refactored pairing models to use role-based field names (`peer_device_id`, `initiator_device_id`, `responder_device_id`) instead of platform-specific names (`mac_device_id`, `android_device_id`). Backward compatibility maintained through dual field support.
@@ -663,14 +663,14 @@ All notable changes to the Hypo project will be documented in this file.
 ### Changed (macOS)
 - Replaced NoopSyncTransport with functional LAN transport
 - macOS now capable of receiving WebSocket connections from Android
-- Fixed QR code signature verification by adding sorted JSON keys
+- Fixed pairing payload signature verification by adding sorted JSON keys
 
 ### Added (Android)
 - **LanPairingViewModel**: State management for auto-discovery pairing
   - Uses existing LanDiscoverySource for mDNS device discovery
   - Manages pairing flow: Discovering → DevicesFound → Pairing → Success/Error
   - Integrates with PairingHandshakeManager for secure handshake
-- **Auto-Discovery UI**: Three-tab interface (LAN | QR | Code)
+- **Auto-Discovery UI**: Two-tab interface (LAN | Code)
   - AutoDiscoveryContent composable displays discovered macOS devices
   - DeviceCard shows device name, IP:port, and security status (🔒 Secured)
   - Real-time device discovery with automatic list updates
@@ -678,7 +678,7 @@ All notable changes to the Hypo project will be documented in this file.
 - **PairingMode.AutoDiscovery**: Set as default pairing mode for best UX
 
 ### Changed (Android)
-- Default pairing mode changed from QR to AutoDiscovery
+- Default pairing mode changed to AutoDiscovery
 - PairingScreen now supports three modes with tab navigation
 - Fixed imports for DeviceKeyStore and DeviceIdentity
 - Build Status: ✅ Compiles successfully, APK at `android/app/build/outputs/apk/debug/app-debug.apk`
@@ -820,7 +820,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Defined throttling mechanism (token bucket, 1 update per 300ms)
   
 - **Security Design**:
-  - Documented device pairing protocol (QR code for LAN, 6-digit code for cloud)
+  - Documented device pairing protocol (LAN auto-discovery, 6-digit code for cloud)
   - Specified certificate pinning for cloud relay
   - Defined key rotation policy (30-day cycle with 7-day grace period)
   - Established threat model and mitigation strategies
@@ -889,7 +889,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Planned Features**:
 - Basic clipboard sync (text only)
 - LAN discovery and direct connection
-- Device pairing via QR code
+- Device pairing via LAN auto-discovery
 - Simple UI on both platforms
 - De-duplication and throttling
 

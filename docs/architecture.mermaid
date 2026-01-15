@@ -65,7 +65,7 @@ graph TB
     CLOUD <--> WS
     
     subgraph "Security Layer"
-        PAIR[Device Pairing<br/>QR Code Exchange]
+        PAIR[Device Pairing<br/>LAN Auto-Discovery + Code]
         E2E[E2E Encryption<br/>Per-device keys]
         
         PAIR --> E2E
@@ -95,4 +95,3 @@ graph TB
     style E2E fill:#FFD700,color:#000
     style LAN fill:#90EE90,color:#000
     style CLOUD fill:#FFB6C1,color:#000
-

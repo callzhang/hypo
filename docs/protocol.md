@@ -755,7 +755,7 @@ See `tests/protocol-test-vectors.json` for encryption/decryption test vectors (c
 
 **Changes**:
 1. **Field Names**: Replaced platform-specific field names with role-based names
-   - `mac_device_id` → `peer_device_id` (QR payload) or `initiator_device_id`/`responder_device_id` (messages)
+   - `mac_device_id` → `peer_device_id` (pairing payload) or `initiator_device_id`/`responder_device_id` (messages)
    - `android_device_id` → `responder_device_id`
    - `mac_pub_key` → `peer_pub_key` or `initiator_pub_key`/`responder_pub_key`
 

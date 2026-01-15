@@ -46,7 +46,7 @@ See `docs/architecture.mermaid` for visual representation.
 | Storage - Android | Room | Official Jetpack library, Flow support | Oct 1, 2025 |
 | State Storage - Backend | Redis | In-memory speed, ephemeral state | Oct 1, 2025 |
 | Encryption | AES-256-GCM | Industry standard, authenticated encryption | Oct 1, 2025 |
-| Key Exchange | ECDH | Forward secrecy, QR code compatibility | Oct 1, 2025 |
+| Key Exchange | ECDH | Forward secrecy, LAN auto-discovery compatibility | Oct 1, 2025 |
 | Transport | WebSocket | Bi-directional, real-time, wide support | Oct 1, 2025 |
 
 #### macOS Client ✅ Implemented
@@ -308,13 +308,13 @@ To ensure robust duplicate detection without overhead, Hypo uses a **metadata-fi
 
 ### 3.2 Device Pairing Protocol ✅ Implemented
 
-Hypo supports three pairing methods, all device-agnostic (any device can pair with any other device):
+Hypo supports two pairing methods, both device-agnostic (any device can pair with any other device):
 
 #### 1. LAN Auto-Discovery Pairing (Primary Method) ✅ Implemented
 **Status**: Fully operational with tap-to-pair UX
 
 1. Both devices on same network advertise via mDNS/Bonjour
-2. Each device discovers peers automatically (no QR code needed)
+2. Each device discovers peers automatically (no manual pairing artifacts needed)
 3. User taps discovered device to initiate pairing
 4. Automatic ECDH key exchange via WebSocket challenge-response
 5. Keys stored securely, pairing complete in < 3 seconds
@@ -325,22 +325,7 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
 - **Timeout Handling**: `sendRawJson()` properly captures `connectionSignal` atomically to avoid race conditions where the signal might be reassigned during connection establishment
 - **Connection Signal**: Uses mutex-protected capture of `connectionSignal` to ensure pairing challenges wait on the correct signal instance
 
-#### 2. QR Code Pairing (LAN) ✅ Implemented
-**Device-Agnostic**: Any device can initiate pairing (generate QR) and any device can respond (scan QR). Roles are initiator/responder, not platform-specific.
-
-1. User opens "Pair Device" on initiator device.
-2. Initiator fetches/rotates its long-term Ed25519 signing key (stored in platform-specific secure storage) and generates an ephemeral Curve25519 key pair for this attempt.
-3. Compose QR payload using fields defined in PRD §6.1 (`ver`, `peer_device_id`, `peer_pub_key`, `peer_signing_pub_key`, `service`, `port`, `relay_hint`, `issued_at`, `expires_at`).
-4. Create canonical byte representation: JSON sorted by key, UTF-8 encoded; sign with Ed25519 → `signature` field.
-5. Render QR (error correction level M, 256×256) and expose to user until `expires_at`.
-6. Responder scans QR, parses JSON, validates schema + TTL window (±5 min) and verifies signature against initiator's long-term public key (distributed during previous pairing or bootstrap update channel).
-7. Responder publishes ephemeral Curve25519 key pair, derives shared key = HKDF-SHA256(X25519(peer_pub_key, responder_priv_key), salt = 32 bytes of 0x00, info = "hypo/pairing").
-8. Resolve Bonjour service `service` and `port`; connect via TLS WebSocket. If connection fails within 3 s, fallback path triggers (see Remote Pairing).
-9. Responder emits `PAIRING_CHALLENGE` message: AES-256-GCM encrypt random 32-byte challenge with `initiator_device_id`, `initiator_device_name`, `initiator_pub_key`, associated data = `initiator_device_id`. Include `nonce`, `ciphertext`, `tag`.
-10. Initiator decrypts, ensures nonce monotonicity (LRU cache of last 32 seen), detects responder's platform from device ID prefix. Responds with `PAIRING_ACK` containing `responder_device_id`, `responder_device_name` and detected platform.
-11. Both sides persist shared key + peer metadata with platform information; handshake complete. Initiator invalidates QR (even if `expires_at` not reached) and logs telemetry `pairing_lan_success` with anonymized latency.
-
-#### 3. Remote Pairing (via Cloud Relay) ✅ Implemented
+#### 2. Remote Pairing (via Cloud Relay) ✅ Implemented
 **Device-Agnostic**: Any device can create a pairing code (initiator) and any device can claim it (responder).
 **Status**: Fully operational via production relay (https://hypo.fly.dev)
 
@@ -355,7 +340,7 @@ Hypo supports three pairing methods, all device-agnostic (any device can pair wi
    - Initiator offline → relay retries notify for 30 s; if unacknowledged, entry resets for reuse until TTL.
    - Duplicate device ID claims → HTTP 409 `DEVICE_NOT_PAIRED`; instruct client to restart handshake.
 
-#### 3.2.4 Re-Pairing and Network Change Recovery ✅ Implemented
+#### 3.2.3 Re-Pairing and Network Change Recovery ✅ Implemented
 
 **Automatic Service Recovery**: Both platforms automatically restart LAN services (Bonjour/NSD advertising and WebSocket servers) when network changes are detected, ensuring devices remain discoverable and connections use updated IP addresses.
 
@@ -1323,7 +1308,7 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 2. Copy image on macOS → verify appears on Android
 3. Disconnect Wi-Fi → verify cloud fallback works
 4. Toggle airplane mode to confirm automatic LAN re-registration and fallback recovery
-5. Device pairing via QR code
+5. Device pairing via LAN auto-discovery or remote code
 6. Run LAN latency capture script and validate telemetry upload (see `docs/testing/lan_manual.md`)
 7. Clipboard history search
 8. Notification display with preview

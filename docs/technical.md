@@ -1285,7 +1285,7 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 ## 5. Testing Strategy
 
 ### 5.1 Unit Tests
-- **macOS**: XCTest for services, models
+- **macOS**: Swift Testing framework (`import Testing`) for services and models
 - **Android**: JUnit + MockK for repositories, services
   - Test naming aligned with production code: `WebSocketTransportClientTest` (renamed from `LanWebSocketClientTest`)
   - Connection state enums match runtime: `ConnectionState.Disconnected` (renamed from `Idle`)
@@ -1294,6 +1294,9 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
     - Cloud device status determined by cloud server connection state and active transport
     - Fixes issue where LAN-connected devices were incorrectly shown as disconnected
 - **Backend**: Rust `#[cfg(test)]` modules
+
+### Coverage Targets
+See `docs/TEST_COVERAGE.md` for the 90% coverage plan, tooling notes, and enforcement strategy.
 
 ### 5.2 Integration Tests
 - **E2E Encryption**: Encrypt on one platform, decrypt on other

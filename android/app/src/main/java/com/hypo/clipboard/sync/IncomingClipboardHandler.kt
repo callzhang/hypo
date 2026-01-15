@@ -42,7 +42,14 @@ class IncomingClipboardHandler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val storageManager: com.hypo.clipboard.data.local.StorageManager
 ) {
-    private val scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    private var ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
+    private var scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + ioDispatcher)
+    
+    @androidx.annotation.VisibleForTesting
+    fun setDispatcher(dispatcher: kotlinx.coroutines.CoroutineDispatcher) {
+        this.ioDispatcher = dispatcher
+        this.scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + dispatcher)
+    }
     
     /**
      * Callback to show Android system notifications when key is missing or decryption fails.
@@ -162,7 +169,7 @@ class IncomingClipboardHandler @Inject constructor(
             false
         }
         
-        if (isDuplicateNonce) {
+        if (isDuplicateNonce && cachedPayload == null) {
             Log.w(TAG, "⏭️ Skipping message with duplicate nonce: id=${messageId.take(8)}...")
             return
         }

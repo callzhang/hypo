@@ -19,7 +19,7 @@ public protocol ClipboardNotificationScheduling: AnyObject {
     func configure(handler: ClipboardNotificationHandling)
     func requestAuthorizationIfNeeded()
     func deliverNotification(for entry: ClipboardEntry)
-    func deliverStatusNotification(title: String, body: String)
+    func deliverStatusNotification(deviceId: String, title: String, body: String)
 }
 
 public final class ClipboardNotificationController: NSObject, ClipboardNotificationScheduling {
@@ -240,7 +240,7 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
         return content
     }
     
-    public func deliverStatusNotification(title: String, body: String) {
+    public func deliverStatusNotification(deviceId: String, title: String, body: String) {
         #if canImport(os)
         let logger = HypoLogger(category: "ClipboardNotificationController")
         logger.debug("📢 [ClipboardNotificationController] deliverStatusNotification: title=\(title), body=\(body)")
@@ -259,11 +259,13 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
             // Use a specific category or default
             // content.categoryIdentifier = ... 
             
-            // Use a unique ID based on title/body or random to avoid coalescing if multiple events happen
-            let identifier = "status-\(UUID().uuidString)"
+            // Use a stable per-device identifier to coalesce status updates
+            let identifier = "status-\(deviceId.lowercased())"
             
             let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
             
+            self.center.removeDeliveredNotifications(withIdentifiers: [identifier])
+            self.center.removePendingNotificationRequests(withIdentifiers: [identifier])
             self.center.add(request) { error in
                 #if canImport(os)
                 if let error = error {
@@ -398,7 +400,7 @@ final class NoOpNotificationController: NSObject, ClipboardNotificationSchedulin
     func configure(handler: ClipboardNotificationHandling) {}
     func requestAuthorizationIfNeeded() {}
     func deliverNotification(for entry: ClipboardEntry) {}
-    func deliverStatusNotification(title: String, body: String) {}
+    func deliverStatusNotification(deviceId: String, title: String, body: String) {}
 }
 
 #endif

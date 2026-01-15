@@ -66,12 +66,14 @@ class ClipboardSyncService : Service() {
     private lateinit var listener: ClipboardListener
     private lateinit var notificationManager: NotificationManagerCompat
     private var notificationJob: Job? = null
+    private var peerStatusJob: Job? = null
     private var clipboardPermissionJob: Job? = null
     private var latestPreview: String? = null
     private var isPaused: Boolean = false
     private var isScreenOff: Boolean = false
     private var awaitingClipboardPermission: Boolean = false
     private var isAppInForeground: Boolean = false
+    private val lastPeerOnlineStatus = mutableMapOf<String, Boolean>()
     private lateinit var screenStateReceiver: ScreenStateReceiver
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private lateinit var connectivityManager: android.net.ConnectivityManager
@@ -176,13 +178,6 @@ class ClipboardSyncService : Service() {
             incomingClipboardHandler.handle(envelope, origin)
         }
         
-        // Handle peer status changes with notifications
-        transportManager.setPeerStatusChangedHandler { deviceId, name, status ->
-             scope.launch {
-                 showStatusNotification(deviceId, "Device Status Changed", "$name is now $status")
-             }
-        }
-        
         // Set handler for LAN peer connections (created by LanPeerConnectionManager)
         // Get LanPeerConnectionManager from TransportManager's internal reference
         val lanPeerConnectionManager = transportManager.getLanPeerConnectionManager()
@@ -211,6 +206,7 @@ class ClipboardSyncService : Service() {
         registerScreenStateReceiver()
         registerNetworkChangeCallback()
         connectionStatusProber.start()
+        observePeerStatusNotifications()
         
         // Monitor app foreground state
         scope.launch {
@@ -236,6 +232,7 @@ class ClipboardSyncService : Service() {
         
         transportManager.clearPeerStatusChangedHandler()
         notificationJob?.cancel()
+        peerStatusJob?.cancel()
         unregisterScreenStateReceiver()
         unregisterNetworkChangeCallback()
         listener.stop()
@@ -545,6 +542,33 @@ class ClipboardSyncService : Service() {
             notificationManager.notify(notificationId, builder.build())
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to show status notification: ${e.message}")
+        }
+    }
+
+    private fun observePeerStatusNotifications() {
+        peerStatusJob?.cancel()
+        peerStatusJob = scope.launch {
+            connectionStatusProber.deviceDualStatus.collectLatest { statuses ->
+                val activeIds = statuses.keys
+                val removedIds = lastPeerOnlineStatus.keys - activeIds
+                removedIds.forEach { lastPeerOnlineStatus.remove(it) }
+
+                statuses.forEach { (deviceId, status) ->
+                    val isOnline = status.isConnectedViaLan || status.isConnectedViaCloud
+                    val previous = lastPeerOnlineStatus[deviceId]
+                    if (previous == null) {
+                        lastPeerOnlineStatus[deviceId] = isOnline
+                        return@forEach
+                    }
+
+                    if (previous != isOnline) {
+                        lastPeerOnlineStatus[deviceId] = isOnline
+                        val displayName = transportManager.getServiceNameForDevice(deviceId) ?: deviceId.take(20)
+                        val statusText = if (isOnline) "Online" else "Offline"
+                        showStatusNotification(deviceId, "Device Status Changed", "$displayName is now $statusText")
+                    }
+                }
+            }
         }
     }
 
@@ -1038,7 +1062,7 @@ class ClipboardSyncService : Service() {
                 val publicKey = keyPair.publicKey
                 val privateKey = keyPair.privateKey
                 val publicKeyBase64 = android.util.Base64.encodeToString(publicKey, android.util.Base64.NO_WRAP)
-                // Store private key (for signing QR payloads)
+                // Store private key (for signing LAN pairing payloads)
                 val privateKeyBase64 = android.util.Base64.encodeToString(privateKey, android.util.Base64.NO_WRAP)
                 prefs.edit()
                     .putString("lan_signing_public_key", publicKeyBase64)

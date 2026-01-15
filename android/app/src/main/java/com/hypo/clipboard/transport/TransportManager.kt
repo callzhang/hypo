@@ -153,6 +153,15 @@ class TransportManager(
         android.util.Log.w("TransportManager", "⚠️ No device name found for $deviceId (tried: $normalizedId, $deviceId)")
         return null
     }
+
+    fun getServiceNameForDevice(deviceId: String): String? {
+        synchronized(stateLock) {
+            return peersByService.values.firstOrNull { peer ->
+                val peerId = peer.attributes["device_id"]
+                peerId != null && peerId.equals(deviceId, ignoreCase = true)
+            }?.serviceName
+        }
+    }
     
     private fun clearPersistedTransportStatus(deviceId: String) {
         prefs?.edit()?.remove("transport_$deviceId")?.apply()

@@ -264,6 +264,7 @@ public final class TransportManager: ObservableObject {
             let deviceName = pairedDevices[index].name
             let statusText = isOnline ? "Online" : "Offline"
             notificationController.deliverStatusNotification(
+                deviceId: pairedDevices[index].id,
                 title: "Device Status Changed",
                 body: "\(deviceName) is now \(statusText)"
             )

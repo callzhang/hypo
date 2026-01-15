@@ -83,7 +83,7 @@
 
     <!-- Pairing Screen -->
     <string name="pairing_title">Pair Device</string>
-    <string name="pairing_scan_qr">Pair New Device</string>
+    <string name="pairing_start">Pair New Device</string>
     <string name="pairing_enter_code">Or enter pairing code</string>
     <string name="pairing_code_hint">6-digit code</string>
     <string name="pairing_pair">Pair</string>
@@ -123,7 +123,6 @@
     <string name="error_generic">Something went wrong</string>
     <string name="error_network">Network error. Please check your connection.</string>
     <string name="error_permission">Permission required</string>
-    <string name="error_camera">Camera permission required for QR scanning</string>
 
     
     <!-- File Size Warnings -->

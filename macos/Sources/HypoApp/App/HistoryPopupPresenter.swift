@@ -17,7 +17,7 @@ private class NonFocusStealingPanel: NSPanel {
     }
     
     // Override keyDown to handle ESC key and pass other events to super
-    // ESC key is handled via Carbon event listener, but we also handle it here as fallback
+    // ESC key is primarily handled via NSEvent local monitor, but we handle it here as fallback
     override func keyDown(with event: NSEvent) {
         // Handle ESC key (keyCode 53) to close window
         // If pinned, only dismiss if this window is the key window (focused)
@@ -50,7 +50,7 @@ final class HistoryPopupPresenter {
     private var window: NSPanel?
     private var isPinned: Bool = false  // Start unpinned - window can be dismissed by clicking outside
     private var globalClickMonitor: Any?
-    private var escHotKeyRef: EventHotKeyRef?
+    private var escKeyMonitor: Any?
     private var previousFrontmostApp: NSRunningApplication?  // Save the app that was frontmost before showing window
 
     func show(with viewModel: ClipboardHistoryViewModel) {
@@ -105,7 +105,7 @@ final class HistoryPopupPresenter {
                     window.orderOut(nil)
                     window.alphaValue = 1.0  // Reset for next show
                     self.removeClickMonitor()
-                    self.removeEscHotkey()  // Unregister ESC key handler
+                    self.removeEscMonitor()  // Remove ESC key monitor
                 }
             })
         }
@@ -146,7 +146,7 @@ final class HistoryPopupPresenter {
             
             // Remove monitors first
             self.removeClickMonitor()
-            self.removeEscHotkey()  // Unregister ESC key handler
+            self.removeEscMonitor()  // Remove ESC key monitor
             
             // CRITICAL: Resign first responder to ensure no text field captures input
             // This prevents "paste into search bar" bug if window receives the event
@@ -257,7 +257,7 @@ final class HistoryPopupPresenter {
             // Keyboard events are handled by overriding keyDown/keyUp in NonFocusStealingPanel
             window.orderFrontRegardless()
             updateClickMonitor()
-            setupEscHotkey()  // Register ESC key handler
+            setupEscMonitor()  // Setup ESC key monitor
             return
         }
 
@@ -314,7 +314,7 @@ final class HistoryPopupPresenter {
         // Don't make window key - just show it without stealing focus
         panel.orderFrontRegardless()
         updateClickMonitor()
-        setupEscHotkey()  // Register ESC key handler
+        setupEscMonitor()  // Setup ESC key monitor
         
         // Focus search field after a short delay to allow window to appear
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -343,41 +343,28 @@ final class HistoryPopupPresenter {
         }
     }
 
-    private func setupEscHotkey() {
-        removeEscHotkey()
-        guard window != nil, window?.isVisible == true else { return }
+    private func setupEscMonitor() {
+        removeEscMonitor()
+        guard !isPinned, window != nil, window?.isVisible == true else { return }
         
-        // Use Carbon API to register ESC key (doesn't require accessibility permissions)
-        // Similar to how Alt+N is handled in HypoAppDelegate
-        var hotKeyID = EventHotKeyID()
-        hotKeyID.signature = OSType(0x4859504F) // "HYPO" signature (same as Alt+V)
-        hotKeyID.id = 999  // Unique ID for ESC key
-        
-        // The event handler is already installed in HypoAppDelegate, we just need to register the hotkey
-        
-        // Register ESC key (keyCode 53)
-        var hotKeyRef: EventHotKeyRef?
-        let err = RegisterEventHotKey(
-            UInt32(53),  // ESC key code
-            0,  // No modifiers
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRef
-        )
-        
-        if err == noErr {
-            escHotKeyRef = hotKeyRef
-            // ESC hotkey registered - no logging needed
-        } else {
-            logger.warning("⚠️ Failed to register ESC hotkey: \(err)")
+        // Use NSEvent local monitor to handle ESC key
+        // This only intercepts events destined for our app, more native than Carbon hotkey
+        escKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            
+            // ESC key (keyCode 53)
+            if event.keyCode == 53 {
+                self.hide()
+                return nil  // Consume the event
+            }
+            return event  // Pass through other keys
         }
     }
     
-    private func removeEscHotkey() {
-        if let hotKey = escHotKeyRef {
-            UnregisterEventHotKey(hotKey)
-            escHotKeyRef = nil
+    private func removeEscMonitor() {
+        if let monitor = escKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            escKeyMonitor = nil
         }
     }
     

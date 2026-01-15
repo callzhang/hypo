@@ -46,7 +46,8 @@ class SyncCoordinator @Inject constructor(
     private val manualTargets = MutableStateFlow<Set<String>>(emptySet())
     private val _targets = MutableStateFlow<Set<String>>(emptySet())
     val targets: StateFlow<Set<String>> = _targets.asStateFlow()
-    private val keyStoreScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val keyStoreJob = SupervisorJob()
+    private val keyStoreScope = CoroutineScope(keyStoreJob + Dispatchers.Default)
     private val pairedDeviceIdsCache = MutableStateFlow<Set<String>>(emptySet())
     
     init {
@@ -345,6 +346,7 @@ class SyncCoordinator @Inject constructor(
         eventChannel = null
         job?.cancel()
         job = null
+        keyStoreJob.cancel()
     }
 
     suspend fun onClipboardEvent(event: ClipboardEvent) {

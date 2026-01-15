@@ -78,7 +78,7 @@ class ClipboardListener(
         // CRITICAL: This is called synchronously on the main thread when setPrimaryClip is called.
         // We must return immediately and do all processing in a coroutine to avoid blocking the UI.
         // Launch processing in a coroutine immediately to avoid blocking the main thread
-        scope.launch(Dispatchers.Default) {
+        scope.launch(dispatcher) {
             try {
                 try {
                     val clip = clipboardManager.primaryClip
@@ -224,7 +224,7 @@ class ClipboardListener(
      * This will process the clipboard even if the listener is not started.
      */
     fun forceProcessCurrentClipboard() {
-        scope.launch(Dispatchers.Default) {
+        scope.launch(dispatcher) {
             try {
                 val clip = clipboardManager.primaryClip
                 if (clip != null) {

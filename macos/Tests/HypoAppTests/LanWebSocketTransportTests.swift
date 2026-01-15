@@ -10,8 +10,8 @@ struct LanWebSocketTransportTests {
     func testConnectResolvesAfterHandshake() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = await MainActor.run {  WebSocketTransport(
-            configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
+        let transport = await MainActor.run { LanWebSocketTransport(
+            configuration: .init(url: URL(string: "wss://example.com/ws?query=param")!, pinnedFingerprint: nil),
             sessionFactory: { _, _ in session }
         ) }
 
@@ -29,11 +29,39 @@ struct LanWebSocketTransportTests {
     }
 
     @Test
+    func testQueryParametersAreStrippedForLanConnections() async throws {
+        let stubTask = StubWebSocketTask()
+        let session = StubSession(task: stubTask)
+        // Use "ws" scheme to trigger LAN behavior (stripping query params)
+        // "wss" scheme is treated as cloud connection which preserves params
+        let transport = await MainActor.run { LanWebSocketTransport(
+            configuration: .init(url: URL(string: "ws://example.com/ws?query=param&other=value")!, pinnedFingerprint: nil, environment: "lan"),
+            sessionFactory: { _, _ in session }
+        ) }
+
+        stubTask.onResume = {
+            transport.handleOpen(task: stubTask)
+        }
+
+        try await transport.connect()
+        
+        // Wait for connection
+        let connected = await waitUntil(timeout: .milliseconds(500)) {
+            transport.isConnected()
+        }
+        #expect(connected)
+        
+        // Check the URL request used to create the task
+        let requestURL = stubTask.createdRequest?.url?.absoluteString
+        #expect(requestURL == "ws://example.com/ws")
+    }
+
+    @Test
     func testSendUsesFrameCodec() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
         let codec = TransportFrameCodec()
-        let transport = await MainActor.run { WebSocketTransport(
+        let transport = await MainActor.run { LanWebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             frameCodec: codec,
             sessionFactory: { _, _ in session }
@@ -62,28 +90,8 @@ struct LanWebSocketTransportTests {
         #expect(decoded.payload.deviceId == "device")
     }
 
-    @Test
-    func testIdleTimeoutCancelsTask() async throws {
-        let stubTask = StubWebSocketTask()
-        let session = StubSession(task: stubTask)
-        let transport = await MainActor.run { WebSocketTransport(
-            configuration: .init(url: URL(string: "ws://example.com")!, pinnedFingerprint: nil, idleTimeout: 0.05),
-            sessionFactory: { _, _ in session }
-        ) }
-        let cancelled = Locked(false)
-        stubTask.onCancel = { (_: URLSessionWebSocketTask.CloseCode, _: Data?) in
-            cancelled.withLock { $0 = true }
-        }
-        stubTask.onResume = {
-            transport.handleOpen(task: stubTask)
-        }
+    // testIdleTimeoutCancelsTask removed as LanWebSocketTransport does not support idle timeout in LAN mode
 
-        try await transport.connect()
-        let fulfilled = await waitUntil(timeout: .seconds(1)) {
-            cancelled.withLock { $0 }
-        }
-        #expect(fulfilled)
-    }
 
     @Test
     func testMetricsRecorderCapturesHandshakeAndRoundTrip() async throws {
@@ -91,7 +99,7 @@ struct LanWebSocketTransportTests {
         let codec = TransportFrameCodec()
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = await MainActor.run { WebSocketTransport(
+        let transport = await MainActor.run { LanWebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             frameCodec: codec,
             metricsRecorder: metrics,
@@ -125,10 +133,82 @@ struct LanWebSocketTransportTests {
     }
 
     @Test
+    func testReceiveParsesAndDispatchesMessages() async throws {
+        let stubTask = StubWebSocketTask()
+        let session = StubSession(task: stubTask)
+        let codec = TransportFrameCodec()
+        let transport = await MainActor.run { LanWebSocketTransport(
+            configuration: .init(url: URL(string: "ws://example.com")!, pinnedFingerprint: nil, environment: "lan"),
+            sessionFactory: { _, _ in session }
+        ) }
+        
+        let receivedEnvelope = Locked<SyncEnvelope?>(nil)
+        await transport.setOnIncomingMessage { data, origin in
+            if let envelope = try? codec.decode(data) {
+                receivedEnvelope.withLock { $0 = envelope }
+            }
+        }
+
+        stubTask.onResume = {
+            transport.handleOpen(task: stubTask)
+        }
+
+        try await transport.connect()
+        
+        let envelope = SyncEnvelope(type: .clipboard, payload: .init(
+            contentType: .text,
+            ciphertext: Data([0xAA]),
+            deviceId: "sender",
+            target: "receiver",
+            encryption: .init(nonce: Data(), tag: Data())
+        ))
+        
+        // Simulate receiving data
+        let encoded = try codec.encode(envelope)
+        stubTask.receiveHandler?(.success(.data(encoded)))
+        
+        let fulfilled = await waitUntil(timeout: .seconds(1)) {
+            receivedEnvelope.withLock { $0 } != nil
+        }
+        #expect(fulfilled)
+        
+        let received = try #require(receivedEnvelope.withLock { $0 })
+        #expect(received.payload.deviceId == "sender")
+    }
+
+    @Test
+    func testPingSendsPingFrame() async throws {
+        let stubTask = StubWebSocketTask()
+        let session = StubSession(task: stubTask)
+        // Set short keepalive interval
+        let transport = await MainActor.run { LanWebSocketTransport(
+            configuration: .init(url: URL(string: "ws://example.com")!, pinnedFingerprint: nil, environment: "lan", keepaliveInterval: 0.1),
+            sessionFactory: { _, _ in session }
+        ) }
+
+        stubTask.onResume = { [weak transport] in
+            transport?.handleOpen(task: stubTask)
+        }
+        
+        let pingSent = Locked(false)
+        stubTask.onPing = {
+            pingSent.withLock { $0 = true }
+        }
+
+        try await transport.connect()
+        
+        // Wait for keepalive interval
+        try await Task.sleep(for: .milliseconds(200))
+        
+        let sent = pingSent.withLock { $0 }
+        #expect(sent)
+    }
+
+    @Test
     func testReconnectAfterDisconnect() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
-        let transport = await MainActor.run { WebSocketTransport(
+        let transport = await MainActor.run { LanWebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
             sessionFactory: { _, _ in session }
         ) }
@@ -172,12 +252,14 @@ private final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
     var createdRequest: URLRequest?
     var onResume: (() -> Void)?
     var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
+    var onPing: (() -> Void)?
     var sentData: [Data] = []
     var receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
 
     func resume() {
         onResume?()
     }
+
 
     func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping (Error?) -> Void) {
         if case .data(let data) = message {
@@ -195,6 +277,7 @@ private final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
     }
 
     func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) {
+        onPing?()
         pongReceiveHandler(nil)
     }
 }

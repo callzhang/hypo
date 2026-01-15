@@ -125,6 +125,10 @@ public final class LanWebSocketServer {
     public func setLocalDeviceId(_ deviceId: String) {
         self.localDeviceId = deviceId
     }
+
+    public var listeningPort: NWEndpoint.Port? {
+        listener?.port
+    }
     
     public func start(port: Int) throws {
         logger.info("🚀 Starting WebSocket server on port \(port)")

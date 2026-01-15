@@ -14,6 +14,7 @@ public struct LanWebSocketConfiguration: Sendable, Equatable {
     public let idleTimeout: TimeInterval
     public let environment: String
     public let roundTripTimeout: TimeInterval
+    public let keepaliveInterval: TimeInterval?
 
     public init(
         url: URL,
@@ -21,7 +22,8 @@ public struct LanWebSocketConfiguration: Sendable, Equatable {
         headers: [String: String] = [:],
         idleTimeout: TimeInterval = 3600, // 1 hour (for compatibility, but LAN uses ping/pong now)
         environment: String = "lan",
-        roundTripTimeout: TimeInterval = 60
+        roundTripTimeout: TimeInterval = 60,
+        keepaliveInterval: TimeInterval? = nil
     ) {
         self.url = url
         self.pinnedFingerprint = pinnedFingerprint
@@ -29,6 +31,7 @@ public struct LanWebSocketConfiguration: Sendable, Equatable {
         self.idleTimeout = idleTimeout
         self.environment = environment
         self.roundTripTimeout = roundTripTimeout
+        self.keepaliveInterval = keepaliveInterval
     }
 }
 
@@ -297,7 +300,7 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
                 
                 // Success!
                 self.logger.info("✅ [LanWebSocketTransport] Message sent successfully after \(queuedMessage.retryCount) retries (queue size: \(messageQueue.count))")
-                _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
+                // Do NOT remove from pendingRoundTrips here - wait for ACK/response to calculate round trip time
                 
             } catch {
                 let errorDescription = error.localizedDescription
@@ -491,16 +494,30 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             fflush(stdout)
             // Send ping every 20 seconds to keep connection alive
             watchdogTask = Task.detached { [weak self] in
-                guard let self else { return }
                 while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 20_000_000_000) // 20 seconds
+                    guard let self else { return }
+                    let interval = self.configuration.keepaliveInterval ?? 20.0
+                    try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                     if Task.isCancelled { return }
                     // Access state directly since LanWebSocketTransport is a class, not an actor
                     guard case .connected(let currentTask) = self.state, currentTask === task else {
                         return
                     }
                     // Send ping to keep connection alive
-                    currentTask.sendPing(pongReceiveHandler: { [weak self] error in
+                    
+                    // We need to be careful not to retain self for too long if we want deinit to work
+                    // But here we are using 'self' from the guard above.
+                    // To properly break cycle, we should re-check weak self or rely on cancel?
+                    // Ideally:
+                    // loop {
+                    //   sleep
+                    //   guard let self = self else { return }
+                    //   use self
+                    // }
+                    // But 'self' is captured by the closure at start if we unwrap it.
+                    // So we must NOT unwrap it at start.
+                    
+                     currentTask.sendPing(pongReceiveHandler: { [weak self] error in 
                         guard let self = self else { return }
                         if let error {
                             self.logger.info("❌ [LanWebSocketTransport] Ping failed: \(error.localizedDescription)")
@@ -527,9 +544,10 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         logger.info("⏰ [LanWebSocketTransport] Starting ping/pong keepalive for LAN connection")
         logger.info("   Sending ping every 30 minutes (event-driven, will reconnect on disconnect)")
         watchdogTask = Task.detached { [weak self] in
-            guard let self else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_800_000_000_000) // 30 minutes (30 * 60 * 1_000_000_000)
+                guard let self else { return }
+                let interval = self.configuration.keepaliveInterval ?? 1800.0 // 30 minutes
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 if Task.isCancelled { return }
                 // Access state directly since LanWebSocketTransport is a class, not an actor
                 guard case .connected(let currentTask) = self.state, currentTask === task else {

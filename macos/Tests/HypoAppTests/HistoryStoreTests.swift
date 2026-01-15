@@ -55,6 +55,108 @@ struct HistoryStoreTests {
         #expect(result?.id == expected.id)
         #expect(result?.content == expected.content)
     }
+
+    @Test
+    func testEntriesPersistAcrossInstances() async {
+        let suiteName = "HistoryStoreTests.Persistence.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        
+        // 1. Create store and insert entry
+        let entry = ClipboardEntry(
+            deviceId: "macos",
+            originPlatform: .macOS,
+            originDeviceName: "Test Mac",
+            content: .text("Persisted")
+        )
+        
+        let store1 = HistoryStore(maxEntries: 10, defaults: defaults)
+        _ = await store1.insert(entry)
+        
+        // 2. Create new store instance with same defaults
+        let store2 = HistoryStore(maxEntries: 10, defaults: defaults)
+        let items = await store2.all()
+        
+        // 3. Verify entry was loaded
+        #expect(items.count == 1)
+        #expect(items.first?.content == .text("Persisted"))
+    }
+    
+    @Test
+    func testRemoveEntry() async {
+        let store = makeStore(maxEntries: 5)
+        let entry = ClipboardEntry(
+            deviceId: "macos",
+            originPlatform: .macOS,
+            originDeviceName: "Test Mac",
+            content: .text("To Delete")
+        )
+        _ = await store.insert(entry)
+        
+        let itemsAfterInsert = await store.all()
+        #expect(itemsAfterInsert.count == 1)
+        
+        await store.remove(id: entry.id)
+        
+        let itemsAfterDelete = await store.all()
+        #expect(itemsAfterDelete.isEmpty)
+    }
+    
+    @Test
+    func testClearAllEntries() async {
+        let store = makeStore(maxEntries: 5)
+        for i in 0..<3 {
+            let entry = ClipboardEntry(
+                deviceId: "macos",
+                originPlatform: .macOS,
+                originDeviceName: "Test Mac",
+                content: .text("Item \(i)")
+            )
+            _ = await store.insert(entry)
+        }
+        
+        #expect(await store.all().count == 3)
+        
+        await store.clear()
+        
+        #expect(await store.all().isEmpty)
+    }
+    
+    @Test
+    func testReinsertingExistingEntryMovesItToTop() async {
+        let store = makeStore(maxEntries: 5)
+        let entry1 = ClipboardEntry(
+            deviceId: "d1",
+            originPlatform: .macOS,
+            originDeviceName: "Mac",
+            content: .text("First")
+        )
+        let entry2 = ClipboardEntry(
+            deviceId: "d1",
+            originPlatform: .macOS,
+            originDeviceName: "Mac",
+            content: .text("Second")
+        )
+        
+        _ = await store.insert(entry1)
+        _ = await store.insert(entry2)
+        
+        var items = await store.all()
+        #expect(items.count == 2)
+        #expect(items.first?.id == entry2.id) // Recent on top
+        
+        // Re-insert entry1 (content match)
+        let entry1Duplicate = ClipboardEntry(
+            deviceId: "d2", // Different device, but same content
+            originPlatform: .Android,
+            originDeviceName: "Phone",
+            content: .text("First")
+        )
+        _ = await store.insert(entry1Duplicate)
+        
+        items = await store.all()
+        #expect(items.count == 2) // No new item
+        #expect(items.first?.content == .text("First")) // entry1 moved to top
+    }
 }
 
 private func makeStore(maxEntries: Int) -> HistoryStore {

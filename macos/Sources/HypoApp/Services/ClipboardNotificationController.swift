@@ -176,7 +176,9 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
             #if canImport(os)
             logger.debug("✅ [ClipboardNotificationController] Enqueuing notification")
             #endif
-            self.enqueueNotification(for: entry)
+            Task { @MainActor [weak self] in
+                self?.enqueueNotification(for: entry)
+            }
         }
     }
 

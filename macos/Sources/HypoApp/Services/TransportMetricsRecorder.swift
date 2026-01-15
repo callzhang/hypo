@@ -1,6 +1,6 @@
 import Foundation
 
-public protocol TransportMetricsRecorder {
+public protocol TransportMetricsRecorder: Sendable {
     func recordHandshake(duration: TimeInterval, timestamp: Date)
     func recordRoundTrip(envelopeId: String, duration: TimeInterval)
 }
@@ -27,7 +27,7 @@ public struct TransportMetricsSnapshot: Equatable {
     public let roundTrip: TransportMetricDistribution?
 }
 
-public final class TransportMetricsAggregator: TransportMetricsRecorder {
+public final class TransportMetricsAggregator: TransportMetricsRecorder, @unchecked Sendable {
     private let lock = NSLock()
     private var handshakeDurationsMs: [Double] = []
     private var roundTripDurationsMs: [Double] = []

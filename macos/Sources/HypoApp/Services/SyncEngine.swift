@@ -26,7 +26,7 @@ private func decodeBase64Field<T: CodingKey>(
     return data
 }
 
-public struct SyncEnvelope: Codable {
+public struct SyncEnvelope: Codable, Sendable {
     public let id: UUID
     public let timestamp: Date
     public let version: String
@@ -85,13 +85,13 @@ public struct SyncEnvelope: Codable {
         case payload
     }
 
-    public enum MessageType: String, Codable {
+    public enum MessageType: String, Codable, Sendable {
         case clipboard
         case control
         case error
     }
 
-    public struct Payload: Codable {
+    public struct Payload: Codable, Sendable {
         public let contentType: ClipboardPayload.ContentType
         public let ciphertext: Data
         public let deviceId: String  // UUID string (pure UUID, no prefix)
@@ -161,7 +161,7 @@ public struct SyncEnvelope: Codable {
         }
     }
 
-    public struct EncryptionMetadata: Codable {
+    public struct EncryptionMetadata: Codable, Sendable {
         public let algorithm: String
         public let nonce: Data
         public let tag: Data
@@ -189,7 +189,7 @@ public struct SyncEnvelope: Codable {
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(algorithm, forKey: .algorithm)
-            // Encode nonce and tag Data as base64 strings (Android expects base64 strings)
+            // Encode nonce and tag Data as base64 string (Android expects base64 strings)
             try container.encode(nonce.base64EncodedString(), forKey: .nonce)
             try container.encode(tag.base64EncodedString(), forKey: .tag)
         }
@@ -202,8 +202,8 @@ public struct SyncEnvelope: Codable {
     }
 }
 
-public struct ClipboardPayload: Codable {
-    public enum ContentType: String, Codable {
+public struct ClipboardPayload: Codable, Sendable {
+    public enum ContentType: String, Codable, Sendable {
         case text
         case link
         case image
@@ -270,7 +270,7 @@ public struct ClipboardPayload: Codable {
     }
 }
 
-public protocol SyncTransport {
+public protocol SyncTransport: Sendable {
     func connect() async throws
     func send(_ envelope: SyncEnvelope) async throws
     func disconnect() async
@@ -417,7 +417,6 @@ public final actor SyncEngine {
             // Use ciphertext directly as plaintext (it's not actually encrypted)
             plaintext = envelope.payload.ciphertext
         } else {
-            let keyProvider = KeychainDeviceKeyProvider()
             let key = try await keyProvider.key(for: senderId)
             let aad = Data(senderId.utf8)
             do {

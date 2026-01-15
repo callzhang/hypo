@@ -287,7 +287,7 @@ public final class IncomingClipboardHandler {
             
             // Save to disk
             let extensionName = format
-            let localPath = try? StorageManager.shared.save(payload.data, extension: extensionName)
+            let localPath = StorageManager.shared.save(payload.data, extension: extensionName)
             
             let metadata = ImageMetadata(
                 pixelSize: pixelSize,
@@ -305,7 +305,7 @@ public final class IncomingClipboardHandler {
             // Save to disk
             // Use file extension from name if possible
             let ext = (fileName as NSString).pathExtension
-            let localPath = try? StorageManager.shared.save(payload.data, extension: ext.isEmpty ? "dat" : ext)
+            let localPath = StorageManager.shared.save(payload.data, extension: ext.isEmpty ? "dat" : ext)
             
             let metadata = FileMetadata(
                 fileName: fileName,

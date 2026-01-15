@@ -13,11 +13,11 @@ public enum TransportAnalyticsEvent: Equatable {
     case metrics(transport: TransportChannel, snapshot: TransportMetricsSnapshot)
 }
 
-public protocol TransportAnalytics {
+public protocol TransportAnalytics: Sendable {
     func record(_ event: TransportAnalyticsEvent)
 }
 
-public final class InMemoryTransportAnalytics: TransportAnalytics {
+public final class InMemoryTransportAnalytics: TransportAnalytics, @unchecked Sendable {
     private let queue = DispatchQueue(label: "TransportAnalytics")
     private var _events: [TransportAnalyticsEvent] = []
 

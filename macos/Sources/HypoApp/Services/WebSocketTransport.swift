@@ -36,7 +36,7 @@ public struct WebSocketConfiguration: Sendable, Equatable {
     }
 }
 
-public protocol WebSocketTasking: AnyObject {
+public protocol WebSocketTasking: AnyObject, Sendable {
     var maximumMessageSize: Int { get set }
     func resume()
     func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping @Sendable (Error?) -> Void)
@@ -45,7 +45,7 @@ public protocol WebSocketTasking: AnyObject {
     func sendPing(pongReceiveHandler: @escaping @Sendable (Error?) -> Void)
 }
 
-extension URLSessionWebSocketTask: WebSocketTasking {
+extension URLSessionWebSocketTask: @unchecked Sendable, WebSocketTasking {
     // URLSessionWebSocketTask uses sendPing(pongReceiveHandler:), which matches the protocol
     // The protocol conformance is automatic
 }
@@ -304,7 +304,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         
         
         while !messageQueue.isEmpty {
-            let queueSizeBefore = messageQueue.count
             var queuedMessage = messageQueue.removeFirst()
             
             // Check Message Expiration (5 min strict)
@@ -1371,10 +1370,6 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             // (In some scenarios, the server may echo back the same envelope ID as acknowledgment)
             if self.inFlightMessages.removeValue(forKey: envelope.id) != nil {
                 self.logger.debug("✅ [WebSocketTransport] Received ack for message \(envelope.id.uuidString.prefix(8))")
-                // Remove from pending round trips since we got server confirmation
-                Task {
-                    _ = await self.pendingRoundTrips.remove(id: envelope.id)
-                }
             }
             
             Task { [metricsRecorder] in

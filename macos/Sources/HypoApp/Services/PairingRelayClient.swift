@@ -3,7 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-public struct PairingRelayClient {
+public struct PairingRelayClient: Sendable {
     public struct PairingCode: Equatable {
         public let code: String
         public let expiresAt: Date

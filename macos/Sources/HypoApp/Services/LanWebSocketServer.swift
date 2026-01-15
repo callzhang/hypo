@@ -247,7 +247,7 @@ public final class LanWebSocketServer {
         }
     }
 
-    private func sendFrame(payload: Data, opcode: UInt8, context: ConnectionContext, completion: @escaping (Error?) -> Void) {
+    private func sendFrame(payload: Data, opcode: UInt8, context: ConnectionContext, completion: @escaping @Sendable (Error?) -> Void) {
         var frame = Data()
         var firstByte: UInt8 = 0x80 // FIN = 1
         firstByte |= (opcode & 0x0F)
@@ -1122,7 +1122,7 @@ public final class LanWebSocketServer {
                         var sin6 = addr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee }
                         var addrBuffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
                         if inet_ntop(AF_INET6, &sin6.sin6_addr, &addrBuffer, socklen_t(INET6_ADDRSTRLEN)) != nil {
-                            let ip = String(cString: addrBuffer)
+                            let ip = addrBuffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
                             interfaces.append("\(name): [\(ip)] (IPv6)")
                         }
                     }
@@ -1174,7 +1174,7 @@ public final class LanWebSocketServer {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: interval)
                 if Task.isCancelled { break }
-                await self.runHeartbeat()
+                self.runHeartbeat()
             }
         }
     }

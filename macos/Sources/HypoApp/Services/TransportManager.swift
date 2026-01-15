@@ -915,8 +915,8 @@ public final class TransportManager: ObservableObject {
 
     @discardableResult
     public func connect(
-        lanDialer: @escaping () async throws -> LanDialResult,
-        cloudDialer: @escaping () async throws -> Bool,
+        lanDialer: @escaping @Sendable () async throws -> LanDialResult,
+        cloudDialer: @escaping @Sendable () async throws -> Bool,
         timeout: TimeInterval = 3,
         peerIdentifier: String? = nil
     ) async -> ConnectionState {
@@ -926,7 +926,10 @@ public final class TransportManager: ObservableObject {
         do {
             outcome = try await withThrowingTaskGroup(of: LanDialOutcome.self) { group in
                 group.addTask {
-                    let result = try await lanDialer()
+                    let task = Task { @MainActor in
+                        try await lanDialer()
+                    }
+                    let result = try await task.value
                     return LanDialOutcome.result(result)
                 }
                 group.addTask {
@@ -994,10 +997,10 @@ public final class TransportManager: ObservableObject {
 
     public func startConnectionSupervisor(
         peerIdentifier: String?,
-        lanDialer: @escaping () async throws -> LanDialResult,
-        cloudDialer: @escaping () async throws -> Bool,
-        sendHeartbeat: @escaping () async -> Bool,
-        awaitAck: @escaping () async -> Bool,
+        lanDialer: @escaping @Sendable () async throws -> LanDialResult,
+        cloudDialer: @escaping @Sendable () async throws -> Bool,
+        sendHeartbeat: @escaping @Sendable () async -> Bool,
+        awaitAck: @escaping @Sendable () async -> Bool,
         configuration: ConnectionSupervisorConfiguration = .default
     ) {
         connectionSupervisorTask?.cancel()
@@ -1039,17 +1042,17 @@ public final class TransportManager: ObservableObject {
 
     private func superviseConnection(
         peerIdentifier: String?,
-        lanDialer: @escaping () async throws -> LanDialResult,
-        cloudDialer: @escaping () async throws -> Bool,
-        sendHeartbeat: @escaping () async -> Bool,
-        awaitAck: @escaping () async -> Bool,
+        lanDialer: @escaping @Sendable () async throws -> LanDialResult,
+        cloudDialer: @escaping @Sendable () async throws -> Bool,
+        sendHeartbeat: @escaping @Sendable () async -> Bool,
+        awaitAck: @escaping @Sendable () async -> Bool,
         configuration: ConnectionSupervisorConfiguration
     ) async {
         var attempts = 0
         while !Task.isCancelled {
             let state = await connect(
-                lanDialer: { try await lanDialer() },
-                cloudDialer: { try await cloudDialer() },
+                lanDialer: lanDialer,
+                cloudDialer: cloudDialer,
                 timeout: configuration.fallbackTimeout,
                 peerIdentifier: peerIdentifier
             )
@@ -1110,8 +1113,8 @@ public final class TransportManager: ObservableObject {
     }
 
     private func monitorConnection(
-        sendHeartbeat: @escaping () async -> Bool,
-        awaitAck: @escaping () async -> Bool,
+        sendHeartbeat: @escaping @Sendable () async -> Bool,
+        awaitAck: @escaping @Sendable () async -> Bool,
         configuration: ConnectionSupervisorConfiguration
     ) async -> ConnectionMonitorOutcome {
         while !Task.isCancelled {
@@ -1135,9 +1138,14 @@ public final class TransportManager: ObservableObject {
         return .gracefulStop
     }
 
-    private func waitForAck(timeout: TimeInterval, awaitAck: @escaping () async -> Bool) async -> Bool {
+    private func waitForAck(timeout: TimeInterval, awaitAck: @escaping @Sendable () async -> Bool) async -> Bool {
         await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-            group.addTask { await awaitAck() }
+            group.addTask {
+                let task = Task { @MainActor in
+                    await awaitAck()
+                }
+                return await task.value
+            }
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
                 return false
@@ -1378,7 +1386,7 @@ public final class TransportManager: ObservableObject {
     }
 }
 
-public enum ConnectionState: Equatable {
+public enum ConnectionState: Equatable, Sendable {
     case disconnected
     case connectingLan
     case connectedLan
@@ -1387,23 +1395,23 @@ public enum ConnectionState: Equatable {
     case error(String)
 }
 
-public enum TransportChannel: String, Codable {
+public enum TransportChannel: String, Codable, Sendable {
     case lan
     case cloud
 }
 
-public enum LanDialResult {
+public enum LanDialResult: @unchecked Sendable {
     case success
     case failure(reason: TransportFallbackReason, error: Error?)
 }
 
-private enum LanDialOutcome {
+private enum LanDialOutcome: @unchecked Sendable {
     case result(LanDialResult)
     case timeout
     case failure(Error)
 }
 
-public struct ConnectionSupervisorConfiguration {
+public struct ConnectionSupervisorConfiguration: Sendable {
     public var fallbackTimeout: TimeInterval
     public var heartbeatInterval: TimeInterval
     public var ackTimeout: TimeInterval
@@ -1486,6 +1494,8 @@ public struct UserDefaultsLanDiscoveryCache: LanDiscoveryCache {
             let endpoint = LanEndpoint(
                 host: cachedPeer.host,
                 port: cachedPeer.port,
+                deviceId: nil, // Will be restored from metadata if needed
+                deviceName: nil,
                 fingerprint: cachedPeer.fingerprint,
                 metadata: cachedPeer.metadata
             )
@@ -1527,7 +1537,7 @@ public struct UserDefaultsLanDiscoveryCache: LanDiscoveryCache {
 private final class ApplicationLifecycleObserver {
     private var tokens: [NSObjectProtocol] = []
 
-    init(onActivate: @escaping () -> Void, onDeactivate: @escaping () -> Void, onTerminate: @escaping () -> Void) {
+    init(onActivate: @escaping @Sendable () -> Void, onDeactivate: @escaping @Sendable () -> Void, onTerminate: @escaping @Sendable () -> Void) {
         let center = NotificationCenter.default
         tokens.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             onActivate()

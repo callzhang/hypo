@@ -33,7 +33,8 @@ public struct CloudRelayConfiguration: Sendable, Equatable {
     }
 }
 
-public final class CloudRelayTransport: SyncTransport {
+@MainActor
+public final class CloudRelayTransport: SyncTransport, @unchecked Sendable {
     private let delegate: WebSocketTransport
     private var nameLookup: ((String) -> String?)?
 
@@ -97,7 +98,7 @@ public final class CloudRelayTransport: SyncTransport {
     }
     
     /// Set handler for incoming messages from cloud relay
-    public func setOnIncomingMessage(_ handler: @escaping (Data, TransportOrigin) async -> Void) {
+    public func setOnIncomingMessage(_ handler: @escaping @Sendable (Data, TransportOrigin) async -> Void) {
         delegate.setOnIncomingMessage(handler)
     }
     

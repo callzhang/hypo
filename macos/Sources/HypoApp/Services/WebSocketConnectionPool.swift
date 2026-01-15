@@ -6,7 +6,7 @@ import Network
 /// WebSocket connection pool for optimizing network resource usage
 public actor WebSocketConnectionPool {
     
-    struct PooledConnection {
+    struct PooledConnection: Sendable {
         let id: UUID
         let webSocket: URLSessionWebSocketTask
         let endpoint: Endpoint
@@ -24,7 +24,7 @@ public actor WebSocketConnectionPool {
         }
     }
     
-    public struct Endpoint: Hashable {
+    public struct Endpoint: Hashable, Sendable {
         let host: String
         let port: Int
         let path: String

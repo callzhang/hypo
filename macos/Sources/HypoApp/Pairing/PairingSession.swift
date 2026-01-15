@@ -36,7 +36,8 @@ public enum PairingSessionError: LocalizedError {
     }
 }
 
-public final class PairingSession: @unchecked Sendable {
+@MainActor
+public final class PairingSession {
     public struct Configuration: Sendable {
         public var service: String
         public var port: Int
@@ -76,7 +77,7 @@ public final class PairingSession: @unchecked Sendable {
     private let storeSharedKeyHandler: @Sendable (SymmetricKey, String) throws -> Void
     private let jsonEncoder: JSONEncoder
     private let jsonDecoder: JSONDecoder
-    private let clock: () -> Date
+    private let clock: @Sendable () -> Date
     private var ephemeralKey: Curve25519.KeyAgreement.PrivateKey?
     private var lastChallenges: [UUID] = []
     private var configuration: Configuration?
@@ -89,7 +90,7 @@ public final class PairingSession: @unchecked Sendable {
         cryptoService: CryptoService = CryptoService(),
         deviceKeyProvider: KeychainDeviceKeyProvider = KeychainDeviceKeyProvider(),
         storeSharedKey: (@Sendable (SymmetricKey, String) throws -> Void)? = nil,
-        clock: @escaping () -> Date = { Date() }
+        clock: @Sendable @escaping () -> Date = { Date() }
     ) {
         self.identity = identity
         self.signingKeyStore = signingKeyStore
@@ -186,17 +187,13 @@ public final class PairingSession: @unchecked Sendable {
                 lastSeen: clock(),
                 isOnline: true
             )
-            await MainActor.run {
-                self.state = .completed(device: device)
-                self.delegate?.pairingSession(self, didCompleteWith: device)
-            }
+            self.state = .completed(device: device)
+            self.delegate?.pairingSession(self, didCompleteWith: device)
             try persistAck(ack)
             return ack
         } catch {
-            await MainActor.run {
-                self.state = .failed(error.localizedDescription)
-                self.delegate?.pairingSession(self, didFailWith: error)
-            }
+            self.state = .failed(error.localizedDescription)
+            self.delegate?.pairingSession(self, didFailWith: error)
             return nil
         }
     }

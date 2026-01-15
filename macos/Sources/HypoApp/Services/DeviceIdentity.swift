@@ -1,6 +1,6 @@
 import Foundation
 
-public enum DevicePlatform: String, Codable {
+public enum DevicePlatform: String, Codable, Sendable {
     case macOS = "macos"
     case Android = "android"
     case iOS = "ios"
@@ -8,7 +8,7 @@ public enum DevicePlatform: String, Codable {
     case Linux = "linux"
 }
 
-public protocol DeviceIdentityProviding { 
+public protocol DeviceIdentityProviding {
     var deviceId: UUID { get }
     var deviceIdString: String { get }  // UUID string for protocol compatibility
     var platform: DevicePlatform { get }
@@ -21,14 +21,14 @@ public final class DeviceIdentity: DeviceIdentityProviding {
         static let devicePlatform = "com.hypo.clipboard.device_platform"
         static let deviceName = "com.hypo.clipboard.device_name"
     }
-    
+
 
     private static let currentPlatform = DevicePlatform.macOS
 
     public let deviceId: UUID
     public let platform: DevicePlatform
     public let deviceName: String
-    
+
     /// UUID string for protocol compatibility (backward compatibility during migration)
     /// Normalized to lowercase for cross-platform compatibility (Android uses lowercase UUIDs)
     public var deviceIdString: String {

@@ -10,7 +10,7 @@ import Combine
 /// Memory profiler for monitoring and optimizing memory usage in the macOS client
 public actor MemoryProfiler {
     
-    public struct MemorySnapshot {
+    public struct MemorySnapshot: Sendable {
         let timestamp: Date
         let residentMemoryMB: Double
         let virtualMemoryMB: Double

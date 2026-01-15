@@ -1,6 +1,6 @@
 import Foundation
 
-public struct PairingPayload: Codable, Equatable {
+public struct PairingPayload: Codable, Equatable, Sendable {
     public let version: String
     public let peerDeviceId: UUID
     public let peerPublicKey: Data
@@ -121,7 +121,7 @@ public struct PairingPayload: Codable, Equatable {
     }
 }
 
-public struct PairingChallengeMessage: Codable, Equatable {
+public struct PairingChallengeMessage: Codable, Equatable, Sendable {
     public let challengeId: UUID
     public let initiatorDeviceId: String
     public let initiatorDeviceName: String
@@ -201,7 +201,7 @@ public struct PairingChallengeMessage: Codable, Equatable {
     }
 }
 
-public struct PairingAckMessage: Codable, Equatable {
+public struct PairingAckMessage: Codable, Equatable, Sendable {
     public let challengeId: UUID
     public let responderDeviceId: UUID
     public let responderDeviceName: String
@@ -285,12 +285,12 @@ public struct PairingAckMessage: Codable, Equatable {
     }
 }
 
-public struct PairingChallengePayload: Codable, Equatable {
+public struct PairingChallengePayload: Codable, Equatable, Sendable {
     public let challenge: Data
     public let timestamp: Date
 }
 
-public struct PairingAckPayload: Codable, Equatable {
+public struct PairingAckPayload: Codable, Equatable, Sendable {
     public let responseHash: Data
     public let issuedAt: Date
     

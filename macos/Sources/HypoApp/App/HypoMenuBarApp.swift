@@ -10,12 +10,13 @@ import ApplicationServices
 
 #if canImport(AppKit)
 // Global state to track if we've already prompted for accessibility permission in this session
-private var hasPromptedForAccessibility = false
+@MainActor private var hasPromptedForAccessibility = false
 
 // Check if accessibility permissions are granted (required for CGEvent to work)
+@MainActor
 private func checkAccessibilityPermissions(prompt: Bool = false) -> Bool {
     // First check without prompting to see current status
-    let optionsNoPrompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false]
+    let optionsNoPrompt = ["AXTrustedCheckOptionPrompt": false]
     let isCurrentlyTrusted = AXIsProcessTrustedWithOptions(optionsNoPrompt as CFDictionary)
     
     // If already trusted, return true immediately
@@ -26,12 +27,20 @@ private func checkAccessibilityPermissions(prompt: Bool = false) -> Bool {
     // If not trusted and prompt is requested, only prompt once per app session
     if prompt && !hasPromptedForAccessibility {
         hasPromptedForAccessibility = true
-        let optionsWithPrompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        let optionsWithPrompt = ["AXTrustedCheckOptionPrompt": true]
         return AXIsProcessTrustedWithOptions(optionsWithPrompt as CFDictionary)
     }
     
     // Otherwise return false (not trusted and either not prompting or already prompted)
     return false
+}
+
+// Check if accessibility permissions are granted (required for CGEvent to work).
+// This version does not prompt the user.
+@MainActor
+private func checkAccessibilityStatus() -> Bool {
+    let options = ["AXTrustedCheckOptionPrompt": false]
+    return AXIsProcessTrustedWithOptions(options as CFDictionary)
 }
 #endif
 
@@ -123,28 +132,31 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self = self else { return }
-            self.logger.info("🔔 [HypoAppDelegate] Received ShowHistoryPopup notification")
-            
-            // Show history popup
-            if let viewModel = AppContext.shared.historyViewModel {
-                // Determine previous app before ACTIVATE (to ensure we can restore focus)
-                HistoryPopupPresenter.shared.saveFrontmostAppBeforeActivation()
+            let itemId = notification.userInfo?["itemId"] as? UUID
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                self.logger.info("🔔 [HypoAppDelegate] Received ShowHistoryPopup notification")
                 
-                // Activate Hypo
-                NSApplication.shared.activate(ignoringOtherApps: true)
-                HistoryPopupPresenter.shared.show(with: viewModel)
-                
-                // Highlight item if ID provided
-                if let itemId = notification.userInfo?["itemId"] as? UUID {
-                    self.logger.info("🔔 [HypoAppDelegate] Highlighting item: \(itemId)")
-                    // Delay slightly to ensure UI is ready
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        NotificationCenter.default.post(
-                            name: NSNotification.Name("HighlightHistoryItem"),
-                            object: nil,
-                            userInfo: ["itemId": itemId]
-                        )
+                // Show history popup
+                if let viewModel = AppContext.shared.historyViewModel {
+                    // Determine previous app before ACTIVATE (to ensure we can restore focus)
+                    HistoryPopupPresenter.shared.saveFrontmostAppBeforeActivation()
+                    
+                    // Activate Hypo
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    HistoryPopupPresenter.shared.show(with: viewModel)
+                    
+                    // Highlight item if ID provided
+                    if let itemId = itemId {
+                        self.logger.info("🔔 [HypoAppDelegate] Highlighting item: \(itemId)")
+                        // Delay slightly to ensure UI is ready
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("HighlightHistoryItem"),
+                                object: nil,
+                                userInfo: ["itemId": itemId]
+                            )
+                        }
                     }
                 }
             }
@@ -534,11 +546,12 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 // Global reference to prevent AppDelegate deallocation
-private var globalAppDelegate: HypoAppDelegate?
+@MainActor private var globalAppDelegate: HypoAppDelegate?
 
 /// Directly type text at cursor position (similar to pynput) - more reliable than Cmd+V
 /// This method directly inputs text characters without relying on clipboard
 /// Uses CGEvent to inject text character by character for maximum reliability
+@MainActor
 private func typeTextAtCursor(_ text: String) {
     let logger = HypoLogger(category: "typeTextAtCursor")
     
@@ -601,6 +614,7 @@ private func typeTextAtCursor(_ text: String) {
 // Uses Cmd+V for all content types (most reliable method on macOS)
 // CRITICAL: Window must be fully hidden before sending keyboard events
 // Even with canBecomeKey=false, a visible window can intercept events
+@MainActor
 private func pasteToCursorAtCurrentPosition(entry: ClipboardEntry? = nil) {
     let logger = HypoLogger(category: "pasteToCursor")
     
@@ -1171,6 +1185,7 @@ struct MenuBarContentView: View {
     
     /// Directly type text at cursor position (similar to pynput) - more reliable than Cmd+V
     /// Uses CGEvent to inject text character by character for maximum reliability
+    @MainActor
     private func typeTextAtCursor(_ text: String) {
         // Longer delay to ensure focus is fully restored and window is ready
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -1342,7 +1357,9 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { [self] _ in
-            selectedSection = .history
+            Task { @MainActor [self] in
+                selectedSection = .history
+            }
         }
         
         // Set up observer for showing popup - prevent duplicate calls
@@ -1351,12 +1368,17 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { [self] _ in
-            guard !isHandlingPopup else { return }
-            
-            isHandlingPopup = true
-            // Reset flag after handling
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                isHandlingPopup = false
+            Task { @MainActor [self] in
+                guard !isHandlingPopup else { return }
+                isHandlingPopup = true
+                // Reset flag after handling
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    Task { @MainActor [self] in
+                        isHandlingPopup = false
+                    }
+                }
+                
+                HistoryPopupPresenter.shared.show(with: viewModel)
             }
         }
         
@@ -1366,7 +1388,9 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { [self] _ in
-            selectedSection = .settings
+            Task { @MainActor [self] in
+                selectedSection = .settings
+            }
         }
         
         logger.debug("✅ [MenuBarContentView] Notification observers set up")
@@ -1379,9 +1403,12 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { notification in
-            if let itemId = notification.userInfo?["itemId"] as? UUID {
-                self.logger.debug("✨ [MenuBarContentView] Highlighting item: \(itemId)")
-                self.highlightedItemId = itemId
+            let itemId = notification.userInfo?["itemId"] as? UUID
+            Task { @MainActor in
+                if let itemId = itemId {
+                    self.logger.debug("✨ [MenuBarContentView] Highlighting item: \(itemId)")
+                    self.highlightedItemId = itemId
+                }
             }
         }
         
@@ -1391,7 +1418,9 @@ struct MenuBarContentView: View {
             object: nil,
             queue: .main
         ) { _ in
-            self.highlightedItemId = nil
+            Task { @MainActor in
+                self.highlightedItemId = nil
+            }
         }
     }
     
@@ -2445,7 +2474,7 @@ private struct SettingsSectionView: View {
         if let transportManager = viewModel.transportManager {
             let discoveredPeers = transportManager.lanDiscoveredPeers()
             if let peer = discoveredPeers.first(where: { peer in
-                if let peerDeviceId = peer.endpoint.metadata["device_id"] {
+                if let peerDeviceId = peer.endpoint.deviceId {
                     return peerDeviceId.lowercased() == device.id.lowercased()
                 }
                 return false
@@ -2615,8 +2644,9 @@ private struct NotificationPermissionSection: View {
     
     private func checkAuthorizationStatus() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let status = settings.authorizationStatus
             DispatchQueue.main.async {
-                authorizationStatus = settings.authorizationStatus
+                authorizationStatus = status
                 isChecking = false
             }
         }
@@ -2672,9 +2702,10 @@ private struct AccessibilityPermissionSection: View {
         }
     }
     
+    @MainActor
     private func checkAccessibilityStatus() {
         // Check accessibility permissions without prompting
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false]
+        let options = ["AXTrustedCheckOptionPrompt": false]
         let isEnabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
         DispatchQueue.main.async {
             isAccessibilityEnabled = isEnabled

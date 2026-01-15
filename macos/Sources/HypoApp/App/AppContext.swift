@@ -4,9 +4,10 @@ import AppKit
 #endif
 
 /// Shared app-scoped references needed outside SwiftUI view lifecycles.
+@MainActor
 final class AppContext {
     static let shared = AppContext()
-    private init() {}
+    nonisolated private init() {}
 
     /// Current history view model (set during app init).
     var historyViewModel: ClipboardHistoryViewModel?

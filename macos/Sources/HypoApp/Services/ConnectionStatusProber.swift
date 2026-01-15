@@ -150,9 +150,9 @@ public final class ConnectionStatusProber {
         transportManager.updateCloudConnectedDeviceIds(cloudConnectedDeviceIds)
     }
 
-    private func withTimeout<T>(
+    private func withTimeout<T: Sendable>(
         seconds: TimeInterval,
-        operation: @escaping () async throws -> T
+        operation: @Sendable @escaping () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask {

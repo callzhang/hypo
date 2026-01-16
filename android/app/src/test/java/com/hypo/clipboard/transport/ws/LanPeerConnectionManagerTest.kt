@@ -109,6 +109,7 @@ class LanPeerConnectionManagerTest {
         
         // Verify disconnect was called
         coVerify { anyConstructed<WebSocketTransportClient>().disconnect() }
+        advanceUntilIdle()
         
         val connections = manager.getAllConnections()
         assertTrue(connections.isEmpty())
@@ -211,6 +212,7 @@ class LanPeerConnectionManagerTest {
         
         val envelope = SyncEnvelope(type = MessageType.CLIPBOARD, payload = Payload())
         val count = manager.sendToAllPeers(envelope)
+        advanceUntilIdle()
         
         assertEquals(2, count)
         coVerify(exactly = 2) { anyConstructed<WebSocketTransportClient>().send(envelope) }

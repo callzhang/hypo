@@ -722,20 +722,54 @@ func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Senda
     }
 }
 
-final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
+final class MockServerDelegateState: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock()
-    private var _connectionContinuation: CheckedContinuation<UUID, Error>?
-    private var _dataContinuation: CheckedContinuation<Data, Error>?
-    private var clipboardData: [Data] = []
-    private var connectionIds: [UUID] = []
+    fileprivate var connectionContinuation: CheckedContinuation<UUID, Error>?
+    fileprivate var dataContinuation: CheckedContinuation<Data, Error>?
+    fileprivate var clipboardData: [Data] = []
+    fileprivate var connectionIds: [UUID] = []
+
+    func setConnectionContinuation(_ continuation: CheckedContinuation<UUID, Error>) {
+        lock.withLock { connectionContinuation = continuation }
+    }
+    
+    func setDataContinuation(_ continuation: CheckedContinuation<Data, Error>) {
+        lock.withLock { dataContinuation = continuation }
+    }
+    
+    func appendClipboardData(_ data: Data) {
+        lock.withLock {
+            clipboardData.append(data)
+            if let continuation = dataContinuation {
+                continuation.resume(returning: data)
+                dataContinuation = nil
+            }
+        }
+    }
+    
+    func appendConnectionId(_ id: UUID) {
+        lock.withLock {
+            connectionIds.append(id)
+            if let continuation = connectionContinuation {
+                continuation.resume(returning: id)
+                connectionContinuation = nil
+            }
+        }
+    }
+    
+    func getClipboardData() -> [Data] {
+        lock.withLock { clipboardData }
+    }
+}
+
+final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
+    let state = MockServerDelegateState()
 
     func waitForConnection(timeout: TimeInterval) async throws -> UUID {
         return try await withThrowingTaskGroup(of: UUID.self) { group in
             group.addTask {
                 return try await withCheckedThrowingContinuation { continuation in
-                    self.lock.withLock {
-                        self._connectionContinuation = continuation
-                    }
+                    self.state.setConnectionContinuation(continuation)
                 }
             }
             group.addTask {
@@ -752,9 +786,7 @@ final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable 
         return try await withThrowingTaskGroup(of: Data.self) { group in
             group.addTask {
                 return try await withCheckedThrowingContinuation { continuation in
-                    self.lock.withLock {
-                        self._dataContinuation = continuation
-                    }
+                    self.state.setDataContinuation(continuation)
                 }
             }
             group.addTask {
@@ -770,23 +802,11 @@ final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable 
     func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {}
     
     func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {
-        lock.withLock {
-            clipboardData.append(data)
-            if let continuation = _dataContinuation {
-                continuation.resume(returning: data)
-                _dataContinuation = nil
-            }
-        }
+        state.appendClipboardData(data)
     }
     
     func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID) {
-        lock.withLock {
-            connectionIds.append(id)
-            if let continuation = _connectionContinuation {
-                continuation.resume(returning: id)
-                _connectionContinuation = nil
-            }
-        }
+        state.appendConnectionId(id)
     }
     
     func server(_ server: LanWebSocketServer, didCloseConnection id: UUID) {}
@@ -796,22 +816,46 @@ final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable 
     struct TimeoutError: Error {}
 
     func receivedClipboardData() -> [Data] {
-        lock.withLock { clipboardData }
+        state.getClipboardData()
+    }
+}
+
+final class PairingDelegateState: @unchecked Sendable {
+    private let lock = OSAllocatedUnfairLock()
+    fileprivate var connectionContinuation: CheckedContinuation<UUID, Error>?
+    fileprivate var pairingContinuation: CheckedContinuation<PairingChallengeMessage, Error>?
+
+    func setConnectionContinuation(_ continuation: CheckedContinuation<UUID, Error>) {
+        lock.withLock { connectionContinuation = continuation }
+    }
+    
+    func setPairingContinuation(_ continuation: CheckedContinuation<PairingChallengeMessage, Error>) {
+        lock.withLock { pairingContinuation = continuation }
+    }
+    
+    func resumePairing(with challenge: PairingChallengeMessage) {
+        lock.withLock {
+            pairingContinuation?.resume(returning: challenge)
+            pairingContinuation = nil
+        }
+    }
+    
+    func resumeConnection(with id: UUID) {
+        lock.withLock {
+            connectionContinuation?.resume(returning: id)
+            connectionContinuation = nil
+        }
     }
 }
 
 final class PairingDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
-    private let lock = OSAllocatedUnfairLock()
-    private var connectionContinuation: CheckedContinuation<UUID, Error>?
-    private var pairingContinuation: CheckedContinuation<PairingChallengeMessage, Error>?
+    let state = PairingDelegateState()
 
     func waitForConnection(timeout: TimeInterval) async throws -> UUID {
         return try await withThrowingTaskGroup(of: UUID.self) { group in
             group.addTask {
                 return try await withCheckedThrowingContinuation { continuation in
-                    self.lock.withLock {
-                        self.connectionContinuation = continuation
-                    }
+                    self.state.setConnectionContinuation(continuation)
                 }
             }
             group.addTask {
@@ -828,9 +872,7 @@ final class PairingDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
         return try await withThrowingTaskGroup(of: PairingChallengeMessage.self) { group in
             group.addTask {
                 return try await withCheckedThrowingContinuation { continuation in
-                    self.lock.withLock {
-                        self.pairingContinuation = continuation
-                    }
+                    self.state.setPairingContinuation(continuation)
                 }
             }
             group.addTask {
@@ -844,19 +886,13 @@ final class PairingDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
     }
 
     func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {
-        lock.withLock {
-            pairingContinuation?.resume(returning: challenge)
-            pairingContinuation = nil
-        }
+        state.resumePairing(with: challenge)
     }
 
     func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {}
 
     func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID) {
-        lock.withLock {
-            connectionContinuation?.resume(returning: id)
-            connectionContinuation = nil
-        }
+        state.resumeConnection(with: id)
     }
 
     func server(_ server: LanWebSocketServer, didCloseConnection id: UUID) {}

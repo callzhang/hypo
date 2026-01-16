@@ -118,6 +118,10 @@ jobs:
           echo "Building Swift package..."
           swift build -c release
           
+          # Get the actual binary path dynamically
+          BIN_PATH=$(swift build -c release --show-bin-path)
+          echo "Binary built at: $BIN_PATH"
+          
           # Create app bundle structure if it doesn't exist
           if [ ! -d "Hypo.app" ]; then
             echo "Creating app bundle structure..."
@@ -125,44 +129,25 @@ jobs:
             mkdir -p Hypo.app/Contents/Resources
           fi
           
-          # Find the built binary (product name is HypoMenuBar, target is HypoMenuBarApp)
+          # Find the built binary
           echo "Looking for built binary..."
-          BUILT_BINARY=""
+          BUILT_BINARY="$BIN_PATH/$BINARY_NAME"
           
-          # First, try the expected location (product name)
-          if [ -f ".build/release/$BINARY_NAME" ]; then
-            BUILT_BINARY=".build/release/$BINARY_NAME"
-            echo "Found: $BUILT_BINARY"
-          # Fallback: try target name
-          elif [ -f ".build/release/HypoMenuBarApp" ]; then
-            BUILT_BINARY=".build/release/HypoMenuBarApp"
-            echo "Found: $BUILT_BINARY"
-          # Fallback: search for any executable with MenuBar in name
-          else
-            BUILT_BINARY=$(find .build/release -name "*MenuBar*" -type f -executable 2>/dev/null | head -1)
-            if [ -n "$BUILT_BINARY" ]; then
-              echo "Found: $BUILT_BINARY"
-            fi
+          if [ ! -f "$BUILT_BINARY" ]; then
+             # Try target name as fallback
+             BUILT_BINARY="$BIN_PATH/HypoMenuBarApp"
           fi
           
-          # Last resort: find any executable in release directory
-          if [ -z "$BUILT_BINARY" ]; then
-            echo "Error: Binary not found. Searching for any executables..."
-            echo "Available files in .build/release:"
-            find .build/release -type f 2>/dev/null | head -10 || echo "No .build/release directory found"
-            echo "Available executables in .build:"
-            find .build -type f -executable 2>/dev/null | head -10 || echo "No executables found"
-            BUILT_BINARY=$(find .build/release -type f -executable 2>/dev/null | head -1)
-            if [ -n "$BUILT_BINARY" ]; then
-              echo "Found executable: $BUILT_BINARY, using it"
-            fi
-          fi
-          
-          if [ -z "$BUILT_BINARY" ] || [ ! -f "$BUILT_BINARY" ]; then
-            echo "❌ Error: Built binary not found"
-            echo "Build may have succeeded but binary was not produced"
+          if [ ! -f "$BUILT_BINARY" ]; then
+            echo "❌ Error: Built binary not found at expected locations:"
+            echo "  - $BIN_PATH/$BINARY_NAME"
+            echo "  - $BIN_PATH/HypoMenuBarApp"
+            echo "List of files in $BIN_PATH:"
+            ls -la "$BIN_PATH"
             exit 1
           fi
+          
+          echo "Found: $BUILT_BINARY"
           
           # Copy binary to app bundle
           APP_BINARY="Hypo.app/Contents/MacOS/$BINARY_NAME"

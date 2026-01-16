@@ -170,6 +170,7 @@ class LanPeerConnectionManagerTest {
         
         val envelope = SyncEnvelope(type = MessageType.CLIPBOARD, payload = Payload())
         val result = manager.sendToPeer("target-id", envelope)
+        advanceUntilIdle()
         
         assertEquals(false, result)
     }
@@ -193,6 +194,7 @@ class LanPeerConnectionManagerTest {
         advanceUntilIdle()
         
         coVerify { anyConstructed<WebSocketTransportClient>().disconnect() }
+        advanceUntilIdle()
         
         // Verify connections meant to be kept in map (as per implementation comment: "Keep peerConnections map intact")
         // But verifying disconnect was called is main goal.
@@ -222,6 +224,7 @@ class LanPeerConnectionManagerTest {
         
         val handler: (SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit = { _, _ -> }
         manager.setIncomingClipboardHandler(handler)
+        advanceUntilIdle()
         
         verify { anyConstructed<WebSocketTransportClient>().setIncomingClipboardHandler(any<(SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit>()) }
     }

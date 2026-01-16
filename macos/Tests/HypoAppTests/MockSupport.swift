@@ -234,7 +234,7 @@ final class StubSession: URLSessionProviding, @unchecked Sendable {
 }
 
 final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
-    private let lock = OSAllocatedUnfairLock()
+    private let lock = NSLock()
     private var _maximumMessageSize: Int = Int.max
     private var _createdRequest: URLRequest?
     private var _onResume: (() -> Void)?
@@ -399,7 +399,7 @@ final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
 }
 
 final class FlakyWebSocketTask: WebSocketTasking, @unchecked Sendable {
-    private let lock = OSAllocatedUnfairLock()
+    private let lock = NSLock()
     private var _maximumMessageSize: Int = Int.max
     private var _createdRequest: URLRequest?
     private var _onResume: (() -> Void)?

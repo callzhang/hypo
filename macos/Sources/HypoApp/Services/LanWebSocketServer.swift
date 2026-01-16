@@ -88,7 +88,8 @@ public final class LanWebSocketServer {
     public weak var delegate: LanWebSocketServerDelegate?
     private var localDeviceId: String?  // macOS device ID for target filtering
     private var heartbeatTask: Task<Void, Never>?
-    private let heartbeatInterval: TimeInterval = 60
+    private let heartbeatInterval: TimeInterval
+    private let heartbeatEnabled: Bool
     private let idleTimeout: TimeInterval = 180
     
     public func connectionMetadata(for connectionId: UUID) -> ConnectionMetadata? {
@@ -118,10 +119,16 @@ public final class LanWebSocketServer {
         }
     }
     
-    public init(localDeviceId: String? = nil) {
+    public init(
+        localDeviceId: String? = nil,
+        heartbeatInterval: TimeInterval = 60,
+        enableHeartbeat: Bool = true
+    ) {
         self.localDeviceId = localDeviceId
+        self.heartbeatInterval = heartbeatInterval
+        self.heartbeatEnabled = enableHeartbeat
     }
-    
+
     public func setLocalDeviceId(_ deviceId: String) {
         self.localDeviceId = deviceId
     }
@@ -1182,7 +1189,7 @@ public final class LanWebSocketServer {
     }
 
     private func startHeartbeatIfNeeded() {
-        guard heartbeatTask == nil else { return }
+        guard heartbeatEnabled, heartbeatTask == nil else { return }
         heartbeatTask = Task { [weak self] in
             guard let self else { return }
             let interval = UInt64(heartbeatInterval * 1_000_000_000)

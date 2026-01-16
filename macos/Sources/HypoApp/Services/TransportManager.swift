@@ -113,7 +113,8 @@ public final class TransportManager: ObservableObject {
         historyStore: HistoryStore? = nil,
         defaults: UserDefaults = .standard,
         dispatcher: ClipboardEventDispatcher? = nil,
-        notificationController: ClipboardNotificationScheduling = ClipboardNotificationController.shared
+        notificationController: ClipboardNotificationScheduling = ClipboardNotificationController.shared,
+        autoStartLanServices: Bool = true
     ) {
         self.defaults = defaults
         self.provider = provider
@@ -216,31 +217,33 @@ public final class TransportManager: ObservableObject {
             }
         }
 
-        #if canImport(AppKit)
-        // Consolidated Application Lifecycle Observer
-        self.lifecycleObserver = ApplicationLifecycleObserver(
-            onActivate: { [weak self] in
-                Task { @MainActor in
-                    await self?.activateLanServices()
+        if autoStartLanServices {
+            #if canImport(AppKit)
+            // Consolidated Application Lifecycle Observer
+            self.lifecycleObserver = ApplicationLifecycleObserver(
+                onActivate: { [weak self] in
+                    Task { @MainActor in
+                        await self?.activateLanServices()
+                    }
+                },
+                onDeactivate: {
+                    // Don't deactivate LAN services on window close for menu bar apps
+                    // Services should stay running in the background
+                },
+                onTerminate: { [weak self] in
+                    Task { await self?.shutdownLanServices() }
                 }
-            },
-            onDeactivate: {
-                // Don't deactivate LAN services on window close for menu bar apps
-                // Services should stay running in the background
-            },
-            onTerminate: { [weak self] in
-                Task { await self?.shutdownLanServices() }
+            )
+            // Start LAN services immediately (menu bar apps don't trigger didBecomeActive on launch)
+            initTask = Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                await self.activateLanServices()
+                self.logger.info("➡️ [TransportManager] LAN services activated in initTask")
             }
-        )
-        // Start LAN services immediately (menu bar apps don't trigger didBecomeActive on launch)
-        initTask = Task { @MainActor [weak self] in
-            guard let self = self else { return }
-            await self.activateLanServices()
-            self.logger.info("➡️ [TransportManager] LAN services activated in initTask")
+            #else
+            Task { await activateLanServices() }
+            #endif
         }
-        #else
-        Task { await activateLanServices() }
-        #endif
     }
     // MARK: - Peer State Management
 

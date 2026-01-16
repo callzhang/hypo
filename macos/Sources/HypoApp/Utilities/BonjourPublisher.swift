@@ -12,6 +12,7 @@ public protocol BonjourPublishing: AnyObject, Sendable {
 #if canImport(Darwin)
 @MainActor
 public final class BonjourPublisher: NSObject, BonjourPublishing {
+    public typealias NetServiceFactory = @Sendable (String, String, String, Int32) -> NetService
     public struct Configuration: Equatable, Sendable {
         public let domain: String
         public let serviceType: String
@@ -73,8 +74,12 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
     private var configuration: Configuration?
     private var service: NetService?
     private var stopCompletion: (() -> Void)?
+    private let netServiceFactory: NetServiceFactory
 
-    public override init() {
+    public init(netServiceFactory: @escaping NetServiceFactory = { domain, type, name, port in
+        NetService(domain: domain, type: type, name: name, port: port)
+    }) {
+        self.netServiceFactory = netServiceFactory
         super.init()
     }
 
@@ -107,11 +112,11 @@ public final class BonjourPublisher: NSObject, BonjourPublishing {
         logger.info("📢 Starting Bonjour service: \(configuration.serviceName) on port \(configuration.port)")
         #endif
         
-        let service = NetService(
-            domain: configuration.domain,
-            type: configuration.serviceType,
-            name: configuration.serviceName,
-            port: Int32(configuration.port)
+        let service = netServiceFactory(
+            configuration.domain,
+            configuration.serviceType,
+            configuration.serviceName,
+            Int32(configuration.port)
         )
         service.includesPeerToPeer = true
         service.delegate = self

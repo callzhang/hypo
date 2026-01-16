@@ -928,6 +928,63 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
         logger.info("📡 [LanWebSocketTransport] handleOpen: Starting receiveNext()")
         receiveNext(on: task)
     }
+
+#if DEBUG
+    @_spi(Testing) public func _testing_setStateConnected(_ task: WebSocketTasking) {
+        state = .connected(task)
+    }
+
+    @_spi(Testing) public func _testing_setStateConnecting() {
+        state = .connecting
+    }
+
+    @_spi(Testing) public func _testing_setStateIdle() {
+        state = .idle
+    }
+
+    @_spi(Testing) public func _testing_enqueueQueuedMessage(
+        envelope: SyncEnvelope,
+        data: Data,
+        queuedAt: Date,
+        retryCount: UInt
+    ) {
+        let message = QueuedMessage(
+            envelope: envelope,
+            data: data,
+            queuedAt: queuedAt,
+            retryCount: retryCount
+        )
+        messageQueue.append(message)
+    }
+
+    @_spi(Testing) public func _testing_processMessageQueue() async {
+        await processMessageQueue()
+    }
+
+    @_spi(Testing) public func _testing_messageQueueCount() -> Int {
+        messageQueue.count
+    }
+
+    @_spi(Testing) public func _testing_handleIncoming(_ data: Data) {
+        handleIncoming(data: data)
+    }
+
+    @_spi(Testing) public func _testing_receiveNext(on task: WebSocketTasking) {
+        receiveNext(on: task)
+    }
+
+    @_spi(Testing) public func _testing_setLastActivity(_ date: Date) {
+        lastActivity = date
+    }
+
+    @_spi(Testing) public func _testing_startWatchdog(for task: WebSocketTasking) {
+        startWatchdog(for: task)
+    }
+
+    @_spi(Testing) public func _testing_closeDueToIdle(task: WebSocketTasking) async {
+        await closeDueToIdle(task: task)
+    }
+#endif
 }
 
 extension LanWebSocketTransport: URLSessionDelegate {

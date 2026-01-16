@@ -1456,6 +1456,48 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
         logger.info("📡 [WebSocketTransport] handleOpen: Starting receiveNext()")
         receiveNext(on: task)
     }
+
+#if DEBUG
+    @_spi(Testing) public func _testing_setStateConnected(_ task: WebSocketTasking) {
+        state = .connected(task)
+    }
+
+    @_spi(Testing) public func _testing_setStateConnecting() {
+        state = .connecting
+    }
+
+    @_spi(Testing) public func _testing_setStateIdle() {
+        state = .idle
+    }
+
+    @_spi(Testing) public func _testing_handleIncoming(_ data: Data) {
+        handleIncoming(data: data)
+    }
+
+    @_spi(Testing) public func _testing_receiveNext(on task: WebSocketTasking) {
+        receiveNext(on: task)
+    }
+
+    @_spi(Testing) public func _testing_triggerQueueProcessingIfNeeded() async {
+        await triggerQueueProcessingIfNeeded()
+    }
+
+    @_spi(Testing) public func _testing_setQueueProcessingTask(_ task: Task<Void, Never>?) {
+        queueProcessingTask = task
+    }
+
+    @_spi(Testing) public func _testing_setLastActivity(_ date: Date) {
+        lastActivity = date
+    }
+
+    @_spi(Testing) public func _testing_startWatchdog(for task: WebSocketTasking) {
+        startWatchdog(for: task)
+    }
+
+    @_spi(Testing) public func _testing_closeDueToIdle(task: WebSocketTasking) async {
+        await closeDueToIdle(task: task)
+    }
+#endif
 }
 
 extension WebSocketTransport: URLSessionDelegate {

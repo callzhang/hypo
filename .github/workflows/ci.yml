@@ -54,10 +54,10 @@ jobs:
 
   macos-tests:
     name: macOS Tests
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Run Swift tests
         working-directory: macos
-        run: swift test --parallel
+        run: xcodebuild test -workspace HypoApp.xcworkspace -scheme HypoApp -destination 'platform=macOS'

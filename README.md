@@ -289,11 +289,16 @@ Hypo takes security seriously:
 ## 📊 Current Status
 
 **Phase**: Production Release ✅  
-**Version**: v1.1.0  
+**Version**: v1.1.5  
 **Progress**: 100%  
-**Last Updated**: January 13, 2026
+**Last Updated**: January 16, 2026
 
 **Recent Milestones**:
+- ✅ **v1.1.5 Released** (Jan 16, 2026): Stability & release workflow fixes
+  - `PairingCode` now conforms to `Sendable`, eliminating the strict concurrency error.
+  - `WebSocketTransport` locks with `OSAllocatedUnfairLock` instead of `NSLock` for safer multi-threaded access.
+  - Release workflow now resolves the binary path dynamically, avoiding hard-coded build paths.
+  - Fixed the `WebSocketTransport` message queue race condition to stop dropped or replayed clipboard messages.
 - ✅ **v1.1.0 Released** (Jan 13, 2026): macOS Architecture Refactor & Stability
   - TransportManager now owns peer state and persistence
   - SecurityManager manages encryption key summary and UI actions

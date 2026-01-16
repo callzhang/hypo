@@ -210,7 +210,7 @@ TODO.txt
 # Downloaded Android SDK for local testing
 .android-sdk/
 
-.gradle/
+
 # macOS build artifacts (app bundles)
 macos/HypoApp.app
 macos/HypoApp-release.app

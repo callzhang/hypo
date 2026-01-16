@@ -4,6 +4,14 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-01-16
+
+### Fixed
+- **Pairing concurrency**: `PairingCode` is now `Sendable`, resolving crashes when pairing events crossed threads.
+- **Transport locking**: `WebSocketTransport` replaced `NSLock` with `OSAllocatedUnfairLock`, preventing deadlocks under load.
+- **Release automation**: The release workflow now resolves macOS and Android binary locations dynamically instead of relying on hard-coded paths.
+- **Message queue stability**: Fixed a race in `WebSocketTransport`'s outgoing queue so clipboard messages are not dropped or replayed.
+
 ## [1.1.0] - 2026-01-13
 
 ### Added

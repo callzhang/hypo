@@ -6,7 +6,7 @@ Hypo uses a centralized version management system to ensure consistency across a
 
 The project version is defined in a single file at the root:
 
-- **`VERSION`** - Contains the version string (e.g., `1.0.5`)
+- **`VERSION`** - Contains the version string (e.g., `1.1.5`)
 
 All build systems read from this file:
 
@@ -19,7 +19,7 @@ All build systems read from this file:
 ### Method 1: Using the Update Script (Recommended)
 
 ```bash
-./scripts/update-version.sh 1.0.6
+./scripts/update-version.sh 1.1.5
 ```
 
 This script will:
@@ -29,10 +29,10 @@ This script will:
 
 ### Method 2: Manual Update
 
-1. Edit `VERSION` file with the new version (e.g., `1.0.6`)
+1. Edit `VERSION` file with the new version (e.g., `1.1.5`)
 2. Update `backend/Cargo.toml`:
    ```toml
-   version = "1.0.6"
+   version = "1.1.5"
    ```
 3. Rebuild apps - they will automatically pick up the new version:
    ```bash
@@ -47,15 +47,15 @@ Versions follow semantic versioning: `MAJOR.MINOR.PATCH`
 - **MINOR**: New features (backward compatible)
 - **PATCH**: Bug fixes
 
-Examples: `1.0.5`, `1.1.0`, `2.0.0`
+Examples: `1.0.5`, `1.1.0`, `1.1.5`, `2.0.0`
 
 ## Build Number Derivation
 
 To ensure consistency and allow for versions with patch 0 (e.g., `1.1.0`), build numbers are derived using the formula:
 `MAJOR * 10000 + MINOR * 100 + PATCH`
 
-- **Android**: `versionCode` is derived from this formula (e.g., `1.0.5` → `10005`, `1.1.0` → `10100`)
-- **macOS**: `CFBundleVersion` is derived from this formula (e.g., `1.0.5` → `10005`, `1.1.0` → `10100`)
+- **Android**: `versionCode` is derived from this formula (e.g., `1.0.5` → `10005`, `1.1.0` → `10100`, `1.1.5` → `10105`)
+- **macOS**: `CFBundleVersion` is derived from this formula (e.g., `1.0.5` → `10005`, `1.1.0` → `10100`, `1.1.5` → `10105`)
 
 ## Release Process
 
@@ -72,4 +72,3 @@ The version is displayed in:
 - **macOS**: About dialog (from `CFBundleShortVersionString`)
 
 Both are automatically set from the `VERSION` file during build.
-

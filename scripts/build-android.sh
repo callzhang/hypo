@@ -84,7 +84,7 @@ fi
 
 # Gradle User Home (optional, for reproducible builds)
 if [ -z "$GRADLE_USER_HOME" ]; then
-    export GRADLE_USER_HOME="$PROJECT_ROOT/.gradle"
+    export GRADLE_USER_HOME="$PROJECT_ROOT/android/.gradle"
 fi
 
 echo "   JAVA_HOME: $JAVA_HOME"

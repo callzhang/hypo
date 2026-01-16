@@ -1,9 +1,9 @@
 # Repository Guidelines
 
 **Project**: Hypo - Cross-Platform Clipboard Sync  
-**Version**: See `VERSION` file (currently 1.0.5)  
+**Version**: See `VERSION` file (currently 1.1.5)  
 **Status**: Production-ready, all critical issues resolved  
-**Last Updated**: December 6, 2025
+**Last Updated**: January 16, 2026
 
 ## Project Structure & Module Organization
 - `macos/`: Swift 6/SwiftUI client; shared logic under `Sources`, unit suites in `Tests/HypoAppTests`.

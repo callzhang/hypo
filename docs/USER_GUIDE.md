@@ -961,6 +961,12 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ## 📝 Changelog
 
+**Version 1.1.5** (Stability & Release Workflow Fixes)
+- `PairingCode` now conforms to `Sendable`, resolving strict concurrency failures during pairing.
+- `WebSocketTransport` now locks with `OSAllocatedUnfairLock` to avoid contention under load.
+- Release builds dynamically resolve macOS/Android binary locations so tooling keeps working across machines.
+- Fixed the `WebSocketTransport` message queue race so clipboard messages are no longer dropped or replayed.
+
 **Version 1.1.0** (Current - macOS Architecture Refactor)
 - TransportManager now owns peer state and persistence
 - SecurityManager manages encryption key summary and UI actions
@@ -1013,6 +1019,6 @@ We welcome feature requests! Please check our roadmap first, then create a GitHu
 
 ---
 
-**Last Updated**: January 13, 2026  
-**Version**: 1.1.0  
+**Last Updated**: January 16, 2026  
+**Version**: 1.1.5  
 **For Technical Support**: support@hypo.app

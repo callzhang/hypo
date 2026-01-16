@@ -141,16 +141,16 @@ class LanPeerConnectionManager(
                     // Set incoming clipboard handler if available
                     onIncomingClipboard?.let { handler ->
                         client.setIncomingClipboardHandler(handler)
-                        val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
-                        android.util.Log.d("LanPeerConnectionManager", "✅ Set incoming clipboard handler for peer $deviceDesc")
+                        val handlerDeviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                        android.util.Log.d("LanPeerConnectionManager", "✅ Set incoming clipboard handler for peer $handlerDeviceDesc")
                     }
                     
                     // CRITICAL: Set connection event listener BEFORE starting connection
                     // This ensures the listener is set before any connect/disconnect events fire
                     android.util.Log.d("LanPeerConnectionManager", "📝 Setting listener on client instance ${client.hashCode()} for device $deviceDesc (deviceId=$deviceId)")
                     client.setConnectionEventListener { isConnected ->
-                        val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
-                        android.util.Log.d("LanPeerConnectionManager", "🔌 Connection event: $deviceDesc -> $isConnected (instance=${client.hashCode()}, deviceId=$deviceId)")
+                        val connectedDeviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
+                        android.util.Log.d("LanPeerConnectionManager", "🔌 Connection event: $connectedDeviceDesc -> $isConnected (instance=${client.hashCode()}, deviceId=$deviceId)")
                         transportManager.setLanConnection(deviceId, isConnected)
                     }
                     
@@ -158,9 +158,7 @@ class LanPeerConnectionManager(
                     android.util.Log.d("LanPeerConnectionManager", "✅ Added client instance ${client.hashCode()} to peerConnections for $deviceDesc (deviceId=$deviceId)")
                     
                     // Start connection maintenance task
-                    connectionJobs[deviceId] = scope.launch {
-                        maintainPeerConnection(deviceId, client, peer.serviceName, peerUrl)
-                    }
+                        maintainPeerConnection(deviceId, client, peerUrl) // peerName removed (unused)
                 } else {
                     val client = peerConnections[deviceId]
                     if (client != null) {
@@ -174,9 +172,7 @@ class LanPeerConnectionManager(
                                 "🔄 Restarting connection for peer $deviceDesc (deviceId=$deviceId, connected=${client.isConnected()}, job=${existingJob != null && !existingJob.isCancelled})"
                             )
                             existingJob?.cancel()
-                            connectionJobs[deviceId] = scope.launch {
-                                maintainPeerConnection(deviceId, client, peer.serviceName, peerUrl)
-                            }
+                                maintainPeerConnection(deviceId, client, peerUrl) // peerName removed (unused)
                         }
                     }
                 }
@@ -193,7 +189,6 @@ class LanPeerConnectionManager(
     private suspend fun maintainPeerConnection(
         deviceId: String,
         client: WebSocketTransportClient,
-        peerName: String,
         peerUrl: String
     ) {
         val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."

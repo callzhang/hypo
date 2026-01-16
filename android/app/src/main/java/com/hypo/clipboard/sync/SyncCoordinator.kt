@@ -191,7 +191,7 @@ class SyncCoordinator @Inject constructor(
                         
                         // Preserve origin info if this is a local event (event.deviceId == null)
                         val isLocalEvent = event.deviceId == null
-                        val resolvedDeviceId = if (isLocalEvent) latestEntry.deviceId ?: deviceId else deviceId
+                        val resolvedDeviceId = if (isLocalEvent) latestEntry.deviceId else deviceId
                         val resolvedDeviceName = if (isLocalEvent) latestEntry.deviceName ?: deviceName else deviceName
                         val resolvedTransportOrigin = if (isLocalEvent) latestEntry.transportOrigin else event.transportOrigin
                         
@@ -236,7 +236,7 @@ class SyncCoordinator @Inject constructor(
                             
                             // Preserve origin info if this is a local event (event.deviceId == null)
                             val isLocalEvent = event.deviceId == null
-                            val resolvedDeviceId = if (isLocalEvent) matchingEntry.deviceId ?: deviceId else deviceId
+                            val resolvedDeviceId = if (isLocalEvent) matchingEntry.deviceId else deviceId
                             val resolvedDeviceName = if (isLocalEvent) matchingEntry.deviceName ?: deviceName else deviceName
                             val resolvedTransportOrigin = if (isLocalEvent) matchingEntry.transportOrigin else event.transportOrigin
                             

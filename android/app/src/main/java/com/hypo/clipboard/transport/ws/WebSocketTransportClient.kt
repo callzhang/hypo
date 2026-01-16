@@ -91,8 +91,7 @@ class OkHttpWebSocketConnector @Inject constructor(
             // Default OkHttpClient has 10s timeouts, which can be too short for large image transfers
             // Use roundTripTimeoutMillis (60s default) or a minimum of 30s for connection establishment
             val connectTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
-            val readTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
-            val writeTimeoutMs = max(config.roundTripTimeoutMillis, 30_000L)
+            // readTimeoutMs and writeTimeoutMs removed (unused)
             builder.connectTimeout(connectTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
 
             // Enable Keep-Alive Pings to keep connection alive through NATs/Load Balancers
@@ -1323,10 +1322,10 @@ class WebSocketTransportClient @Inject constructor(
                             return
                         }
                         
-                        val isPairingChallenge = payloadJson.contains("initiator_device_id") && 
+                        val isPairingChallengeJson = payloadJson.contains("initiator_device_id") && 
                                                 payloadJson.contains("initiator_pub_key")
                         
-                        if (isPairingChallenge) {
+                        if (isPairingChallengeJson) {
                             android.util.Log.d("WebSocketTransportClient", "📋 Pairing: Challenge received (binary)")
                             scope.launch {
                                 try {

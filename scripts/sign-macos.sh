@@ -120,9 +120,11 @@ log_info "Removing extended attributes..."
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true
 
 # 4. Double-check and force remove specifics just in case -cr missed the root or others
+# Clean bundle root explicitly
 xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
 xattr -d com.apple.ResourceFork "$APP_BUNDLE" 2>/dev/null || true
 xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
+xattr -d com.apple.provenance "$APP_BUNDLE" 2>/dev/null || true
 
 # 5. Ensure the executable itself is clean
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$(defaults read "$APP_BUNDLE/Contents/Info" CFBundleExecutable 2>/dev/null || echo "HypoMenuBar")"
@@ -169,6 +171,7 @@ log_info "Signing binary: $(basename "$APP_BINARY")"
 xattr -d com.apple.FinderInfo "$APP_BINARY" 2>/dev/null || true
 xattr -d com.apple.ResourceFork "$APP_BINARY" 2>/dev/null || true
 xattr -d com.apple.quarantine "$APP_BINARY" 2>/dev/null || true
+xattr -d com.apple.provenance "$APP_BINARY" 2>/dev/null || true
 xattr -c "$APP_BINARY" 2>/dev/null || true # Clear all xattrs one last time
 
 # Explicitly remove any shadow file that might exist

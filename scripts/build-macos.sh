@@ -247,6 +247,8 @@ APP_BINARY="$APP_BUNDLE/Contents/MacOS/$BINARY_NAME"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 
 log_info "Copying binary to app bundle..."
+# Remove provenance attribute from source binary (Swift adds this, codesign rejects it)
+xattr -d com.apple.provenance "$BUILT_BINARY" 2>/dev/null || true
 cp -f "$BUILT_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 
@@ -356,7 +358,21 @@ if [ -f "$SCRIPT_DIR/sign-macos.sh" ]; then
     if [ $SIGN_EXIT_CODE -ne 0 ]; then
         log_warn "Code signing failed (exit code: $SIGN_EXIT_CODE), trying fallback method..."
         # Fallback to simple ad-hoc signing
+        # Clean aggressively - attributes may have been re-added
         xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+        xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
+        xattr -d com.apple.ResourceFork "$APP_BUNDLE" 2>/dev/null || true
+        xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
+        xattr -d com.apple.provenance "$APP_BUNDLE" 2>/dev/null || true
+        xattr -d com.apple.fileprovider.fpfs#P "$APP_BUNDLE" 2>/dev/null || true
+        
+        xattr -d com.apple.FinderInfo "$APP_BINARY" 2>/dev/null || true
+        xattr -d com.apple.ResourceFork "$APP_BINARY" 2>/dev/null || true
+        xattr -d com.apple.quarantine "$APP_BINARY" 2>/dev/null || true
+        xattr -d com.apple.provenance "$APP_BINARY" 2>/dev/null || true
+        xattr -d com.apple.fileprovider.fpfs#P "$APP_BINARY" 2>/dev/null || true
+        xattr -c "$APP_BINARY" 2>/dev/null || true
+        
         # Define Entitlements path if not present (matches sign-macos.sh)
         ENTITLEMENTS="$MACOS_DIR/HypoApp.entitlements"
         if codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_BINARY" && \

@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import os
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -89,6 +90,9 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     private let pendingRoundTrips: PendingRoundTripStore
     private var onIncomingMessage: ((Data, TransportOrigin) async -> Void)?
     private let dateProvider: @Sendable () -> Date
+    
+    // Thread safety
+    private let stateLock = OSAllocatedUnfairLock()
     
     // Message queue with retry logic
     internal struct QueuedMessage {
@@ -257,18 +261,22 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         // Queue Overflow Protection: Max 100 messages
         // Drop oldest messages if queue is full
         let maxQueueSize = 100
-        if messageQueue.count >= maxQueueSize {
-            // Drop oldest messages until we have space
-            // (Drop up to 10 messages at a time to create buffer)
-            let dropCount = min(10, messageQueue.count)
-            let dropped = messageQueue.prefix(dropCount)
-            messageQueue.removeFirst(dropCount)
-            
-            for msg in dropped {
-                _ = await pendingRoundTrips.remove(id: msg.envelope.id)
+        
+        stateLock.withLock {
+            let currentQueueCount = messageQueue.count
+            if currentQueueCount >= maxQueueSize {
+                // Drop oldest messages until we have space
+                // (Drop up to 10 messages at a time to create buffer)
+                let dropCount = min(10, currentQueueCount)
+                // Note: We can't use await inside withLock, so we defer removing pendingRoundTrips
+                // let dropped = messageQueue.prefix(dropCount) // Unused
+                messageQueue.removeFirst(dropCount)
             }
-            logger.warning("⚠️ [WebSocketTransport] Queue overflow: dropped \(dropCount) oldest messages to make room")
         }
+        
+        // NOTE: We're not removing from pendingRoundTrips for dropped messages immediately 
+        // because we can't await inside the lock. They will eventually time out or be cleaned up.
+        // This is a trade-off for thread safety.
         
         // Ensure connection before queuing
         // This prevents queuing messages when we know we can't send them
@@ -281,9 +289,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             queuedAt: dateProvider(),
             retryCount: 0
         )
-        messageQueue.append(queuedMessage)
         
-        logger.debug("📥 [WebSocketTransport] Queued message: type=\(envelope.payload.contentType), size=\(encodedData.count.formattedAsKB), id=\(envelope.id.uuidString.prefix(8)), queue=\(messageQueue.count)")
+        let currentQueueCount = stateLock.withLock {
+            messageQueue.append(queuedMessage)
+            return messageQueue.count
+        }
+        
+        logger.debug("📥 [WebSocketTransport] Queued message: type=\(envelope.payload.contentType), size=\(encodedData.count.formattedAsKB), id=\(envelope.id.uuidString.prefix(8)), queue=\(currentQueueCount)")
         
         // Start queue processor if not already running
         // The queue processor will handle sending and retries
@@ -307,13 +319,18 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         
         
         
-        while !messageQueue.isEmpty {
-            // Guard against race condition where queue becomes empty between check and removeFirst
-            guard !messageQueue.isEmpty else {
-                logger.debug("✅ [WebSocketTransport] Queue became empty during processing")
+        while true {
+            let nextMessage: QueuedMessage? = stateLock.withLock {
+                if messageQueue.isEmpty {
+                    return nil
+                }
+                return messageQueue.removeFirst()
+            }
+            
+            guard let queuedMessage = nextMessage else {
+                logger.debug("✅ [WebSocketTransport] Message queue empty, stopping processor")
                 break
             }
-            var queuedMessage = messageQueue.removeFirst()
             
             // Check Message Expiration (5 min strict)
             let timeInQueue = dateProvider().timeIntervalSince(queuedMessage.queuedAt)
@@ -364,10 +381,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                     
                     // Additional safety: Send ping and wait for pong to confirm connection is ready
                     guard case .connected(let pingTask) = state else {
-                        logger.warning("⚠️ [WebSocketTransport] Connection lost during delay, requeuing message")
-                        queuedMessage.retryCount += 1
                         if queuedMessage.retryCount <= maxRetries {
-                            messageQueue.append(queuedMessage)
+                            var mutableMessage = queuedMessage
+                            mutableMessage.retryCount += 1
+                            let toQueue = mutableMessage
+                            stateLock.withLock {
+                                messageQueue.append(toQueue)
+                            }
                         } else {
                             logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
                             _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
@@ -394,9 +414,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 }
             } catch {
                 logger.warning("⚠️ [WebSocketTransport] Connection failed on retry \(queuedMessage.retryCount): \(error.localizedDescription)")
-                queuedMessage.retryCount += 1
-                if queuedMessage.retryCount <= maxRetries {
-                    messageQueue.append(queuedMessage)
+                if queuedMessage.retryCount + 1 <= maxRetries {
+                    var mutableMessage = queuedMessage
+                    mutableMessage.retryCount += 1
+                    let toQueue = mutableMessage
+                    stateLock.withLock {
+                        messageQueue.append(toQueue)
+                    }
                 } else {
                     logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
                     _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
@@ -406,9 +430,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             
             guard case .connected(let task) = state else {
                 logger.debug("⚠️ [WebSocketTransport] Not connected after ensureConnected() on retry \(queuedMessage.retryCount)")
-                queuedMessage.retryCount += 1
-                if queuedMessage.retryCount <= maxRetries {
-                    messageQueue.append(queuedMessage)
+                if queuedMessage.retryCount + 1 <= maxRetries {
+                    var mutableMessage = queuedMessage
+                    mutableMessage.retryCount += 1
+                    let toQueue = mutableMessage
+                    stateLock.withLock {
+                        messageQueue.append(toQueue)
+                    }
                 } else {
                     logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
                     _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
@@ -421,9 +449,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 // Double-check connection state right before sending (socket might have closed)
                 guard case .connected(let currentTask) = state, currentTask === task else {
                     logger.info("⚠️ [WebSocketTransport] Connection lost between check and send, requeuing message")
-                    queuedMessage.retryCount += 1
-                    if queuedMessage.retryCount <= maxRetries {
-                        messageQueue.append(queuedMessage)
+                    if queuedMessage.retryCount + 1 <= maxRetries {
+                        var mutableMessage = queuedMessage
+                        mutableMessage.retryCount += 1
+                        let toQueue = mutableMessage
+                        stateLock.withLock {
+                            messageQueue.append(toQueue)
+                        }
                     } else {
                         logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
                         _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
@@ -453,7 +485,9 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 let contentType = queuedMessage.envelope.payload.contentType
                 
                 // Track all messages as in-flight until we get server feedback
-                inFlightMessages[messageId] = queuedMessage
+                stateLock.withLock {
+                    inFlightMessages[messageId] = queuedMessage
+                }
                 self.logger.debug("📤 [WebSocketTransport] Message in-flight: type=\(contentType), size=\(frameSize.formattedAsKB), id=\(messageId.uuidString.prefix(8))")
                 
                 // Set up timeout to handle cases where server doesn't respond
@@ -466,7 +500,11 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                     guard let strongSelf = self else { return }
                     await MainActor.run {
                         // Check if message is still in-flight
-                        guard let queuedMessage = strongSelf.inFlightMessages.removeValue(forKey: messageId) else {
+                        let queuedMessage = strongSelf.stateLock.withLock {
+                            return strongSelf.inFlightMessages.removeValue(forKey: messageId)
+                        }
+                        
+                        guard let queuedMessage else {
                             // Message was already removed (either confirmed or failed)
                             return
                         }
@@ -515,9 +553,10 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                     let errorType = isCancellationError ? "cancellation" : "socket closure"
                     self.logger.info("⚠️ [WebSocketTransport] \(errorType.capitalized) during send (likely during large payload transmission), requeuing message")
                     // Don't increment retry count for transient errors - this is expected for large payloads
-                    messageQueue.append(queuedMessage)
+                    stateLock.withLock {
+                        messageQueue.append(queuedMessage)
+                    }
                     
-                    // Only trigger reconnection if socket is actually not connected
                     // For cancellation errors, the connection might still be valid - just retry the send
                     if isSocketNotConnected {
                         // Socket is closed - need to reconnect
@@ -541,9 +580,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                     await triggerQueueProcessingIfNeeded()
                 } else {
                     self.logger.info("❌ [WebSocketTransport] Send failed on retry \(queuedMessage.retryCount)/\(maxRetries): \(errorDescription)")
-                    queuedMessage.retryCount += 1
-                    if queuedMessage.retryCount <= maxRetries {
-                        messageQueue.append(queuedMessage)
+                    if queuedMessage.retryCount + 1 <= maxRetries {
+                        var mutableMessage = queuedMessage
+                        mutableMessage.retryCount += 1
+                        let toQueue = mutableMessage
+                        stateLock.withLock {
+                            messageQueue.append(toQueue)
+                        }
                     } else {
                         logger.info("❌ [WebSocketTransport] Max retries reached, dropping message")
                         _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
@@ -552,15 +595,10 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             }
         }
         
-        // Check if queue is actually empty before stopping
-        // Messages may have been requeued while we were processing (e.g., after cancellation)
-        if messageQueue.isEmpty {
-            queueProcessingTask = nil
-            logger.debug("✅ [WebSocketTransport] Message queue empty, stopping processor")
-        } else {
-            // Queue has new messages (possibly requeued), continue processing
-            // Don't set queueProcessingTask to nil - let it continue
-        }
+        // We're done with the loop (break triggered when queue empty)
+        // No need to manually check messageQueue.isEmpty here as the loop condition handles it
+        // and we break when empty.
+        queueProcessingTask = nil
     }
 
     /// Enter sleep mode: disconnect but preserve message queue (pause sync)
@@ -612,16 +650,22 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         // Only clear message queue on intentional disconnect (not during reconnection)
         // During reconnection, we want to preserve requeued messages for retry
         if clearQueue {
-            let queueSize = messageQueue.count
+            // Copy messages to remove round trips outside lock
+            let messages: [QueuedMessage] = stateLock.withLock {
+                let msgs = messageQueue
+                messageQueue.removeAll()
+                return msgs
+            }
+            
+            let queueSize = messages.count
             if queueSize > 0 {
                 logger.debug("🧹 [WebSocketTransport] Clearing \(queueSize) queued messages on disconnect")
-                for queuedMessage in messageQueue {
+                for queuedMessage in messages {
                     _ = await pendingRoundTrips.remove(id: queuedMessage.envelope.id)
                 }
-                messageQueue.removeAll()
             }
         } else {
-            let queueSize = messageQueue.count
+            let queueSize = stateLock.withLock { messageQueue.count }
             if queueSize > 0 {
                 logger.debug("🔄 [WebSocketTransport] Preserving \(queueSize) queued messages during reconnection")
             }

@@ -357,9 +357,9 @@ if [ -f "$SCRIPT_DIR/sign-macos.sh" ]; then
         log_warn "Code signing failed (exit code: $SIGN_EXIT_CODE), trying fallback method..."
         # Fallback to simple ad-hoc signing
         xattr -cr "$APP_BUNDLE" 2>/dev/null || true
-        if codesign --force --sign - "$APP_BINARY" 2>/dev/null && \
-           codesign --force --sign - "$APP_BUNDLE" 2>/dev/null; then
-            log_success "App signed with fallback method"
+        if codesign --force --sign - "$APP_BINARY" && \
+           codesign --force --sign - "$APP_BUNDLE"; then
+            log_success "App signed with fallback method (Ad-hoc)"
         else
             log_warn "Code signing failed, but app may still work for local development"
             log_info "If macOS says the app is damaged, right-click and select 'Open' to bypass Gatekeeper"

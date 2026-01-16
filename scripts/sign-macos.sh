@@ -110,25 +110,25 @@ find "$APP_BUNDLE" -name "._*" -delete 2>/dev/null || true
 
 # 2. Merge/clean AppleDouble files (._*) using dot_clean if available
 if command -v dot_clean &> /dev/null; then
+    # -m: Always merge
     dot_clean -m "$APP_BUNDLE" || true
 fi
 
-# 3. Remove Finder info/resource fork attributes explicitly (codesign rejects these)
-xattr -dr com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
-xattr -dr com.apple.ResourceFork "$APP_BUNDLE" 2>/dev/null || true
-
-# 4. Remove quarantine attribute
-xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
-
-# 5. Strip ALL extended attributes (Recursively)
-# Now that ._ files are gone, this cleans the actual data files
-log_info "Removing extended attributes from all files..."
+# 3. Aggressively strip ALL extended attributes
+# We use xattr -cr (clear recursive)
+log_info "Removing extended attributes..."
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true
 
-# 6. Explicitly clear bundle-root metadata that can still trip codesign
+# 4. Double-check and force remove specifics just in case -cr missed the root or others
 xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
 xattr -d com.apple.ResourceFork "$APP_BUNDLE" 2>/dev/null || true
-xattr -d com.apple.fileprovider.fpfs#P "$APP_BUNDLE" 2>/dev/null || true
+xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
+
+# 5. Ensure the executable itself is clean
+APP_BINARY="$APP_BUNDLE/Contents/MacOS/$(defaults read "$APP_BUNDLE/Contents/Info" CFBundleExecutable 2>/dev/null || echo "HypoMenuBar")"
+if [ -f "$APP_BINARY" ]; then
+    xattr -c "$APP_BINARY" 2>/dev/null || true
+fi
 
 log_success "Cleaned app bundle"
 
@@ -160,7 +160,29 @@ else
     log_success "Using stable identity. This should preserve accessibility permissions."
 fi
 
-codesign --force --deep --sign "$SIGN_IDENTITY" \
+# Inside-out signing (Manual deep signing)
+# 1. Sign the specific binary first
+log_info "Signing binary: $(basename "$APP_BINARY")"
+# FORCE CLEANING: Explicitly remove resource forks/finder info from the binary itself right before signing
+# This is the last line of defense against "resource fork" errors
+xattr -d com.apple.FinderInfo "$APP_BINARY" 2>/dev/null || true
+xattr -d com.apple.ResourceFork "$APP_BINARY" 2>/dev/null || true
+xattr -d com.apple.quarantine "$APP_BINARY" 2>/dev/null || true
+xattr -c "$APP_BINARY" 2>/dev/null || true # Clear all xattrs one last time
+
+# Note: ENTITLEMENTS are usually for the bundle or main executable, applied here to be safe
+codesign --force --sign "$SIGN_IDENTITY" \
+    --entitlements "$ENTITLEMENTS" \
+    --options runtime \
+    "$APP_BINARY"
+
+if [ $? -ne 0 ]; then
+    log_warn "Binary signing failed, but proceeding to bundle signing (sometimes this is expected)"
+fi
+
+# 2. Sign the app bundle (wrapper)
+log_info "Signing app bundle..."
+codesign --force --sign "$SIGN_IDENTITY" \
     --entitlements "$ENTITLEMENTS" \
     "$APP_BUNDLE"
 

@@ -60,4 +60,4 @@ jobs:
         uses: actions/checkout@v4
       - name: Run Swift tests
         working-directory: macos
-        run: swift test
+        run: swift test --no-parallel

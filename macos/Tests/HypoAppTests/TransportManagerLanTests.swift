@@ -7,11 +7,11 @@ struct TransportManagerLanTests {
     func testDiscoveryEventsUpdateStateAndDiagnostics() async throws {
         let driver = MockBonjourDriver()
         let now = Date(timeIntervalSince1970: 1_000)
-        let browser = await MainActor.run { BonjourBrowser(driver: driver, clock: { now }) }
+        let browser = BonjourBrowser(driver: driver, clock: { now })
         let publisher = MockBonjourPublisher()
         let cache = InMemoryLanDiscoveryCache()
-        let webSocketServer = await makeWebSocketServer()
-        let manager = await TransportManager(
+        let webSocketServer = makeWebSocketServer()
+        let manager = TransportManager(
             provider: MockTransportProvider(),
             browser: browser,
             publisher: publisher,
@@ -23,8 +23,10 @@ struct TransportManagerLanTests {
                 fingerprint: "fingerprint",
                 protocols: ["ws+tls"]
             ),
-            webSocketServer: webSocketServer
+            webSocketServer: webSocketServer,
+            autoStartLanServices: false
         )
+        defer { Task { await manager.deactivateLanServices() } }
 
         await manager.ensureLanDiscoveryActive()
         let startCount = await MainActor.run { publisher.startCount }
@@ -41,18 +43,18 @@ struct TransportManagerLanTests {
         driver.emit(.resolved(record))
         try await Task.sleep(nanoseconds: 5_000_000)
 
-        let peers = await manager.lanDiscoveredPeers()
+        let peers = manager.lanDiscoveredPeers()
         #expect(peers.count == 1)
         #expect(peers.first?.serviceName == "peer-one")
         #expect(cache.storage["peer-one"] == Date(timeIntervalSince1970: 1_000))
 
-        let diagnostics = await manager.handleDeepLink(URL(string: "hypo://debug/lan")!)
+        let diagnostics = manager.handleDeepLink(URL(string: "hypo://debug/lan")!)
         #expect(diagnostics != nil)
         #expect(diagnostics?.contains("peer-one") ?? false)
 
         driver.emit(.removed("peer-one"))
         try await Task.sleep(nanoseconds: 5_000_000)
-        let remainingPeers = await manager.lanDiscoveredPeers()
+        let remainingPeers = manager.lanDiscoveredPeers()
         #expect(remainingPeers.isEmpty)
         #expect(cache.storage["peer-one"] != nil)
 
@@ -65,11 +67,11 @@ struct TransportManagerLanTests {
     func testAutomaticPruneRemovesStalePeers() async throws {
         let driver = MockBonjourDriver()
         let clock = MutableClock(now: Date(timeIntervalSince1970: 10_000))
-        let browser = await MainActor.run { BonjourBrowser(driver: driver, clock: { clock.now }) }
+        let browser = BonjourBrowser(driver: driver, clock: { clock.now })
         let publisher = MockBonjourPublisher()
         let cache = InMemoryLanDiscoveryCache()
-        let webSocketServer = await makeWebSocketServer()
-        let manager = await TransportManager(
+        let webSocketServer = makeWebSocketServer()
+        let manager = TransportManager(
             provider: MockTransportProvider(),
             browser: browser,
             publisher: publisher,
@@ -84,8 +86,10 @@ struct TransportManagerLanTests {
             pruneInterval: 0.05,
             stalePeerInterval: 0.1,
             dateProvider: { clock.now },
-            webSocketServer: webSocketServer
+            webSocketServer: webSocketServer,
+            autoStartLanServices: false
         )
+        defer { Task { await manager.deactivateLanServices() } }
 
         await manager.ensureLanDiscoveryActive()
 
@@ -98,13 +102,13 @@ struct TransportManagerLanTests {
         driver.emit(.resolved(record))
         try await Task.sleep(nanoseconds: 10_000_000)
 
-        var peers = await manager.lanDiscoveredPeers()
+        var peers = manager.lanDiscoveredPeers()
         #expect(peers.count == 1)
 
         clock.now = clock.now.addingTimeInterval(0.2)
         try await Task.sleep(nanoseconds: 200_000_000)
 
-        peers = await manager.lanDiscoveredPeers()
+        peers = manager.lanDiscoveredPeers()
         #expect(peers.isEmpty)
         #expect(cache.storage.isEmpty)
 
@@ -113,16 +117,19 @@ struct TransportManagerLanTests {
 
     @Test
     func testConnectPrefersLan() async {
-        let webSocketServer = await makeWebSocketServer()
-        let manager = await TransportManager(
-            provider: MockTransportProvider(),
-            analytics: InMemoryTransportAnalytics(),
-            webSocketServer: webSocketServer
-        )
+        let manager = await MainActor.run {
+            TransportManager(
+                provider: MockTransportProvider(),
+                analytics: InMemoryTransportAnalytics(),
+                webSocketServer: makeWebSocketServer(),
+                autoStartLanServices: false
+            )
+        }
+        defer { Task { await manager.deactivateLanServices() } }
 
         let state = await manager.connect(
             lanDialer: { LanDialResult.success },
-            cloudDialer: { #expect(false); return false },
+            cloudDialer: { #expect(Bool(false)); return false },
             peerIdentifier: "peer"
         )
 
@@ -136,12 +143,15 @@ struct TransportManagerLanTests {
     @Test
     func testConnectFallsBackOnTimeout() async {
         let analytics = InMemoryTransportAnalytics()
-        let webSocketServer = await makeWebSocketServer()
-        let manager = await TransportManager(
-            provider: MockTransportProvider(),
-            analytics: analytics,
-            webSocketServer: webSocketServer
-        )
+        let manager = await MainActor.run {
+            TransportManager(
+                provider: MockTransportProvider(),
+                analytics: analytics,
+                webSocketServer: makeWebSocketServer(),
+                autoStartLanServices: false
+            )
+        }
+        defer { Task { await manager.deactivateLanServices() } }
 
         let task = Task {
             await manager.connect(
@@ -163,19 +173,22 @@ struct TransportManagerLanTests {
         if case let .fallback(reason, _, _) = events.first {
             #expect(reason == .lanTimeout)
         } else {
-            #expect(false)
+            #expect(Bool(false))
         }
     }
 
     @Test
     func testConnectRecordsLanFailureReason() async {
         let analytics = InMemoryTransportAnalytics()
-        let webSocketServer = await makeWebSocketServer()
-        let manager = await TransportManager(
-            provider: MockTransportProvider(),
-            analytics: analytics,
-            webSocketServer: webSocketServer
-        )
+        let manager = await MainActor.run {
+            TransportManager(
+                provider: MockTransportProvider(),
+                analytics: analytics,
+                webSocketServer: makeWebSocketServer(),
+                autoStartLanServices: false
+            )
+        }
+        defer { Task { await manager.deactivateLanServices() } }
 
         let state = await manager.connect(
             lanDialer: { .failure(reason: .lanRejected, error: NSError(domain: "test", code: 1)) },
@@ -190,7 +203,7 @@ struct TransportManagerLanTests {
             #expect(reason == .lanRejected)
             #expect(metadata["reason"] == "lan_rejected")
         } else {
-            #expect(false)
+            #expect(Bool(false))
         }
         let route = await MainActor.run { manager.lastSuccessfulTransport(for: "peer") }
         #expect(route == nil)
@@ -199,12 +212,15 @@ struct TransportManagerLanTests {
     @Test
     func testConnectionSupervisorReconnectsAfterHeartbeatFailure() async {
         let analytics = InMemoryTransportAnalytics()
-        let webSocketServer = await makeWebSocketServer()
-        let manager = await TransportManager(
-            provider: MockTransportProvider(),
-            analytics: analytics,
-            webSocketServer: webSocketServer
-        )
+        let manager = await MainActor.run {
+            TransportManager(
+                provider: MockTransportProvider(),
+                analytics: analytics,
+                webSocketServer: makeWebSocketServer(),
+                autoStartLanServices: false
+            )
+        }
+        defer { Task { await manager.deactivateLanServices() } }
 
         let lanAttempts = Locked(0)
         let heartbeatCalls = Locked(0)
@@ -230,10 +246,10 @@ struct TransportManagerLanTests {
             )
         )
 
-        try? await Task.sleep(nanoseconds: 600_000_000)
-
-        let attempts = lanAttempts.withLock { $0 }
-        #expect(attempts >= 2)
+        let fulfilled = await waitUntil(timeout: .seconds(2)) {
+            lanAttempts.withLock { $0 >= 2 }
+        }
+        #expect(fulfilled)
         let last = await manager.lastSuccessfulTransport(for: "peer")
         #expect(last == .lan)
 
@@ -242,12 +258,15 @@ struct TransportManagerLanTests {
 
     @Test
     func testManualRetrySkipsBackoffDelay() async {
-        let webSocketServer = await makeWebSocketServer()
-        let manager = await TransportManager(
-            provider: MockTransportProvider(),
-            analytics: InMemoryTransportAnalytics(),
-            webSocketServer: webSocketServer
-        )
+        let manager = await MainActor.run {
+            TransportManager(
+                provider: MockTransportProvider(),
+                analytics: InMemoryTransportAnalytics(),
+                webSocketServer: makeWebSocketServer(),
+                autoStartLanServices: false
+            )
+        }
+        defer { Task { await manager.deactivateLanServices() } }
 
         let attempts = Locked(0)
         await manager.startConnectionSupervisor(
@@ -285,12 +304,15 @@ struct TransportManagerLanTests {
 
     @Test
     func testShutdownTransportFlushesCallback() async {
-        let webSocketServer = await makeWebSocketServer()
-        let manager = await TransportManager(
-            provider: MockTransportProvider(),
-            analytics: InMemoryTransportAnalytics(),
-            webSocketServer: webSocketServer
-        )
+        let manager = await MainActor.run {
+            TransportManager(
+                provider: MockTransportProvider(),
+                analytics: InMemoryTransportAnalytics(),
+                webSocketServer: makeWebSocketServer(),
+                autoStartLanServices: false
+            )
+        }
+        defer { Task { await manager.deactivateLanServices() } }
 
         let flushed = Locked(false)
         await manager.startConnectionSupervisor(
@@ -310,6 +332,57 @@ struct TransportManagerLanTests {
         let state = await MainActor.run { manager.connectionState }
         #expect(state == .disconnected)
     }
+
+    @Test @MainActor
+    func testUpdateLocalAdvertisementRestartsOnPortChange() async throws {
+        let publisher = MockBonjourPublisher()
+        let manager = TransportManager(
+            provider: MockTransportProvider(),
+            publisher: publisher,
+            lanConfiguration: BonjourPublisher.Configuration(
+                serviceName: "local-device",
+                port: 0,
+                version: "1.0",
+                fingerprint: "fingerprint",
+                protocols: ["ws+tls"]
+            ),
+            webSocketServer: makeWebSocketServer(),
+            autoStartLanServices: false
+        )
+        defer { Task { await manager.deactivateLanServices() } }
+
+        await manager.ensureLanDiscoveryActive()
+        let initialStarts = publisher.startCount
+
+        manager.updateLocalAdvertisement(port: 4567, fingerprint: "fp-2")
+
+        #expect(publisher.stopCount == 1)
+        #expect(publisher.startCount == initialStarts + 1)
+        #expect(publisher.currentConfiguration?.port == 4567)
+    }
+
+    @Test @MainActor
+    func testUpdateLocalAdvertisementUpdatesTXTRecordWhenPortUnchanged() async {
+        let publisher = MockBonjourPublisher()
+        let manager = TransportManager(
+            provider: MockTransportProvider(),
+            publisher: publisher,
+            lanConfiguration: BonjourPublisher.Configuration(
+                serviceName: "local-device",
+                port: 5555,
+                version: "1.0",
+                fingerprint: "fingerprint",
+                protocols: ["ws+tls"]
+            ),
+            webSocketServer: makeWebSocketServer(),
+            autoStartLanServices: false
+        )
+        defer { Task { await manager.deactivateLanServices() } }
+
+        await manager.ensureLanDiscoveryActive()
+        manager.updateLocalAdvertisement(fingerprint: "fp-3")
+
+        #expect(publisher.metadataUpdates.count == 1)
+        #expect(publisher.currentConfiguration?.fingerprint == "fp-3")
+    }
 }
-
-

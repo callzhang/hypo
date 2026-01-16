@@ -59,7 +59,7 @@ struct ClipboardMonitorTests {
         let entry = monitor.evaluatePasteboard()
 
         guard case let .file(metadata)? = entry?.content else {
-            #expect(false)
+            #expect(Bool(false))
             return
         }
         #expect(metadata.byteSize == data.count)
@@ -291,6 +291,177 @@ struct ClipboardMonitorTests {
         // types will be []
         let entry = monitor.evaluatePasteboard()
         #expect(entry == nil)
+    }
+
+    @Test
+    @MainActor
+    func testEvaluatePasteboardSkipsWhenTypesNil() {
+        let pasteboard = MockPasteboard()
+        pasteboard.types = nil
+        pasteboard.changeCount = 1
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+
+        let entry = monitor.evaluatePasteboard()
+        #expect(entry == nil)
+    }
+
+    @Test
+    @MainActor
+    func testInvalidURLDoesNotCapture() {
+        let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+
+        pasteboard.setString("http://[::1", for: .URL)
+        let entry = monitor.evaluatePasteboard()
+        #expect(entry == nil)
+    }
+
+    @Test
+    @MainActor
+    func testEmptyStringDoesNotCapture() {
+        let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+
+        pasteboard.setString("", for: .string)
+        let entry = monitor.evaluatePasteboard()
+        #expect(entry == nil)
+    }
+
+    @Test
+    @MainActor
+    func testInvalidImageDataSkipsCapture() {
+        let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+
+        pasteboard.setData(Data([0x00, 0x01]), for: .png)
+        let entry = monitor.evaluatePasteboard()
+        #expect(entry == nil)
+    }
+
+    @Test
+    @MainActor
+    func testFileURLMissingSkipsCapture() {
+        let pasteboard = MockPasteboard()
+        pasteboard.changeCount = 1
+        pasteboard.types = [.fileURL]
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+
+        let entry = monitor.evaluatePasteboard()
+        #expect(entry == nil)
+    }
+
+    @Test
+    @MainActor
+    func testCapturesGifImageFileFormat() throws {
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".gif")
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        image.lockFocus()
+        NSColor.blue.set()
+        NSRect(x: 0, y: 0, width: 10, height: 10).fill()
+        image.unlockFocus()
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "test", code: 0, userInfo: nil)
+        }
+        try pngData.write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+        pasteboard.setFile(url: fileURL)
+
+        let entry = monitor.evaluatePasteboard()
+        guard case let .image(metadata)? = entry?.content else {
+            Issue.record("Expected image")
+            return
+        }
+        #expect(metadata.format == "gif")
+    }
+
+    @Test
+    @MainActor
+    func testWebpImageFileFallsBackToFileEntry() throws {
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".webp")
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        image.lockFocus()
+        NSColor.orange.set()
+        NSRect(x: 0, y: 0, width: 10, height: 10).fill()
+        image.unlockFocus()
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "test", code: 0, userInfo: nil)
+        }
+        try pngData.write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+        pasteboard.setFile(url: fileURL)
+
+        let entry = monitor.evaluatePasteboard()
+        guard case .file = entry?.content else {
+            Issue.record("Expected file fallback")
+            return
+        }
+    }
+
+    @Test
+    @MainActor
+    func testBmpImageFileFallsBackToFileEntry() throws {
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".bmp")
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        image.lockFocus()
+        NSColor.yellow.set()
+        NSRect(x: 0, y: 0, width: 10, height: 10).fill()
+        image.unlockFocus()
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "test", code: 0, userInfo: nil)
+        }
+        try pngData.write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+        pasteboard.setFile(url: fileURL)
+
+        let entry = monitor.evaluatePasteboard()
+        guard case .file = entry?.content else {
+            Issue.record("Expected file fallback")
+            return
+        }
+    }
+
+    @Test
+    @MainActor
+    func testCapturesTiffImageFileFormat() throws {
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".tiff")
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        image.lockFocus()
+        NSColor.gray.set()
+        NSRect(x: 0, y: 0, width: 10, height: 10).fill()
+        image.unlockFocus()
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "test", code: 0, userInfo: nil)
+        }
+        try pngData.write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+        pasteboard.setFile(url: fileURL)
+
+        let entry = monitor.evaluatePasteboard()
+        guard case let .image(metadata)? = entry?.content else {
+            Issue.record("Expected image")
+            return
+        }
+        #expect(metadata.format == "tiff")
     }
 
     @Test

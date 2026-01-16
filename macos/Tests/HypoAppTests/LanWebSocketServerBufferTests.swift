@@ -14,7 +14,7 @@ struct LanWebSocketServerBufferTests {
     // Helper to create a test server instance
     @MainActor
     private func createTestServer() -> LanWebSocketServer {
-        LanWebSocketServer()
+        LanWebSocketServer(enableHeartbeat: false)
     }
     
     @MainActor

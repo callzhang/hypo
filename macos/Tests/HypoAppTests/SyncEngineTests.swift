@@ -84,10 +84,10 @@ struct SyncEngineTests {
 
         do {
             _ = try await engine.decode(encoded)
-            #expect(false)
+            #expect(Bool(false))
         } catch {
             guard let providerError = error as? DeviceKeyProviderError else {
-                #expect(false)
+                #expect(Bool(false))
                 return
             }
             switch providerError {

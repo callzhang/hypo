@@ -64,7 +64,7 @@ struct TransportFrameCodecTests {
         let codec = TransportFrameCodec()
         do {
             _ = try codec.decode(Data([0x00, 0x00, 0x00, 0x05, 0x01]))
-            #expect(false)
+            #expect(Bool(false))
         } catch {
             #expect(error as? TransportFrameError == .truncated)
         }
@@ -82,7 +82,7 @@ struct TransportFrameCodecTests {
         ))
         do {
             _ = try codec.encode(envelope)
-            #expect(false)
+            #expect(Bool(false))
         } catch {
             #expect(error as? TransportFrameError == .payloadTooLarge)
         }
@@ -102,7 +102,7 @@ struct TransportFrameCodecTests {
         let strict = TransportFrameCodec(maxPayloadSize: 8)
         do {
             _ = try strict.decode(frame)
-            #expect(false)
+            #expect(Bool(false))
         } catch {
             #expect(error as? TransportFrameError == .payloadTooLarge)
         }

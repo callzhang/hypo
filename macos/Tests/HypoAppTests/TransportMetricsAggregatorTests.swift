@@ -17,7 +17,7 @@ struct TransportMetricsAggregatorTests {
         let events = analytics.events()
         #expect(events.count == 1)
         guard case let .metrics(transport, snapshot) = events.first else {
-            #expect(false)
+            #expect(Bool(false))
             return
         }
         #expect(transport == .lan)

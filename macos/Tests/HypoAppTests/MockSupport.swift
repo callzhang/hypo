@@ -37,7 +37,8 @@ final class MockBonjourPublisher: BonjourPublishing {
             host: "localhost",
             port: configuration.port,
             deviceId: configuration.deviceId,
-            deviceName: configuration.serviceName
+            deviceName: configuration.serviceName,
+            fingerprint: configuration.fingerprint
         )
     }
 
@@ -126,6 +127,25 @@ struct MockSyncTransport: SyncTransport {
     func isConnected() -> Bool { false }
 }
 
+@MainActor
+final class MockNotificationController: ClipboardNotificationScheduling {
+    struct StatusNotification: Equatable {
+        let deviceId: String
+        let title: String
+        let body: String
+    }
+
+    private(set) var statusNotifications: [StatusNotification] = []
+
+    func configure(handler: ClipboardNotificationHandling) {}
+    func requestAuthorizationIfNeeded() {}
+    func deliverNotification(for entry: ClipboardEntry) {}
+
+    func deliverStatusNotification(deviceId: String, title: String, body: String) {
+        statusNotifications.append(.init(deviceId: deviceId, title: title, body: body))
+    }
+}
+
 final class StubSession: URLSessionProviding, @unchecked Sendable {
     private let task: StubWebSocketTask
 
@@ -187,6 +207,55 @@ final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
     }
 }
 
+final class FlakyWebSocketTask: WebSocketTasking, @unchecked Sendable {
+    var maximumMessageSize: Int = Int.max
+    var createdRequest: URLRequest?
+    var onResume: (() -> Void)?
+    var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
+    var onPing: (() -> Void)?
+    var sentData: [Data] = []
+    var receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
+    var sendErrors: [Error?] = []
+
+    func resume() {
+        onResume?()
+    }
+
+    func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping (Error?) -> Void) {
+        if !sendErrors.isEmpty {
+            let nextError = sendErrors.removeFirst()
+            if let nextError {
+                completionHandler(nextError)
+                return
+            }
+        }
+        switch message {
+        case .data(let data):
+            sentData.append(data)
+        case .string(let string):
+            if let data = string.data(using: .utf8) {
+                sentData.append(data)
+            }
+        @unknown default:
+            break
+        }
+        completionHandler(nil)
+    }
+
+    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        onCancel?(closeCode, reason)
+    }
+
+    func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
+        receiveHandler = completionHandler
+    }
+
+    func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) {
+        onPing?()
+        pongReceiveHandler(nil)
+    }
+}
+
 final class RecordingMetricsRecorder: TransportMetricsRecorder, @unchecked Sendable {
     private let lock = NSLock()
     private var _handshakes: [TimeInterval] = []
@@ -218,7 +287,7 @@ extension NSLock {
 
 @MainActor
 func makeWebSocketServer() -> LanWebSocketServer {
-    LanWebSocketServer()
+    LanWebSocketServer(enableHeartbeat: false)
 }
 
 final class MutableClock: @unchecked Sendable {

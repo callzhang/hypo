@@ -125,12 +125,14 @@ struct HistoryStoreTests {
     func testReinsertingExistingEntryMovesItToTop() async {
         let store = makeStore(maxEntries: 5)
         let entry1 = ClipboardEntry(
+            timestamp: Date(timeIntervalSince1970: 1),
             deviceId: "d1",
             originPlatform: .macOS,
             originDeviceName: "Mac",
             content: .text("First")
         )
         let entry2 = ClipboardEntry(
+            timestamp: Date(timeIntervalSince1970: 2),
             deviceId: "d1",
             originPlatform: .macOS,
             originDeviceName: "Mac",

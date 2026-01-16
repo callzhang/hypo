@@ -41,12 +41,12 @@ struct BonjourBrowserTests {
             #expect(peer.endpoint.port == 7010)
             #expect(peer.lastSeen == Date(timeIntervalSince1970: 1_000))
         } else {
-            #expect(false)
+            #expect(Bool(false))
         }
         if case .removed(let serviceName) = events[1] {
             #expect(serviceName == "peer-one")
         } else {
-            #expect(false)
+            #expect(Bool(false))
         }
 
         await browser.stop()

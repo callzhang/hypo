@@ -213,8 +213,11 @@ pub async fn websocket_handler(
                         }
                         Message::Close(close_frame) => {
                             if let Some(frame) = close_frame {
-                                close_reason = format!("close_frame_code_{:?}_description_{}", frame.code, 
-                                    frame.description.as_ref().map(|d| d.as_str()).unwrap_or("none"));
+                                close_reason = format!(
+                                    "close_frame_code_{:?}_description_{}",
+                                    frame.code,
+                                    frame.description.as_deref().unwrap_or("none")
+                                );
                             } else {
                                 close_reason = String::from("close_frame_no_details");
                             }

@@ -13,10 +13,6 @@ import java.time.Clock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
@@ -39,8 +35,6 @@ class LanPeerConnectionManager(
 ) {
     // Map of deviceId -> WebSocketTransportClient (one connection per peer)
     private val peerConnections = ConcurrentHashMap<String, WebSocketTransportClient>()
-    // Map of deviceId -> connection maintenance job
-    private val connectionJobs = ConcurrentHashMap<String, Job>()
     private val mutex = Mutex()
     // Handler for incoming clipboard messages from peer connections
     private var onIncomingClipboard: ((com.hypo.clipboard.sync.SyncEnvelope, com.hypo.clipboard.domain.model.TransportOrigin) -> Unit)? = null
@@ -78,9 +72,6 @@ class LanPeerConnectionManager(
                 peerConnections[deviceId]?.disconnect()
                 // Immediately update LAN connection state so UI reflects peer loss without waiting for onClosed
                 transportManager.setLanConnection(deviceId, false)
-                
-                connectionJobs[deviceId]?.cancel()
-                connectionJobs.remove(deviceId)
                 peerConnections.remove(deviceId)
             }
             
@@ -156,57 +147,23 @@ class LanPeerConnectionManager(
                     
                     peerConnections[deviceId] = client
                     android.util.Log.d("LanPeerConnectionManager", "✅ Added client instance ${client.hashCode()} to peerConnections for $deviceDesc (deviceId=$deviceId)")
-                    
-                    // Start connection maintenance task
-                        maintainPeerConnection(deviceId, client, peerUrl) // peerName removed (unused)
+                    client.startReceiving()
                 } else {
                     val client = peerConnections[deviceId]
                     if (client != null) {
-                        val existingJob = connectionJobs[deviceId]
                         val needsReconnect = !client.isConnected()
-                        val needsJob = existingJob == null || existingJob.isCancelled
-                        if (needsReconnect || needsJob) {
+                        if (needsReconnect) {
                             val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
                             android.util.Log.d(
                                 "LanPeerConnectionManager",
-                                "🔄 Restarting connection for peer $deviceDesc (deviceId=$deviceId, connected=${client.isConnected()}, job=${existingJob != null && !existingJob.isCancelled})"
+                                "🔄 Restarting connection for peer $deviceDesc (deviceId=$deviceId, connected=${client.isConnected()})"
                             )
-                            existingJob?.cancel()
-                                maintainPeerConnection(deviceId, client, peerUrl) // peerName removed (unused)
+                            client.startReceiving()
                         }
                     }
                 }
             }
         }
-    }
-    
-    /**
-     * Maintain persistent connection to a peer with automatic reconnection.
-     * Reuses unified event-driven reconnection logic from WebSocketTransportClient.
-     * Simply calls startReceiving() once - all reconnection is handled by onClosed() callbacks
-     * with the same exponential backoff as cloud connections.
-     */
-    private suspend fun maintainPeerConnection(
-        deviceId: String,
-        client: WebSocketTransportClient,
-        peerUrl: String
-    ) {
-        val deviceDesc = transportManager.getDeviceName(deviceId) ?: "${deviceId.take(8)}..."
-        android.util.Log.d("LanPeerConnectionManager", "🔌 Starting connection maintenance for peer $deviceDesc at $peerUrl")
-        
-        // Start receiving - this will establish connection and maintain it
-        // WebSocketTransportClient handles all reconnection via onClosed() callbacks
-        // with unified exponential backoff (same as cloud connections)
-        // Connection event listener is already set during client creation
-        client.startReceiving()
-        
-        // Keep this coroutine alive while peer is still in our map
-        // The connection is maintained by WebSocketTransportClient's event-driven reconnection
-        while (scope.isActive && peerConnections.containsKey(deviceId)) {
-            delay(10_000) // Just keep alive - reconnection is handled by WebSocketTransportClient
-        }
-        
-        android.util.Log.d("LanPeerConnectionManager", "🔌 Connection maintenance ended for peer $deviceDesc")
     }
     
     /**
@@ -278,11 +235,6 @@ class LanPeerConnectionManager(
                     android.util.Log.w("LanPeerConnectionManager", "⚠️ Error disconnecting peer $deviceDesc: ${e.message}")
                 }
             }
-            // Cancel connection maintenance jobs
-            for ((_, job) in connectionJobs) {
-                job.cancel()
-            }
-            connectionJobs.clear()
             // Keep peerConnections map intact - we'll reconnect to the same peers
         }
     }
@@ -318,10 +270,6 @@ class LanPeerConnectionManager(
      */
     fun shutdown() {
         android.util.Log.d("LanPeerConnectionManager", "🛑 Shutting down all peer connections")
-        for ((_, job) in connectionJobs) {
-            job.cancel()
-        }
-        connectionJobs.clear()
         peerConnections.clear()
     }
 }

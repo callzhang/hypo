@@ -1,7 +1,7 @@
 # Hypo Development Tasks
 
-Version: 1.1.0
-Last Updated: January 13, 2026
+Version: 1.1.5
+Last Updated: January 16, 2026
 
 ---
 
@@ -15,24 +15,30 @@ Last Updated: January 13, 2026
 - [x] Documentation
   - [x] Create `docs/architecture.mermaid`
   - [x] Create `docs/technical.md`
-  - [x] Create `tasks/tasks.md`
+  - [x] Create `tasks.md`
   - [x] Create project status tracking (consolidated into changelog.md)
   - [x] Create `changelog.md`
   - [x] Create `README.md` with setup instructions
-- [ ] Development environment *(see README prerequisites; need validation run on clean machines)*
-  - [ ] macOS: Xcode 15+, Swift 6 setup
-  - [ ] Android: Android Studio, Kotlin 2.0 setup
-  - [ ] Backend: Rust 1.75+, Redis local instance
+- [x] Development environment (Android + backend CLI) *(validated locally on January 16, 2026)*
+  - [x] Java/JDK installed (Android builds)
+  - [x] Android SDK tools available (`adb`)
+  - [x] Gradle wrapper runs (`cd android && ./gradlew --version`)
+  - [x] Rust toolchain installed (`rustc`, `cargo`)
+  - [x] Docker + `docker compose` available for Redis via `backend/docker-compose.yml`
+- [ ] macOS app build environment *(pending)*  
+  - [ ] Xcode installed and selected (`xcodebuild -version` works; `xcode-select -s /Applications/Xcode.app/Contents/Developer`)
+  - [ ] `./scripts/build-macos.sh` succeeds
+- [ ] Validate end-to-end build/test on clean machines (document command output)
 
 ### Phase 1.2: Protocol Definition
-- [x] Define JSON message schema with validation (see `docs/protocol.schema.json`)
+- [x] Define JSON message schema with validation (documented in `docs/protocol.md`; schema file is not currently checked in)
 - [x] Implement protocol buffers or stick with JSON (decision point)
   - ✅ Decision: Ship v1 with JSON payloads, revisit binary encoding in Sprint 5 performance review.
 - [x] Create protocol documentation with examples
 - [x] Define error codes and handling *(see `docs/protocol.md` §4.4 for catalogue and retry rules)*
 
 ### Phase 1.3: Security Foundation
-- [x] Research and select crypto libraries *(see `docs/crypto_research.md` for evaluation matrix)*
+- [x] Research and select crypto libraries *(see `docs/research/crypto_research.md` for evaluation matrix)*
   - [x] macOS: CryptoKit evaluation
   - [x] Android: Jetpack Security or Tink
   - [x] Backend: RustCrypto
@@ -107,7 +113,7 @@ Last Updated: January 13, 2026
   - [x] Android: Build `OkHttp` WebSocket factory with `CertificatePinner` and coroutine-based send queue.
   - [x] Share protobuf-free message framing utilities and include binary tests in `tests/transport/`.
 - [x] Test LAN discovery on same network
-  - [x] Create manual QA checklist for dual-device LAN pairing (success + failure cases). *(See `docs/testing/lan_manual.md` for loopback harness results and field execution steps.)*
+  - [x] Create manual QA checklist for dual-device LAN pairing (success + failure cases). *(See `docs/technical.md` for execution steps.)*
   - [x] Capture Wireshark traces to confirm mDNS advertisement cadence and TLS handshake flow. *(Documented capture workflow; simulated handshake artifacts recorded pending physical trace upload.)*
   - [x] Log metrics into README.md performance targets section once baseline captured.
 - [x] Measure LAN latency
@@ -161,6 +167,12 @@ Last Updated: January 13, 2026
   - [x] Ensure metrics + telemetry generated during tests align with dashboards.
   - [x] Capture regression scripts to run pre-release before Sprint 3 demo.
 
+### Phase 3.4: Reliability & Release Hardening
+- [x] Harden `PairingCode` by conforming it to `Sendable`, preventing strict concurrency crashes observed in pairing flows (commit `2a3ac9f`).
+- [x] Replace all `NSLock` usages in `WebSocketTransport` with `OSAllocatedUnfairLock` and update CI/test mocks for thread safety so heavy frame traffic no longer deadlocks (commits `a4c1e58`, `b6e98f0`, `57a8e57`, `5cc1afb`).
+- [x] Fix the outbound queue race condition in `WebSocketTransport` so clipboard messages are not dropped or replayed, and ensure release automation resolves macOS/Android binary paths dynamically (commits `07ac58a`, `ef67de6`, `6dc20bc`).
+- [x] Merge the transport and Gradle configuration updates that underpin v1.1.5/1.1.6 stability releases and keep future release pipelines flexible.
+
 ---
 
 ## Sprint 4: Content Type Handling (Weeks 7-8)
@@ -186,7 +198,7 @@ Last Updated: January 13, 2026
 - [x] macOS: Read file bytes, encode Base64
 - [x] Android: Extract file URI from ClipData
 - [x] Android: Read content resolver, encode Base64
-- [x] Implement size limit checks (1MB)
+- [x] Implement size limit checks (10MB sync limit, 50MB copy limit; enforced via `SizeConstants`)
 - [x] End-to-end test: file sync
 
 ---
@@ -255,24 +267,41 @@ Last Updated: January 13, 2026
 ## Sprint 7: Testing & Optimization (Weeks 13-14)
 
 ### Phase 7.1: Testing
-- [ ] Write unit tests (80% coverage target)
-  - [ ] macOS: Clipboard monitoring, encryption, transport
-  - [ ] Android: Clipboard listening, repository, sync
-  - [x] Backend: Routing, rate limiting
+- [ ] Reach coverage targets (clients ≥80%, backend ≥90%)
+  - macOS: Current total line coverage is ~46% (core sync paths are higher; see `macos/Tests/TEST_COVERAGE.md`)
+  - Android: JaCoCo report task exists (`jacocoTestReport`); baseline report needs to be generated and reviewed
+- [x] macOS unit tests
+  - [x] Crypto, clipboard monitoring, sync pipeline, transport, and Bonjour utilities
+  - [x] Concurrency-safe mocks and queue/expiration coverage for WebSocket transports
+- [x] Android unit tests
+  - [x] Crypto, pairing handshake, parser/pipeline/sync engine, transport (LAN + relay), and view models
+  - [x] JaCoCo reporting wired in Gradle
+- [x] Backend unit/integration coverage for core routing paths (routing/session manager, offline handling via `DeviceNotConnected`)
 - [ ] Integration tests
   - [x] End-to-end encryption
   - [ ] LAN discovery and sync
   - [x] Cloud relay sync
   - [x] Multi-device scenarios
-- [ ] Performance tests
-  - [ ] Latency measurement (LAN/Cloud)
-  - [x] Throughput test (100 clips)
-  - [ ] Memory profiling
-  - [ ] Battery drain test (Android, 24h)
-- [ ] Security tests
+  - [x] Cross-platform transport regression fixtures (vectors under `tests/transport/`)
+  - [ ] Restore a shared regression runner (docs reference `scripts/run-transport-regression.sh`, but it is not currently present)
+- [x] Performance tests (automated)
+  - [x] Latency measurement (LAN/Cloud)
+  - [x] Throughput test (100 messages / clips)
+  - [x] Backend throughput regression test (see `backend/tests/performance_throughput.rs`)
+- [ ] Extended profiling (manual / field)
+  - [ ] Memory profiling (macOS Instruments + Android Profiler)
+  - [ ] Battery drain test (Android, 24h on physical device)
+- [x] Security validation (automated)
+  - [x] Backend: `cargo test --all-features --locked` with Redis + `cargo clippy -- -D warnings`
+  - [x] Crypto: tampering detection + known-vector tests (backend and clients)
+- [ ] External security audit (manual)
   - [ ] Penetration testing on relay
-  - [ ] Man-in-the-middle simulation
-  - [ ] Key extraction attempts
+  - [ ] Man-in-the-middle simulation (verify pinning behavior under active MITM)
+  - [ ] Key extraction attempts (device storage / keystore / file-based stores)
+- [x] Test infrastructure
+  - [x] CI: Cross-platform test workflow
+  - [x] Git hooks: run `swift test` as part of pre-push
+  - [x] Parallelize transport test execution and harden WebSocket mocks for concurrency
 
 ### Phase 7.2: Optimization
 - [x] macOS: Profile with Instruments
@@ -292,8 +321,8 @@ Last Updated: January 13, 2026
 
 ## Sprint 8: Polish & Deployment (Weeks 15-16) ✅ 95% Complete
 
-### Phase 8.1: Bug Fixes ✅ Critical Issues Resolved
-- [x] Address all P0/P1 bugs from testing *(see `docs/sprint8_bug_report.md` for comprehensive analysis)*
+### Phase 8.1: Bug Fixes ✅ Complete (P0/P1)
+- [x] Address all P0/P1 bugs from testing *(analysis is captured in `changelog.md` and related documentation)*
 - [x] Identify and categorize all critical issues by priority
 - [x] Clean backend compilation warnings (reduced from 5 to 3)
 - [x] **RESOLVED**: Fix Android Room KSP compilation issues *(Oct 12, 2025)* ✅
@@ -306,10 +335,7 @@ Last Updated: January 13, 2026
   - Updated build system and entry point
   - Removed binary artifacts from version control
   - App now builds successfully and runs as menu bar application
-- [ ] Test Android APK on physical device
-- [ ] Fix edge cases (empty clipboard, unsupported types)
-- [ ] Handle network errors gracefully
-- [ ] Improve error messages and user feedback
+- [x] Automated regression suites pass (macOS `swift test`, Android unit tests + JaCoCo, backend `cargo test`) *(Jan 16, 2026)*
 
 ### Phase 8.2: Documentation ✅ Complete
 - [x] User guide (how to install, pair, use) *(15,000+ word comprehensive guide)*
@@ -319,8 +345,9 @@ Last Updated: January 13, 2026
 - [x] API documentation *(protocol spec - see `docs/protocol.md`)*
 - [x] FAQ and support resources
 
-### Phase 8.3: Deployment Preparation ✅ Complete
+### Phase 8.3: Deployment Preparation ✅ Mostly Complete
 - [x] macOS: Replace Keychain with file-based storage (improves Notarization compatibility) *(Dec 1, 2025)*
+- [x] macOS: Harden self-signed code signing flow (remove hardened runtime for self-signed builds, apply entitlements fallback, aggressively clean xattrs/resource forks)
 - [ ] macOS: Code signing with Developer ID *(Pending - requires Apple Developer account)*
 - [ ] macOS: Notarization for distribution *(Pending - requires code signing)*
 - [x] Android: Generate signed APK ✅ *(Release APK builds successfully via CI)*
@@ -328,10 +355,16 @@ Last Updated: January 13, 2026
 - [ ] Set up monitoring (Prometheus, Grafana) *(Backend metrics available, dashboard pending)*
 - [x] Set up error tracking (Sentry) ✅ *(Configured in Android build, requires auth token)*
 - [x] Create automated build and release pipeline ✅ *(Dec 3, 2025 - GitHub Actions workflow complete)*
+  - [x] CI: Update macOS runner to 15 and fix Android buildDir deprecation warnings
+  - [x] Release workflow: Dynamic binary/artifact path lookup to avoid hard-coded build paths
 
 ### Phase 8.4: Beta Release 📋 Pending
 - [ ] Recruit 10-20 beta testers
 - [ ] Distribute macOS .app and Android APK
+- [ ] QA on physical devices (pre-beta)
+  - [ ] Test Android APK on at least one physical device
+  - [ ] Validate edge cases (empty clipboard, unsupported types)
+  - [ ] Validate network error handling and user-facing error messages
 - [ ] Create beta feedback collection system
 - [ ] Set up usage analytics (opt-in)
 - [ ] Measure success metrics

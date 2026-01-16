@@ -4,6 +4,19 @@ import Network
 import os
 @testable import HypoApp
 
+/// A simple unfair lock wrapper that supports manual lock()/unlock() for test mocks
+final class UnfairLock: @unchecked Sendable {
+    private var _lock = os_unfair_lock()
+    
+    func lock() {
+        os_unfair_lock_lock(&_lock)
+    }
+    
+    func unlock() {
+        os_unfair_lock_unlock(&_lock)
+    }
+}
+
 final class MockBonjourDriverState: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock()
     private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
@@ -234,7 +247,7 @@ final class StubSession: URLSessionProviding, @unchecked Sendable {
 }
 
 final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = UnfairLock()
     private var _maximumMessageSize: Int = Int.max
     private var _createdRequest: URLRequest?
     private var _onResume: (() -> Void)?
@@ -399,7 +412,7 @@ final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
 }
 
 final class FlakyWebSocketTask: WebSocketTasking, @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = UnfairLock()
     private var _maximumMessageSize: Int = Int.max
     private var _createdRequest: URLRequest?
     private var _onResume: (() -> Void)?

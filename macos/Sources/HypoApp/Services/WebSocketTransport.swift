@@ -306,7 +306,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         let messageExpiration: TimeInterval = 300.0 // 5 minutes (strict expiration)
         
         
+        
         while !messageQueue.isEmpty {
+            // Guard against race condition where queue becomes empty between check and removeFirst
+            guard !messageQueue.isEmpty else {
+                logger.debug("✅ [WebSocketTransport] Queue became empty during processing")
+                break
+            }
             var queuedMessage = messageQueue.removeFirst()
             
             // Check Message Expiration (5 min strict)

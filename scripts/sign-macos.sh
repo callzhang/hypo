@@ -163,6 +163,7 @@ fi
 # Inside-out signing (Manual deep signing)
 # 1. Sign the specific binary first
 log_info "Signing binary: $(basename "$APP_BINARY")"
+
 # FORCE CLEANING: Explicitly remove resource forks/finder info from the binary itself right before signing
 # This is the last line of defense against "resource fork" errors
 xattr -d com.apple.FinderInfo "$APP_BINARY" 2>/dev/null || true
@@ -170,11 +171,23 @@ xattr -d com.apple.ResourceFork "$APP_BINARY" 2>/dev/null || true
 xattr -d com.apple.quarantine "$APP_BINARY" 2>/dev/null || true
 xattr -c "$APP_BINARY" 2>/dev/null || true # Clear all xattrs one last time
 
+# Explicitly remove any shadow file that might exist
+rm -f "$(dirname "$APP_BINARY")/._$(basename "$APP_BINARY")"
+
 # Note: ENTITLEMENTS are usually for the bundle or main executable, applied here to be safe
-codesign --force --sign "$SIGN_IDENTITY" \
-    --entitlements "$ENTITLEMENTS" \
-    --options runtime \
-    "$APP_BINARY"
+# Only use --options runtime with Apple-issued certificates (not self-signed or ad-hoc)
+if [ "$SIGN_IDENTITY" != "-" ] && [ "$SIGN_IDENTITY" != "HypoSelfSign" ]; then
+    # Apple Development certificate - use hardened runtime
+    codesign --force --sign "$SIGN_IDENTITY" \
+        --entitlements "$ENTITLEMENTS" \
+        --options runtime \
+        "$APP_BINARY"
+else
+    # Self-signed or ad-hoc - no hardened runtime
+    codesign --force --sign "$SIGN_IDENTITY" \
+        --entitlements "$ENTITLEMENTS" \
+        "$APP_BINARY"
+fi
 
 if [ $? -ne 0 ]; then
     log_warn "Binary signing failed, but proceeding to bundle signing (sometimes this is expected)"

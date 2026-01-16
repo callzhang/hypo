@@ -4,36 +4,104 @@ import Network
 import os
 @testable import HypoApp
 
-final class MockBonjourDriver: BonjourBrowsingDriver, @unchecked Sendable {
+final class MockBonjourDriverState: @unchecked Sendable {
+    private let lock = OSAllocatedUnfairLock()
     private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
-    private(set) var startCount = 0
+    fileprivate var startCount = 0
+    
+    func incrementStartCount() { lock.withLock { startCount += 1 } }
+    func decrementStartCount() { lock.withLock { startCount = max(0, startCount - 1) } }
+    func getStartCount() -> Int { lock.withLock { startCount } }
+    
+    func setHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void) {
+        lock.withLock { self.handler = handler }
+    }
+    
+    func emit(_ event: BonjourBrowsingDriverEvent) {
+        let h = lock.withLock { handler }
+        h?(event)
+    }
+}
+
+final class MockBonjourDriver: BonjourBrowsingDriver, @unchecked Sendable {
+    let state = MockBonjourDriverState()
+    
+    var startCount: Int { state.getStartCount() }
 
     func startBrowsing(serviceType: String, domain: String) {
-        startCount += 1
+        state.incrementStartCount()
     }
 
     func stopBrowsing() {
-        startCount = max(0, startCount - 1)
+        state.decrementStartCount()
     }
 
     func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void) {
-        self.handler = handler
+        state.setHandler(handler)
     }
 
     func emit(_ event: BonjourBrowsingDriverEvent) {
-        handler?(event)
+        state.emit(event)
+    }
+}
+
+final class MockBonjourPublisherState: @unchecked Sendable {
+    private let lock = OSAllocatedUnfairLock()
+    fileprivate var startCount = 0
+    fileprivate var stopCount = 0
+    fileprivate var metadataUpdates: [[String: String]] = []
+    fileprivate var configuration: BonjourPublisher.Configuration?
+    
+    func getStartCount() -> Int { lock.withLock { startCount } }
+    func getStopCount() -> Int { lock.withLock { stopCount } }
+    func getMetadataUpdates() -> [[String: String]] { lock.withLock { metadataUpdates } }
+    func getConfiguration() -> BonjourPublisher.Configuration? { lock.withLock { configuration } }
+    
+    func start(with config: BonjourPublisher.Configuration) {
+        lock.withLock {
+            startCount += 1
+            configuration = config
+        }
+    }
+    
+    func stop() {
+        lock.withLock {
+            stopCount += 1
+            configuration = nil
+        }
+    }
+    
+    func updateTXTRecord(_ metadata: [String : String]) {
+        lock.withLock {
+            metadataUpdates.append(metadata)
+            guard let configuration else { return }
+            let fingerprint = metadata["fingerprint_sha256"] ?? configuration.fingerprint
+            let version = metadata["version"] ?? configuration.version
+            let protocols = (metadata["protocols"] ?? configuration.protocols.joined(separator: ",")).split(separator: ",").map(String.init)
+            self.configuration = BonjourPublisher.Configuration(
+                domain: configuration.domain,
+                serviceType: configuration.serviceType,
+                serviceName: configuration.serviceName,
+                port: configuration.port,
+                version: version,
+                fingerprint: fingerprint,
+                protocols: protocols
+            )
+        }
     }
 }
 
 final class MockBonjourPublisher: BonjourPublishing {
-    private(set) var startCount = 0
-    private(set) var stopCount = 0
-    private(set) var metadataUpdates: [[String: String]] = []
-    private var configuration: BonjourPublisher.Configuration?
+    let state = MockBonjourPublisherState()
 
-    var currentConfiguration: BonjourPublisher.Configuration? { configuration }
+    var startCount: Int { state.getStartCount() }
+    var stopCount: Int { state.getStopCount() }
+    var metadataUpdates: [[String: String]] { state.getMetadataUpdates() }
+    
+    var currentConfiguration: BonjourPublisher.Configuration? { state.getConfiguration() }
+    
     var currentEndpoint: LanEndpoint? {
-        guard let configuration else { return nil }
+        guard let configuration = state.getConfiguration() else { return nil }
         return LanEndpoint(
             host: "localhost",
             port: configuration.port,
@@ -44,13 +112,11 @@ final class MockBonjourPublisher: BonjourPublishing {
     }
 
     func start(with configuration: BonjourPublisher.Configuration) {
-        startCount += 1
-        self.configuration = configuration
+        state.start(with: configuration)
     }
 
     func stop() {
-        stopCount += 1
-        configuration = nil
+        state.stop()
     }
     
     func stop(completion: @escaping () -> Void) {
@@ -59,20 +125,7 @@ final class MockBonjourPublisher: BonjourPublishing {
     }
 
     func updateTXTRecord(_ metadata: [String : String]) {
-        metadataUpdates.append(metadata)
-        guard let configuration else { return }
-        let fingerprint = metadata["fingerprint_sha256"] ?? configuration.fingerprint
-        let version = metadata["version"] ?? configuration.version
-        let protocols = (metadata["protocols"] ?? configuration.protocols.joined(separator: ",")).split(separator: ",").map(String.init)
-        self.configuration = BonjourPublisher.Configuration(
-            domain: configuration.domain,
-            serviceType: configuration.serviceType,
-            serviceName: configuration.serviceName,
-            port: configuration.port,
-            version: version,
-            fingerprint: fingerprint,
-            protocols: protocols
-        )
+        state.updateTXTRecord(metadata)
     }
 }
 
@@ -97,8 +150,25 @@ final class InMemoryLanDiscoveryCache: LanDiscoveryCache, @unchecked Sendable {
     }
 }
 
+final class MockTransportProviderState: @unchecked Sendable {
+    private let lock = OSAllocatedUnfairLock()
+    fileprivate var onIncomingMessage: (@Sendable (Data, TransportOrigin) async -> Void)?
+    
+    func setHandler(_ handler: @escaping @Sendable (Data, TransportOrigin) async -> Void) {
+        lock.withLock { onIncomingMessage = handler }
+    }
+    
+    func getHandler() -> (@Sendable (Data, TransportOrigin) async -> Void)? {
+        lock.withLock { onIncomingMessage }
+    }
+    
+    func hasHandler() -> Bool {
+        lock.withLock { onIncomingMessage != nil }
+    }
+}
+
 final class MockTransportProvider: TransportProvider {
-    private var _onIncomingMessage: ((Data, TransportOrigin) async -> Void)?
+    let state = MockTransportProviderState()
     
     func preferredTransport() -> SyncTransport {
         MockSyncTransport()
@@ -110,15 +180,16 @@ final class MockTransportProvider: TransportProvider {
     
     func setGetDiscoveredPeers(_ getter: @escaping () -> [DiscoveredPeer]) {}
     
-    func setCloudIncomingMessageHandler(_ handler: @escaping (Data, TransportOrigin) async -> Void) {
-        _onIncomingMessage = handler
+    func setCloudIncomingMessageHandler(_ handler: @escaping @Sendable (Data, TransportOrigin) async -> Void) {
+        state.setHandler(handler)
     }
     
     func simulateIncomingMessage(data: Data, origin: TransportOrigin) async {
-        await _onIncomingMessage?(data, origin)
+        let handler = state.getHandler()
+        await handler?(data, origin)
     }
     
-    var hasCloudIncomingMessageHandler: Bool { _onIncomingMessage != nil }
+    var hasCloudIncomingMessageHandler: Bool { state.hasHandler() }
 }
 
 struct MockSyncTransport: SyncTransport {

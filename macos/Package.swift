@@ -41,7 +41,10 @@ let package = Package(
                 "HypoApp",
                 .product(name: "Testing", package: "swift-testing")
             ],
-            path: "Tests/HypoAppTests"
+            path: "Tests/HypoAppTests",
+            swiftSettings: [
+                .unsafeFlags(["-Xfrontend", "-suppress-warnings"], .when(platforms: [.macOS]))
+            ]
         )
     ]
 )

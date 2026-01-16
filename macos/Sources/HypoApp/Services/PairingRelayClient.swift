@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 
 public struct PairingRelayClient: Sendable {
-    public struct PairingCode: Equatable {
+    public struct PairingCode: Equatable, Sendable {
         public let code: String
         public let expiresAt: Date
     }

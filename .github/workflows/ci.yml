@@ -45,12 +45,12 @@ jobs:
           chmod +x ./scripts/setup-android-sdk.sh
           ./scripts/setup-android-sdk.sh
         env:
-          ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
+          ANDROID_HOME: ${{ github.workspace }}/.android-sdk
       - name: Run Android unit tests
         working-directory: android
         run: ./gradlew testDebugUnitTest
         env:
-          ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
+          ANDROID_HOME: ${{ github.workspace }}/.android-sdk
 
   macos-tests:
     name: macOS Tests
@@ -60,4 +60,4 @@ jobs:
         uses: actions/checkout@v4
       - name: Run Swift tests
         working-directory: macos
-        run: xcodebuild test -scheme HypoAppPackageTests -destination 'platform=macOS'
+        run: swift test

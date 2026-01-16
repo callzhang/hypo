@@ -163,96 +163,335 @@ final class StubSession: URLSessionProviding, @unchecked Sendable {
 }
 
 final class StubWebSocketTask: WebSocketTasking, @unchecked Sendable {
-    var maximumMessageSize: Int = Int.max
-    var createdRequest: URLRequest?
-    var onResume: (() -> Void)?
-    var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
-    var onPing: (() -> Void)?
-    var sentData: [Data] = []
-    var receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
-    var sendError: Error?
+    private let lock = OSAllocatedUnfairLock()
+    private var _maximumMessageSize: Int = Int.max
+    private var _createdRequest: URLRequest?
+    private var _onResume: (() -> Void)?
+    private var _onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
+    private var _onPing: (() -> Void)?
+    private var _sentData: [Data] = []
+    private var _receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
+    private var _sendError: Error?
+
+    var maximumMessageSize: Int {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _maximumMessageSize
+        }
+        set {
+            lock.lock()
+            _maximumMessageSize = newValue
+            lock.unlock()
+        }
+    }
+    
+    var createdRequest: URLRequest? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _createdRequest
+        }
+        set {
+            lock.lock()
+            _createdRequest = newValue
+            lock.unlock()
+        }
+    }
+    
+    var onResume: (() -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onResume
+        }
+        set {
+            lock.lock()
+            _onResume = newValue
+            lock.unlock()
+        }
+    }
+    
+    var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onCancel
+        }
+        set {
+            lock.lock()
+            _onCancel = newValue
+            lock.unlock()
+        }
+    }
+    
+    var onPing: (() -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onPing
+        }
+        set {
+            lock.lock()
+            _onPing = newValue
+            lock.unlock()
+        }
+    }
+    
+    var sentData: [Data] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _sentData
+        }
+        set {
+            lock.lock()
+            _sentData = newValue
+            lock.unlock()
+        }
+    }
+    
+    var receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _receiveHandler
+        }
+        set {
+            lock.lock()
+            _receiveHandler = newValue
+            lock.unlock()
+        }
+    }
+    
+    var sendError: Error? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _sendError
+        }
+        set {
+            lock.lock()
+            _sendError = newValue
+            lock.unlock()
+        }
+    }
 
     func resume() {
-        onResume?()
+        lock.lock()
+        let callback = _onResume
+        lock.unlock()
+        callback?()
     }
 
     func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping (Error?) -> Void) {
-        if let error = sendError {
+        lock.lock()
+        if let error = _sendError {
+            lock.unlock()
             completionHandler(error)
             return
         }
         switch message {
         case .data(let data):
-            sentData.append(data)
+            _sentData.append(data)
         case .string(let string):
             if let data = string.data(using: .utf8) {
-                sentData.append(data)
+                _sentData.append(data)
             }
         @unknown default:
             break
         }
+        lock.unlock()
         completionHandler(nil)
     }
 
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        onCancel?(closeCode, reason)
+        lock.lock()
+        let callback = _onCancel
+        lock.unlock()
+        callback?(closeCode, reason)
     }
 
     func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
-        receiveHandler = completionHandler
+        lock.lock()
+        _receiveHandler = completionHandler
+        lock.unlock()
     }
 
     func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) {
-        onPing?()
+        lock.lock()
+        let callback = _onPing
+        lock.unlock()
+        callback?()
         pongReceiveHandler(nil)
     }
 }
 
 final class FlakyWebSocketTask: WebSocketTasking, @unchecked Sendable {
-    var maximumMessageSize: Int = Int.max
-    var createdRequest: URLRequest?
-    var onResume: (() -> Void)?
-    var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
-    var onPing: (() -> Void)?
-    var sentData: [Data] = []
-    var receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
-    var sendErrors: [Error?] = []
+    private let lock = OSAllocatedUnfairLock()
+    private var _maximumMessageSize: Int = Int.max
+    private var _createdRequest: URLRequest?
+    private var _onResume: (() -> Void)?
+    private var _onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
+    private var _onPing: (() -> Void)?
+    private var _sentData: [Data] = []
+    private var _receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
+    private var _sendErrors: [Error?] = []
+    
+    var maximumMessageSize: Int {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _maximumMessageSize
+        }
+        set {
+            lock.lock()
+            _maximumMessageSize = newValue
+            lock.unlock()
+        }
+    }
+    
+    var createdRequest: URLRequest? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _createdRequest
+        }
+        set {
+            lock.lock()
+            _createdRequest = newValue
+            lock.unlock()
+        }
+    }
+    
+    var onResume: (() -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onResume
+        }
+        set {
+            lock.lock()
+            _onResume = newValue
+            lock.unlock()
+        }
+    }
+    
+    var onCancel: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onCancel
+        }
+        set {
+            lock.lock()
+            _onCancel = newValue
+            lock.unlock()
+        }
+    }
+    
+    var onPing: (() -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onPing
+        }
+        set {
+            lock.lock()
+            _onPing = newValue
+            lock.unlock()
+        }
+    }
+    
+    var sentData: [Data] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _sentData
+        }
+        set {
+            lock.lock()
+            _sentData = newValue
+            lock.unlock()
+        }
+    }
+    
+    var receiveHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _receiveHandler
+        }
+        set {
+            lock.lock()
+            _receiveHandler = newValue
+            lock.unlock()
+        }
+    }
+    
+    var sendErrors: [Error?] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _sendErrors
+        }
+        set {
+            lock.lock()
+            _sendErrors = newValue
+            lock.unlock()
+        }
+    }
 
     func resume() {
-        onResume?()
+        lock.lock()
+        let callback = _onResume
+        lock.unlock()
+        callback?()
     }
 
     func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping (Error?) -> Void) {
-        if !sendErrors.isEmpty {
-            let nextError = sendErrors.removeFirst()
+        lock.lock()
+        if !_sendErrors.isEmpty {
+            let nextError = _sendErrors.removeFirst()
             if let nextError {
+                lock.unlock()
                 completionHandler(nextError)
                 return
             }
         }
+        
         switch message {
         case .data(let data):
-            sentData.append(data)
+            _sentData.append(data)
         case .string(let string):
             if let data = string.data(using: .utf8) {
-                sentData.append(data)
+                _sentData.append(data)
             }
         @unknown default:
             break
         }
+        lock.unlock()
         completionHandler(nil)
     }
 
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        onCancel?(closeCode, reason)
+        lock.lock()
+        let callback = _onCancel
+        lock.unlock()
+        callback?(closeCode, reason)
     }
 
     func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
-        receiveHandler = completionHandler
+        lock.lock()
+        _receiveHandler = completionHandler
+        lock.unlock()
     }
 
     func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) {
-        onPing?()
+        lock.lock()
+        let callback = _onPing
+        lock.unlock()
+        callback?()
         pongReceiveHandler(nil)
     }
 }

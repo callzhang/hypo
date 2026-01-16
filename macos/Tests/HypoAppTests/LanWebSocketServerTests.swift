@@ -2,6 +2,7 @@ import Foundation
 import Network
 import CryptoKit
 import Testing
+import os
 @testable import HypoApp
 
 @MainActor
@@ -722,7 +723,7 @@ func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Senda
 }
 
 final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
     private var _connectionContinuation: CheckedContinuation<UUID, Error>?
     private var _dataContinuation: CheckedContinuation<Data, Error>?
     private var clipboardData: [Data] = []
@@ -732,9 +733,9 @@ final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable 
         return try await withThrowingTaskGroup(of: UUID.self) { group in
             group.addTask {
                 return try await withCheckedThrowingContinuation { continuation in
-                    self.lock.lock()
-                    self._connectionContinuation = continuation
-                    self.lock.unlock()
+                    self.lock.withLock {
+                        self._connectionContinuation = continuation
+                    }
                 }
             }
             group.addTask {
@@ -751,9 +752,9 @@ final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable 
         return try await withThrowingTaskGroup(of: Data.self) { group in
             group.addTask {
                 return try await withCheckedThrowingContinuation { continuation in
-                    self.lock.lock()
-                    self._dataContinuation = continuation
-                    self.lock.unlock()
+                    self.lock.withLock {
+                        self._dataContinuation = continuation
+                    }
                 }
             }
             group.addTask {
@@ -769,22 +770,22 @@ final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable 
     func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {}
     
     func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {
-        lock.lock()
-        defer { lock.unlock() }
-        clipboardData.append(data)
-        if let continuation = _dataContinuation {
-            continuation.resume(returning: data)
-            _dataContinuation = nil
+        lock.withLock {
+            clipboardData.append(data)
+            if let continuation = _dataContinuation {
+                continuation.resume(returning: data)
+                _dataContinuation = nil
+            }
         }
     }
     
     func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID) {
-        lock.lock()
-        defer { lock.unlock() }
-        connectionIds.append(id)
-        if let continuation = _connectionContinuation {
-            continuation.resume(returning: id)
-            _connectionContinuation = nil
+        lock.withLock {
+            connectionIds.append(id)
+            if let continuation = _connectionContinuation {
+                continuation.resume(returning: id)
+                _connectionContinuation = nil
+            }
         }
     }
     
@@ -795,14 +796,12 @@ final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable 
     struct TimeoutError: Error {}
 
     func receivedClipboardData() -> [Data] {
-        lock.lock()
-        defer { lock.unlock() }
-        return clipboardData
+        lock.withLock { clipboardData }
     }
 }
 
 final class PairingDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
     private var connectionContinuation: CheckedContinuation<UUID, Error>?
     private var pairingContinuation: CheckedContinuation<PairingChallengeMessage, Error>?
 
@@ -810,9 +809,9 @@ final class PairingDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
         return try await withThrowingTaskGroup(of: UUID.self) { group in
             group.addTask {
                 return try await withCheckedThrowingContinuation { continuation in
-                    self.lock.lock()
-                    self.connectionContinuation = continuation
-                    self.lock.unlock()
+                    self.lock.withLock {
+                        self.connectionContinuation = continuation
+                    }
                 }
             }
             group.addTask {
@@ -829,9 +828,9 @@ final class PairingDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
         return try await withThrowingTaskGroup(of: PairingChallengeMessage.self) { group in
             group.addTask {
                 return try await withCheckedThrowingContinuation { continuation in
-                    self.lock.lock()
-                    self.pairingContinuation = continuation
-                    self.lock.unlock()
+                    self.lock.withLock {
+                        self.pairingContinuation = continuation
+                    }
                 }
             }
             group.addTask {
@@ -845,19 +844,19 @@ final class PairingDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
     }
 
     func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {
-        lock.lock()
-        defer { lock.unlock() }
-        pairingContinuation?.resume(returning: challenge)
-        pairingContinuation = nil
+        lock.withLock {
+            pairingContinuation?.resume(returning: challenge)
+            pairingContinuation = nil
+        }
     }
 
     func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {}
 
     func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID) {
-        lock.lock()
-        defer { lock.unlock() }
-        connectionContinuation?.resume(returning: id)
-        connectionContinuation = nil
+        lock.withLock {
+            connectionContinuation?.resume(returning: id)
+            connectionContinuation = nil
+        }
     }
 
     func server(_ server: LanWebSocketServer, didCloseConnection id: UUID) {}

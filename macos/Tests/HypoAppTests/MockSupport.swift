@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import Network
+import os
 @testable import HypoApp
 
 final class MockBonjourDriver: BonjourBrowsingDriver, @unchecked Sendable {
@@ -257,7 +258,7 @@ final class FlakyWebSocketTask: WebSocketTasking, @unchecked Sendable {
 }
 
 final class RecordingMetricsRecorder: TransportMetricsRecorder, @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
     private var _handshakes: [TimeInterval] = []
     private var _roundTrips: [String: [TimeInterval]] = [:]
 
@@ -277,13 +278,6 @@ final class RecordingMetricsRecorder: TransportMetricsRecorder, @unchecked Senda
     }
 }
 
-extension NSLock {
-    func withLock<T>(_ body: () -> T) -> T {
-        self.lock()
-        defer { self.unlock() }
-        return body()
-    }
-}
 
 @MainActor
 func makeWebSocketServer() -> LanWebSocketServer {
@@ -291,7 +285,7 @@ func makeWebSocketServer() -> LanWebSocketServer {
 }
 
 final class MutableClock: @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
     private var _now: Date
     
     init(now: Date) { _now = now }

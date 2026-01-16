@@ -1,11 +1,12 @@
 import Foundation
+import os
 
-public final class TokenBucket {
+public final class TokenBucket: @unchecked Sendable {
     private let capacity: Double
     private let refillRatePerSecond: Double
     private var tokens: Double
     private var lastRefill: TimeInterval
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
 
     init(capacity: Int, refillInterval: TimeInterval) {
         precondition(capacity > 0, "Capacity must be positive")
@@ -17,23 +18,21 @@ public final class TokenBucket {
     }
 
     func consume() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-
-        refillTokensLocked(currentTime: Date().timeIntervalSince1970)
-        guard tokens >= 1 else { return false }
-        tokens -= 1
-        return true
+        lock.withLock {
+            refillTokensLocked(currentTime: Date().timeIntervalSince1970)
+            guard tokens >= 1 else { return false }
+            tokens -= 1
+            return true
+        }
     }
 
     func consume(allowing count: Int) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-
-        refillTokensLocked(currentTime: Date().timeIntervalSince1970)
-        guard tokens >= Double(count) else { return false }
-        tokens -= Double(count)
-        return true
+        lock.withLock {
+            refillTokensLocked(currentTime: Date().timeIntervalSince1970)
+            guard tokens >= Double(count) else { return false }
+            tokens -= Double(count)
+            return true
+        }
     }
 
     private func refillTokensLocked(currentTime: TimeInterval) {

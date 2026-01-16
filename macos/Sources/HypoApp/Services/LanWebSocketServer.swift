@@ -34,7 +34,7 @@ public final class LanWebSocketServer {
         let connection: NWConnection
         private var buffer = Data()
         // Protects buffer mutations so concurrent frame appends can't corrupt indices (Issue 7)
-        private let bufferLock = NSLock()
+        private let bufferLock = OSAllocatedUnfairLock()
         var upgraded = false
         var pendingClose = false  // Set to true when close frame is received, but keep connection open until data is depleted
         var lastActivity = Date()
@@ -49,36 +49,33 @@ public final class LanWebSocketServer {
         
         func appendToBuffer(_ chunk: Data) {
             guard !chunk.isEmpty else { return }
-            bufferLock.lock()
-            buffer.append(chunk)
-            bufferLock.unlock()
+            bufferLock.withLock {
+                buffer.append(chunk)
+            }
         }
         
         func consumeHeader(upTo delimiter: Data) -> Data? {
-            bufferLock.lock()
-            defer { bufferLock.unlock() }
-            guard let headerRange = buffer.range(of: delimiter) else { return nil }
-            let headerData = buffer.subdata(in: 0..<headerRange.upperBound)
-            buffer = Data(buffer[headerRange.upperBound...])
-            return headerData
+            bufferLock.withLock {
+                guard let headerRange = buffer.range(of: delimiter) else { return nil }
+                let headerData = buffer.subdata(in: 0..<headerRange.upperBound)
+                buffer = Data(buffer[headerRange.upperBound...])
+                return headerData
+            }
         }
         
         func snapshotBuffer() -> Data {
-            bufferLock.lock()
-            let copy = buffer
-            bufferLock.unlock()
-            return copy
+            bufferLock.withLock { buffer }
         }
         
         func dropPrefix(_ length: Int) {
             guard length > 0 else { return }
-            bufferLock.lock()
-            if length >= buffer.count {
-                buffer.removeAll(keepingCapacity: true)
-            } else {
-                buffer.removeSubrange(0..<length)
+            bufferLock.withLock {
+                if length >= buffer.count {
+                    buffer.removeAll(keepingCapacity: true)
+                } else {
+                    buffer.removeSubrange(0..<length)
+                }
             }
-            bufferLock.unlock()
         }
     }
 

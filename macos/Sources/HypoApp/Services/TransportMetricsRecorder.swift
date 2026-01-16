@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public protocol TransportMetricsRecorder: Sendable {
     func recordHandshake(duration: TimeInterval, timestamp: Date)
@@ -28,7 +29,7 @@ public struct TransportMetricsSnapshot: Equatable {
 }
 
 public final class TransportMetricsAggregator: TransportMetricsRecorder, @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
     private var handshakeDurationsMs: [Double] = []
     private var roundTripDurationsMs: [Double] = []
     private let environment: String
@@ -54,15 +55,14 @@ public final class TransportMetricsAggregator: TransportMetricsRecorder, @unchec
     }
 
     public func snapshot(clear: Bool = false) -> TransportMetricsSnapshot? {
-        var handshakes: [Double] = []
-        var roundTrips: [Double] = []
-        lock.withLock {
-            handshakes = handshakeDurationsMs
-            roundTrips = roundTripDurationsMs
+        let (handshakes, roundTrips) = lock.withLock {
+            let h = handshakeDurationsMs
+            let r = roundTripDurationsMs
             if clear {
                 handshakeDurationsMs.removeAll()
                 roundTripDurationsMs.removeAll()
             }
+            return (h, r)
         }
         if handshakes.isEmpty && roundTrips.isEmpty {
             return nil
@@ -107,10 +107,4 @@ private extension Comparable {
     }
 }
 
-private extension NSLock {
-    func withLock<T>(_ body: () -> T) -> T {
-        lock()
-        defer { unlock() }
-        return body()
-    }
-}
+

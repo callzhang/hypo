@@ -1,34 +1,35 @@
 # Test Coverage Strategy (90% Target)
 
-**Status**: Draft  
-**Last Updated**: January 15, 2026  
+**Status**: Draft (coverage run completed)  
+**Last Updated**: January 16, 2026  
 
 ## Current Status
-**Overall Coverage:** Improving (~22% project-wide). Core sync components now show high coverage (>90% for SyncEngine).
+**Overall Coverage:** 46.16% project-wide (llvm-cov TOTAL line coverage). Core sync components now show high coverage (>90% for SyncEngine).
+**Latest Run:** `swift test --enable-code-coverage` completed on January 16, 2026 (172 tests passed). Coverage report generated.
 
 ## Coverage Summary Table
 
 | Category | Class | Line % | Notes |
 | :--- | :--- | :---: | :--- |
-| **Security** | `CryptoService` | 9.30% | Needs dedicated unit tests |
+| **Security** | `CryptoService` | 95.35% | |
 | | `FileBasedKeyStore` | 57.00% | |
-| | `FileBasedPairingSigningKeyStore` | 61.04% | |
+| | `FileBasedPairingSigningKeyStore` | 96.10% | |
 | | `KeychainKeyStore` | 0.00% | |
-| **Transport** | `TransportManager` | 58.55% | Orchestrator logic covered |
-| | `LanWebSocketTransport` | 51.84% | |
-| | `WebSocketTransport` | 29.41% | `WebSocketTransportTests` skipped |
-| | `CloudRelayTransport` | 42.31% | |
-| | `TransportFrameCodec` | 91.67% | High confidence |
-| | `BonjourBrowser` | 85.33% | |
-| | `BonjourPublisher` | 57.85% | |
-| | `LanWebSocketServer` | 11.58% | |
+| **Transport** | `TransportManager` | 72.46% | Orchestrator logic covered |
+| | `LanWebSocketTransport` | 70.71% | |
+| | `WebSocketTransport` | 74.24% | |
+| | `CloudRelayTransport` | 76.92% | |
+| | `TransportFrameCodec` | 100.00% | High confidence |
+| | `BonjourBrowser` | 77.99% | |
+| | `BonjourPublisher` | 90.40% | |
+| | `LanWebSocketServer` | 73.47% | |
 | **Sync** | `SyncEngine` | 92.31% | Core sync logic verified |
-| | `ClipboardEventDispatcher` | 78.95% | |
-| | `IncomingClipboardHandler` | 53.04% | Integration with encryption/history |
-| | `ClipboardMonitor` | 0.00% | |
-| **Data** | `HistoryStore` | 7.33% | Persistence logic verified in sync tests |
-| | `StorageManager` | 45.61% | |
-| **Utils** | `Logger` | 52.94% | |
+| | `ClipboardEventDispatcher` | 100.00% | |
+| | `IncomingClipboardHandler` | 53.91% | Integration with encryption/history |
+| | `ClipboardMonitor` | 85.19% | |
+| **Data** | `HistoryStore` | 16.32% | Persistence logic verified in sync tests |
+| | `StorageManager` | 71.93% | |
+| **Utils** | `Logger` | 62.35% | |
 | | `Compression` | 83.25% | Gzip/Zlib logic verified |
 
 ## Goals
@@ -91,4 +92,3 @@ Any exclusions must be documented in the relevant module test plan.
 ## Reporting & Review
 - Coverage summaries should be included in PR descriptions once tooling is active.
 - Any deliberate coverage reduction must be justified and documented.
-

@@ -58,9 +58,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Build Swift package
-        working-directory: macos
-        run: swift build --build-tests
       - name: Run Swift tests
         working-directory: macos
-        run: swift test --skip-build
+        run: xcodebuild test -scheme HypoAppPackageTests -destination 'platform=macOS'

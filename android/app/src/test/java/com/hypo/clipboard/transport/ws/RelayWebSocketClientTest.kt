@@ -67,6 +67,7 @@ class RelayWebSocketClientTest {
         val deviceIdentity = mockk<com.hypo.clipboard.sync.DeviceIdentity>(relaxed = true) {
             every { deviceId } returns "android-device"
         }
+        val relayClient = mockk<com.hypo.clipboard.pairing.PairingRelayClient>(relaxed = true)
         val client = RelayWebSocketClient(
             config = TlsWebSocketConfig(
                 url = "wss://hypo.fly.dev/ws",
@@ -77,6 +78,7 @@ class RelayWebSocketClientTest {
             frameCodec = TransportFrameCodec(),
             analytics = analytics,
             transportManager = transportManager,
+            relayClient = relayClient,
             deviceIdentity = deviceIdentity,
             scope = scope,
             clock = clock

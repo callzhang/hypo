@@ -67,7 +67,12 @@ async fn peers_filters_to_requested_devices() {
         .to_request();
     let resp = test::call_service(&app, req).await;
 
-    assert!(resp.status().is_success());
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = test::read_body(resp).await;
+        panic!("Test failed with status {}: {:?}", status, body);
+    }
+
     let body: serde_json::Value = test::read_body_json(resp).await;
     let connected = body["connected_devices"].as_array().expect("connected_devices");
     assert_eq!(connected.len(), 1);

@@ -68,4 +68,4 @@ jobs:
         run: xcodebuild -list
       - name: Run Swift tests
         working-directory: macos
-        run: xcodebuild test -scheme HypoApp-Package -destination 'platform=macOS'
+        run: xcodebuild test -scheme HypoApp-Package -destination 'platform=macOS' -skipMacroValidation

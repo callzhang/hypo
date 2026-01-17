@@ -38,6 +38,22 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
     private let defaults: UserDefaults
     private weak var handler: ClipboardNotificationHandling?
     private let fileManager: FileManager
+    private static let isRunningTests: Bool = {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        if environment["XCTestBundlePath"] != nil || environment["XCTestSessionIdentifier"] != nil {
+            return true
+        }
+        if ProcessInfo.processInfo.processName == "xctest" {
+            return true
+        }
+        if Bundle.main.bundlePath.hasSuffix(".xctest") {
+            return true
+        }
+        return NSClassFromString("XCTest") != nil
+    }()
 
     public init?(
         center: UNUserNotificationCenter? = nil,
@@ -52,6 +68,9 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
             // Check if we're in a proper app bundle before using .current()
             // UNUserNotificationCenter.current() requires a proper app bundle
             // When running from .build directory or test environment, Bundle.main.bundleURL won't be suitable
+            if Self.isRunningTests {
+                return nil
+            }
             let bundleURL = Bundle.main.bundleURL
             let bundlePath = bundleURL.path
             

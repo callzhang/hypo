@@ -504,7 +504,7 @@ struct LanWebSocketServerTests {
 
     }
 
-    @Test(.disabled(if: ProcessInfo.processInfo.environment["CI"] != nil, "Flaky in CI due to timing"))
+    @Test
     func testSendToConnectionNotUpgradedThrows() async throws {
         let server = LanWebSocketServer(enableHeartbeat: false)
         try server.start(port: 0)

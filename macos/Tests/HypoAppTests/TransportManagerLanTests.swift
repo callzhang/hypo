@@ -3,7 +3,7 @@ import Testing
 @testable import HypoApp
 
 struct TransportManagerLanTests {
-    @Test(.disabled(if: ProcessInfo.processInfo.environment["CI"] != nil, "Flaky in CI due to timing")) @MainActor
+    @Test @MainActor
     func testDiscoveryEventsUpdateStateAndDiagnostics() async throws {
         let driver = MockBonjourDriver()
         let now = Date(timeIntervalSince1970: 1_000)
@@ -63,7 +63,7 @@ struct TransportManagerLanTests {
         #expect(stopCount == 1)
     }
 
-    @Test(.disabled(if: ProcessInfo.processInfo.environment["CI"] != nil, "Flaky in CI due to timing")) @MainActor
+    @Test @MainActor
     func testAutomaticPruneRemovesStalePeers() async throws {
         let driver = MockBonjourDriver()
         let clock = MutableClock(now: Date(timeIntervalSince1970: 10_000))
@@ -115,7 +115,7 @@ struct TransportManagerLanTests {
         await manager.suspendLanDiscovery()
     }
 
-    @Test(.disabled(if: ProcessInfo.processInfo.environment["CI"] != nil, "Flaky in CI due to timing"))
+    @Test
     func testConnectPrefersLan() async {
         let manager = await MainActor.run {
             TransportManager(
@@ -140,7 +140,7 @@ struct TransportManagerLanTests {
         #expect(lastRoute == .lan)
     }
 
-    @Test(.disabled(if: ProcessInfo.processInfo.environment["CI"] != nil, "Flaky in CI due to timing"))
+    @Test
     func testConnectFallsBackOnTimeout() async {
         let analytics = InMemoryTransportAnalytics()
         let manager = await MainActor.run {
@@ -177,7 +177,7 @@ struct TransportManagerLanTests {
         }
     }
 
-    @Test(.disabled(if: ProcessInfo.processInfo.environment["CI"] != nil, "Flaky in CI due to timing"))
+    @Test
     func testConnectRecordsLanFailureReason() async {
         let analytics = InMemoryTransportAnalytics()
         let manager = await MainActor.run {
@@ -209,7 +209,7 @@ struct TransportManagerLanTests {
         #expect(route == nil)
     }
 
-    @Test(.disabled(if: ProcessInfo.processInfo.environment["CI"] != nil, "Flaky in CI due to timing"))
+    @Test
     func testConnectionSupervisorReconnectsAfterHeartbeatFailure() async {
         let analytics = InMemoryTransportAnalytics()
         let manager = await MainActor.run {
@@ -256,7 +256,7 @@ struct TransportManagerLanTests {
         await manager.stopConnectionSupervisor()
     }
 
-    @Test(.disabled(if: ProcessInfo.processInfo.environment["CI"] != nil, "Flaky in CI due to timing"))
+    @Test
     func testManualRetrySkipsBackoffDelay() async {
         let manager = await MainActor.run {
             TransportManager(
@@ -302,7 +302,7 @@ struct TransportManagerLanTests {
         #expect(last == .lan)
     }
 
-    @Test(.disabled(if: ProcessInfo.processInfo.environment["CI"] != nil, "Flaky in CI due to timing"))
+    @Test
     func testShutdownTransportFlushesCallback() async {
         let manager = await MainActor.run {
             TransportManager(

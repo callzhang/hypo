@@ -250,7 +250,7 @@ object AppModule {
         deviceIdentity = deviceIdentity
     )
 
-    private fun computeWsAuthToken(secret: String, deviceId: String): String? {
+    internal fun computeWsAuthToken(secret: String, deviceId: String): String? {
         if (secret.isBlank()) return null
         val mac = Mac.getInstance("HmacSHA256")
         val key = SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256")

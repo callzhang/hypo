@@ -7,6 +7,14 @@ import Testing
 
 struct CloudRelayTransportTests {
     @Test @MainActor
+    func testDefaultsIncludeAuthTokenWhenConfigured() async {
+        setenv("RELAY_WS_AUTH_TOKEN", "test-secret", 1)
+        defer { unsetenv("RELAY_WS_AUTH_TOKEN") }
+
+        let configuration = CloudRelayDefaults.production()
+        #expect(configuration.headers["X-Auth-Token"] != nil)
+    }
+    @Test @MainActor
     func testSendDelegatesToUnderlyingTransport() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
@@ -55,46 +63,34 @@ struct CloudRelayTransportTests {
 
     @Test @MainActor
     func testQueryConnectedPeersUsesNameLookup() async {
-        let stubTask = StubWebSocketTask()
-        let session = StubSession(task: stubTask)
         let transport = CloudRelayTransport(
             configuration: .init(
                 url: URL(string: "wss://hypo-relay-staging.fly.dev/ws")!,
                 fingerprint: "abcd"
-            ),
-            sessionFactory: { _, _ in session }
+            )
         )
         transport.setNameLookup { deviceId in
             deviceId == "peer-a" ? "Alice" : nil
         }
 
-        stubTask.onResume = {
-            transport.handleOpen(task: stubTask)
+        let responseData = """
+        {"connected_devices":[{"device_id":"peer-a","last_seen":"2025-10-01T12:35:10.123Z"}]}
+        """.data(using: .utf8) ?? Data()
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseData)
         }
 
-        try? await transport.connect()
+        URLProtocol.registerClass(MockURLProtocol.self)
+        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
 
-        async let response = transport.queryConnectedPeers(peerIds: ["peer-a"])
-        let sent = await waitUntil(timeout: .seconds(1)) {
-            stubTask.sentData.count == 1
-        }
-        #expect(sent)
-
-        let sentData = stubTask.sentData.first ?? Data()
-        let json = jsonObject(from: sentData) ?? [:]
-        let queryId = json["id"] as? String ?? ""
-
-        let payload: [String: Any] = [
-            "type": "control",
-            "payload": [
-                "action": "query_connected_peers",
-                "original_message_id": queryId,
-                "connected_devices": ["peer-a"]
-            ]
-        ]
-        transport.underlying._testing_handleIncoming(lengthPrefixedJSON(payload))
-
-        let peers = await response
+        let peers = await transport.queryConnectedPeers(peerIds: ["peer-a"])
         #expect(peers.count == 1)
         #expect(peers.first?.deviceId == "peer-a")
         #expect(peers.first?.name == "Alice")
@@ -174,4 +170,34 @@ private func jsonObject(from data: Data) -> [String: Any]? {
         return nil
     }
     return object
+}
+
+private final class MockURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        return true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        return request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

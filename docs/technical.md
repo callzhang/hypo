@@ -903,7 +903,7 @@ class ScreenStateReceiver(
 #### 4.2.7 Connection Status Probing ✅ Dual Status (LAN + Cloud) (December 2025)
 
 **Dual Status Architecture**: `ConnectionStatusProber` checks connection status via both LAN and Cloud simultaneously:
-- **Cloud Status**: Queries backend via WebSocket control message (`query_connected_peers`) to get list of connected device IDs
+- **Cloud Status**: Queries backend via HTTP `GET /peers?device_id=...` to get list of connected device IDs
 - **LAN Status**: Checks via Bonjour discovery + active WebSocket connections (devices with established LAN connections)
 - **Dual Status Display**: UI shows "LAN ✓", "Cloud ✓", "Both ✓", or "Offline" for each peer
 - **Event-Driven Architecture**: Uses StateFlow observation instead of periodic polling:
@@ -1274,7 +1274,7 @@ async fn route_to_device(redis: &Redis, device_id: &str, message: &str) -> Optio
 
 #### 4.3.4 Cloud Relay Enhancements
 
-- **Production Deployment**: Relay deployed to Fly.io production. `backend/fly.toml` defines auto-scaling (min=1, max=3) and embedded Redis in container. Secrets (`RELAY_HMAC_KEY`, `CERT_FINGERPRINT`) managed through Fly secrets and rotated monthly. The production relay is available at `https://hypo.fly.dev` with WebSocket endpoint `wss://hypo.fly.dev/ws`.
+- **Production Deployment**: Relay deployed to Fly.io production. `backend/fly.toml` defines auto-scaling (min=1, max=3) and embedded Redis in container. Secrets (`RELAY_WS_AUTH_TOKEN`, `CERT_FINGERPRINT`) managed through Fly secrets and rotated monthly. The production relay is available at `https://hypo.fly.dev` with WebSocket endpoint `wss://hypo.fly.dev/ws`.
 - **Pairing Support**: Adds `/pairing/code` and `/pairing/claim` endpoints secured with HMAC header `X-Hypo-Signature`. Pairing codes stored in Redis with 60 s TTL and replay protection counters. Protocol is device-agnostic: any device can act as initiator (code creator) or responder (code claimer).
 - **Client Dual-Send Orchestration**: Both Android and macOS use `DualSyncTransport` to always attempt both LAN and cloud sends in parallel, with LAN attempts bounded by a 3 s timeout. Transport reason codes (`lan_timeout`, `lan_rejected`, `lan_not_supported`) are still surfaced via the shared `TransportAnalytics` stream for telemetry dashboards.
 - **Certificate Pinning**: `backend/scripts/cert_fingerprint.sh` extracts SHA-256 fingerprints from the Fly-issued certificate chain. Clients load the pinned hash and record a `transport_pinning_failure` analytics event when TLS verification fails (environment + host metadata captured).

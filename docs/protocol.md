@@ -487,14 +487,8 @@ respect this hint before retrying to avoid unnecessary load.
 Clients can query the status of known peers without exposing their full social graph or receiving a list of all connected devices.
 
 **Request**:
-```json
-{
-  "type": "control",
-  "payload": {
-    "action": "query_connected_peers",
-    "device_ids": ["known-peer-uuid-1", "known-peer-uuid-2"]
-  }
-}
+```
+GET /peers?device_id=known-peer-uuid-1&device_id=known-peer-uuid-2
 ```
 
 **Response**:
@@ -502,19 +496,15 @@ Server returns the subset of requested devices that are currently connected, inc
 
 ```json
 {
-  "type": "control",
-  "payload": {
-    "action": "connected_peers",
-    "connected_devices": [
-      {
-        "device_id": "known-peer-uuid-1",
-        "last_seen": "2025-10-01T12:35:10.123Z"
-      }
-    ]
-  }
+  "connected_devices": [
+    {
+      "device_id": "known-peer-uuid-1",
+      "last_seen": "2025-10-01T12:35:10.123Z"
+    }
+  ]
 }
 ```
-- Only returns devices from the `device_ids` request list that are currently connected.
+- Only returns devices from the `device_id` query list that are currently connected.
 - `last_seen`: ISO 8601 timestamp of the last activity from that device.
 
 
@@ -539,7 +529,7 @@ Server returns the subset of requested devices that are currently connected, inc
 ### 5.2 Cloud Relay Connection
 
 ```
-1. Client → Relay: WS Upgrade (wss://relay.hypo.app/ws)
+1. Client → Relay: WS Upgrade (wss://relay.hypo.app/ws) with headers `X-Device-Id`, `X-Device-Platform`, `X-Auth-Token`
 2. Client ← Relay: 101 Switching Protocols
 3. Client → Relay: Handshake with device ID
 4. Client ← Relay: Handshake ACK

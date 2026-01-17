@@ -202,7 +202,8 @@ docker-compose up
 **Server Endpoints**:
 - Health: `GET /health` - Server status and uptime
 - Metrics: `GET /metrics` - Prometheus metrics
-- WebSocket: `WS /ws` - Real-time message relay (requires `X-Device-Id` and `X-Device-Platform` headers)
+- WebSocket: `WS /ws` - Real-time message relay (requires `X-Device-Id`, `X-Device-Platform`, `X-Auth-Token`)
+- Peers: `GET /peers?device_id=<id>&device_id=<id>` - Connected peers (filtered)
 - Pairing: `POST /pairing/code` - Create pairing code
 - Pairing: `POST /pairing/claim` - Claim pairing code
 

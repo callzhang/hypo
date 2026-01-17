@@ -133,7 +133,7 @@ Server will start on `http://localhost:8080`
 2. Populate staging secrets and Redis attachment:
 
    ```bash
-   flyctl secrets set RELAY_HMAC_KEY=... CERT_FINGERPRINT=...
+   flyctl secrets set RELAY_WS_AUTH_TOKEN=... CERT_FINGERPRINT=...
    flyctl volumes create redis --size 1
    ```
 
@@ -167,13 +167,15 @@ WS /ws
 - `Connection: Upgrade`
 - `X-Device-Id: <UUID>` (required)
 - `X-Device-Platform: macos|android` (required)
+- `X-Auth-Token: <base64(hmac_sha256(device_id))>` (required)
 
 **Example**:
 ```javascript
 const ws = new WebSocket('ws://localhost:8080/ws', {
     headers: {
         'X-Device-Id': '550e8400-e29b-41d4-a716-446655440000',
-        'X-Device-Platform': 'macos'
+        'X-Device-Platform': 'macos',
+        'X-Auth-Token': '<base64(hmac_sha256(device_id))>'
     }
 });
 ```
@@ -214,6 +216,24 @@ hypo_messages_routed_total 56789
 # TYPE hypo_message_latency_seconds histogram
 hypo_message_latency_seconds_bucket{le="0.001"} 1000
 hypo_message_latency_seconds_bucket{le="0.01"} 5000
+```
+
+### Connected Peers
+
+```
+GET /peers?device_id=<uuid>&device_id=<uuid>
+```
+
+**Response**:
+```json
+{
+  "connected_devices": [
+    {
+      "device_id": "known-peer-uuid-1",
+      "last_seen": "2025-10-01T12:35:10.123Z"
+    }
+  ]
+}
 ```
 
 ---
@@ -505,7 +525,7 @@ HttpServer::new(move || {
 ### Authentication
 
 - Validate `X-Device-Id` header format (UUID)
-- Optional: HMAC signature verification for added security
+- Require `X-Auth-Token` = base64(HMAC-SHA256(device_id)) using `RELAY_WS_AUTH_TOKEN`
 
 ---
 
@@ -570,4 +590,3 @@ let redis_pool = ConnectionManager::new(redis_client).await?;
 
 **Status**: In Development  
 **Last Updated**: October 1, 2025
-

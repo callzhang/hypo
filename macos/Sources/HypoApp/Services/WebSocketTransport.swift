@@ -76,7 +76,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         case connected(WebSocketTasking)
     }
 
-    private let configuration: WebSocketConfiguration
+    let configuration: WebSocketConfiguration
     private let sessionFactory: @Sendable (URLSessionDelegate, TimeInterval) -> URLSessionProviding
     private let frameCodec: TransportFrameCodec
     private let metricsRecorder: TransportMetricsRecorder

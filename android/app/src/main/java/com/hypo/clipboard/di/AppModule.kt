@@ -43,7 +43,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import android.util.Base64
 import java.time.Clock
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import javax.inject.Named
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -146,18 +149,26 @@ object AppModule {
     @Named("cloud_ws_config")
     fun provideCloudTlsWebSocketConfig(
         deviceIdentity: DeviceIdentity
-    ): TlsWebSocketConfig =
-        TlsWebSocketConfig(
+    ): TlsWebSocketConfig {
+        val headers = mutableMapOf(
+            "X-Hypo-Client" to BuildConfig.VERSION_NAME,
+            "X-Hypo-Environment" to BuildConfig.RELAY_ENVIRONMENT,
+            "X-Device-Id" to deviceIdentity.deviceId,
+            "X-Device-Platform" to "android"
+        )
+
+        val authToken = computeWsAuthToken(BuildConfig.RELAY_WS_AUTH_TOKEN, deviceIdentity.deviceId)
+        if (authToken != null) {
+            headers["X-Auth-Token"] = authToken
+        }
+
+        return TlsWebSocketConfig(
             url = BuildConfig.RELAY_WS_URL,
             fingerprintSha256 = BuildConfig.RELAY_CERT_FINGERPRINT.takeIf { it.isNotBlank() },
-            headers = mapOf(
-                "X-Hypo-Client" to BuildConfig.VERSION_NAME,
-                "X-Hypo-Environment" to BuildConfig.RELAY_ENVIRONMENT,
-                "X-Device-Id" to deviceIdentity.deviceId,
-                "X-Device-Platform" to "android"
-            ),
+            headers = headers,
             environment = "cloud"
         )
+    }
 
     @Provides
     @Singleton
@@ -238,6 +249,15 @@ object AppModule {
         relayClient = relayClient,
         deviceIdentity = deviceIdentity
     )
+
+    private fun computeWsAuthToken(secret: String, deviceId: String): String? {
+        if (secret.isBlank()) return null
+        val mac = Mac.getInstance("HmacSHA256")
+        val key = SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256")
+        mac.init(key)
+        val digest = mac.doFinal(deviceId.lowercase().toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(digest, Base64.NO_WRAP)
+    }
 
     @Provides
     fun provideNsdManager(@ApplicationContext context: Context): NsdManager =

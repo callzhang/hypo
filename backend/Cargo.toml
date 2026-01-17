@@ -50,6 +50,7 @@ flate2 = "1.0"
 
 # Security
 sha2 = "0.10"
+hmac = "0.12"
 base64 = "0.21"
 aes-gcm = "0.10"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
@@ -75,4 +76,3 @@ strip = true
 [profile.dev]
 opt-level = 0
 debug = true
-

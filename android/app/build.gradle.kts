@@ -102,6 +102,7 @@ android {
         // Certificate pinning causes issues when certificates change and is overkill for a relay service
         buildConfigField("String", "RELAY_CERT_FINGERPRINT", "\"\"")
         buildConfigField("String", "RELAY_ENVIRONMENT", "\"production\"")
+        buildConfigField("String", "RELAY_WS_AUTH_TOKEN", "\"\"")
     }
 
     buildTypes {

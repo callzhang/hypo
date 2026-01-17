@@ -3,6 +3,7 @@ use actix_ws::Message;
 use base64::engine::general_purpose::{STANDARD as BASE64, STANDARD_NO_PAD as BASE64_NO_PAD};
 use base64::Engine;
 use chrono::Utc;
+use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{error, info, warn};
@@ -39,6 +40,16 @@ pub async fn websocket_handler(
     // Normalize device ID to lowercase for consistent matching across platforms
     let device_id = device_id.unwrap().to_lowercase();
     let platform = platform.unwrap();
+
+    if !verify_ws_auth(&req, &device_id) {
+        warn!(
+            "WebSocket connection rejected: auth token missing or invalid for device {} ({})",
+            device_id, platform
+        );
+        return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Missing or invalid X-Auth-Token"
+        })));
+    }
 
     info!(
         "WebSocket connection request from device: {} ({})",
@@ -277,6 +288,40 @@ pub async fn websocket_handler(
     });
 
     Ok(response)
+}
+
+fn verify_ws_auth(req: &HttpRequest, device_id: &str) -> bool {
+    let secret = match std::env::var("RELAY_WS_AUTH_TOKEN") {
+        Ok(value) if !value.is_empty() => value,
+        _ => {
+            error!("RELAY_WS_AUTH_TOKEN not set; rejecting WebSocket connection");
+            return false;
+        }
+    };
+
+    let token = match req
+        .headers()
+        .get("X-Auth-Token")
+        .and_then(|h| h.to_str().ok())
+    {
+        Some(value) if !value.is_empty() => value,
+        _ => return false,
+    };
+
+    let decoded = match BASE64
+        .decode(token.as_bytes())
+        .or_else(|_| BASE64_NO_PAD.decode(token.as_bytes()))
+    {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+
+    let mut mac = match Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    mac.update(device_id.as_bytes());
+    mac.verify_slice(&decoded).is_ok()
 }
 
 /// Decode binary frame (4-byte big-endian length + JSON payload)

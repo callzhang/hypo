@@ -6,7 +6,8 @@ use std::sync::{
 use tokio::sync::{mpsc, RwLock};
 
 type BinaryFrame = Vec<u8>;
-type SessionChannel = mpsc::UnboundedSender<BinaryFrame>;
+const SESSION_QUEUE_CAPACITY: usize = 256;
+type SessionChannel = mpsc::Sender<BinaryFrame>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -34,7 +35,7 @@ struct SessionEntry {
 }
 
 pub struct Registration {
-    pub receiver: mpsc::UnboundedReceiver<BinaryFrame>,
+    pub receiver: mpsc::Receiver<BinaryFrame>,
     pub token: u64,
 }
 
@@ -44,7 +45,7 @@ impl SessionManager {
     }
 
     pub async fn register(&self, device_id: String) -> Registration {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(SESSION_QUEUE_CAPACITY);
         let token = self.next_token.fetch_add(1, Ordering::Relaxed);
         let mut sessions = self.inner.write().await;
         if sessions.contains_key(&device_id) {
@@ -101,7 +102,13 @@ impl SessionManager {
             if id == sender_id {
                 continue;
             }
-            let _ = entry.sender.send(frame.clone());
+            if let Err(err) = entry.sender.try_send(frame.clone()) {
+                tracing::warn!(
+                    "Dropping message for {} due to backpressure: {}",
+                    id,
+                    err
+                );
+            }
         }
     }
 
@@ -122,7 +129,7 @@ impl SessionManager {
             })?;
         sender
             .sender
-            .send(frame)
+            .try_send(frame)
             .map_err(|err| {
                 tracing::error!("Failed to send to device {}: {}", device_id, err);
                 SessionError::SendError(err.to_string())

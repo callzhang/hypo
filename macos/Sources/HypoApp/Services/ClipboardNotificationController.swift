@@ -51,9 +51,17 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
         } else {
             // Check if we're in a proper app bundle before using .current()
             // UNUserNotificationCenter.current() requires a proper app bundle
-            // When running from .build directory, Bundle.main.bundleURL won't end in .app
+            // When running from .build directory or test environment, Bundle.main.bundleURL won't be suitable
             let bundleURL = Bundle.main.bundleURL
-            if bundleURL.pathExtension == "app" || bundleURL.path.contains(".app/") {
+            let bundlePath = bundleURL.path
+            
+            // Detect test environment (Xcode test runner)
+            if bundlePath.contains("/Xcode/Agents/") || bundlePath.contains("/Xcode/DerivedData/") {
+                // We're in a test environment, notifications aren't available
+                return nil
+            }
+            
+            if bundleURL.pathExtension == "app" || bundlePath.contains(".app/") {
                 // We're in a proper app bundle, safe to use .current()
                 notificationCenter = .current()
                 

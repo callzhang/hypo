@@ -678,9 +678,10 @@ public final class TransportManager: ObservableObject {
                 // Update configuration with actual port if it was ephemeral
                 if lanConfiguration.port == 0 {
                     // Wait for port assignment (async)
-                    if let assigned = try? await webSocketServer.waitForPort() {
-                         logger.info("✅ [TransportManager] WebSocket server bound to ephemeral port: \(assigned)")
-                         lanConfiguration = BonjourPublisher.Configuration(
+                    do {
+                        let assigned = try await webSocketServer.waitForPort(timeout: 5.0)
+                        logger.info("✅ [TransportManager] WebSocket server bound to ephemeral port: \(assigned)")
+                        lanConfiguration = BonjourPublisher.Configuration(
                             domain: lanConfiguration.domain,
                             serviceType: lanConfiguration.serviceType,
                             serviceName: lanConfiguration.serviceName,
@@ -689,8 +690,21 @@ public final class TransportManager: ObservableObject {
                             fingerprint: lanConfiguration.fingerprint,
                             protocols: lanConfiguration.protocols
                         )
-                    } else {
-                        logger.error("❌ [TransportManager] Failed to resolve ephemeral port")
+                    } catch {
+                        if let assigned = webSocketServer.listeningPort?.rawValue, assigned > 0 {
+                            logger.warning("⚠️ [TransportManager] Using fallback port after timeout: \(assigned)")
+                            lanConfiguration = BonjourPublisher.Configuration(
+                                domain: lanConfiguration.domain,
+                                serviceType: lanConfiguration.serviceType,
+                                serviceName: lanConfiguration.serviceName,
+                                port: Int(assigned),
+                                version: lanConfiguration.version,
+                                fingerprint: lanConfiguration.fingerprint,
+                                protocols: lanConfiguration.protocols
+                            )
+                        } else {
+                            logger.error("❌ [TransportManager] Failed to resolve ephemeral port: \(error.localizedDescription)")
+                        }
                     }
                 }
                 logger.info("✅ [TransportManager] WebSocket server started")

@@ -839,6 +839,7 @@ mod tests {
         session
     }
 
+
     #[actix_rt::test]
     async fn register_key_control_message_stores_key() {
         let store = crate::services::device_key_store::DeviceKeyStore::new();

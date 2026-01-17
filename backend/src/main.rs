@@ -7,6 +7,7 @@ use hypo_relay::{
             claim_pairing_code, create_pairing_code, poll_ack, poll_challenge, submit_ack,
             submit_challenge,
         },
+        peers::connected_peers_handler,
         status::status_handler,
         websocket::websocket_handler,
     },
@@ -81,6 +82,7 @@ async fn main() -> std::io::Result<()> {
             .route("/health", web::get().to(health_check))
             .route("/status", web::get().to(status_handler))
             .route("/metrics", web::get().to(metrics_handler))
+            .route("/peers", web::get().to(connected_peers_handler))
             .service(
                 web::scope("/pairing")
                     .route("/code", web::post().to(create_pairing_code))

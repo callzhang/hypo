@@ -177,10 +177,12 @@ pub async fn websocket_handler(
                             }
                         }
                         Message::Binary(bytes) => {
-                            // Skip empty binary frames (likely WebSocket keepalive/ping frames)
+                            // Reject empty binary frames to prevent probing/ambiguity
                             if bytes.is_empty() {
-                                // Silently ignore empty frames - these are likely keepalive messages
-                                continue;
+                                warn!("Empty binary frame received from {}", reader_device_id);
+                                close_reason = "empty_binary_frame".to_string();
+                                let _ = reader_session.close(None).await;
+                                break;
                             }
                             // Binary frame format (4-byte length + JSON) - forward as-is
                             if let Err(err) =
@@ -288,6 +290,10 @@ fn decode_binary_frame(data: &[u8]) -> Result<String, &'static str> {
     
     if data.len() < 4 + length {
         return Err("frame truncated");
+    }
+    
+    if data.len() != 4 + length {
+        return Err("frame has trailing bytes");
     }
     
     // Extract JSON payload

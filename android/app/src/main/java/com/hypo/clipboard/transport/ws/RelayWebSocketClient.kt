@@ -29,6 +29,7 @@ class RelayWebSocketClient @Inject constructor(
     metricsRecorder: TransportMetricsRecorder = NoopTransportMetricsRecorder,
     analytics: TransportAnalytics = NoopTransportAnalytics,
     private val transportManager: com.hypo.clipboard.transport.TransportManager,
+    private val relayClient: com.hypo.clipboard.pairing.PairingRelayClient,
     private val deviceIdentity: com.hypo.clipboard.sync.DeviceIdentity,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     clock: Clock = Clock.systemUTC()
@@ -118,56 +119,27 @@ class RelayWebSocketClient @Inject constructor(
      * Filters out the local device ID to avoid "No device name" warnings.
      */
     suspend fun queryConnectedPeers(peerIds: List<String>? = null): List<ConnectedPeer> {
-        if (!isConnected()) {
-            android.util.Log.d("RelayWebSocketClient", "⚠️ Cannot query connected peers: not connected")
+        if (peerIds.isNullOrEmpty()) {
+            android.util.Log.d("RelayWebSocketClient", "⚠️ Cannot query connected peers: device_ids filter is required")
             return emptyList()
         }
-        
+
         return try {
-            if (!peerIds.isNullOrEmpty()) {
-                val preview = peerIds.take(5).joinToString(",")
-                val suffix = if (peerIds.size > 5) ", …(+${peerIds.size - 5})" else ""
-                android.util.Log.d("RelayWebSocketClient", "🔎 query_connected_peers request: ${peerIds.size} ids [$preview$suffix]")
-            } else {
-                android.util.Log.d("RelayWebSocketClient", "🔎 query_connected_peers request: no filter ids")
+            val preview = peerIds.take(5).joinToString(",")
+            val suffix = if (peerIds.size > 5) ", …(+${peerIds.size - 5})" else ""
+            android.util.Log.d("RelayWebSocketClient", "🔎 HTTP query peers: ${peerIds.size} ids [$preview$suffix]")
+            val devices = relayClient.queryConnectedPeers(peerIds)
+            val peers = devices.mapNotNull { info ->
+                val deviceId = info.deviceId
+                if (deviceId == deviceIdentity.deviceId) return@mapNotNull null
+                val lastSeen = runCatching { java.time.Instant.parse(info.lastSeen) }.getOrNull()
+                val name = transportManager.getDeviceName(deviceId)
+                ConnectedPeer(deviceId = deviceId, name = name, lastSeen = lastSeen)
             }
-            val response = delegate.sendControlMessage(
-                action = "query_connected_peers", 
-                timeoutMs = 5000,
-                deviceIds = peerIds
-            )
-            if (response != null) {
-                val devicesArray = response.optJSONArray("connected_devices")
-                val peers = mutableListOf<ConnectedPeer>()
-                if (devicesArray != null) {
-                    for (i in 0 until devicesArray.length()) {
-                        val deviceInfo = devicesArray.getJSONObject(i)
-                        val deviceId = deviceInfo.getString("device_id")
-                        val lastSeenStr = deviceInfo.optString("last_seen")
-                        
-                        // Skip local device - server might return it if filter wasn't used
-                        if (deviceId == deviceIdentity.deviceId) {
-                            continue
-                        }
-                        
-                        val lastSeen = try {
-                            java.time.Instant.parse(lastSeenStr)
-                        } catch (e: Exception) {
-                            null
-                        }
-                        
-                        val name = transportManager.getDeviceName(deviceId)
-                        peers.add(ConnectedPeer(deviceId = deviceId, name = name, lastSeen = lastSeen))
-                    }
-                }
-                val idPreview = peers.map { it.deviceId }.take(5).joinToString(",")
-                val idSuffix = if (peers.size > 5) ", …(+${peers.size - 5})" else ""
-                android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${peers.size} devices [$idPreview$idSuffix]")
-                peers
-            } else {
-                android.util.Log.w("RelayWebSocketClient", "⚠️ No response from query_connected_peers")
-                emptyList()
-            }
+            val idPreview = peers.map { it.deviceId }.take(5).joinToString(",")
+            val idSuffix = if (peers.size > 5) ", …(+${peers.size - 5})" else ""
+            android.util.Log.d("RelayWebSocketClient", "✅ Queried connected peers: ${peers.size} devices [$idPreview$idSuffix]")
+            peers
         } catch (e: Exception) {
             android.util.Log.w("RelayWebSocketClient", "⚠️ Failed to query connected peers: ${e.message}", e)
             emptyList()

@@ -227,13 +227,15 @@ object AppModule {
         frameCodec: TransportFrameCodec,
         analytics: TransportAnalytics,
         transportManager: com.hypo.clipboard.transport.TransportManager,
-        deviceIdentity: DeviceIdentity
+        deviceIdentity: DeviceIdentity,
+        relayClient: com.hypo.clipboard.pairing.PairingRelayClient
     ): RelayWebSocketClient = RelayWebSocketClient(
         config = config,
         connector = connector,
         frameCodec = frameCodec,
         analytics = analytics,
         transportManager = transportManager,
+        relayClient = relayClient,
         deviceIdentity = deviceIdentity
     )
 

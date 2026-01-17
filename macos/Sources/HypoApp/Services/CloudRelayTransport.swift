@@ -33,10 +33,20 @@ public struct CloudRelayConfiguration: Sendable, Equatable {
     }
 }
 
+private struct ConnectedDeviceInfoResponse: Decodable {
+    let device_id: String
+    let last_seen: Date
+}
+
+private struct ConnectedPeersResponse: Decodable {
+    let connected_devices: [ConnectedDeviceInfoResponse]
+}
+
 @MainActor
 public final class CloudRelayTransport: SyncTransport, @unchecked Sendable {
     private let delegate: WebSocketTransport
     private var nameLookup: ((String) -> String?)?
+    private let presenceDecoder: JSONDecoder
 
     public init(
         configuration: CloudRelayConfiguration,
@@ -72,6 +82,9 @@ public final class CloudRelayTransport: SyncTransport, @unchecked Sendable {
             sessionFactory: sessionFactory
         )
         self.nameLookup = nameLookup
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.presenceDecoder = decoder
     }
 
     public func connect() async throws {
@@ -122,10 +135,56 @@ public final class CloudRelayTransport: SyncTransport, @unchecked Sendable {
     /// Device names are looked up using the nameLookup closure if provided
     /// - Parameter peerIds: Optional list of device IDs to check presence for. If nil, returns all connected peers (server may limit this).
     public func queryConnectedPeers(peerIds: [String]? = nil) async -> [ConnectedPeer] {
-        let deviceIds = await delegate.queryConnectedPeers(peerIds)
-        return deviceIds.map { deviceId in
-            let name = nameLookup?(deviceId)
-            return ConnectedPeer(deviceId: deviceId, name: name)
+        guard let peerIds, !peerIds.isEmpty else { return [] }
+        guard let baseURL = presenceBaseURL(from: delegate.configuration.url) else { return [] }
+
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        var path = components?.path ?? ""
+        if !path.hasSuffix("/") {
+            path += "/"
         }
+        components?.path = path + "peers"
+        components?.queryItems = peerIds.map { URLQueryItem(name: "device_id", value: $0) }
+
+        guard let url = components?.url else { return [] }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return []
+            }
+            let payload = try presenceDecoder.decode(ConnectedPeersResponse.self, from: data)
+            return payload.connected_devices.map { device in
+                let name = nameLookup?(device.device_id)
+                return ConnectedPeer(deviceId: device.device_id, name: name)
+            }
+        } catch {
+            return []
+        }
+    }
+
+    private func presenceBaseURL(from wsURL: URL) -> URL? {
+        guard var components = URLComponents(url: wsURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        switch components.scheme?.lowercased() {
+        case "ws":
+            components.scheme = "http"
+        case "wss":
+            components.scheme = "https"
+        default:
+            break
+        }
+        if components.path.hasSuffix("/ws") {
+            components.path = String(components.path.dropLast(3))
+        }
+        if components.path.isEmpty {
+            components.path = "/"
+        }
+        return components.url
     }
 }

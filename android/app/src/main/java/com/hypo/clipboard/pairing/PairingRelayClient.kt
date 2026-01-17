@@ -179,6 +179,25 @@ class PairingRelayClient @Inject constructor(
         }
     }
 
+    suspend fun queryConnectedPeers(deviceIds: List<String>): List<ConnectedDeviceInfoResponse> = withContext(Dispatchers.IO) {
+        if (deviceIds.isEmpty()) return@withContext emptyList()
+        val urlBuilder = baseUrl.newBuilder().addPathSegment("peers")
+        deviceIds.forEach { deviceId ->
+            urlBuilder.addQueryParameter("device_id", deviceId)
+        }
+        val request = Request.Builder()
+            .url(urlBuilder.build())
+            .get()
+            .header("Accept", "application/json")
+            .build()
+        execute(request) { response ->
+            when (response.code) {
+                200 -> json.decodeFromString<ConnectedPeersResponse>(response.body!!.string()).connectedDevices
+                else -> throw relayError(response)
+            }
+        }
+    }
+
     private suspend fun <T> execute(request: Request, parser: (Response) -> T): T {
         val response = try {
             client.newCall(request).execute()
@@ -267,6 +286,17 @@ private data class AckResponse(val ack: String)
 
 @Serializable
 private data class ErrorResponse(val error: String? = null)
+
+@Serializable
+data class ConnectedDeviceInfoResponse(
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("last_seen") val lastSeen: String
+)
+
+@Serializable
+private data class ConnectedPeersResponse(
+    @SerialName("connected_devices") val connectedDevices: List<ConnectedDeviceInfoResponse>
+)
 
 data class PairingCode(
     val code: String,

@@ -59,6 +59,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Generate Xcode Project
+        working-directory: macos
+        run: swift package generate-xcodeproj
+      - name: List Schemes
+        working-directory: macos
+        run: xcodebuild -list -project HypoApp.xcodeproj | tee scheme-list.txt
+      - name: Upload scheme list
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-schemes
+          path: macos/scheme-list.txt
       - name: Run Swift tests
         working-directory: macos
-        run: swift test
+        run: xcodebuild test -project HypoApp.xcodeproj -scheme HypoApp -destination 'platform=macOS'

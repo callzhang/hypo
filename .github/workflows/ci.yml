@@ -69,4 +69,43 @@ jobs:
         run: xcodebuild -list
       - name: Run Swift tests
         working-directory: macos
-        run: xcodebuild test -scheme HypoApp-Package -destination 'platform=macOS' -skipMacroValidation -enableCodeCoverage NO
+        run: |
+          xcodebuild test \
+            -scheme HypoApp-Package \
+            -destination 'platform=macOS' \
+            -skipMacroValidation \
+            -enableCodeCoverage NO \
+            -resultBundlePath "$RUNNER_TEMP/hypo-macos-tests.xcresult"
+      - name: Summarize macOS test failures
+        if: failure()
+        run: |
+          xcrun xcresulttool get \
+            --format json \
+            --path "$RUNNER_TEMP/hypo-macos-tests.xcresult" \
+            | python3 - <<'PY'
+          import json
+          import sys
+          
+          data = json.load(sys.stdin)
+          issues = data.get("issues", {}).get("testFailureSummaries", {}).get("_values", [])
+          if not issues:
+              print("No test failure summaries found.")
+              sys.exit(0)
+          print("Failing tests:")
+          for item in issues:
+              test_name = item.get("testCaseName", {}).get("_value", "unknown")
+              message = item.get("message", {}).get("_value", "")
+              file_name = item.get("fileName", {}).get("_value", "")
+              line = item.get("lineNumber", {}).get("_value", "")
+              location = f"{file_name}:{line}" if file_name else ""
+              if location:
+                  print(f"- {test_name} ({location}) {message}")
+              else:
+                  print(f"- {test_name} {message}")
+          PY
+      - name: Upload macOS xcresult
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-results
+          path: ${{ runner.temp }}/hypo-macos-tests.xcresult

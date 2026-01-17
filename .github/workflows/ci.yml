@@ -56,10 +56,10 @@ jobs:
   macos-tests:
     name: macOS Tests
     runs-on: macos-15
-    continue-on-error: true
+    runs-on: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Run Swift tests
         working-directory: macos
-        run: xcodebuild test -scheme HypoApp-Package -destination 'platform=macOS'
+        run: xcodebuild test -scheme HypoMenuBar -destination 'platform=macOS'

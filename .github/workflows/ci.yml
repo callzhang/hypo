@@ -79,14 +79,23 @@ jobs:
       - name: Summarize macOS test failures
         if: failure()
         run: |
-          xcrun xcresulttool get \
+          if [ ! -e "$RUNNER_TEMP/hypo-macos-tests.xcresult" ]; then
+            echo "xcresult bundle not found."
+            exit 0
+          fi
+          xcrun xcresulttool get object \
+            --legacy \
             --format json \
             --path "$RUNNER_TEMP/hypo-macos-tests.xcresult" \
             | python3 - <<'PY'
           import json
           import sys
           
-          data = json.load(sys.stdin)
+          payload = sys.stdin.read().strip()
+          if not payload:
+            print("xcresulttool returned no data.")
+            sys.exit(0)
+          data = json.loads(payload)
           issues = data.get("issues", {}).get("testFailureSummaries", {}).get("_values", [])
           if not issues:
               print("No test failure summaries found.")

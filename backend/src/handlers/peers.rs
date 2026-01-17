@@ -8,7 +8,7 @@ use crate::AppState;
 #[derive(Debug, Deserialize)]
 pub struct PeersQuery {
     #[serde(default)]
-    pub device_id: Vec<String>,
+    pub device_id: Option<String>,
 }
 
 pub async fn connected_peers_handler(
@@ -23,8 +23,11 @@ pub async fn connected_peers_handler(
 
     let requested: HashSet<String> = query
         .device_id
-        .iter()
-        .map(|id| id.to_lowercase())
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|id| id.trim().to_lowercase())
         .collect();
 
     let mut connected_devices = data.sessions.get_connected_devices_info().await;

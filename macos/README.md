@@ -235,7 +235,7 @@ dependencies: [
 ### Unit Tests
 
 ```bash
-xcodebuild test -scheme Hypo -destination 'platform=macOS'
+xcodebuild test -scheme HypoApp -destination 'platform=macOS'
 ```
 
 ### Manual Testing Checklist
@@ -271,7 +271,7 @@ xcodebuild test -scheme Hypo -destination 'platform=macOS'
 
 ```bash
 # Archive
-xcodebuild archive -scheme Hypo -archivePath build/Hypo.xcarchive
+xcodebuild archive -scheme HypoApp -archivePath build/Hypo.xcarchive
 
 # Export
 xcodebuild -exportArchive -archivePath build/Hypo.xcarchive \

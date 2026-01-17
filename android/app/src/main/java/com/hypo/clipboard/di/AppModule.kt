@@ -43,7 +43,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import android.util.Base64
+import java.util.Base64
 import java.time.Clock
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -256,7 +256,7 @@ object AppModule {
         val key = SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256")
         mac.init(key)
         val digest = mac.doFinal(deviceId.lowercase().toByteArray(Charsets.UTF_8))
-        return Base64.encodeToString(digest, Base64.NO_WRAP)
+        return Base64.getEncoder().encodeToString(digest)
     }
 
     @Provides

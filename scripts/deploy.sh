@@ -140,7 +140,7 @@ deploy() {
     echo ""
     
     # Determine build strategy - default to local for faster builds
-    BUILD_STRATEGY="${BUILD_STRATEGY:-local}"
+    BUILD_STRATEGY="${BUILD_STRATEGY:-auto}"
     
     # Auto-detect: prefer local if Docker is available and fast, otherwise remote
     if [ "$BUILD_STRATEGY" = "auto" ]; then

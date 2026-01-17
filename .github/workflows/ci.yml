@@ -60,9 +60,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Generate Xcode Project
-        working-directory: macos
-        run: swift package generate-xcodeproj
       - name: Run Swift tests
         working-directory: macos
-        run: xcodebuild test -project HypoApp.xcodeproj -scheme HypoApp-Package -destination 'platform=macOS'
+        run: xcodebuild test -scheme HypoApp-Package -destination 'platform=macOS'

@@ -60,9 +60,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Remove Conflicting Workspace
+        working-directory: macos
+        run: rm -rf HypoApp.xcworkspace
       - name: List Schemes
         working-directory: macos
         run: xcodebuild -list
       - name: Run Swift tests
         working-directory: macos
-        run: xcodebuild test -scheme HypoMenuBarApp -destination 'platform=macOS'
+        run: xcodebuild test -scheme HypoMenuBar -destination 'platform=macOS'

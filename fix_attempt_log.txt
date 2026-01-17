@@ -1,0 +1,177 @@
+macOS Tests	Set up job	﻿2026-01-17T00:47:17.8586820Z Current runner version: '2.331.0'
+macOS Tests	Set up job	2026-01-17T00:47:17.8604240Z ##[group]Runner Image Provisioner
+macOS Tests	Set up job	2026-01-17T00:47:17.8604810Z Hosted Compute Agent
+macOS Tests	Set up job	2026-01-17T00:47:17.8605210Z Version: 20260115.477
+macOS Tests	Set up job	2026-01-17T00:47:17.8605570Z Commit: 4b342d620503cbe250a3154040964899ea7c9b00
+macOS Tests	Set up job	2026-01-17T00:47:17.8605990Z Build Date: 2026-01-15T22:32:41Z
+macOS Tests	Set up job	2026-01-17T00:47:17.8606380Z Worker ID: {ef2e1e62-2023-4277-b634-1f1348d58817}
+macOS Tests	Set up job	2026-01-17T00:47:17.8606790Z Azure Region: westus
+macOS Tests	Set up job	2026-01-17T00:47:17.8607120Z ##[endgroup]
+macOS Tests	Set up job	2026-01-17T00:47:17.8608090Z ##[group]Operating System
+macOS Tests	Set up job	2026-01-17T00:47:17.8608450Z macOS
+macOS Tests	Set up job	2026-01-17T00:47:17.8608720Z 15.7.3
+macOS Tests	Set up job	2026-01-17T00:47:17.8608980Z 24G419
+macOS Tests	Set up job	2026-01-17T00:47:17.8609280Z ##[endgroup]
+macOS Tests	Set up job	2026-01-17T00:47:17.8609570Z ##[group]Runner Image
+macOS Tests	Set up job	2026-01-17T00:47:17.8609890Z Image: macos-15-arm64
+macOS Tests	Set up job	2026-01-17T00:47:17.8610190Z Version: 20260112.0107.1
+macOS Tests	Set up job	2026-01-17T00:47:17.8610900Z Included Software: https://github.com/actions/runner-images/blob/macos-15-arm64/20260112.0107/images/macos/macos-15-arm64-Readme.md
+macOS Tests	Set up job	2026-01-17T00:47:17.8611960Z Image Release: https://github.com/actions/runner-images/releases/tag/macos-15-arm64%2F20260112.0107
+macOS Tests	Set up job	2026-01-17T00:47:17.8612540Z ##[endgroup]
+macOS Tests	Set up job	2026-01-17T00:47:17.8613210Z ##[group]GITHUB_TOKEN Permissions
+macOS Tests	Set up job	2026-01-17T00:47:17.8614360Z Contents: read
+macOS Tests	Set up job	2026-01-17T00:47:17.8614660Z Metadata: read
+macOS Tests	Set up job	2026-01-17T00:47:17.8614950Z Packages: read
+macOS Tests	Set up job	2026-01-17T00:47:17.8615240Z ##[endgroup]
+macOS Tests	Set up job	2026-01-17T00:47:17.8616880Z Secret source: Actions
+macOS Tests	Set up job	2026-01-17T00:47:17.8617290Z Prepare workflow directory
+macOS Tests	Set up job	2026-01-17T00:47:17.8924080Z Prepare all required actions
+macOS Tests	Set up job	2026-01-17T00:47:17.8951410Z Getting action download info
+macOS Tests	Set up job	2026-01-17T00:47:18.2447780Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+macOS Tests	Set up job	2026-01-17T00:47:18.6698140Z Complete job name: macOS Tests
+macOS Tests	Checkout	﻿2026-01-17T00:47:18.7232890Z ##[group]Run actions/checkout@v4
+macOS Tests	Checkout	2026-01-17T00:47:18.7233640Z with:
+macOS Tests	Checkout	2026-01-17T00:47:18.7233970Z   repository: callzhang/hypo
+macOS Tests	Checkout	2026-01-17T00:47:18.7234650Z   token: ***
+macOS Tests	Checkout	2026-01-17T00:47:18.7235040Z   ssh-strict: true
+macOS Tests	Checkout	2026-01-17T00:47:18.7235430Z   ssh-user: git
+macOS Tests	Checkout	2026-01-17T00:47:18.7235820Z   persist-credentials: true
+macOS Tests	Checkout	2026-01-17T00:47:18.7236230Z   clean: true
+macOS Tests	Checkout	2026-01-17T00:47:18.7236630Z   sparse-checkout-cone-mode: true
+macOS Tests	Checkout	2026-01-17T00:47:18.7237060Z   fetch-depth: 1
+macOS Tests	Checkout	2026-01-17T00:47:18.7237430Z   fetch-tags: false
+macOS Tests	Checkout	2026-01-17T00:47:18.7237930Z   show-progress: true
+macOS Tests	Checkout	2026-01-17T00:47:18.7238320Z   lfs: false
+macOS Tests	Checkout	2026-01-17T00:47:18.7238670Z   submodules: false
+macOS Tests	Checkout	2026-01-17T00:47:18.7239130Z   set-safe-directory: true
+macOS Tests	Checkout	2026-01-17T00:47:18.7239650Z ##[endgroup]
+macOS Tests	Checkout	2026-01-17T00:47:19.1783110Z Syncing repository: callzhang/hypo
+macOS Tests	Checkout	2026-01-17T00:47:19.1787850Z ##[group]Getting Git version info
+macOS Tests	Checkout	2026-01-17T00:47:19.1789700Z Working directory is '/Users/runner/work/hypo/hypo'
+macOS Tests	Checkout	2026-01-17T00:47:19.1792200Z [command]/opt/homebrew/bin/git version
+macOS Tests	Checkout	2026-01-17T00:47:19.2225860Z git version 2.52.0
+macOS Tests	Checkout	2026-01-17T00:47:19.2281680Z ##[endgroup]
+macOS Tests	Checkout	2026-01-17T00:47:19.2309320Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/607e9374-c089-419b-a580-d15f1921a71f/.gitconfig'
+macOS Tests	Checkout	2026-01-17T00:47:19.2354760Z Temporarily overriding HOME='/Users/runner/work/_temp/607e9374-c089-419b-a580-d15f1921a71f' before making global git config changes
+macOS Tests	Checkout	2026-01-17T00:47:19.2358540Z Adding repository directory to the temporary git global config as a safe directory
+macOS Tests	Checkout	2026-01-17T00:47:19.2364940Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/hypo/hypo
+macOS Tests	Checkout	2026-01-17T00:47:19.2576440Z Deleting the contents of '/Users/runner/work/hypo/hypo'
+macOS Tests	Checkout	2026-01-17T00:47:19.2580630Z ##[group]Initializing the repository
+macOS Tests	Checkout	2026-01-17T00:47:19.2583700Z [command]/opt/homebrew/bin/git init /Users/runner/work/hypo/hypo
+macOS Tests	Checkout	2026-01-17T00:47:19.2771830Z hint: Using 'master' as the name for the initial branch. This default branch name
+macOS Tests	Checkout	2026-01-17T00:47:19.2774030Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+macOS Tests	Checkout	2026-01-17T00:47:19.2775670Z hint: to use in all of your new repositories, which will suppress this warning,
+macOS Tests	Checkout	2026-01-17T00:47:19.2776840Z hint: call:
+macOS Tests	Checkout	2026-01-17T00:47:19.2777130Z hint:
+macOS Tests	Checkout	2026-01-17T00:47:19.2777510Z hint: 	git config --global init.defaultBranch <name>
+macOS Tests	Checkout	2026-01-17T00:47:19.2777930Z hint:
+macOS Tests	Checkout	2026-01-17T00:47:19.2778320Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+macOS Tests	Checkout	2026-01-17T00:47:19.2778970Z hint: 'development'. The just-created branch can be renamed via this command:
+macOS Tests	Checkout	2026-01-17T00:47:19.2779460Z hint:
+macOS Tests	Checkout	2026-01-17T00:47:19.2779760Z hint: 	git branch -m <name>
+macOS Tests	Checkout	2026-01-17T00:47:19.2780080Z hint:
+macOS Tests	Checkout	2026-01-17T00:47:19.2780510Z hint: Disable this message with "git config set advice.defaultBranchName false"
+macOS Tests	Checkout	2026-01-17T00:47:19.2785980Z Initialized empty Git repository in /Users/runner/work/hypo/hypo/.git/
+macOS Tests	Checkout	2026-01-17T00:47:19.2793620Z [command]/opt/homebrew/bin/git remote add origin https://github.com/callzhang/hypo
+macOS Tests	Checkout	2026-01-17T00:47:19.2884050Z ##[endgroup]
+macOS Tests	Checkout	2026-01-17T00:47:19.2885730Z ##[group]Disabling automatic garbage collection
+macOS Tests	Checkout	2026-01-17T00:47:19.2887130Z [command]/opt/homebrew/bin/git config --local gc.auto 0
+macOS Tests	Checkout	2026-01-17T00:47:19.2957680Z ##[endgroup]
+macOS Tests	Checkout	2026-01-17T00:47:19.2958910Z ##[group]Setting up auth
+macOS Tests	Checkout	2026-01-17T00:47:19.2967650Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+macOS Tests	Checkout	2026-01-17T00:47:19.3051480Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+macOS Tests	Checkout	2026-01-17T00:47:19.4402550Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+macOS Tests	Checkout	2026-01-17T00:47:19.4496880Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+macOS Tests	Checkout	2026-01-17T00:47:19.5409920Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+macOS Tests	Checkout	2026-01-17T00:47:19.5477950Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+macOS Tests	Checkout	2026-01-17T00:47:19.6510730Z [command]/opt/homebrew/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+macOS Tests	Checkout	2026-01-17T00:47:19.6684550Z ##[endgroup]
+macOS Tests	Checkout	2026-01-17T00:47:19.6686850Z ##[group]Fetching the repository
+macOS Tests	Checkout	2026-01-17T00:47:19.6690130Z [command]/opt/homebrew/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +1b231d1f5f287a7fec407428a25fde26f7bb618c:refs/remotes/origin/main
+macOS Tests	Checkout	2026-01-17T00:47:20.5390480Z From https://github.com/callzhang/hypo
+macOS Tests	Checkout	2026-01-17T00:47:20.5394160Z  * [new ref]         1b231d1f5f287a7fec407428a25fde26f7bb618c -> origin/main
+macOS Tests	Checkout	2026-01-17T00:47:20.5539930Z ##[endgroup]
+macOS Tests	Checkout	2026-01-17T00:47:20.5540700Z ##[group]Determining the checkout info
+macOS Tests	Checkout	2026-01-17T00:47:20.5541400Z ##[endgroup]
+macOS Tests	Checkout	2026-01-17T00:47:20.5542820Z [command]/opt/homebrew/bin/git sparse-checkout disable
+macOS Tests	Checkout	2026-01-17T00:47:20.5709970Z [command]/opt/homebrew/bin/git config --local --unset-all extensions.worktreeConfig
+macOS Tests	Checkout	2026-01-17T00:47:20.5794300Z ##[group]Checking out the ref
+macOS Tests	Checkout	2026-01-17T00:47:20.5799890Z [command]/opt/homebrew/bin/git checkout --progress --force -B main refs/remotes/origin/main
+macOS Tests	Checkout	2026-01-17T00:47:20.6372180Z Switched to a new branch 'main'
+macOS Tests	Checkout	2026-01-17T00:47:20.6373470Z branch 'main' set up to track 'origin/main'.
+macOS Tests	Checkout	2026-01-17T00:47:20.6381280Z ##[endgroup]
+macOS Tests	Checkout	2026-01-17T00:47:20.6470500Z [command]/opt/homebrew/bin/git log -1 --format=%H
+macOS Tests	Checkout	2026-01-17T00:47:20.6539540Z 1b231d1f5f287a7fec407428a25fde26f7bb618c
+macOS Tests	Remove Conflicting Workspace	﻿2026-01-17T00:47:20.6748050Z ##[group]Run rm -rf HypoApp.xcworkspace
+macOS Tests	Remove Conflicting Workspace	2026-01-17T00:47:20.6748580Z [36;1mrm -rf HypoApp.xcworkspace[0m
+macOS Tests	Remove Conflicting Workspace	2026-01-17T00:47:20.6788470Z shell: /bin/bash -e {0}
+macOS Tests	Remove Conflicting Workspace	2026-01-17T00:47:20.6788840Z ##[endgroup]
+macOS Tests	List Schemes	﻿2026-01-17T00:47:20.7248910Z ##[group]Run xcodebuild -list
+macOS Tests	List Schemes	2026-01-17T00:47:20.7249770Z [36;1mxcodebuild -list[0m
+macOS Tests	List Schemes	2026-01-17T00:47:20.7285860Z shell: /bin/bash -e {0}
+macOS Tests	List Schemes	2026-01-17T00:47:20.7286570Z ##[endgroup]
+macOS Tests	List Schemes	2026-01-17T00:47:23.4662070Z Command line invocation:
+macOS Tests	List Schemes	2026-01-17T00:47:23.4689370Z     /Applications/Xcode_16.4.app/Contents/Developer/usr/bin/xcodebuild -list
+macOS Tests	List Schemes	2026-01-17T00:47:23.4690040Z 
+macOS Tests	List Schemes	2026-01-17T00:47:26.3968160Z Resolve Package Graph
+macOS Tests	List Schemes	2026-01-17T00:47:46.5102000Z 
+macOS Tests	List Schemes	2026-01-17T00:47:46.5231200Z Fetching from https://github.com/apple/swift-testing.git
+macOS Tests	List Schemes	2026-01-17T00:47:48.7482290Z 
+macOS Tests	List Schemes	2026-01-17T00:47:50.6954630Z Fetching from https://github.com/swiftlang/swift-syntax.git
+macOS Tests	List Schemes	2026-01-17T00:47:55.5620170Z 
+macOS Tests	List Schemes	2026-01-17T00:48:02.9369970Z Creating working copy of package ‘swift-testing’
+macOS Tests	List Schemes	2026-01-17T00:48:03.1272570Z 
+macOS Tests	List Schemes	2026-01-17T00:48:03.1299490Z Checking out 0.99.0 of package ‘swift-testing’
+macOS Tests	List Schemes	2026-01-17T00:48:03.2642640Z 
+macOS Tests	List Schemes	2026-01-17T00:48:03.3133530Z Creating working copy of package ‘swift-syntax’
+macOS Tests	List Schemes	2026-01-17T00:48:03.4794850Z 
+macOS Tests	List Schemes	2026-01-17T00:48:03.4848810Z Checking out 600.0.1 of package ‘swift-syntax’
+macOS Tests	List Schemes	2026-01-17T00:48:03.8897940Z 
+macOS Tests	List Schemes	2026-01-17T00:48:06.9010580Z 
+macOS Tests	List Schemes	2026-01-17T00:48:06.9232550Z Resolved source packages:
+macOS Tests	List Schemes	2026-01-17T00:48:06.9349220Z   HypoApp: /Users/runner/work/hypo/hypo/macos
+macOS Tests	List Schemes	2026-01-17T00:48:06.9478010Z   swift-syntax: https://github.com/swiftlang/swift-syntax.git @ 600.0.1
+macOS Tests	List Schemes	2026-01-17T00:48:06.9582490Z   swift-testing: https://github.com/apple/swift-testing.git @ 0.99.0
+macOS Tests	List Schemes	2026-01-17T00:48:06.9696150Z 
+macOS Tests	List Schemes	2026-01-17T00:48:06.9803060Z Information about workspace "macos":
+macOS Tests	List Schemes	2026-01-17T00:48:06.9906070Z     Schemes:
+macOS Tests	List Schemes	2026-01-17T00:48:07.0008090Z         HypoApp
+macOS Tests	List Schemes	2026-01-17T00:48:07.0110470Z         HypoApp-Package
+macOS Tests	List Schemes	2026-01-17T00:48:07.0213470Z         HypoMenuBar
+macOS Tests	List Schemes	2026-01-17T00:48:07.0316730Z         Testing
+macOS Tests	List Schemes	2026-01-17T00:48:07.0418300Z 
+macOS Tests	Run Swift tests	﻿2026-01-17T00:48:07.0662100Z ##[group]Run xcodebuild test -scheme HypoMenuBar -destination 'platform=macOS'
+macOS Tests	Run Swift tests	2026-01-17T00:48:07.0663810Z [36;1mxcodebuild test -scheme HypoMenuBar -destination 'platform=macOS'[0m
+macOS Tests	Run Swift tests	2026-01-17T00:48:07.3921920Z shell: /bin/bash -e {0}
+macOS Tests	Run Swift tests	2026-01-17T00:48:07.3922730Z ##[endgroup]
+macOS Tests	Run Swift tests	2026-01-17T00:48:11.4860540Z Command line invocation:
+macOS Tests	Run Swift tests	2026-01-17T00:48:11.4863990Z     /Applications/Xcode_16.4.app/Contents/Developer/usr/bin/xcodebuild test -scheme HypoMenuBar -destination platform=macOS
+macOS Tests	Run Swift tests	2026-01-17T00:48:11.5015680Z 
+macOS Tests	Run Swift tests	2026-01-17T00:48:12.1231580Z Resolve Package Graph
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.5636630Z 
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.5799350Z 
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.5800580Z Resolved source packages:
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.5801860Z   swift-syntax: https://github.com/swiftlang/swift-syntax.git @ 600.0.1
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.5802750Z   swift-testing: https://github.com/apple/swift-testing.git @ 0.99.0
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.5803250Z   HypoApp: /Users/runner/work/hypo/hypo/macos
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.5803640Z 
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.5841430Z 2026-01-17 00:48:17.583 xcodebuild[3099:16352] Writing error result bundle to /var/folders/kg/7q73ww8s3llgyl61c9z_j5g40000gn/T/ResultBundle_2026-17-01_00-48-0017.xcresult
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.7392390Z xcodebuild: error: Scheme HypoMenuBar is not currently configured for the test action.
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.7506240Z 
+macOS Tests	Run Swift tests	2026-01-17T00:48:17.7603120Z ##[error]Process completed with exit code 66.
+macOS Tests	Post Checkout	﻿2026-01-17T00:48:17.8014220Z Post job cleanup.
+macOS Tests	Post Checkout	2026-01-17T00:48:18.4505510Z [command]/opt/homebrew/bin/git version
+macOS Tests	Post Checkout	2026-01-17T00:48:18.5324270Z git version 2.52.0
+macOS Tests	Post Checkout	2026-01-17T00:48:18.5393640Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/37fe7f90-cfcb-4c90-b76e-f450a5d4bba0/.gitconfig'
+macOS Tests	Post Checkout	2026-01-17T00:48:18.5412410Z Temporarily overriding HOME='/Users/runner/work/_temp/37fe7f90-cfcb-4c90-b76e-f450a5d4bba0' before making global git config changes
+macOS Tests	Post Checkout	2026-01-17T00:48:18.5414380Z Adding repository directory to the temporary git global config as a safe directory
+macOS Tests	Post Checkout	2026-01-17T00:48:18.5440220Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/hypo/hypo
+macOS Tests	Post Checkout	2026-01-17T00:48:18.5681680Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+macOS Tests	Post Checkout	2026-01-17T00:48:18.5822030Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+macOS Tests	Post Checkout	2026-01-17T00:48:18.7791640Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+macOS Tests	Post Checkout	2026-01-17T00:48:18.7855390Z http.https://github.com/.extraheader
+macOS Tests	Post Checkout	2026-01-17T00:48:18.7943230Z [command]/opt/homebrew/bin/git config --local --unset-all http.https://github.com/.extraheader
+macOS Tests	Post Checkout	2026-01-17T00:48:18.8048090Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+macOS Tests	Post Checkout	2026-01-17T00:48:18.9667420Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+macOS Tests	Post Checkout	2026-01-17T00:48:18.9719010Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+macOS Tests	Complete job	﻿2026-01-17T00:48:19.1195120Z Cleaning up orphan processes

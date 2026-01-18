@@ -134,7 +134,7 @@ public final class LanWebSocketServer {
         listener?.port
     }
 
-    public func waitForPort(timeout: TimeInterval = 5.0) async throws -> Int {
+    public func waitForPort(timeout: TimeInterval = 15.0) async throws -> Int {
         let start = Date()
         while Date().timeIntervalSince(start) < timeout {
             if let port = listeningPort?.rawValue, port > 0 {

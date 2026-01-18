@@ -33,7 +33,7 @@ struct CloudRelayTransportTests {
 
         try await transport.connect()
         let connected = await waitUntil(timeout: .seconds(2)) {
-            transport.isConnected()
+            await transport.isConnected()
         }
         #expect(connected)
         

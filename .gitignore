@@ -226,3 +226,4 @@ build_log.txt
 build_output.txt
 failed_test_log.txt
 macos/test_output.txt
+full_log.txt

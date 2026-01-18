@@ -47,6 +47,7 @@ public final class CloudRelayTransport: SyncTransport, @unchecked Sendable {
     private let delegate: WebSocketTransport
     private var nameLookup: ((String) -> String?)?
     private let presenceDecoder: JSONDecoder
+    private let httpSession: URLSession
 
     public init(
         configuration: CloudRelayConfiguration,
@@ -65,7 +66,8 @@ public final class CloudRelayTransport: SyncTransport, @unchecked Sendable {
             config.isDiscretionary = false
             config.allowsCellularAccess = true
             return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-        }
+        },
+        urlSession: URLSession = .shared
     ) {
         let webSocketConfiguration = WebSocketConfiguration(
             url: configuration.url,
@@ -85,6 +87,7 @@ public final class CloudRelayTransport: SyncTransport, @unchecked Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         self.presenceDecoder = decoder
+        self.httpSession = urlSession
     }
 
     public func connect() async throws {
@@ -153,7 +156,7 @@ public final class CloudRelayTransport: SyncTransport, @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await httpSession.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 return []
             }

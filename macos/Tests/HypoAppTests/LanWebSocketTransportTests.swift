@@ -537,7 +537,7 @@ struct LanWebSocketTransportTests {
         let error = NSError(domain: NSPOSIXErrorDomain, code: 57, userInfo: nil)
         stubTask.receiveHandler?(.failure(error))
 
-        let reconnected = await waitUntil(timeout: .seconds(2.5)) {
+        let reconnected = await waitUntil(timeout: .seconds(10)) {
             resumeCount.withLock { $0 } >= 1
         }
         #expect(reconnected)

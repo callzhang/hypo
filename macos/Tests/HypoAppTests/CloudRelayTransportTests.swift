@@ -49,11 +49,15 @@ struct CloudRelayTransportTests {
 
     @Test @MainActor
     func testConfigurationUsesCloudEnvironment() async {
+        let sessionConfig = URLSessionConfiguration.ephemeral
+        sessionConfig.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: sessionConfig)
         let transport = CloudRelayTransport(
             configuration: .init(
                 url: URL(string: "wss://hypo-relay-staging.fly.dev/ws")!,
                 fingerprint: "abcd"
-            )
+            ),
+            urlSession: session
         )
 
         let mirror = Mirror(reflecting: transport.underlying)
@@ -63,11 +67,16 @@ struct CloudRelayTransportTests {
 
     @Test @MainActor
     func testQueryConnectedPeersUsesNameLookup() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let httpSession = URLSession(configuration: config)
+
         let transport = CloudRelayTransport(
             configuration: .init(
                 url: URL(string: "wss://hypo-relay-staging.fly.dev/ws")!,
                 fingerprint: "abcd"
-            )
+            ),
+            urlSession: httpSession
         )
         transport.setNameLookup { deviceId in
             deviceId == "peer-a" ? "Alice" : nil
@@ -87,9 +96,6 @@ struct CloudRelayTransportTests {
             return (response, responseData)
         }
 
-        URLProtocol.registerClass(MockURLProtocol.self)
-        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
-
         let peers = await transport.queryConnectedPeers(peerIds: ["peer-a"])
         #expect(peers.count == 1)
         #expect(peers.first?.deviceId == "peer-a")
@@ -100,12 +106,17 @@ struct CloudRelayTransportTests {
     func testReconnectRestartsConnection() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let httpSession = URLSession(configuration: config)
+
         let transport = CloudRelayTransport(
             configuration: .init(
                 url: URL(string: "wss://hypo-relay-staging.fly.dev/ws")!,
                 fingerprint: "abcd"
             ),
-            sessionFactory: { _, _ in session }
+            sessionFactory: { _, _ in session },
+            urlSession: httpSession
         )
 
         let resumes = Locked(0)

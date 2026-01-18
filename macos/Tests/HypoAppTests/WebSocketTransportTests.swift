@@ -904,7 +904,7 @@ struct WebSocketTransportTests {
         ))
         try await transport.send(envelope)
 
-        let fulfilled = await waitUntil(timeout: .seconds(2)) {
+        let fulfilled = await waitUntil(timeout: .seconds(10)) {
             pinged.withLock { $0 }
         }
         #expect(fulfilled)

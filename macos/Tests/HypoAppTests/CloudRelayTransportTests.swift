@@ -32,6 +32,11 @@ struct CloudRelayTransportTests {
         }
 
         try await transport.connect()
+        let connected = await waitUntil(timeout: .seconds(2)) {
+            transport.isConnected()
+        }
+        #expect(connected)
+        
         let envelope = SyncEnvelope(
             type: .clipboard,
             payload: .init(
@@ -83,7 +88,7 @@ struct CloudRelayTransportTests {
         }
 
         let responseData = """
-        {"connected_devices":[{"device_id":"peer-a","last_seen":"2025-10-01T12:35:10.123Z"}]}
+        {"connected_devices":[{"device_id":"peer-a","last_seen":"2025-10-01T12:35:10Z"}]}
         """.data(using: .utf8) ?? Data()
 
         MockURLProtocol.requestHandler = { request in

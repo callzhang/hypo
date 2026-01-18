@@ -6,17 +6,17 @@ import os
 func waitUntil(
     timeout: Duration = .seconds(1),
     pollInterval: Duration = .milliseconds(10),
-    _ condition: @escaping @Sendable () -> Bool
+    _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: timeout)
     while clock.now < deadline {
-        if condition() {
+        if await condition() {
             return true
         }
         try? await clock.sleep(for: pollInterval)
     }
-    return condition()
+    return await condition()
 }
 
 func expectThrows<T>(_ expression: () throws -> T) {

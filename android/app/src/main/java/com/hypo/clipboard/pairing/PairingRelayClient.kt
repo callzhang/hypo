@@ -49,7 +49,14 @@ class PairingRelayClient @Inject constructor(
             .build()
         execute(request) { response ->
             when (response.code) {
-                200 -> json.decodeFromString<CreatePairingCodeResponse>(response.body!!.string()).toPairingCode()
+                200 -> {
+                    val body = response.body ?: throw IOException("Empty response body for pairing code creation")
+                    val responseBody = body.string()
+                    if (responseBody.isBlank()) {
+                        throw IOException("Blank response body for pairing code creation")
+                    }
+                    json.decodeFromString<CreatePairingCodeResponse>(responseBody).toPairingCode()
+                }
                 else -> throw relayError(response)
             }
         }
@@ -76,7 +83,14 @@ class PairingRelayClient @Inject constructor(
             .build()
         execute(request) { response ->
             when (response.code) {
-                200 -> json.decodeFromString<ClaimResponse>(response.body!!.string()).toClaim()
+                200 -> {
+                    val body = response.body ?: throw IOException("Empty response body for pairing claim")
+                    val responseBody = body.string()
+                    if (responseBody.isBlank()) {
+                        throw IOException("Blank response body for pairing claim")
+                    }
+                    json.decodeFromString<ClaimResponse>(responseBody).toClaim()
+                }
                 404 -> throw PairingRelayException.CodeNotFound
                 409 -> throw PairingRelayException.CodeAlreadyClaimed
                 410 -> throw PairingRelayException.CodeExpired
@@ -118,7 +132,14 @@ class PairingRelayClient @Inject constructor(
             .build()
         execute(request) { response ->
             when (response.code) {
-                200 -> json.decodeFromString<ChallengeResponse>(response.body!!.string()).challenge
+                200 -> {
+                    val body = response.body ?: throw IOException("Empty response body for challenge poll")
+                    val responseBody = body.string()
+                    if (responseBody.isBlank()) {
+                        throw IOException("Blank response body for challenge poll")
+                    }
+                    json.decodeFromString<ChallengeResponse>(responseBody).challenge
+                }
                 404 -> {
                     val error = response.body?.string()
                     if (error?.contains("challenge not available", ignoreCase = true) == true) {
@@ -165,7 +186,14 @@ class PairingRelayClient @Inject constructor(
             .build()
         execute(request) { response ->
             when (response.code) {
-                200 -> json.decodeFromString<AckResponse>(response.body!!.string()).ack
+                200 -> {
+                    val body = response.body ?: throw IOException("Empty response body for ack poll")
+                    val responseBody = body.string()
+                    if (responseBody.isBlank()) {
+                        throw IOException("Blank response body for ack poll")
+                    }
+                    json.decodeFromString<AckResponse>(responseBody).ack
+                }
                 404 -> {
                     val error = response.body?.string()
                     if (error?.contains("acknowledgement not available", ignoreCase = true) == true) {
@@ -192,7 +220,14 @@ class PairingRelayClient @Inject constructor(
             .build()
         execute(request) { response ->
             when (response.code) {
-                200 -> json.decodeFromString<ConnectedPeersResponse>(response.body!!.string()).connectedDevices
+                200 -> {
+                    val body = response.body ?: throw IOException("Empty response body for connected peers query")
+                    val responseBody = body.string()
+                    if (responseBody.isBlank()) {
+                        throw IOException("Blank response body for connected peers query")
+                    }
+                    json.decodeFromString<ConnectedPeersResponse>(responseBody).connectedDevices
+                }
                 else -> throw relayError(response)
             }
         }

@@ -385,9 +385,11 @@ class ClipboardParser(
             }
 
             if (localPath == null) return null
-            
+
             // Verify size from saved file (optional, but good practice)
-            val savedFile = File(localPath!!)
+            // Safe to use localPath directly since we checked for null above
+            @Suppress("SENSELESS_COMPARISON")
+            val savedFile = File(localPath)
             if (savedFile.length() > SizeConstants.MAX_ATTACHMENT_BYTES) {
                  android.util.Log.w("ClipboardParser", "⚠️ Saved file too large: ${formatBytes(savedFile.length())}, deleting...")
                  savedFile.delete()

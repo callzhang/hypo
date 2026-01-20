@@ -1,6 +1,7 @@
 package com.hypo.clipboard.pairing
 
 import android.util.Base64
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.crypto.tink.subtle.X25519
@@ -258,7 +259,17 @@ class RemotePairingViewModel @Inject constructor(
                             relayClient.submitChallenge(code, identity.deviceId, challengeJson) // responderDeviceId
                         }
                         if (submitResult.isFailure) {
-                            handleRelayFailure(submitResult.exceptionOrNull()!!)
+                            val exception = submitResult.exceptionOrNull()
+                            if (exception != null) {
+                                handleRelayFailure(exception)
+                            } else {
+                                Log.e("RemotePairingViewModel", "Unexpected state: isFailure=true but exception is null")
+                                _state.value = _state.value.copy(
+                                    phase = RemotePairingPhase.Error,
+                                    status = "Unknown error occurred during pairing",
+                                    error = "Unknown error occurred during pairing"
+                                )
+                            }
                             return@onSuccess
                         }
                         _state.value = _state.value.copy(

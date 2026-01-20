@@ -828,8 +828,13 @@ class ClipboardSyncService : Service() {
         // This is robust against multi-network scenarios (WiFi + Cellular) and only fires
         // when the active primary network actually changes.
         // Min SDK is 26, so this API (added in API 24) is safe to use.
-        connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
-        android.util.Log.d(TAG, "Default network connectivity callback registered")
+        val callback = networkCallback
+        if (callback != null) {
+            connectivityManager.registerDefaultNetworkCallback(callback)
+            android.util.Log.d(TAG, "Default network connectivity callback registered")
+        } else {
+            android.util.Log.e(TAG, "Failed to register network callback: callback is null")
+        }
     }
     
     private fun unregisterNetworkChangeCallback() {

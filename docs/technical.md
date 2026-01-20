@@ -1,7 +1,7 @@
 # Technical Specification - Hypo Clipboard Sync
 
 Version: 1.1.6  
-Date: January 13, 2026  
+Date: January 20, 2026  
 Status: Production
 
 ---
@@ -655,7 +655,7 @@ android/
 │   │   │   │   ├── ClipboardSyncService.kt (Foreground)
 │   │   │   │   ├── ClipboardListener.kt
 │   │   │   ├── data/
-│   │   │   │   ├── db/ClipboardDatabase.kt
+│   │   │   │   ├── db/HypoDatabase.kt
 │   │   │   │   ├── repository/ClipboardRepository.kt
 │   │   │   ├── sync/
 │   │   │   │   ├── SyncEngine.kt
@@ -732,7 +732,7 @@ data class ClipboardEntity(
     @ColumnInfo(name = "transport_origin") val transportOrigin: String? = null  // "LAN" or "CLOUD"
 )
 
-@Database(entities = [ClipboardEntity::class], version = 3)
+@Database(entities = [ClipboardEntity::class], version = 4)
 abstract class HypoDatabase : RoomDatabase() {
     abstract fun clipboardDao(): ClipboardDao
 }
@@ -767,7 +767,7 @@ interface ClipboardDao {
 }
 ```
 
-**Database Schema Changes (Version 3)**:
+**Database Schema Changes (Version 4)**:
 - Added `isEncrypted` field to track encryption status of clipboard items
 - Added `transportOrigin` field to track whether item was received via LAN or CLOUD transport
 - Changed timestamp field from `timestamp: Long` to `createdAt: Instant` for better type safety

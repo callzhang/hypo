@@ -12,6 +12,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Get script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Configuration
 SERVER_URL="${SERVER_URL:-https://hypo.fly.dev}"
 LOCAL_URL="${LOCAL_URL:-http://localhost:8080}"
@@ -113,7 +117,7 @@ test_pairing_code_creation() {
     
     response=$(curl -s -w "\n%{http_code}" -X POST \
         -H "Content-Type: application/json" \
-        -d "{\"mac_device_id\":\"test-mac-device-123\",\"mac_device_name\":\"Test Mac Device\",\"mac_public_key\":\"${DUMMY_KEY}\"}" \
+        -d "{\"initiator_device_id\":\"test-mac-device-123\",\"initiator_device_name\":\"Test Mac Device\",\"initiator_public_key\":\"${DUMMY_KEY}\"}" \
         "${BASE_URL}/pairing/code" 2>&1)
     
     http_code=$(echo "$response" | tail -n1)
@@ -149,7 +153,7 @@ test_pairing_code_claim() {
     
     response=$(curl -s -w "\n%{http_code}" -X POST \
         -H "Content-Type: application/json" \
-        -d "{\"code\":\"${PAIRING_CODE}\",\"android_device_id\":\"test-android-456\",\"android_device_name\":\"Claiming Device\",\"android_public_key\":\"${ANDROID_KEY}\"}" \
+        -d "{\"code\":\"${PAIRING_CODE}\",\"responder_device_id\":\"test-android-456\",\"responder_device_name\":\"Claiming Device\",\"responder_public_key\":\"${ANDROID_KEY}\"}" \
         "${BASE_URL}/pairing/claim" 2>&1)
     
     http_code=$(echo "$response" | tail -n1)
@@ -224,7 +228,7 @@ run_rust_tests() {
         return 1
     fi
     
-    cd /Users/derek/Documents/Projects/hypo/backend
+    cd "$PROJECT_ROOT/backend"
     
     if cargo test --test '*' 2>&1 | tee /tmp/rust_tests.log; then
         log_success "Rust integration tests passed"

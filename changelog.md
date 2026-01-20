@@ -4,6 +4,16 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-01-20
+
+### Fixed
+- **Test Script API**: Updated test script to use role-based API field names (`initiator_device_id`, `responder_device_id`) instead of platform-specific names
+- **Test Script Portability**: Replaced hardcoded paths with dynamic path resolution for cross-platform compatibility
+- **Android Safety**: Replaced all force unwrap (`!!`) operations with safe null checks to prevent NullPointerException crashes
+  - Fixed 7 instances across `PairingRelayClient.kt`, `RemotePairingViewModel.kt`, `ClipboardSyncService.kt`, and `ClipboardParser.kt`
+  - Added proper error messages for empty response bodies
+- **Documentation**: Updated all documentation version numbers to match current version (v1.1.6)
+
 ## [1.1.5] - 2026-01-16
 
 ### Fixed

@@ -1,6 +1,6 @@
 # Hypo Clipboard Sync Protocol Specification
 
-Version: 1.1.0  
+Version: 1.1.6  
 Status: Production  
 Date: January 13, 2026
 

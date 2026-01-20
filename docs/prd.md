@@ -4,7 +4,7 @@
 - **Project**: Hypo - Cross-Platform Clipboard Sync
 - **Platforms**: Android (8.0+), macOS (14.0+), with support for additional platforms (iOS, Windows, Linux)
 - **Status**: Production Release (Sprint 11 - Production Release)
-- **Version**: v1.1.0
+- **Version**: v1.1.6
 - **Last Updated**: January 13, 2026
 
 ## 1. Purpose

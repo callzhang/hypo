@@ -1,7 +1,7 @@
 # Hypo User Guide
 
 **Cross-Platform Clipboard Synchronization**  
-**Version**: 1.1.0  
+**Version**: 1.1.6  
 **Last Updated**: January 13, 2026
 
 ---

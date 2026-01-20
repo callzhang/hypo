@@ -1,7 +1,7 @@
 # Hypo Troubleshooting Guide
 
 **Comprehensive troubleshooting for Hypo clipboard sync**  
-**Version**: 1.1.0  
+**Version**: 1.1.6  
 **Last Updated**: January 13, 2026
 
 > **Note**: As of November 2025, all critical bugs have been resolved. The system is production-ready. If you encounter issues, they are likely related to network configuration or device-specific settings.

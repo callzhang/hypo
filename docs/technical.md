@@ -1,6 +1,6 @@
 # Technical Specification - Hypo Clipboard Sync
 
-Version: 1.1.0  
+Version: 1.1.6  
 Date: January 13, 2026  
 Status: Production
 

@@ -51,6 +51,13 @@ tasks.register<JacocoReport>("jacocoTestReport") {
     ))
 }
 
+// Load .env file if it exists (for Auth Token injection)
+val envFile = rootProject.file("../.env")
+val envProperties = Properties()
+if (envFile.exists()) {
+    envFile.inputStream().use { envProperties.load(it) }
+}
+
 // Read version from centralized VERSION file
 val versionFile = rootProject.file("../VERSION")
 require(versionFile.exists()) {
@@ -102,7 +109,9 @@ android {
         // Certificate pinning causes issues when certificates change and is overkill for a relay service
         buildConfigField("String", "RELAY_CERT_FINGERPRINT", "\"\"")
         buildConfigField("String", "RELAY_ENVIRONMENT", "\"production\"")
-        buildConfigField("String", "RELAY_WS_AUTH_TOKEN", "\"\"")
+        // Inject Auth Token from .env file
+        val relayAuthToken = envProperties.getProperty("RELAY_WS_AUTH_TOKEN", "")
+        buildConfigField("String", "RELAY_WS_AUTH_TOKEN", "\"$relayAuthToken\"")
     }
 
     buildTypes {
@@ -176,12 +185,7 @@ android {
 }
 
 // Sentry configuration
-// Load .env file if it exists
-val envFile = rootProject.file("../.env")
-val envProperties = Properties()
-if (envFile.exists()) {
-    envFile.inputStream().use { envProperties.load(it) }
-}
+
 
 // Configure Sentry - only enable uploads if auth token is provided
 val sentryAuthToken = System.getenv("SENTRY_AUTH_TOKEN") 

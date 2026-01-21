@@ -66,7 +66,12 @@
 - **Version updates**: Use `./scripts/update-version.sh <version>` to update version across all platforms. The version is centralized in the `VERSION` file at the project root. See `docs/VERSION_MANAGEMENT.md` for details.
 
 ## Security & Configuration Tips
-- Copy secrets from `.env.example` and keep production values in the shared vault; never commit Fly.io or signing credentials.
+- Copy secrets from `.env.example` and keep production values in the shared vault.
+- **Backend Auth**: `hypo.fly.dev` requires `RELAY_WS_AUTH_TOKEN` (generated via `backend/scripts/generate_and_set_secret.sh`).
+    - **Development**: Merge contents of `.secrets` into your local `.env`.
+    - **Android**: `build.gradle.kts` automatically injects `RELAY_WS_AUTH_TOKEN` from `.env`.
+    - **macOS**: `scripts/build-macos.sh` automatically injects `RELAY_WS_AUTH_TOKEN` from `.env` into `Info.plist`.
+- **LAN Testing**: If LAN tests fail with timeout, use `adb forward tcp:7010 tcp:7010` (automated in `test-sync-matrix.sh`).
 - Regenerate TLS fingerprints with `backend/scripts/cert_fingerprint.sh` after certificate updates.
 - Prefer the repo-scoped Android SDK (`.android-sdk`) to keep builds reproducible; ensure pairing flows respect signed entitlements during macOS testing.
 - **GitHub Secrets**: Store sensitive values (e.g., `SENTRY_AUTH_TOKEN`) in GitHub repository secrets, not in code or config files.

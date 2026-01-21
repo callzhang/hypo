@@ -1134,6 +1134,11 @@ class WebSocketTransportClient @Inject constructor(
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     touch()
+                    // Debug: Log ALL text messages to see if we're receiving payloads as text
+                    if (isCloudConnection) {
+                         android.util.Log.d("WebSocketTransportClient", "☁️ Received TEXT message: ${text.take(200)}...")
+                    }
+
                     // Check if this is a pairing ACK (text message)
                     val isPairingAck = text.contains("\"challenge_id\"") && 
                                       text.contains("\"responder_device_id\"")

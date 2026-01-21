@@ -270,7 +270,7 @@ class IncomingClipboardHandler @Inject constructor(
                 // For images and files, keep content as base64 string (binary data)
                 // For text and links, decode base64 to get the actual text
                 var content: String
-                val preview: String
+                var preview: String
                 var enhancedMetadata: MutableMap<String, String>? = null // For IMAGE/FILE types with hash and size
                 var localPath: String? = null
                 
@@ -278,9 +278,15 @@ class IncomingClipboardHandler @Inject constructor(
                     com.hypo.clipboard.domain.model.ClipboardType.TEXT,
                     com.hypo.clipboard.domain.model.ClipboardType.LINK -> {
                         // Decode base64 to get text content
-                        val decoded = java.util.Base64.getDecoder().decode(clipboardPayload.dataBase64)
-                        content = String(decoded, Charsets.UTF_8)
-                        preview = content.take(100)
+                        try {
+                            val decoded = java.util.Base64.getDecoder().decode(clipboardPayload.dataBase64)
+                            content = String(decoded, Charsets.UTF_8)
+                            preview = content.take(100)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "❌ Failed to decode text base64 content: ${e.message}")
+                            content = "Error decoding text"
+                            preview = "Error"
+                        }
                     }
                     com.hypo.clipboard.domain.model.ClipboardType.IMAGE,
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> {
@@ -385,14 +391,21 @@ class IncomingClipboardHandler @Inject constructor(
                     localPath = localPath
                 )
                 
-                // Extract message content for logging
                 val contentPreview = when (event.type) {
                     com.hypo.clipboard.domain.model.ClipboardType.TEXT -> event.content.take(100)
                     com.hypo.clipboard.domain.model.ClipboardType.LINK -> event.content.take(100)
                     com.hypo.clipboard.domain.model.ClipboardType.IMAGE -> "image(${event.content.length} bytes)"
                     com.hypo.clipboard.domain.model.ClipboardType.FILE -> "file(${event.content.length} bytes)"
                 }
-                Log.d(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=$senderDeviceName, content: $contentPreview")
+                
+                // Deterministic hash for test verification (User Requested Improvement)
+                val verificationHash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(event.content.toByteArray())
+                    .joinToString("") { "%02x".format(it) }
+                    .take(16)
+                    
+                Log.i(TAG, "✅ [VERIFIED-CONTENT] hash=$verificationHash type=${event.type} source=$senderDeviceName preview='$contentPreview'")
+                Log.i(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=$senderDeviceName, content: $contentPreview")
                 
                 // Always try to update system clipboard (same mechanism as macOS)
                 // If Accessibility Service is enabled, it will succeed in background

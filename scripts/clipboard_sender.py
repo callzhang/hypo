@@ -212,6 +212,10 @@ def create_sync_envelope(
     # Note: json.dumps preserves OrderedDict order, so no need for sort_keys
     plaintext = json.dumps(payload, separators=(',', ':')).encode('utf-8')
     
+    # Compress payload with GZIP (required by protocol)
+    import gzip
+    plaintext = gzip.compress(plaintext)
+    
     # Encrypt or use plaintext mode
     if encrypted and key:
         if not ENCRYPTION_AVAILABLE:

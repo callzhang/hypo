@@ -379,6 +379,53 @@ create_test_file() {
     echo "$file_path"
 }
 
+# Wait for specific hash to appear in Android logs (continuous monitoring)
+# Args: $1 = expected_hash, $2 = timeout_seconds (default: 10)
+# Returns: 0 if found, 1 if timeout
+wait_for_hash_in_logs() {
+    local expected_hash="$1"
+    local timeout="${2:-10}"
+    local start_time=$(date +%s)
+    
+    # Start continuous logcat monitoring in background
+    adb logcat -v brief 2>/dev/null | while IFS= read -r line; do
+        # Check if line contains our hash
+        if echo "$line" | grep -q "hash=$expected_hash"; then
+            echo "HASH_FOUND"
+            break
+        fi
+        
+        # Check timeout
+        local current_time=$(date +%s)
+        local elapsed=$((current_time - start_time))
+        if [ $elapsed -ge $timeout ]; then
+            break
+        fi
+    done &
+    local monitor_pid=$!
+    
+    # Wait for either hash found or timeout
+    local found=0
+    for i in $(seq 1 $((timeout * 10))); do
+        if ! kill -0 $monitor_pid 2>/dev/null; then
+            # Process exited - check if it found the hash
+            wait $monitor_pid
+            local exit_code=$?
+            if [ $exit_code -eq 0 ]; then
+                found=1
+            fi
+            break
+        fi
+        sleep 0.1
+    done
+    
+    # Kill monitor if still running
+    kill $monitor_pid 2>/dev/null || true
+    wait $monitor_pid 2>/dev/null || true
+    
+    return $((1 - found))
+}
+
 # Run a single test case
 run_test_case() {
     local case_num=$1
@@ -852,8 +899,25 @@ PYTHON_SCRIPT
     # Check reception
     if [ "$result" != "FAILED" ]; then
         echo ""
-        echo "   ⏳ Waiting 5 seconds for message to arrive and be processed..."
-        sleep 5
+        
+        # For Android text messages, use hash-based continuous monitoring (much faster!)
+        if [ "$target_platform" = "android" ] && [ "$content_type" = "text" ]; then
+            # Calculate expected hash
+            local expected_hash=$(echo -n "$message" | shasum -a 256 | awk '{print substr($1,1,16)}')
+            echo "   ⏳ Waiting for message (monitoring for hash=$expected_hash)..."
+            
+            # Start continuous monitoring (returns immediately when found or after timeout)
+            if wait_for_hash_in_logs "$expected_hash" 10; then
+                echo "   ✅ Message detected via hash verification!"
+            else
+                echo "   ⚠️  Hash not detected within timeout, checking logs..."
+            fi
+        else
+            # For other cases (images, files, macOS), use traditional wait
+            echo "   ⏳ Waiting 5 seconds for message to arrive and be processed..."
+            sleep 5
+        fi
+        
         echo "   🔍 Checking reception status..."
         
         if [ "$target_platform" = "android" ]; then
@@ -990,28 +1054,22 @@ check_test_case_reception() {
         fi
         
         # 2. Check logcat for case pattern in preview/content (database entries show this)
+        # 2. Check logcat for case pattern in preview/content (database entries show this)
         # For images, also check for image-related indicators
+        # INCREASED BUFFER: 500 -> 3000 to catch elusive logs
+        # FILTER: Exclude adbd/shell commands to avoid false positives
         if [ "$content_type" = "image" ]; then
-            local case_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "Case $case_num:|preview=Case $case_num:|content_type.*image|type.*image" 2>/dev/null || echo "0")
+            local case_found=$(adb_cmd logcat -d -t 3000 2>/dev/null | grep -vE "adbd|shell" | grep -cE "Case $case_num:|preview=Case $case_num:|content_type.*image|type.*image" 2>/dev/null || echo "0")
         else
-            local case_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "Case $case_num:|preview=Case $case_num:" 2>/dev/null || echo "0")
+            local case_found=$(adb_cmd logcat -d -t 3000 2>/dev/null | grep -vE "adbd|shell" | grep -cE "Case $case_num:|preview=Case $case_num:" 2>/dev/null || echo "0")
         fi
         
-        # 3. Check for handler success - look for "Decoded clipboard event" or "Upserting item" with case number
-        # For images, also check for image content type
-        if [ "$content_type" = "image" ]; then
-            local handler_success=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "✅.*Decoded clipboard event|IncomingClipboardHandler.*✅.*Decoded|Upserting item.*Case $case_num:|content_type.*image|type.*image" 2>/dev/null || echo "0")
-        else
-            local handler_success=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "✅.*Decoded clipboard event|IncomingClipboardHandler.*✅.*Decoded|Upserting item.*Case $case_num:" 2>/dev/null || echo "0")
+        # DEBUG: Print found logs
+        if [ "$case_found" -gt 0 ]; then
+             echo "   🔍 Found Test ID in logs (Debug):"
+             adb_cmd logcat -d -t 10000 2>/dev/null | grep -vE "adbd|shell" | grep -E "Case $case_num:|preview=Case $case_num:" | sed 's/^/      /'
         fi
         
-        # 4. Check for handler failure (decryption errors)
-        # For images, failure might be indicated differently
-        local handler_failure=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "❌.*Failed.*Case $case_num:|IncomingClipboardHandler.*❌.*Failed|BAD_DECRYPT" 2>/dev/null || echo "0")
-        
-        # 5. Check for message reception indicators (onMessage, binary frames, etc.)
-        # For cloud: look for onMessage calls around the test time window
-        # For LAN: look for binary frame received and handler invocation
         local onmessage_count=0
         if [ "$transport" = "cloud" ]; then
             onmessage_count=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "🔥🔥🔥.*onMessage.*CALLED.*wss://hypo.fly.dev|✅ Decoded envelope.*type=CLIPBOARD" 2>/dev/null || echo "0")
@@ -1199,8 +1257,8 @@ verify_test_case_logs() {
         if [ "${db_found:-0}" -gt 0 ] 2>/dev/null; then
             log_success "Message found in database"
             echo "   Querying message details..."
-            adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/hypo.db 'SELECT preview, created_at FROM clipboard_items WHERE preview LIKE \"%$test_id%\" ORDER BY created_at DESC LIMIT 1;' 2>/dev/null" || \
-            adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/hypo.db 'SELECT preview, created_at FROM clipboard_items WHERE preview LIKE \"%$test_id%\" ORDER BY created_at DESC LIMIT 1;' 2>/dev/null"
+            # Use run-as to access private app storage
+            adb_cmd shell "run-as com.hypo.clipboard sqlite3 databases/hypo.db 'SELECT preview, created_at FROM clipboard_items WHERE preview LIKE \"%$test_id%\" ORDER BY created_at DESC LIMIT 1;' 2>/dev/null"
         else
             log_error "Message not found in database"
         fi

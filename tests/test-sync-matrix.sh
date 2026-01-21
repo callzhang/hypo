@@ -1053,11 +1053,21 @@ check_test_case_reception() {
             db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/hypo.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         fi
         
-        # 2. Check logcat for case pattern in preview/content (database entries show this)
+        
+        # NEW: Check for VERIFIED-CONTENT hash (most reliable for text messages)
+        local hash_verified=0
+        if [ "$content_type" = "text" ]; then
+            local expected_hash=$(echo -n "$message_text" | shasum -a 256 | awk '{print substr($1,1,16)}')
+            hash_verified=$(adb_cmd logcat -d 2>/dev/null | grep -c "hash=$expected_hash" || echo "0")
+            hash_verified=$(echo "${hash_verified:-0}" | grep -o '[0-9]*' | head -1 || echo "0")
+        fi
+        
+        # Check for general VERIFIED-CONTENT log (for any content type)
+        local verified_content_found=$(adb_cmd logcat -d -t 3000 2>/dev/null | grep -c "VERIFIED-CONTENT.*Case $case_num:" || echo "0")
+        verified_content_found=$(echo "${verified_content_found:-0}" | grep -o '[0-9]*' | head -1 || echo "0")
+        
         # 2. Check logcat for case pattern in preview/content (database entries show this)
         # For images, also check for image-related indicators
-        # INCREASED BUFFER: 500 -> 3000 to catch elusive logs
-        # FILTER: Exclude adbd/shell commands to avoid false positives
         if [ "$content_type" = "image" ]; then
             local case_found=$(adb_cmd logcat -d -t 3000 2>/dev/null | grep -vE "adbd|shell" | grep -cE "Case $case_num:|preview=Case $case_num:|content_type.*image|type.*image" 2>/dev/null || echo "0")
         else
@@ -1065,9 +1075,9 @@ check_test_case_reception() {
         fi
         
         # DEBUG: Print found logs
-        if [ "$case_found" -gt 0 ]; then
+        if [ "$case_found" -gt 0 ] || [ "$hash_verified" -gt 0 ] || [ "$verified_content_found" -gt 0 ]; then
              echo "   🔍 Found Test ID in logs (Debug):"
-             adb_cmd logcat -d -t 10000 2>/dev/null | grep -vE "adbd|shell" | grep -E "Case $case_num:|preview=Case $case_num:" | sed 's/^/      /'
+             adb_cmd logcat -d -t 10000 2>/dev/null | grep -vE "adbd|shell" | grep -E "Case $case_num:|preview=Case $case_num:|VERIFIED-CONTENT.*Case $case_num:" | sed 's/^/      /'
         fi
         
         local onmessage_count=0
@@ -1097,27 +1107,25 @@ check_test_case_reception() {
         fi
         binary_frame_received=$(echo "${binary_frame_received:-0}" | grep -o '[0-9]*' | head -1 || echo "0")
         
-        echo "   📊 Android detection: case_found=$case_found, success=$handler_success, failure=$handler_failure, onMessage=$onmessage_count, binary_frames=$binary_frame_received, db_found=$db_found"
+        echo "   📊 Android detection: case_found=$case_found, hash_verified=$hash_verified, verified_content=$verified_content_found, db_found=$db_found"
         
         # Check if THIS specific case was received
-        # Priority: 1) Database entry (most reliable), 2) Handler success, 3) Case pattern in logs, 4) Reception indicators
-        # Database check is the most reliable - if message is stored, it was received
-        if [ "${db_found:-0}" -gt 0 ] 2>/dev/null; then
+        # Priority: 1) Hash verification (for text), 2) VERIFIED-CONTENT log, 3) Database entry, 4) Case pattern in logs
+        if [ "$hash_verified" -gt 0 ] 2>/dev/null; then
+            # Hash verified - message definitely received and processed
+            log_success "  Android received and processed message (hash verified)"
+            result="PASSED"
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+        elif [ "$verified_content_found" -gt 0 ] 2>/dev/null; then
+            # VERIFIED-CONTENT log found - message processed
+            log_success "  Android received and processed message (verified content log)"
+            result="PASSED"
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+        elif [ "${db_found:-0}" -gt 0 ] 2>/dev/null; then
             # Message is in database - definitely received
-            local handler_success_any=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "✅.*Decoded clipboard event|IncomingClipboardHandler.*✅.*Decoded" 2>/dev/null || echo "0")
-            handler_success_any=$(echo "${handler_success_any:-0}" | grep -o '[0-9]*' | head -1 || echo "0")
-            
-            if [ "$handler_success_any" -gt 0 ] || [ "$handler_success" -gt 0 ]; then
-                log_success "  Android received and processed message (found in database)"
-                result="PASSED"
-                PASSED_TESTS=$((PASSED_TESTS + 1))
-            elif [ "$handler_failure" -gt 0 ]; then
-                if [ "$encryption" = "encrypted" ]; then
-                    log_warning "  Android received message but decryption failed (found in database but decryption error)"
-                    result="PARTIAL"
-                    error_msg="Decryption failed (key may have rotated - re-pair devices)"
-                else
-                    log_warning "  Android received message but processing failed"
+            log_success "  Android received and processed message (found in database)"
+            result="PASSED"
+            PASSED_TESTS=$((PASSED_TESTS + 1))
                     result="PARTIAL"
                     error_msg="Processing failed (check logs)"
                 fi

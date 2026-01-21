@@ -201,7 +201,7 @@ Transport layer test data:
 - `frame_vectors.json` - WebSocket frame test vectors
 - `lan_loopback_metrics.json` - LAN transport loopback metrics
 
-Used by `scripts/run-transport-regression.sh` for cross-platform transport regression testing.
+Note: Used for transport layer testing and validation.
 
 ---
 
@@ -307,7 +307,7 @@ For automated testing:
 
 ```bash
 # Check device connection
-./scripts/check-android-device.sh
+adb devices
 
 # Verify device IDs in .env match actual devices
 adb devices

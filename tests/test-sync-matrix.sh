@@ -222,7 +222,7 @@ check_android_reception() {
         fi
         
         # Fallback: Check database via SQLite query
-        db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%${message_text}%\" OR content LIKE \"%${message_text}%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+        db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/hypo.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%${message_text}%\" OR content LIKE \"%${message_text}%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         
         # If we found evidence, break early
         if [ "$onmessage_count" -gt 0 ] || [ "$handler_success" -gt 0 ] || [ "$db_found" -gt 0 ]; then
@@ -977,16 +977,16 @@ check_test_case_reception() {
         # 1. Check database FIRST (most reliable) - look for case number in preview or image type
         if [ "$content_type" = "image" ]; then
             # For images, check for image type in database
-            local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE type=\"image\" OR preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+            local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/hypo.db 'SELECT COUNT(*) FROM clipboard_items WHERE type=\"image\" OR preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         elif [ "$content_type" = "file" ]; then
             # For files, check for file type
-            local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE type=\"file\" OR preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+            local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/hypo.db 'SELECT COUNT(*) FROM clipboard_items WHERE type=\"file\" OR preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         else
-            local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+            local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/hypo.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         fi
         if [ "${db_found:-0}" = "0" ] 2>/dev/null; then
             # Fallback to release package name
-            db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+            db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/hypo.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         fi
         
         # 2. Check logcat for case pattern in preview/content (database entries show this)
@@ -1191,16 +1191,16 @@ verify_test_case_logs() {
         echo ""
         
         echo "6️⃣  Checking database for message..."
-        local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%$test_id%\" OR content LIKE \"%$test_id%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+        local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/hypo.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%$test_id%\" OR content LIKE \"%$test_id%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         if [ "${db_found:-0}" = "0" ] 2>/dev/null; then
-            db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%$test_id%\" OR content LIKE \"%$test_id%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+            db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/hypo.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%$test_id%\" OR content LIKE \"%$test_id%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         fi
         
         if [ "${db_found:-0}" -gt 0 ] 2>/dev/null; then
             log_success "Message found in database"
             echo "   Querying message details..."
-            adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT preview, created_at FROM clipboard_items WHERE preview LIKE \"%$test_id%\" ORDER BY created_at DESC LIMIT 1;' 2>/dev/null" || \
-            adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/clipboard.db 'SELECT preview, created_at FROM clipboard_items WHERE preview LIKE \"%$test_id%\" ORDER BY created_at DESC LIMIT 1;' 2>/dev/null"
+            adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/hypo.db 'SELECT preview, created_at FROM clipboard_items WHERE preview LIKE \"%$test_id%\" ORDER BY created_at DESC LIMIT 1;' 2>/dev/null" || \
+            adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard/databases/hypo.db 'SELECT preview, created_at FROM clipboard_items WHERE preview LIKE \"%$test_id%\" ORDER BY created_at DESC LIMIT 1;' 2>/dev/null"
         else
             log_error "Message not found in database"
         fi
@@ -1337,8 +1337,8 @@ main() {
     
     # Verify Android is connected
     if ! adb devices 2>/dev/null | grep -q "device$"; then
-        log_error "Android device not connected"
-        exit 1
+        log_warning "Android device not connected - Android tests will fail"
+        # exit 1  <-- DISABLED for macOS debugging
     fi
     
     # Auto-detect Android device if not set (prefer physical device)
@@ -1364,6 +1364,17 @@ main() {
     echo "🧹 Clearing Android logcat buffer..."
     adb_cmd logcat -c > /dev/null 2>&1 || true
     sleep 1
+    
+    # Start macOS log capture in background
+    echo "📋 Starting macOS log capture to /tmp/hypo_debug.log..."
+    rm -f /tmp/hypo_debug.log
+    # Stream logs from our subsystem to file, ignoring history to keep it fresh
+    log stream --predicate 'subsystem == "com.hypo.clipboard"' --level debug --style compact > /tmp/hypo_debug.log &
+    MACOS_LOG_PID=$!
+    echo "   Started log stream (PID: $MACOS_LOG_PID)"
+    
+    # Ensure we kill the log process on exit
+    trap 'kill $MACOS_LOG_PID 2>/dev/null; mv /tmp/hypo_debug.log /tmp/hypo_debug_last.log' EXIT
     
     if [ "$run_all" = true ]; then
         # Phase 1: Send all messages first

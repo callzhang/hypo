@@ -1126,14 +1126,6 @@ check_test_case_reception() {
             log_success "  Android received and processed message (found in database)"
             result="PASSED"
             PASSED_TESTS=$((PASSED_TESTS + 1))
-                    result="PARTIAL"
-                    error_msg="Processing failed (check logs)"
-                fi
-            else
-                log_success "  Android received message (found in database)"
-                result="PASSED"
-                PASSED_TESTS=$((PASSED_TESTS + 1))
-            fi
         elif [ "${handler_success:-0}" -gt 0 ] 2>/dev/null || [ "${case_found:-0}" -gt 0 ] 2>/dev/null || [ "${onmessage_count:-0}" -gt 0 ] 2>/dev/null; then
             # Check if handler successfully processed (even if case pattern not in logs)
             # Handler success can be detected from logs without case pattern

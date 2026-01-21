@@ -3,6 +3,7 @@
 # Tests all 16 combinations: 
 #   - Text: Plaintext/Encrypted × Cloud/LAN × macOS/Android (8 cases)
 #   - Image: Plaintext/Encrypted × Cloud/LAN × macOS/Android (8 cases)
+#   - File: Plaintext/Encrypted × Cloud/LAN × macOS/Android (8 cases)
 #
 # This is an INTEGRATION test that uses REAL device keys from .env or keychain.
 # For unit tests with deterministic test vectors, see:
@@ -363,6 +364,21 @@ with open('$image_file', 'wb') as f:
     }
 }
 
+# Create a test file (dummy content)
+create_test_file() {
+    local file_path="/tmp/test_file_$$.txt"
+    local case_num="$1"
+    
+    echo "This is a test file for Case $case_num" > "$file_path"
+    echo "Created at $(date)" >> "$file_path"
+    # Pad to 1KB
+    for i in {1..20}; do
+        echo "Padding line $i -----------------------------------------" >> "$file_path"
+    done
+    
+    echo "$file_path"
+}
+
 # Run a single test case
 run_test_case() {
     local case_num=$1
@@ -393,7 +409,7 @@ run_test_case() {
     local error_msg=""
     local image_file=""
     
-    # Create test image if needed
+    # Create test image or file if needed
     if [ "$content_type" = "image" ]; then
         image_file=$(create_test_image "$case_num")
         if [ ! -f "$image_file" ] || [ ! -s "$image_file" ]; then
@@ -410,6 +426,17 @@ run_test_case() {
                 echo "   📐 Image dimensions: ${dims}"
             fi
         fi
+    elif [ "$content_type" = "file" ]; then
+        # Reuse image_file variable for generic file path to minimize changes
+        image_file=$(create_test_file "$case_num")
+        if [ ! -f "$image_file" ]; then
+            log_error "Failed to create test file"
+            result="FAILED"
+            error_msg="File creation failed"
+            return
+        fi
+        local file_size=$(stat -f%z "$image_file" 2>/dev/null || stat -c%s "$image_file" 2>/dev/null || echo "unknown")
+        echo "   📄 Created test file: $image_file ($file_size bytes)"
     fi
     
     # Determine target device ID
@@ -523,6 +550,50 @@ send_via_cloud_relay(
     quiet=False
 )
 PYTHON_SCRIPT
+        elif [ "$content_type" = "file" ] && [ -n "$image_file" ]; then
+            # For generic files (reusing image_file variable), create a temporary Python script
+            local temp_script="/tmp/send_file_${case_num}_$$.py"
+            # Get filename from path
+            local filename=$(basename "$image_file")
+            cat > "$temp_script" << PYTHON_SCRIPT
+import sys
+import os
+sys.path.insert(0, '$SIM_SCRIPTS_DIR')
+from clipboard_sender import create_file_payload, send_via_cloud_relay
+
+# Read file
+with open('$image_file', 'rb') as f:
+    file_data = f.read()
+
+# Create payload
+payload = create_file_payload(file_data, '$filename')
+
+# Get encryption config
+encryption_key_hex = '$encryption_key' if '$encryption_key' else None
+encryption_device_id = '$encryption_device_id' if '$encryption_device_id' else None
+
+# Convert hex key to bytes if provided
+key_bytes = None
+if encryption_key_hex and len(encryption_key_hex) == 64:
+    try:
+        key_bytes = bytes.fromhex(encryption_key_hex)
+    except:
+        key_bytes = None
+
+# Send via relay
+actual_sender_id = encryption_device_id if encryption_device_id else '$test_session_id'
+send_via_cloud_relay(
+    payload=payload,
+    sender_device_id=actual_sender_id,
+    sender_device_name='[SIM] Test Device',
+    target_device_id='$target_device_id',
+    relay_url='wss://hypo.fly.dev/ws',
+    encrypted=bool(key_bytes),
+    key=key_bytes,
+    session_device_id='$test_session_id',
+    quiet=False
+)
+PYTHON_SCRIPT
             cmd="python3 $temp_script"
             echo "   📝 Created temporary Python script: $temp_script"
             echo "   Target: $target_platform device ($target_device_id)"
@@ -584,19 +655,27 @@ PYTHON_SCRIPT
         local lan_port=7010
         
         if [ "$target_platform" = "android" ]; then
-            # Get Android device IP address
-            ANDROID_IP=$(adb_cmd shell "ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print \$2}' | cut -d/ -f1" 2>/dev/null | tr -d '\r\n' || echo "")
-            if [ -z "$ANDROID_IP" ]; then
-                # Fallback: try to get IP from other interfaces
-                ANDROID_IP=$(adb_cmd shell "ip addr show | grep 'inet ' | grep -v '127.0.0.1' | head -1 | awk '{print \$2}' | cut -d/ -f1" 2>/dev/null | tr -d '\r\n' || echo "")
-            fi
-            if [ -n "$ANDROID_IP" ]; then
-                lan_host="$ANDROID_IP"
-                echo "   Transport: LAN WebSocket (ws://$lan_host:$lan_port) - Android server"
-            else
-                log_warning "  Could not get Android IP, using localhost (may fail)"
+            # Use ADB Port Forwarding (reliable, bypasses firewall)
+            echo "   Requesting ADB port forwarding (tcp:$lan_port -> tcp:$lan_port)..."
+            if adb_cmd forward tcp:$lan_port tcp:$lan_port; then
                 lan_host="localhost"
-                echo "   Transport: LAN WebSocket (ws://localhost:$lan_port) - fallback"
+                echo "   ✅ ADB forwarding enabled. Using localhost:$lan_port"
+                echo "   Transport: LAN WebSocket (ws://localhost:$lan_port) - via ADB Forward"
+            else
+                log_warning "  ADB forwarding failed. Falling back to IP detection..."
+                # Fallback to IP detection
+                ANDROID_IP=$(adb_cmd shell "ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print \$2}' | cut -d/ -f1" 2>/dev/null | tr -d '\r\n' || echo "")
+                if [ -z "$ANDROID_IP" ]; then
+                    ANDROID_IP=$(adb_cmd shell "ip addr show | grep 'inet ' | grep -v '127.0.0.1' | head -1 | awk '{print \$2}' | cut -d/ -f1" 2>/dev/null | tr -d '\r\n' || echo "")
+                fi
+                if [ -n "$ANDROID_IP" ]; then
+                    lan_host="$ANDROID_IP"
+                    echo "   Transport: LAN WebSocket (ws://$lan_host:$lan_port) - Android server"
+                else
+                    log_warning "  Could not get Android IP, using localhost (may fail)"
+                    lan_host="localhost"
+                    echo "   Transport: LAN WebSocket (ws://localhost:$lan_port) - fallback"
+                fi
             fi
         else
             # Get macOS IP address (use actual IP, not localhost)
@@ -631,6 +710,49 @@ with open('$image_file', 'rb') as f:
 
 # Create payload
 payload = create_image_payload(image_data, 'png')
+
+# Get encryption config
+encryption_key_hex = '$encryption_key' if '$encryption_key' else None
+encryption_device_id = '$encryption_device_id' if '$encryption_device_id' else None
+
+# Convert hex key to bytes if provided
+key_bytes = None
+if encryption_key_hex and len(encryption_key_hex) == 64:
+    try:
+        key_bytes = bytes.fromhex(encryption_key_hex)
+    except:
+        key_bytes = None
+
+# Send via LAN
+send_via_lan(
+    payload=payload,
+    sender_device_id='$test_session_id',
+    sender_device_name='[SIM] Test Device',
+    target_device_id='$target_device_id',
+    host='$lan_host',
+    port=$lan_port,
+    encrypted=bool(key_bytes),
+    key=key_bytes,
+    envelope_sender_device_id=encryption_device_id,
+    quiet=False
+)
+PYTHON_SCRIPT
+        elif [ "$content_type" = "file" ] && [ -n "$image_file" ]; then
+            # For files, create a temporary Python script
+            local temp_script="/tmp/send_file_lan_${case_num}_$$.py"
+            local filename=$(basename "$image_file")
+            cat > "$temp_script" << PYTHON_SCRIPT
+import sys
+import os
+sys.path.insert(0, '$SIM_SCRIPTS_DIR')
+from clipboard_sender import create_file_payload, send_via_lan
+
+# Read file
+with open('$image_file', 'rb') as f:
+    file_data = f.read()
+
+# Create payload
+payload = create_file_payload(file_data, '$filename')
 
 # Get encryption config
 encryption_key_hex = '$encryption_key' if '$encryption_key' else None
@@ -856,6 +978,9 @@ check_test_case_reception() {
         if [ "$content_type" = "image" ]; then
             # For images, check for image type in database
             local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE type=\"image\" OR preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
+        elif [ "$content_type" = "file" ]; then
+            # For files, check for file type
+            local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE type=\"file\" OR preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         else
             local db_found=$(adb_cmd shell "sqlite3 /data/data/com.hypo.clipboard.debug/databases/clipboard.db 'SELECT COUNT(*) FROM clipboard_items WHERE preview LIKE \"%Case $case_num:%\" OR content LIKE \"%Case $case_num:%\" LIMIT 1;' 2>/dev/null" | tr -d '\r\n' || echo "0")
         fi
@@ -1114,15 +1239,16 @@ print_usage() {
 Usage: $0 [OPTIONS]
 
 Options:
-    -c, --case NUM          Run specific test case (1-16)
+    -c, --case NUM          Run specific test case (1-24)
     -v, --verify            Run detailed log verification after test
-    -a, --all               Run all 16 test cases (default)
+    -a, --all               Run all 24 test cases (default)
     -h, --help              Show this help message
 
 Examples:
-    $0                      # Run all 16 test cases (8 text + 8 image)
+    $0                      # Run all 24 test cases (8 text + 8 image + 8 file)
     $0 -c 8                 # Run only case 8 (Encrypted Text LAN Android)
     $0 -c 16                # Run only case 16 (Encrypted Image LAN Android)
+    $0 -c 24                # Run only case 24 (Encrypted File LAN Android)
     $0 -c 8 -v              # Run case 8 with detailed log verification
     $0 -v                   # Run all cases with detailed verification
 
@@ -1146,6 +1272,16 @@ Test Cases:
     14. Encrypted + Cloud + Android
     15. Encrypted + LAN + macOS
     16. Encrypted + LAN + Android
+    
+    File Messages (17-24):
+    17. Plaintext + Cloud + macOS
+    18. Plaintext + Cloud + Android
+    19. Plaintext + LAN + macOS
+    20. Plaintext + LAN + Android
+    21. Encrypted + Cloud + macOS
+    22. Encrypted + Cloud + Android
+    23. Encrypted + LAN + macOS
+    24. Encrypted + LAN + Android
 
 EOF
 }
@@ -1192,7 +1328,7 @@ main() {
     echo "  - Encryption: Plaintext / Encrypted"
     echo "  - Transport: LAN / Cloud"
     echo "  - Target: macOS / Android"
-    echo "  - Total: 16 test cases (8 text + 8 image)"
+    echo "  - Total: 24 test cases (8 text + 8 image + 8 file)"
     echo ""
     echo "Device IDs:"
     echo "  Android: $ANDROID_DEVICE_ID"
@@ -1233,7 +1369,7 @@ main() {
         # Phase 1: Send all messages first
         log_section "📤 Phase 1: Sending All Messages"
         echo ""
-        echo "Sending all 16 test messages (8 text + 8 image) in sequence..."
+        echo "Sending all 24 test messages (8 text + 8 image + 8 file) in sequence..."
         echo ""
         
         # Send all text messages (send_only mode)
@@ -1273,6 +1409,24 @@ main() {
         run_test_case 16 "encrypted" "lan" "android" "Encrypted Image LAN Android" "send_only" "image"
         
         echo ""
+        log_info "Sending file messages (cases 17-24)..."
+        run_test_case 17 "plaintext" "cloud" "macos" "Plaintext File Cloud macOS" "send_only" "file"
+        sleep 0.5
+        run_test_case 18 "plaintext" "cloud" "android" "Plaintext File Cloud Android" "send_only" "file"
+        sleep 0.5
+        run_test_case 19 "plaintext" "lan" "macos" "Plaintext File LAN macOS" "send_only" "file"
+        sleep 0.5
+        run_test_case 20 "plaintext" "lan" "android" "Plaintext File LAN Android" "send_only" "file"
+        sleep 0.5
+        run_test_case 21 "encrypted" "cloud" "macos" "Encrypted File Cloud macOS" "send_only" "file"
+        sleep 0.5
+        run_test_case 22 "encrypted" "cloud" "android" "Encrypted File Cloud Android" "send_only" "file"
+        sleep 0.5
+        run_test_case 23 "encrypted" "lan" "macos" "Encrypted File LAN macOS" "send_only" "file"
+        sleep 0.5
+        run_test_case 24 "encrypted" "lan" "android" "Encrypted File LAN Android" "send_only" "file"
+        
+        echo ""
         log_info "All messages sent. Waiting 10 seconds for delivery and processing..."
         sleep 10
         echo ""
@@ -1304,12 +1458,23 @@ main() {
         check_test_case_reception 15 "encrypted" "lan" "macos" "Encrypted Image LAN macOS" "image"
         check_test_case_reception 16 "encrypted" "lan" "android" "Encrypted Image LAN Android" "image"
         
+        echo ""
+        log_info "Checking file message reception (cases 17-24)..."
+        check_test_case_reception 17 "plaintext" "cloud" "macos" "Plaintext File Cloud macOS" "file"
+        check_test_case_reception 18 "plaintext" "cloud" "android" "Plaintext File Cloud Android" "file"
+        check_test_case_reception 19 "plaintext" "lan" "macos" "Plaintext File LAN macOS" "file"
+        check_test_case_reception 20 "plaintext" "lan" "android" "Plaintext File LAN Android" "file"
+        check_test_case_reception 21 "encrypted" "cloud" "macos" "Encrypted File Cloud macOS" "file"
+        check_test_case_reception 22 "encrypted" "cloud" "android" "Encrypted File Cloud Android" "file"
+        check_test_case_reception 23 "encrypted" "lan" "macos" "Encrypted File LAN macOS" "file"
+        check_test_case_reception 24 "encrypted" "lan" "android" "Encrypted File LAN Android" "file"
+        
         # Detailed verification if requested
         if [ "$verify_mode" = true ]; then
             echo ""
             log_section "🔍 Detailed Log Verification"
             echo ""
-            for case_num in {1..16}; do
+            for case_num in {1..24}; do
                 local encryption=""
                 local transport=""
                 local target=""
@@ -1332,6 +1497,14 @@ main() {
                     14) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted Image Cloud Android"; content_type="image" ;;
                     15) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted Image LAN macOS"; content_type="image" ;;
                     16) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted Image LAN Android"; content_type="image" ;;
+                    17) encryption="plaintext"; transport="cloud"; target="macos"; description="Plaintext File Cloud macOS"; content_type="file" ;;
+                    18) encryption="plaintext"; transport="cloud"; target="android"; description="Plaintext File Cloud Android"; content_type="file" ;;
+                    19) encryption="plaintext"; transport="lan"; target="macos"; description="Plaintext File LAN macOS"; content_type="file" ;;
+                    20) encryption="plaintext"; transport="lan"; target="android"; description="Plaintext File LAN Android"; content_type="file" ;;
+                    21) encryption="encrypted"; transport="cloud"; target="macos"; description="Encrypted File Cloud macOS"; content_type="file" ;;
+                    22) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted File Cloud Android"; content_type="file" ;;
+                    23) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted File LAN macOS"; content_type="file" ;;
+                    24) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted File LAN Android"; content_type="file" ;;
                 esac
                 local test_id="Case $case_num:"
                 verify_test_case_logs "$case_num" "$encryption" "$transport" "$target" "$test_id"
@@ -1339,8 +1512,8 @@ main() {
         fi
     else
         # Run single test case
-        if [ -z "$test_case" ] || ! [[ "$test_case" =~ ^[1-9]$|^1[0-6]$ ]]; then
-            log_error "Invalid test case: $test_case (must be 1-16)"
+        if [ -z "$test_case" ] || ! [[ "$test_case" =~ ^[1-9]$|^1[0-9]$|^2[0-4]$ ]]; then
+            log_error "Invalid test case: $test_case (must be 1-24)"
             print_usage
             exit 1
         fi
@@ -1368,6 +1541,14 @@ main() {
             14) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted Image Cloud Android"; content_type="image" ;;
             15) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted Image LAN macOS"; content_type="image" ;;
             16) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted Image LAN Android"; content_type="image" ;;
+            17) encryption="plaintext"; transport="cloud"; target="macos"; description="Plaintext File Cloud macOS"; content_type="file" ;;
+            18) encryption="plaintext"; transport="cloud"; target="android"; description="Plaintext File Cloud Android"; content_type="file" ;;
+            19) encryption="plaintext"; transport="lan"; target="macos"; description="Plaintext File LAN macOS"; content_type="file" ;;
+            20) encryption="plaintext"; transport="lan"; target="android"; description="Plaintext File LAN Android"; content_type="file" ;;
+            21) encryption="encrypted"; transport="cloud"; target="macos"; description="Encrypted File Cloud macOS"; content_type="file" ;;
+            22) encryption="encrypted"; transport="cloud"; target="android"; description="Encrypted File Cloud Android"; content_type="file" ;;
+            23) encryption="encrypted"; transport="lan"; target="macos"; description="Encrypted File LAN macOS"; content_type="file" ;;
+            24) encryption="encrypted"; transport="lan"; target="android"; description="Encrypted File LAN Android"; content_type="file" ;;
         esac
         
         log_section "🧪 Running Test Case $test_case: $description"
@@ -1407,7 +1588,7 @@ main() {
     # Initialize results file
     touch "$RESULTS_FILE"
     
-    for case_num in {1..8}; do
+    for case_num in {1..24}; do
         local result_data=$(grep "^${case_num}|" "$RESULTS_FILE" 2>/dev/null || echo "")
         if [ -z "$result_data" ]; then
             local status="NOT_RUN"
@@ -1435,6 +1616,14 @@ main() {
             14) desc="Encrypted Image + Cloud + Android" ;;
             15) desc="Encrypted Image + LAN + macOS" ;;
             16) desc="Encrypted Image + LAN + Android" ;;
+            17) desc="Plaintext File + Cloud + macOS" ;;
+            18) desc="Plaintext File + Cloud + Android" ;;
+            19) desc="Plaintext File + LAN + macOS" ;;
+            20) desc="Plaintext File + LAN + Android" ;;
+            21) desc="Encrypted File + Cloud + macOS" ;;
+            22) desc="Encrypted File + Cloud + Android" ;;
+            23) desc="Encrypted File + LAN + macOS" ;;
+            24) desc="Encrypted File + LAN + Android" ;;
         esac
         
         local status_color=""

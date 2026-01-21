@@ -132,6 +132,34 @@ def create_image_payload(image_data: bytes, image_format: str = "png") -> dict:
         ])),  # metadata comes AFTER data_base64 in macOS's encode()!
     ])
 
+def create_file_payload(file_data: bytes, filename: str) -> dict:
+    """Create a file clipboard payload.
+    
+    Args:
+        file_data: Raw file bytes
+        filename: Name of the file
+    
+    Returns:
+        Dictionary with content_type, data, data_base64, and metadata
+        Note: macOS's ClipboardPayload.encode() includes both 'data' and 'data_base64'
+        fields to match the exact JSON format that macOS produces.
+        Key order MUST match Swift's JSONEncoder output: content_type, data, metadata, data_base64
+    """
+    from collections import OrderedDict
+    data_base64 = base64.b64encode(file_data).decode('utf-8')
+    # CRITICAL: Match Swift's JSONEncoder key order exactly!
+    # macOS ClipboardPayload.encode() produces: content_type, data, data_base64, metadata
+    # (See SyncEngine.swift:179-186 for exact order)
+    return OrderedDict([
+        ("content_type", "file"),
+        ("data", data_base64),  # macOS includes this field (Data encoded as base64 string in JSON)
+        ("data_base64", data_base64),  # data_base64 comes BEFORE metadata in macOS's encode()!
+        ("metadata", OrderedDict([
+            ("name", filename),
+            ("size", str(len(file_data)))
+        ])),  # metadata comes AFTER data_base64 in macOS's encode()!
+    ])
+
 def create_link_payload(url: str) -> dict:
     """Create a link clipboard payload.
     
@@ -358,6 +386,25 @@ def send_via_cloud_relay(
             "X-Hypo-Environment: production"
         ]
         
+        # Add auth token if secret is available (env var or default empty)
+        # Verify if header is needed even if secret is empty (some servers might require signed empty secret?)
+        # For now, we try to grab it from env.
+        auth_secret = os.environ.get("RELAY_WS_AUTH_TOKEN", "")
+        if auth_secret:
+            try:
+                import hmac
+                import hashlib
+                # HMAC-SHA256(device_id, secret)
+                # device_id should be lowercase for consistency
+                device_id_for_auth = ws_device_id.lower()
+                h = hmac.new(auth_secret.encode('utf-8'), device_id_for_auth.encode('utf-8'), hashlib.sha256)
+                auth_token = base64.b64encode(h.digest()).decode('utf-8')
+                headers.append(f"X-Auth-Token: {auth_token}")
+                if not quiet:
+                   print(f"   🔐 Added X-Auth-Token for device {device_id_for_auth}")
+            except Exception as e:
+                print(f"   ⚠️ Failed to generate X-Auth-Token: {e}")
+
         # Add force register header if requested (for testing/debugging)
         # This allows session takeover if the device is already connected
         if force_register:

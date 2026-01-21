@@ -15,6 +15,17 @@ The test suite covers:
 
 ### Main Test Suites
 
+#### `run_suite.sh` - Unified Test Runner (Recommended Entry Point)
+**Purpose**: Master script to run all or specific subsets of tests.
+
+**Usage**:
+```bash
+./tests/run_suite.sh --all      # Run everything (Server + Client + Matrix)
+./tests/run_suite.sh --server   # Run backend server tests only
+./tests/run_suite.sh --client   # Run client sync tests only
+./tests/run_suite.sh --matrix   # Run full regression matrix
+```
+
 #### `test-sync.sh` - Comprehensive Sync Test (Recommended for Quick Testing)
 **Purpose**: General integration test covering basic sync functionality
 
@@ -45,9 +56,10 @@ The test suite covers:
 **Purpose**: Exhaustive test covering all combinations of sync scenarios
 
 **What it tests**:
-- **16 test cases total**:
+- **24 test cases total**:
   - **Text sync (8 cases)**: Plaintext/Encrypted × Cloud/LAN × macOS/Android
   - **Image sync (8 cases)**: Plaintext/Encrypted × Cloud/LAN × macOS/Android
+  - **File sync (8 cases)**: Plaintext/Encrypted × Cloud/LAN × macOS/Android
 
 **Usage**:
 ```bash

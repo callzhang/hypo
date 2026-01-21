@@ -330,6 +330,50 @@ else
     fi
 fi
 
+# Inject RELAY_WS_AUTH_TOKEN from .env if available
+ENV_FILE="$PROJECT_ROOT/.env"
+if [ -f "$ENV_FILE" ]; then
+    # Load .env variables cleanly
+    set +e
+    while IFS='=' read -r key value || [ -n "$key" ]; do
+        # Skip comments and empty lines
+        [[ "$key" =~ ^#.*$ ]] && continue
+        [[ -z "$key" ]] && continue
+        # Trim whitespace
+        key=$(echo "$key" | xargs)
+        value=$(echo "$value" | xargs)
+        if [ "$key" == "RELAY_WS_AUTH_TOKEN" ]; then
+            AUTH_TOKEN="$value"
+            break
+        fi
+    done < "$ENV_FILE"
+    set -e
+    
+    if [ -n "$AUTH_TOKEN" ]; then
+        log_info "Injecting RELAY_WS_AUTH_TOKEN into Info.plist..."
+        if command -v plutil &> /dev/null; then
+            plutil -replace RelayWsAuthToken -string "$AUTH_TOKEN" "$APP_BUNDLE/Contents/Info.plist"
+        else
+            # Fallback for systems without plutil (unlikely on macOS)
+            if grep -q "RelayWsAuthToken" "$APP_BUNDLE/Contents/Info.plist"; then
+                 sed -i '' "s/<string>.*<\/string>.*RelayWsAuthToken/<string>$AUTH_TOKEN<\/string>/" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+            else
+                 sed -i '' "s|</dict>|    <key>RelayWsAuthToken</key>\n    <string>$AUTH_TOKEN</string>\n</dict>|" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+            fi
+        fi
+        log_success "Injected Auth Token"
+    else
+        log_warn "RELAY_WS_AUTH_TOKEN not found in .env"
+    fi
+else
+    log_warn ".env file not found at $ENV_FILE"
+fi
+
+# Clean resource forks and extended attributes aggressively before signing
+# This fixes "resource fork, Finder information, or similar detritus not allowed" errors
+log_info "Cleaning extended attributes..."
+xattr -rc "$APP_BUNDLE" 2>/dev/null || true
+
 # Ensure icon is up to date (check if icon generation script is newer than icon)
 # Icons are generated to Hypo.app
 if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ] && [ -f "$ICON_ICNS" ]; then
@@ -431,6 +475,9 @@ fi
 # Copy app to /Applications (use cp -R to preserve permissions and extended attributes)
 if cp -R "$APP_BUNDLE" "/Applications/"; then
     log_success "App copied to /Applications: $APPLICATIONS_APP"
+    # Remove the local build artifact to prevent "multiple versions" confusion in LaunchServices
+    # and ensure only the installed /Applications copy is used/indexed.
+    rm -rf "$APP_BUNDLE"
     # Update APP_BUNDLE to point to /Applications version for launching
     APP_BUNDLE="$APPLICATIONS_APP"
 else

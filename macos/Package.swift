@@ -26,6 +26,9 @@ let package = Package(
             dependencies: [
             ],
             path: "Sources/HypoApp",
+            swiftSettings: [
+                .unsafeFlags(["-Xfrontend", "-strict-concurrency=complete"], .when(platforms: [.macOS]))
+            ],
             linkerSettings: [
                 .linkedLibrary("z")
             ]
@@ -33,7 +36,10 @@ let package = Package(
         .executableTarget(
             name: "HypoMenuBarApp",
             dependencies: ["HypoApp"],
-            path: "Sources/HypoMenuBarApp"
+            path: "Sources/HypoMenuBarApp",
+            swiftSettings: [
+                .unsafeFlags(["-Xfrontend", "-strict-concurrency=complete"], .when(platforms: [.macOS]))
+            ]
         ),
         .testTarget(
             name: "HypoAppTests",
@@ -43,7 +49,7 @@ let package = Package(
             ],
             path: "Tests/HypoAppTests",
             swiftSettings: [
-                .unsafeFlags(["-Xfrontend", "-suppress-warnings"], .when(platforms: [.macOS]))
+                .unsafeFlags(["-Xfrontend", "-strict-concurrency=complete"], .when(platforms: [.macOS]))
             ]
         )
     ]

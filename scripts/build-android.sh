@@ -277,7 +277,7 @@ fi
 if [ -n "$ADB" ]; then
     # Get list of connected devices
     DEVICES=$("$ADB" devices 2>/dev/null | grep "device$" | awk '{print $1}')
-    DEVICE_COUNT=$(echo "$DEVICES" | grep -c . || echo "0")
+    DEVICE_COUNT=$(echo "$DEVICES" | grep -c . || true)
     
     if [ "$DEVICE_COUNT" -gt 0 ]; then
         echo -e "${YELLOW}Found $DEVICE_COUNT connected device(s)${NC}"

@@ -108,12 +108,6 @@ class MenuBarRightClickManager {
             eventMonitors.append(localMonitor)
         }
         
-        // Global monitor - works when other apps are active (but heavily restricted)
-        // For menu bar apps, we mostly rely on finding the status item button,
-        // but checking NSEvent within our own process is useful if valid.
-        // Note: Global monitors for mouse clicks are often blocked by sandbox/permissions,
-        // but since the status item belongs to our app process, local monitor + button attachment is usually sufficient.
-        
         logger.info("✅ Right-click event monitors set up")
     }
     
@@ -167,18 +161,10 @@ class MenuBarRightClickManager {
     
     @discardableResult
     private func attachMenuToButton(in view: NSView, menu: NSMenu) -> Bool {
-        // Recursively search for buttons
+        // Recursively search for buttons (NSStatusBarButton is a subclass of NSButton)
         if view is NSButton {
-            // Found a button - attach a custom right-click handler if possible
-            // or verify if we can subclass/swizzle. 
-            // For standard NSStatusItem, the button is internal. 
-            // However, since we are using SwiftUI's MenuBarExtra, the underlying implementation 
-            // might not expose a simple 'menu' property for right-click on the button itself 
-            // if it's configured for left-click popover.
-            
-            // Fortunately, NSButton in status bar usually accepts right clicks if we override action.
-            // But here we rely primarily on the event monitor for "NSStatusBarWindow".
-            
+            // The event monitor handles right-click; MenuBarExtra(.window) handles left-click.
+            // No need to override target/action here.
             return true
         }
         

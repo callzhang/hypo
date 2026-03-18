@@ -50,12 +50,15 @@ def encrypt_payload(plaintext: bytes, key: bytes, device_id: str) -> Tuple[str, 
     # Create AESGCM cipher
     aesgcm = AESGCM(key)
     
-    # AAD = deviceId as UTF-8 bytes
-    aad = device_id.encode('utf-8')
+    # AAD = deviceId as lowercase UTF-8 bytes
+    # Android normalizes device IDs to lowercase before decryption.
+    # Use lowercase here to avoid BAD_DECRYPT on mixed-case IDs.
+    normalized_device_id = device_id.lower()
+    aad = normalized_device_id.encode('utf-8')
     
     # Debug logging
     print(f"🔐 [ENCRYPT] deviceId: {device_id}")
-    print(f"🔐 [ENCRYPT] AAD: {device_id} ({len(aad)} bytes)")
+    print(f"🔐 [ENCRYPT] AAD: {normalized_device_id} ({len(aad)} bytes)")
     print(f"🔐 [ENCRYPT] AAD hex: {aad.hex()}")
     print(f"🔐 [ENCRYPT] Key size: {len(key)} bytes")
     print(f"🔐 [ENCRYPT] Plaintext size: {len(plaintext)} bytes")

@@ -336,10 +336,24 @@ final class HistoryPopupPresenter {
         guard !isPinned, window != nil else { return }
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             guard let self = self, let window = self.window else { return }
+            
+            // Only dismiss while the popup is actually visible
+            guard window.isVisible else { return }
+            
             let clickPoint = NSEvent.mouseLocation
-            if !window.frame.contains(clickPoint) {
-                self.hide()
+            
+            // Don't dismiss if the click is inside the popup window itself
+            guard !window.frame.contains(clickPoint) else { return }
+            
+            // Don't dismiss if the click is in the menu bar area on any screen.
+            // This lets the user click the menu bar icon without the popup racing
+            // to dismiss — MenuBarExtra handles the toggle on its own.
+            let isInMenuBar = NSScreen.screens.contains { screen in
+                clickPoint.y > screen.visibleFrame.maxY && clickPoint.y <= screen.frame.maxY
             }
+            guard !isInMenuBar else { return }
+            
+            self.hide()
         }
     }
 

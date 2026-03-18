@@ -210,8 +210,8 @@ class PairingRelayClient @Inject constructor(
     suspend fun queryConnectedPeers(deviceIds: List<String>): List<ConnectedDeviceInfoResponse> = withContext(Dispatchers.IO) {
         if (deviceIds.isEmpty()) return@withContext emptyList()
         val urlBuilder = baseUrl.newBuilder().addPathSegment("peers")
-        deviceIds.forEach { deviceId ->
-            urlBuilder.addQueryParameter("device_id", deviceId)
+        if (deviceIds.isNotEmpty()) {
+            urlBuilder.addQueryParameter("device_id", deviceIds.joinToString(","))
         }
         val request = Request.Builder()
             .url(urlBuilder.build())

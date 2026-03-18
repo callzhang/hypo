@@ -147,7 +147,7 @@ public final class CloudRelayTransport: SyncTransport, @unchecked Sendable {
             path += "/"
         }
         components?.path = path + "peers"
-        components?.queryItems = peerIds.map { URLQueryItem(name: "device_id", value: $0) }
+        components?.queryItems = [URLQueryItem(name: "device_id", value: peerIds.joined(separator: ","))]
 
         guard let url = components?.url else { return [] }
 

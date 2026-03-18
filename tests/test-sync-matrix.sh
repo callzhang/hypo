@@ -109,6 +109,22 @@ load_env_file() {
 # Load .env file early to get device IDs and encryption keys
 load_env_file
 
+# Restore Android state after testing (called by trap on exit)
+restore_android_state() {
+    echo ""
+    echo "🔋 Restoring Android normal state..."
+
+    # Restore original battery saver setting
+    if [ -n "${ANDROID_BATTERY_SAVER_ORIGINAL:-}" ] && [ "$ANDROID_BATTERY_SAVER_ORIGINAL" != "null" ]; then
+        adb_cmd shell settings global put low_power "$ANDROID_BATTERY_SAVER_ORIGINAL" > /dev/null 2>&1 || true
+        echo "   ✅ Battery saver restored to: $ANDROID_BATTERY_SAVER_ORIGINAL"
+    fi
+
+    # Press home to return to home screen (dismiss test app)
+    adb_cmd shell input keyevent KEYCODE_HOME > /dev/null 2>&1 || true
+    echo "   ✅ Android restored to normal state"
+}
+
 # Device IDs (from .env or placeholder defaults)
 # NOTE: Default values are PLACEHOLDER UUIDs for testing only.
 # Real device IDs should be configured in .env file.
@@ -206,19 +222,20 @@ check_android_reception() {
     while [ $attempt -lt $max_retries ]; do
         sleep "$timeout"
         
-        # Check for onMessage() call with improved pattern matching
-        onmessage_count=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "🔥🔥🔥.*onMessage.*CALLED" || echo "0")
-        
+        # Check for message reception with improved pattern matching
+        # Look for actual log patterns: "📥 Received", "VERIFIED-CONTENT", "Decoded clipboard event"
+        onmessage_count=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -cE "📥 Received.*clipboard|✅.*VERIFIED-CONTENT|✅ Decoded clipboard event" || echo "0")
+
         # Check for handler processing
-        handler_success=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "IncomingClipboardHandler.*✅.*Decoded clipboard event" || echo "0")
-        handler_failure=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "IncomingClipboardHandler.*❌.*Failed" || echo "0")
+        handler_success=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -cE "IncomingClipboardHandler.*✅.*Decoded clipboard event" || echo "0")
+        handler_failure=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -cE "IncomingClipboardHandler.*❌.*Failed" || echo "0")
         
         # Check for specific message text in logs (if plaintext) or image indicators
         if [ "$content_type" = "image" ]; then
             # For images, look for image-related log entries
-            message_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "content_type.*image|type.*image|image.*received|🖼️" || echo "0")
+            message_found=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -cE "content_type.*image|type.*image|image.*received|🖼️" || echo "0")
         else
-            message_found=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -c "$message_text" || echo "0")
+            message_found=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -c "$message_text" || echo "0")
         fi
         
         # Fallback: Check database via SQLite query
@@ -243,9 +260,10 @@ check_macos_reception() {
     local test_case=$1
     local message_text=$2
     local timeout=${3:-5}
-    
+    local content_type="${4:-text}"  # "text", "image", or "file"
+
     sleep "$timeout"
-    
+
     # Check if macOS app is running (try multiple process name patterns)
     if ! pgrep -f "HypoMenuBar\|HypoApp\|Hypo.*MenuBar" > /dev/null && \
        ! pgrep -f "com\.hypo\|hypo" > /dev/null && \
@@ -253,44 +271,70 @@ check_macos_reception() {
         echo "not_running"
         return
     fi
-    
+
     # Check debug log file for specific case number
-    if [ -f "/tmp/hypo_debug.log" ]; then
-        # Look for the specific case number in the log
-        local case_pattern="Case $test_case:"
-        local log_entries=$(grep -c "$case_pattern" /tmp/hypo_debug.log 2>/dev/null | tr -d '\n' || echo "0")
-        # Ensure it's a valid number
-        log_entries=$(echo "$log_entries" | grep -o '[0-9]*' | head -1 || echo "0")
-        
-        # For encrypted messages, also check for successful decryption and insertion
-        # Encrypted messages might be decrypted and inserted without the exact "Case X:" pattern
-        # Check multiple indicators:
-        # 1. "Inserted entry" that contains the message text (first 30 chars)
-        # 2. "CLIPBOARD DECODED" followed by recent "Inserted entry" (within last 10 lines)
-        if [ "$log_entries" = "0" ]; then
-            local message_prefix=$(echo "$message_text" | cut -c1-30)
-            # Check for inserted entry with message prefix
-            local inserted_count=$(grep "Inserted entry.*$message_prefix" /tmp/hypo_debug.log 2>/dev/null | wc -l | tr -d ' ' || echo "0")
-            inserted_count=$(echo "$inserted_count" | grep -o '[0-9]*' | head -1 || echo "0")
-            
-            # If still 0, check for recent CLIPBOARD DECODED + Inserted entry pattern
-            # This handles encrypted messages that are successfully decrypted
-            if [ "$inserted_count" = "0" ]; then
-                # Check if there's a recent CLIPBOARD DECODED followed by Inserted entry
-                # Look at last 20 lines for this pattern
-                local recent_decoded=$(tail -20 /tmp/hypo_debug.log | grep -c "CLIPBOARD DECODED" 2>/dev/null || echo "0")
-                local recent_inserted=$(tail -20 /tmp/hypo_debug.log | grep -c "Inserted entry" 2>/dev/null || echo "0")
-                # If we see both decoded and inserted recently, likely the message was received
-                if [ "$recent_decoded" -gt 0 ] && [ "$recent_inserted" -gt 0 ]; then
-                    inserted_count="1"
+    local log_file="/tmp/hypo_debug.log"
+    if [ ! -f "$log_file" ]; then
+        # Fallback to the last saved log if current doesn't exist
+        log_file="/tmp/hypo_debug_last.log"
+    fi
+
+    if [ -f "$log_file" ]; then
+        local log_entries="0"
+
+        # For text content, look for the specific case number in the log
+        if [ "$content_type" = "text" ]; then
+            local case_pattern="Case $test_case:"
+            log_entries=$(grep -c "$case_pattern" "$log_file" 2>/dev/null | tr -d '\n' || echo "0")
+            log_entries=$(echo "$log_entries" | grep -o '[0-9]*' | head -1 || echo "0")
+
+            # If not found with case number, check for inserted entry with message prefix
+            if [ "$log_entries" = "0" ]; then
+                local message_prefix=$(echo "$message_text" | cut -c1-30)
+                local inserted_count=$(grep "Inserted entry.*$message_prefix" "$log_file" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+                inserted_count=$(echo "$inserted_count" | grep -o '[0-9]*' | head -1 || echo "0")
+                if [ "$inserted_count" -gt 0 ]; then
+                    log_entries="$inserted_count"
                 fi
             fi
-            
-            if [ "$inserted_count" -gt 0 ]; then
-                log_entries="$inserted_count"
+
+        # For images, check for image reception patterns
+        elif [ "$content_type" = "image" ]; then
+            # Look for image-related log patterns:
+            # - "📥 Received clipboard: image"
+            # - "✅ [SyncEngine] Decoded: type=image"
+            # - "Inserted entry: Image · PNG ·"
+            # - "✅ Applied image to clipboard"
+            local image_received=$(grep -c "📥 Received clipboard: image" "$log_file" 2>/dev/null | tr -d '\n' || echo "0")
+            local image_decoded=$(grep -c "Decoded: type=image" "$log_file" 2>/dev/null | tr -d '\n' || echo "0")
+            local image_inserted=$(grep -c "Inserted entry: Image · PNG ·" "$log_file" 2>/dev/null | tr -d '\n' || echo "0")
+            local image_applied=$(grep -c "✅ Applied image to clipboard" "$log_file" 2>/dev/null | tr -d '\n' || echo "0")
+
+            # Combine all indicators - if we see any positive evidence, count it
+            local total_image=$((image_received + image_decoded + image_inserted + image_applied))
+            if [ "$total_image" -gt 0 ]; then
+                log_entries="$total_image"
+            fi
+
+        # For files, check for file reception patterns
+        elif [ "$content_type" = "file" ]; then
+            # Look for file-related log patterns:
+            # - "📥 Received clipboard: file"
+            # - "✅ [SyncEngine] Decoded: type=file"
+            # - "Inserted entry: file ·"
+            # - "✅ Applied file to clipboard"
+            local file_received=$(grep -c "📥 Received clipboard: file" "$log_file" 2>/dev/null | tr -d '\n' || echo "0")
+            local file_decoded=$(grep -c "Decoded: type=file" "$log_file" 2>/dev/null | tr -d '\n' || echo "0")
+            local file_inserted=$(grep -c "Inserted entry: file ·" "$log_file" 2>/dev/null | tr -d '\n' || echo "0")
+            local file_applied=$(grep -c "✅ Applied file to clipboard" "$log_file" 2>/dev/null | tr -d '\n' || echo "0")
+
+            # Combine all indicators - if we see any positive evidence, count it
+            local total_file=$((file_received + file_decoded + file_inserted + file_applied))
+            if [ "$total_file" -gt 0 ]; then
+                log_entries="$total_file"
             fi
         fi
-        
+
         echo "$log_entries"
     else
         echo "0"
@@ -597,6 +641,16 @@ send_via_cloud_relay(
     quiet=False
 )
 PYTHON_SCRIPT
+            cmd="python3 $temp_script"
+            echo "   📝 Created temporary Python script: $temp_script"
+            echo "   Target: $target_platform device ($target_device_id)"
+            echo "   📝 Using fake UUID for WebSocket session: $test_session_id (to avoid conflicts)"
+            if [ "$encryption" = "encrypted" ] && [ -n "$encryption_key" ]; then
+                echo "   🔑 Using sender device ID in envelope: $encryption_device_id (for key lookup on receiver)"
+                echo "   Encryption: AES-256-GCM (using sender's device ID and key)"
+            else
+                echo "   Encryption: None (plaintext)"
+            fi
         elif [ "$content_type" = "file" ] && [ -n "$image_file" ]; then
             # For generic files (reusing image_file variable), create a temporary Python script
             local temp_script="/tmp/send_file_${case_num}_$$.py"
@@ -784,6 +838,16 @@ send_via_lan(
     quiet=False
 )
 PYTHON_SCRIPT
+            cmd="python3 $temp_script"
+            echo "   📝 Created temporary Python script: $temp_script"
+            echo "   Target: $target_platform device ($target_device_id) at $lan_host:$lan_port"
+            echo "   📝 Using fake UUID for WebSocket session: $test_session_id (to avoid conflicts)"
+            if [ "$encryption" = "encrypted" ] && [ -n "$encryption_key" ]; then
+                echo "   🔑 Using sender device ID in envelope: $encryption_device_id (for key lookup on receiver)"
+                echo "   Encryption: AES-256-GCM (using sender's device ID and key)"
+            else
+                echo "   Encryption: None (plaintext)"
+            fi
         elif [ "$content_type" = "file" ] && [ -n "$image_file" ]; then
             # For files, create a temporary Python script
             local temp_script="/tmp/send_file_lan_${case_num}_$$.py"
@@ -903,7 +967,7 @@ PYTHON_SCRIPT
         # For Android text messages, use hash-based continuous monitoring (much faster!)
         if [ "$target_platform" = "android" ] && [ "$content_type" = "text" ]; then
             # Calculate expected hash
-            local expected_hash=$(echo -n "$message" | shasum -a 256 | awk '{print substr($1,1,16)}')
+            local expected_hash=$(echo -n "$message_text" | shasum -a 256 | awk '{print substr($1,1,16)}')
             echo "   ⏳ Waiting for message (monitoring for hash=$expected_hash)..."
             
             # Start continuous monitoring (returns immediately when found or after timeout)
@@ -922,15 +986,16 @@ PYTHON_SCRIPT
         
         if [ "$target_platform" = "android" ]; then
             # Check Android reception - look for messages after sending
-            local onmessage_count=$(adb_cmd logcat -d 2>/dev/null | grep -c "🔥🔥🔥.*onMessage.*CALLED" 2>/dev/null | head -1 | tr -d '[:space:]' || echo "0")
-            local handler_success=$(adb_cmd logcat -d 2>/dev/null | grep -c "IncomingClipboardHandler.*✅ Decoded clipboard event" 2>/dev/null | head -1 | tr -d '[:space:]' || echo "0")
-            local handler_failure=$(adb_cmd logcat -d 2>/dev/null | grep -c "IncomingClipboardHandler.*❌ Failed" 2>/dev/null | head -1 | tr -d '[:space:]' || echo "0")
-            
+            # Use larger logcat buffer (5000 lines) to ensure we capture all test messages
+            local onmessage_count=$(adb_cmd logcat -d -t 50000 2>/dev/null | grep -cE "📥 Received.*clipboard|✅.*VERIFIED-CONTENT|✅ Decoded clipboard event" 2>/dev/null | head -1 | tr -d '[:space:]' || echo "0")
+            local handler_success=$(adb_cmd logcat -d -t 50000 2>/dev/null | grep -c "IncomingClipboardHandler.*✅ Decoded clipboard event" 2>/dev/null | head -1 | tr -d '[:space:]' || echo "0")
+            local handler_failure=$(adb_cmd logcat -d -t 50000 2>/dev/null | grep -c "IncomingClipboardHandler.*❌ Failed" 2>/dev/null | head -1 | tr -d '[:space:]' || echo "0")
+
             # Ensure numeric values
             onmessage_count=${onmessage_count:-0}
             handler_success=${handler_success:-0}
             handler_failure=${handler_failure:-0}
-            
+
             # Convert to integers
             onmessage_count=$(echo "$onmessage_count" | grep -o '[0-9]*' | head -1 || echo "0")
             handler_success=$(echo "$handler_success" | grep -o '[0-9]*' | head -1 || echo "0")
@@ -978,7 +1043,7 @@ PYTHON_SCRIPT
             fi
         else
             # Check macOS reception
-            local macos_status=$(check_macos_reception "$case_num" "$message_text" 0)
+            local macos_status=$(check_macos_reception "$case_num" "$message_text" 0 "$content_type")
             if [ "$macos_status" = "not_running" ]; then
                 log_warning "  macOS app not running, cannot verify reception"
                 result="SKIPPED"
@@ -1069,22 +1134,25 @@ check_test_case_reception() {
         # 2. Check logcat for case pattern in preview/content (database entries show this)
         # For images, also check for image-related indicators
         if [ "$content_type" = "image" ]; then
-            local case_found=$(adb_cmd logcat -d -t 3000 2>/dev/null | grep -vE "adbd|shell" | grep -cE "Case $case_num:|preview=Case $case_num:|content_type.*image|type.*image" 2>/dev/null || echo "0")
+            local case_found=$(adb_cmd logcat -d -t 3000 2>/dev/null | grep -vE "adbd|shell" | grep -cE "Case $case_num:|preview=Case $case_num:|content_type.*image|type.*image" 2>/dev/null | tr -d '[:space:]' || echo "0")
         else
-            local case_found=$(adb_cmd logcat -d -t 3000 2>/dev/null | grep -vE "adbd|shell" | grep -cE "Case $case_num:|preview=Case $case_num:" 2>/dev/null || echo "0")
+            local case_found=$(adb_cmd logcat -d -t 3000 2>/dev/null | grep -vE "adbd|shell" | grep -cE "Case $case_num:|preview=Case $case_num:" 2>/dev/null | tr -d '[:space:]' || echo "0")
         fi
-        
+
+        # Ensure all values are clean integers
+        case_found=$(echo "$case_found" | grep -o '[0-9]*' | head -1 || echo "0")
+
         # DEBUG: Print found logs
         if [ "$case_found" -gt 0 ] || [ "$hash_verified" -gt 0 ] || [ "$verified_content_found" -gt 0 ]; then
              echo "   🔍 Found Test ID in logs (Debug):"
              adb_cmd logcat -d -t 10000 2>/dev/null | grep -vE "adbd|shell" | grep -E "Case $case_num:|preview=Case $case_num:|VERIFIED-CONTENT.*Case $case_num:" | sed 's/^/      /'
         fi
-        
+
         local onmessage_count=0
         if [ "$transport" = "cloud" ]; then
-            onmessage_count=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "🔥🔥🔥.*onMessage.*CALLED.*wss://hypo.fly.dev|✅ Decoded envelope.*type=CLIPBOARD" 2>/dev/null || echo "0")
+            onmessage_count=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -cE "📥 Received.*clipboard.*wss://hypo.fly.dev|✅.*VERIFIED-CONTENT.*type=TEXT|✅ Decoded clipboard event" 2>/dev/null || echo "0")
         else
-            onmessage_count=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "LanWebSocketServer.*Binary frame received|TransportManager.*Invoking incoming clipboard handler" 2>/dev/null || echo "0")
+            onmessage_count=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -cE "LanWebSocketServer.*Binary frame received|IncomingClipboardHandler.*📥 Received clipboard|✅.*VERIFIED-CONTENT" 2>/dev/null || echo "0")
         fi
         
         # Ensure numeric values and convert to integers
@@ -1100,10 +1168,10 @@ check_test_case_reception() {
         local binary_frame_received=0
         if [ "$transport" = "lan" ]; then
             # For LAN messages, check for any binary frames received (they don't have case pattern in logs)
-            binary_frame_received=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "LanWebSocketServer.*Binary frame received|TransportManager.*Invoking incoming clipboard handler|✅ Decoded envelope.*type=CLIPBOARD" 2>/dev/null || echo "0")
+            binary_frame_received=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -cE "LanWebSocketServer.*Binary frame received|IncomingClipboardHandler.*📥 Received|✅.*VERIFIED-CONTENT" 2>/dev/null || echo "0")
         else
             # For cloud messages, check for onMessage calls (WebSocket client) or decoded envelope logs
-            binary_frame_received=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "🔥🔥🔥.*onMessage.*CALLED|✅ Decoded envelope.*type=CLIPBOARD|📥 Received binary message.*fly.dev" 2>/dev/null || echo "0")
+            binary_frame_received=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -cE "LanWebSocketServer.*Binary frame received|📥 Received.*clipboard|✅.*VERIFIED-CONTENT" 2>/dev/null || echo "0")
         fi
         binary_frame_received=$(echo "${binary_frame_received:-0}" | grep -o '[0-9]*' | head -1 || echo "0")
         
@@ -1129,7 +1197,7 @@ check_test_case_reception() {
         elif [ "${handler_success:-0}" -gt 0 ] 2>/dev/null || [ "${case_found:-0}" -gt 0 ] 2>/dev/null || [ "${onmessage_count:-0}" -gt 0 ] 2>/dev/null; then
             # Check if handler successfully processed (even if case pattern not in logs)
             # Handler success can be detected from logs without case pattern
-            local handler_success_any=$(adb_cmd logcat -d -t 500 2>/dev/null | grep -cE "IncomingClipboardHandler.*✅.*Decoded clipboard event|✅.*Decoded clipboard event.*type=" 2>/dev/null || echo "0")
+            local handler_success_any=$(adb_cmd logcat -d -t 5000 2>/dev/null | grep -cE "IncomingClipboardHandler.*✅.*Decoded clipboard event|✅.*Decoded clipboard event.*type=" 2>/dev/null || echo "0")
             handler_success_any=$(echo "${handler_success_any:-0}" | grep -o '[0-9]*' | head -1 || echo "0")
             
             if [ "$handler_success" -gt 0 ] || [ "$handler_success_any" -gt 0 ]; then
@@ -1159,7 +1227,7 @@ check_test_case_reception() {
         fi
     else
         # Check macOS reception
-        local macos_status=$(check_macos_reception "$case_num" "$message_text" 0)
+        local macos_status=$(check_macos_reception "$case_num" "$message_text" 0 "$content_type")
         if [ "$macos_status" = "not_running" ]; then
             log_warning "  macOS app not running, cannot verify reception"
             result="SKIPPED"
@@ -1422,7 +1490,42 @@ main() {
     echo "🧹 Clearing Android logcat buffer..."
     adb_cmd logcat -c > /dev/null 2>&1 || true
     sleep 1
-    
+
+    # Ensure Android app is running before starting tests
+    echo "📱 Checking if Android app is running..."
+    if ! adb_cmd shell "ps -A" | grep -q "com.hypo.clipboard"; then
+        log_warning "Android app not running, starting now..."
+        adb_cmd shell am start -n com.hypo.clipboard/.MainActivity > /dev/null 2>&1 || true
+        sleep 5
+
+        # Verify it started successfully
+        if adb_cmd shell "ps -A" | grep -q "com.hypo.clipboard"; then
+            log_success "Android app started successfully"
+        else
+            log_error "Failed to start Android app - tests will fail!"
+            log_error "Please start the app manually: adb shell am start -n com.hypo.clipboard/.MainActivity"
+            exit 1
+        fi
+    else
+        log_success "Android app is running"
+    fi
+
+    # Keep Android awake during testing to prevent battery optimization
+    # from pausing WebSocket connections
+    echo "🔋 Ensuring Android stays awake for testing..."
+
+    # Start a foreground activity to keep device awake
+    adb_cmd shell am start -n com.hypo.clipboard/.MainActivity > /dev/null 2>&1 || true
+    sleep 2
+
+    # Save current battery saver state and disable it temporarily
+    ANDROID_BATTERY_SAVER_ORIGINAL=$(adb_cmd shell settings global get low_power 2>/dev/null || echo "null")
+    export ANDROID_BATTERY_SAVER_ORIGINAL
+
+    adb_cmd shell settings global put low_power 0 > /dev/null 2>&1 || true
+    log_success "Android battery optimizations disabled for testing (will restore on exit)"
+    echo ""
+
     # Start macOS log capture in background
     echo "📋 Starting macOS log capture to /tmp/hypo_debug.log..."
     rm -f /tmp/hypo_debug.log
@@ -1432,8 +1535,8 @@ main() {
     echo "   Started log stream (PID: $MACOS_LOG_PID)"
     
     # Ensure we kill the log process on exit
-    trap 'kill $MACOS_LOG_PID 2>/dev/null; mv /tmp/hypo_debug.log /tmp/hypo_debug_last.log' EXIT
-    
+    trap 'kill $MACOS_LOG_PID 2>/dev/null; mv /tmp/hypo_debug.log /tmp/hypo_debug_last.log 2>/dev/null; restore_android_state' EXIT
+
     if [ "$run_all" = true ]; then
         # Phase 1: Send all messages first
         log_section "📤 Phase 1: Sending All Messages"

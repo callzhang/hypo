@@ -165,13 +165,13 @@ build_macos() {
         
         if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
             # Copy the built executable to the app bundle
-            log_info "Updating HypoApp.app bundle..."
-            mkdir -p "$MACOS_DIR/HypoApp.app/Contents/MacOS"
-            cp ".build/release/HypoMenuBar" "$MACOS_DIR/HypoApp.app/Contents/MacOS/HypoMenuBar"
-            chmod +x "$MACOS_DIR/HypoApp.app/Contents/MacOS/HypoMenuBar"
+            log_info "Updating Hypo.app bundle..."
+            mkdir -p "$MACOS_DIR/Hypo.app/Contents/MacOS"
+            cp ".build/release/HypoMenuBar" "$MACOS_DIR/Hypo.app/Contents/MacOS/HypoMenuBar"
+            chmod +x "$MACOS_DIR/Hypo.app/Contents/MacOS/HypoMenuBar"
             
             mark_built "$MACOS_DIR"
-            log_success "macOS app built and HypoApp.app updated successfully"
+            log_success "macOS app built and Hypo.app updated successfully"
             return 0
         else
             log_error "macOS build failed"
@@ -293,17 +293,17 @@ start_macos_app() {
     > "$MACOS_LOG"
     
     # Start app bundle with logging
-    if [[ -d "$MACOS_DIR/HypoApp.app" ]]; then
-        log_info "Launching HypoApp.app bundle..."
-        open "$MACOS_DIR/HypoApp.app" 2>&1 | tee -a "$MACOS_LOG"
+    if [[ -d "$MACOS_DIR/Hypo.app" ]]; then
+        log_info "Launching Hypo.app bundle..."
+        open "$MACOS_DIR/Hypo.app" 2>&1 | tee -a "$MACOS_LOG"
         
         # Wait for app to start and capture its PID
         sleep 3
         
-        MACOS_PID=$(pgrep -f "HypoApp.app" | head -n 1)
+        MACOS_PID=$(pgrep -f "Hypo.app" | head -n 1)
         
         if [[ -n "$MACOS_PID" ]] && ps -p $MACOS_PID > /dev/null; then
-            log_success "macOS HypoApp.app started (PID: $MACOS_PID)"
+            log_success "macOS Hypo.app started (PID: $MACOS_PID)"
             
             # Start log capture from system logs (with timeout protection)
             # Capture logs from HypoMenuBar process (more reliable than subsystem filter)
@@ -328,7 +328,7 @@ start_macos_app() {
             return 1
         fi
     else
-        log_error "HypoApp.app bundle not found at $MACOS_DIR/HypoApp.app"
+        log_error "Hypo.app bundle not found at $MACOS_DIR/Hypo.app"
         return 1
     fi
 }
@@ -639,7 +639,7 @@ main() {
     log_section "Phase 7: Cleanup"
     stop_android_log
     
-    log_info "Leaving macOS HypoApp.app running for manual testing..."
+    log_info "Leaving macOS Hypo.app running for manual testing..."
     log_info "To stop: killall HypoApp  (or click Quit from menu bar)"
     
     # Summary

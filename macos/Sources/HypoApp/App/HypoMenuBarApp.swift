@@ -99,20 +99,6 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         // This is especially important when running from /Applications
         ensureActivationPolicy()
         
-        // CRITICAL: Activate the app to ensure menu bar icon appears
-        // Menu bar apps need to activate to show their status item
-        // Activate immediately and also with delays to catch different timing scenarios
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSApplication.shared.activate(ignoringOtherApps: true)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            NSApplication.shared.activate(ignoringOtherApps: true)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            NSApplication.shared.activate(ignoringOtherApps: true)
-        }
-        
         // Setup Hotkey using Carbon API (more reliable than CGEventTap)
         // Note: Carbon RegisterEventHotKey does NOT require Accessibility permissions
         setupCarbonHotkey()
@@ -748,12 +734,6 @@ public struct HypoMenuBarApp: App {
     public init() {
         logger.info("🚀 [HypoMenuBarApp] Initializing app (viewModel setup)")
         
-        // Note: Activation policy is set in applicationDidFinishLaunching (proper lifecycle method)
-        // Just activate app here to ensure menu bar icon appears
-        DispatchQueue.main.async {
-            NSApplication.shared.activate(ignoringOtherApps: true)
-        }
-        
         // Create shared dependencies using AppContext singletons
         let historyStore: HistoryStore
         if let existingStore = AppContext.shared.historyStore {
@@ -825,7 +805,6 @@ public struct HypoMenuBarApp: App {
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)
                 .onAppear {
-                    
                     // CRITICAL FALLBACK: If @NSApplicationDelegateAdaptor didn't work, set up delegate manually
                     if NSApplication.shared.delegate == nil || !(NSApplication.shared.delegate is HypoAppDelegate) {
                         logger.warning("⚠️ [HypoMenuBarApp] AppDelegate not set, setting up manually")
@@ -836,26 +815,6 @@ public struct HypoMenuBarApp: App {
                         delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
                     }
                     
-                    // CRITICAL: Activate app when MenuBarExtra appears to ensure status item is visible
-                    // This is needed when app is launched by double-clicking (not via open command)
-                    // Activate immediately and also with delays to catch different timing scenarios
-                    logger.debug("🔄 [HypoMenuBarApp] Activating app to ensure menu bar icon appears")
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        NSApplication.shared.activate(ignoringOtherApps: true)
-                        self.logger.debug("🔄 [HypoMenuBarApp] App activated again (0.1s delay)")
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        NSApplication.shared.activate(ignoringOtherApps: true)
-                        self.logger.debug("🔄 [HypoMenuBarApp] App activated again (0.5s delay)")
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        NSApplication.shared.activate(ignoringOtherApps: true)
-                        self.logger.debug("🔄 [HypoMenuBarApp] App activated again (1.0s delay)")
-                        // Verify status item is visible
-                        self.verifyStatusItemVisible()
-                    }
-                    
                     // CRITICAL: Ensure setHistoryViewModel is called when view appears
                     if let transportManager = viewModel.transportManager {
                         transportManager.setHistoryViewModel(viewModel)
@@ -863,7 +822,6 @@ public struct HypoMenuBarApp: App {
                     
                     // Start clipboard monitor - this is the primary place it should start
                     setupMonitor()
-                    // Global shortcut registration is handled by HypoAppDelegate (Carbon hotkey)
                 }
                 .onDisappear {
                     // Keep the global shortcut active across menu open/close cycles.
@@ -871,37 +829,18 @@ public struct HypoMenuBarApp: App {
                 .task {
                     // Also call it from .task as backup
                     if let transportManager = viewModel.transportManager {
-                        logger.debug("🚀 [HypoMenuBarApp] Ensuring viewModel is set")
                         transportManager.setHistoryViewModel(viewModel)
                     }
                     await viewModel.start()
-                    // Ensure monitor is started in .task as well (runs even if .onAppear doesn't)
                     setupMonitor()
-                    
-                    // CRITICAL: Also activate here as backup to ensure menu bar icon appears
-                    // This runs even if .onAppear doesn't fire
-                    // Activate multiple times with delays to ensure it works
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                    try? await Task.sleep(nanoseconds: 400_000_000) // 0.4s more (total 0.5s)
-                    NSApplication.shared.activate(ignoringOtherApps: true)
                 }
                 .onOpenURL { url in
                     Task { await viewModel.handleDeepLink(url) }
                 }
-                // .background(MenuBarIconRightClickHandler(viewModel: viewModel)) // Removed in favor of MenuBarRightClickManager
         }, label: {
             menuBarIcon()
                 .onAppear {
                     logger.info("📊 [HypoMenuBarApp] MenuBarExtra label appeared - status item should be visible now")
-                    // Final activation attempt when MenuBarExtra label appears
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        NSApplication.shared.activate(ignoringOtherApps: true)
-                        self.logger.debug("🔄 [HypoMenuBarApp] App activated when MenuBarExtra label appeared")
-                        // Verify status item is visible
-                        self.verifyStatusItemVisible()
-                    }
                 }
         })
         .menuBarExtraStyle(.window)

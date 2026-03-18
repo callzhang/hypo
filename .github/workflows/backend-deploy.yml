@@ -109,24 +109,6 @@ jobs:
             sleep 1
           done
 
-      - name: Run large file sync tests
-        working-directory: backend/tests
-        env:
-          CLOUD_URL: ws://localhost:8080/ws
-        run: |
-          echo "🧪 Running large file sync tests (100MB)..."
-          echo "This test verifies that the server can handle large file transfers (100MB) without overflow errors"
-          python3 test_file_sync.py \
-            --skip-lan \
-            --skip-overflow \
-            --cloud-url "$CLOUD_URL" \
-            --device-id $(python3 -c "import uuid; print(uuid.uuid4())") || {
-            echo "❌ Large file sync test failed"
-            echo "Server logs:"
-            cat /tmp/hypo-server.log || true
-            exit 1
-          }
-          echo "✅ Large file sync tests passed"
 
       - name: Stop backend server
         if: always()

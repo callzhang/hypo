@@ -4,6 +4,10 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **macOS LAN Discovery Hang**: Eliminated a recursive peer resync path in `LanSyncTransport` that could make the menu bar app stop responding when Bonjour reported the same peer with a changed LAN endpoint.
+- **macOS Local Build Icon Fallback**: Documented and verified local icon generation so debug app bundles include the correct `AppIcon.icns` when `Pillow` is installed.
+
 ## [1.1.6] - 2026-01-20
 
 ### Fixed

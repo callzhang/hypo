@@ -826,6 +826,53 @@ adb shell pm clear com.hypo.clipboard
 2. Update test script key from keychain (prioritizes keychain over .env)
 3. Verify key format matches (64 hex chars)
 
+### Problem: "macOS App Is Not Responding"
+
+**Symptoms**:
+- `HypoMenuBar` stays open but the menu bar app stops responding
+- Activity Monitor shows very high CPU or memory usage for the app
+- Sampling the process shows repeated frames in `LanSyncTransport.syncPeerConnections()`
+
+**Root Cause**: LAN peer synchronization could recursively call itself when Bonjour surfaced the same device more than once with a changed endpoint. On macOS this could spiral on the main actor and hang the app instead of crashing.
+
+**Verification**:
+```bash
+# Find the live process
+ps aux | grep HypoMenuBar
+
+# Sample the hung process for 5 seconds
+sample <PID> 5 -file /tmp/hypo.sample.txt
+
+# Look for repeated syncPeerConnections frames
+grep -n "syncPeerConnections" /tmp/hypo.sample.txt
+```
+
+**Fix**:
+- Update to a build that deduplicates discovered peers before syncing LAN connections
+- Relaunch the app after replacing `/Applications/Hypo.app`
+- If the app is already hung, force quit it once before launching the fixed build
+
+### Problem: "macOS App Icon Is Missing or Incorrect"
+
+**Symptoms**:
+- Local debug builds launch with a generic app icon
+- `/Applications/Hypo.app` runs, but Finder or Launchpad shows the wrong icon
+
+**Root Cause**: The local icon generator in `scripts/generate-icons.py` requires `Pillow`. If it is missing, the build script continues without generating `AppIcon.icns`.
+
+**Fix**:
+```bash
+# Install the icon generation dependency
+python3 -m pip install --user Pillow
+
+# Rebuild the macOS app bundle
+./scripts/build-macos.sh
+```
+
+**If the old icon is still shown**:
+- Relaunch the app from `/Applications/Hypo.app`
+- If Finder still caches the old icon, restart `Dock` and `Finder`
+
 ### Problem: "Certificate Pinning Failures"
 
 **Symptoms**: Cloud sync fails with SSL errors

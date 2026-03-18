@@ -58,12 +58,12 @@
     <string name="error_content_too_large">Item too large to copy (exceeds 10MB limit)</string>
     <string name="error_failed_to_load_content">Failed to load item content</string>
     <string name="error_item_too_large_to_copy">Item too large to copy (%1$s MB exceeds %2$s MB limit)</string>
-    <string name="settings_sms_permission">SMS Auto-Sync</string>
-    <string name="settings_sms_permission_description">Automatically copy incoming SMS to clipboard and sync to macOS</string>
+    <string name="settings_sms_permission">OTP SMS Auto-Copy</string>
+    <string name="settings_sms_permission_description">Detect OTP or verification codes in incoming SMS, copy the code to clipboard, and sync it to peers</string>
     <string name="settings_sms_permission_status_granted">Granted</string>
     <string name="settings_sms_permission_status_denied">Not Granted</string>
     <string name="settings_sms_permission_request_button">Grant Permission</string>
-    <string name="settings_sms_permission_note">Note: On Android 10+, SMS access may be restricted. Manual copy still works.</string>
+    <string name="settings_sms_permission_note">Note: Only SMS that look like OTP or verification messages are copied. If detection misses one, manual copy still works.</string>
     
     <string name="settings_notification_permission">Notifications</string>
     <string name="settings_notification_permission_description">Required for persistent notification showing latest clipboard item</string>

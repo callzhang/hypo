@@ -21,6 +21,7 @@ import kotlin.math.max
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.webkit.MimeTypeMap
+import com.hypo.clipboard.service.SmsOtpParser
 import com.hypo.clipboard.util.SizeConstants
 
 private val base64Encoder = Base64.getEncoder().withoutPadding()
@@ -109,17 +110,19 @@ class ClipboardParser(
         if (Patterns.WEB_URL.matcher(rawText).matches()) {
             return buildLinkEvent(rawText)
         }
-        val bytes = rawText.encodeToByteArray()
+        val parsedText = SmsOtpParser.extractOtpFromClipboardText(rawText) ?: rawText
+        val bytes = parsedText.encodeToByteArray()
         val metadata = mapOf(
             "size" to bytes.size.toString(),
             "hash" to sha256Hex(bytes),
-            "encoding" to "UTF-8"
+            "encoding" to "UTF-8",
+            "otp_extracted" to (parsedText != rawText).toString()
         )
-        val preview = rawText.truncate(100)
+        val preview = parsedText.truncate(100)
         return ClipboardEvent(
             id = newEventId(),
             type = ClipboardType.TEXT,
-            content = rawText,
+            content = parsedText,
             preview = preview,
             metadata = metadata,
             createdAt = Instant.now()

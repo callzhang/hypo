@@ -1,0 +1,223 @@
+Building for debugging...
+[0/4] Write swift-version--1AB21518FC5DEDBE.txt
+Build complete! (0.14s)
+◇ Test run started.
+↳ Testing Library Version: 0.99.0
+◇ Suite TransportManagerTests started.
+◇ Test testSetHistoryViewModelAndUpdateConnectionState() started.
+◇ Test testDeviceNameCacheProvidesFallback() started.
+◇ Test testDiagnosticsReportIncludesVersionAndPeers() started.
+◇ Test testUpdateCloudConnectedDeviceIdsMarksOnline() started.
+◇ Test testSetLanConnectionTracksOnlineState() started.
+◇ Test testRegisterPairedDeviceSkipsNoChange() started.
+◇ Test testHandleDeepLinkRejectsNonDebug() started.
+◇ Test testPairingParametersAndAccessors() started.
+◇ Test testUpdateAndRemovePairedDevice() started.
+◇ Test testDiagnosticsReportIncludesLocalServiceWhenAdvertising() started.
+◇ Test testIncomingClipboardHandlerRegistration() started.
+◇ Test testRegisterPairedDeviceUpdatesByName() started.
+◇ Test testUpdateDeviceOnlineStatusSendsNotification() started.
+◇ Test testUpdateLocalAdvertisementUpdatesPublisher() started.
+◇ Test testServerDelegatePathsUpdateConnectionState() started.
+◇ Test testPruneLanPeersRemovesOldEntries() started.
+◇ Test testCloudIncomingHandlerHandlesValidAndInvalidFrames() started.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000103495bb0 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 5 paired devices
+[2026-03-26 22:49:55] Warning [com.hypo.clipboard:HistoryStore] ⚠️ [HistoryStore] Upgrading to file-based storage. Clearing old history.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:history] 🧹 Clearing old history for file storage migration
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.691 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9250300 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:transport] ✅ Notification controller initialized successfully
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔧 [TransportManager] setHistoryViewModel called
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔧 [TransportManager] Initializing ConnectionStatusProber
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔧 [TransportManager] ConnectionStatusProber started (event-driven + periodic)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔧 [TransportManager] setHistoryViewModel already called, skipping
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Updating connectionState: disconnected → connectedLan
+
+✔ Test testSetHistoryViewModelAndUpdateConnectionState() passed after 0.012 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9250300 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 5 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🎬 [TransportManager] activateLanServices called
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 📡 [TransportManager] Starting WebSocket server on port 0
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:LanWebSocketServer] 🚀 Starting WebSocket server on port 0
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:LanWebSocketServer] 📡 [LanWebSocketServer] Listener created on port 0 - will accept connections from all interfaces (0.0.0.0:0)
+[2026-03-26 22:49:55] Warning [com.hypo.clipboard:HistoryStore] ⚠️ [HistoryStore] Upgrading to file-based storage. Clearing old history.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:history] 🧹 Clearing old history for file storage migration
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9250900 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 5 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9250f00 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+✔ Test testPairingParametersAndAccessors() passed after 0.015 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.697 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9250f00 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+✔ Test testHandleDeepLinkRejectsNonDebug() passed after 0.016 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9250f00 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 5 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.698 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 0 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251500 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+✔ Test testPruneLanPeersRemovesOldEntries() passed after 0.017 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.699 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251500 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] Added paired device: Named Device
+✔ Test testDeviceNameCacheProvidesFallback() passed after 0.019 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.700 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251500 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] Added paired device: Case Device
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Updating connectionState: disconnected → connectedCloud
+
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Device status changed: Case Device is now Online on instance 0x0000000ab9251500
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Device status changed: Case Device is now Offline on instance 0x0000000ab9251500
+✔ Test testSetLanConnectionTracksOnlineState() passed after 0.021 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.703 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251500 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Added new device: Same Device
+✔ Test testRegisterPairedDeviceSkipsNoChange() passed after 0.022 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.704 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251500 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Added new device: Shared Name
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Updated device by name: Shared Name
+✔ Test testRegisterPairedDeviceUpdatesByName() passed after 0.024 seconds.
+[2026-03-26 22:49:55] Warning [com.hypo.clipboard:HistoryStore] ⚠️ [HistoryStore] Upgrading to file-based storage. Clearing old history.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:history] 🧹 Clearing old history for file storage migration
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.706 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251500 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 📥 [TransportManager] Cloud relay incoming message received: 0.26 KB, origin=cloud
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔍 [TransportManager] Envelope details: type=clipboard, target=peer, deviceId=device
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.707 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251800 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Updating connectionState: disconnected → connectedCloud
+
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:transport] WebSocket connection established: 98C5853F-BB5D-4A00-B33E-A12F68E91E11
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:transport] WebSocket connection closed: 98C5853F-BB5D-4A00-B33E-A12F68E91E11
+✔ Test testServerDelegatePathsUpdateConnectionState() passed after 0.027 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.709 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251b00 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] Added paired device: Test Device
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Device status changed: Test Device is now Online on instance 0x0000000ab9251b00
+✘ Test testUpdateDeviceOnlineStatusSendsNotification() recorded an issue at TransportManagerTests.swift:126:9: Expectation failed: (notificationController.statusNotifications.count → 0) == 1
+✘ Test testUpdateDeviceOnlineStatusSendsNotification() recorded an issue at TransportManagerTests.swift:127:9: Expectation failed: (notificationController.statusNotifications.first?.deviceId → nil) == "device-1"
+✘ Test testUpdateDeviceOnlineStatusSendsNotification() recorded an issue at TransportManagerTests.swift:130:9: Expectation failed: (notificationController.statusNotifications.count → 0) == 1
+✘ Test testUpdateDeviceOnlineStatusSendsNotification() failed after 0.031 seconds with 3 issues.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.712 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251b00 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] Added paired device: Alpha
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] Added paired device: Beta
+[2026-03-26 22:49:55] Debug [com.hypo.clipboard:TransportManager] 🔍 [TransportManager] Peer status: [Alpha: offline, Beta: online (changed)] on instance 0x0000000ab9251b00
+✔ Test testUpdateCloudConnectedDeviceIdsMarksOnline() passed after 0.033 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Loading existing LAN pairing key from file storage (size: 0.03 KB)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔑 [TransportManager] Successfully loaded existing key, public key: 0KWinOak3zMKXjQg...
+2026-03-26 22:49:55.714 swiftpm-testing-helper[25942:13700309] 🔑 [TransportManager] Bonjour config: Using public key 0KWinOak3zMKXjQg...
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Restored 2 peers from cache
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🆕 [TransportManager] Initialized instance: 0x0000000ab9251b00 on thread: <_NSMainThread: 0x1034791d0>{number = 1, name = main}
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] init running on Main Thread
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Loaded 0 paired devices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] Added paired device: Old Device
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🗑️ [TransportManager] Removed paired device: Old Device
+✔ Test testUpdateAndRemovePairedDevice() passed after 0.034 seconds.
+✔ Test testDiagnosticsReportIncludesVersionAndPeers() passed after 0.034 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:StorageManager] 🧹 [StorageManager] Cleared all stored files
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:ConnectionStatusProber] ⚠️ [ConnectionStatusProber] TransportManager is nil, cannot probe
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:StorageManager] 🧹 [StorageManager] Cleared all stored files
+✔ Test testUpdateLocalAdvertisementUpdatesPublisher() passed after 0.035 seconds.
+✔ Test testIncomingClipboardHandlerRegistration() passed after 0.035 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] WebSocket server bound to ephemeral port: 62770
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] WebSocket server started
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 📢 [TransportManager] Starting Bonjour advertising on port 62770
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:StorageManager] 🧹 [StorageManager] Cleared all stored files
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:incoming] 📥 [IncomingClipboardHandler] handle() called: 0.26 KB, origin=cloud
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:incoming] 📦 [IncomingClipboardHandler] Decoded envelope: deviceId=device, deviceName=nil, platform=unknown
+[2026-03-26 22:49:55] Warning [com.hypo.clipboard:TransportManager] ⚠️ [TransportManager] Attempted to update status for unknown device: device-xyz on instance 0x0000000ab9251800
+[2026-03-26 22:49:55] Warning [com.hypo.clipboard:SyncEngine] ⚠️ [SyncEngine] PLAIN TEXT MODE: Receiving unencrypted
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] Connection established for device: device-xyz
+[2026-03-26 22:49:55] Warning [com.hypo.clipboard:TransportManager] ⚠️ [TransportManager] Attempted to update status for unknown device: device-xyz on instance 0x0000000ab9251800
+[2026-03-26 22:49:55] Warning [com.hypo.clipboard:TransportManager] ⚠️ [TransportManager] Attempted to update status for unknown device: device-xyz on instance 0x0000000ab9251800
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔍 [TransportManager] About to call incomingHandler?.handle(data)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ❌ [TransportManager] incomingHandler is nil!
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ⚠️ [TransportManager] Failed to decode envelope for metadata update: truncated
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ✅ [TransportManager] Using deviceId from connection metadata: device-xyz
+[2026-03-26 22:49:55] Warning [com.hypo.clipboard:TransportManager] ⚠️ [TransportManager] Attempted to update status for unknown device: device-xyz on instance 0x0000000ab9251800
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔍 [TransportManager] About to call incomingHandler?.handle(data)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] ❌ [TransportManager] incomingHandler is nil!
+[2026-03-26 22:49:55] Warning [com.hypo.clipboard:TransportManager] ⚠️ [TransportManager] Attempted to update status for unknown device: device-xyz on instance 0x0000000ab9251800
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:LanWebSocketServer] ✅ WebSocket server ready and listening on all interfaces
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:LanWebSocketServer] ✅ [LanWebSocketServer] Server is ready and listening on all interfaces (0.0.0.0)
+[2026-03-26 22:49:55] Debug [com.hypo.clipboard:LanWebSocketServer] 📡 [LanWebSocketServer] Found 16 available network interfaces
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔍 [TransportManager] Starting Bonjour browser
+[2026-03-26 22:49:55] Error [com.hypo.clipboard:incoming] ❌ [IncomingClipboardHandler] CLIPBOARD ERROR: The operation couldn’t be completed. (HypoApp.CompressionError error 1.), type: CompressionError
+[2026-03-26 22:49:55] Error [com.hypo.clipboard:incoming] ❌ CLIPBOARD ERROR: Failed to handle incoming clipboard: The operation couldn’t be completed. (HypoApp.CompressionError error 1.)
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 📥 [TransportManager] Cloud relay incoming message received: 0.00 KB, origin=cloud
+[2026-03-26 22:49:55] Debug [com.hypo.clipboard:TransportManager] ☁️ [TransportManager] Calling startAutoConnect from activateLanServices
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🔄 [TransportManager] Attempting to auto-connect to cloud relay
+[2026-03-26 22:49:55] Error [com.hypo.clipboard:TransportManager] ❌ [TransportManager] Failed to decode envelope: The operation couldn’t be completed. (HypoApp.TransportFrameError error 1.)
+[2026-03-26 22:49:55] Debug [com.hypo.clipboard:TransportManager] 🎬 [TransportManager] activateLanServices completed
+✔ Test testCloudIncomingHandlerHandlesValidAndInvalidFrames() passed after 0.043 seconds.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:LanWebSocketServer] 🛑 Stopping WebSocket server
+✔ Test testDiagnosticsReportIncludesLocalServiceWhenAdvertising() passed after 0.043 seconds.
+✘ Suite TransportManagerTests failed after 0.044 seconds with 3 issues.
+[2026-03-26 22:49:55] Info [com.hypo.clipboard:TransportManager] 🌐 [TransportManager] Initial network path: satisfied – IP: 10.0.0.146
+✘ Test run with 17 tests failed after 0.045 seconds with 3 issues.

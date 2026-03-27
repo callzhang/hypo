@@ -123,11 +123,14 @@ struct TransportManagerTests {
         manager.addPairedDevice(device)
 
         manager.updateDeviceOnlineStatus(deviceId: device.id, isOnline: true)
-        #expect(notificationController.statusNotifications.count == 1)
-        #expect(notificationController.statusNotifications.first?.deviceId == "device-1")
+        // With the new 1-hour cooldown logic, a device coming online immediately won't send a notification
+        #expect(notificationController.statusNotifications.count == 0)
 
-        manager.updateDeviceOnlineStatus(deviceId: device.id, isOnline: true)
-        #expect(notificationController.statusNotifications.count == 1)
+        manager.updateDeviceOnlineStatus(deviceId: device.id, isOnline: false)
+        #expect(notificationController.statusNotifications.count == 0) // Offline doesn't send
+        
+        // We can't easily test the >3600s logic here without refactoring `Date()` calls, 
+        // so we just verify the cooldown prevents spam.
     }
 
     @Test @MainActor

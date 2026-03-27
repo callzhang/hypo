@@ -66,6 +66,9 @@ public final class TransportManager: ObservableObject {
     // Messaging and transport state
     private var lastSuccessfulTransportMap: [String: TransportChannel] = [:]
     
+    // Track when devices went offline to only notify after long disconnections
+    private var deviceOfflineTimes: [String: Date] = [:]
+    
     public func pairingParameters() -> (service: String, port: Int, relayHint: URL?) {
         let config = currentLanConfiguration()
         let domain = config.domain
@@ -263,14 +266,23 @@ public final class TransportManager: ObservableObject {
             }
             pairedDevices[index].isOnline = isOnline
             
-            // Send notification for status change
-            let deviceName = pairedDevices[index].name
-            let statusText = isOnline ? "Online" : "Offline"
-            notificationController.deliverStatusNotification(
-                deviceId: pairedDevices[index].id,
-                title: "Device Status Changed",
-                body: "\(deviceName) is now \(statusText)"
-            )
+            let now = Date()
+            if !isOnline {
+                // Record when the device went offline
+                deviceOfflineTimes[deviceId] = now
+            } else {
+                // Device came online. Only notify if it was offline for > 1 hour (3600 seconds)
+                if let offlineTime = deviceOfflineTimes[deviceId], now.timeIntervalSince(offlineTime) > 3600 {
+                    let deviceName = pairedDevices[index].name
+                    notificationController.deliverStatusNotification(
+                        deviceId: pairedDevices[index].id,
+                        title: "Device Connected",
+                        body: "\(deviceName) is now Online"
+                    )
+                }
+                // Clear the offline time since it's now online
+                deviceOfflineTimes.removeValue(forKey: deviceId)
+            }
             
             // Explicitly notify change to ensure SwiftUI picks it up across potential actor boundaries
             objectWillChange.send()

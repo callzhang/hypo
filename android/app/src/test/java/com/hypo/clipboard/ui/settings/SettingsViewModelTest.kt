@@ -69,8 +69,7 @@ class SettingsViewModelTest {
             UserSettings(
                 lanSyncEnabled = false,
                 cloudSyncEnabled = false,
-                historyLimit = 120,
-                plainTextModeEnabled = true
+                historyLimit = 120
             )
         )
 
@@ -89,7 +88,6 @@ class SettingsViewModelTest {
         val state = viewModel.state.value
         assertEquals(false, state.lanSyncEnabled)
         assertEquals(120, state.historyLimit)
-        assertEquals(true, state.plainTextModeEnabled)
         assertEquals(emptyList<DiscoveredPeer>(), state.discoveredPeers)
         viewModel.viewModelScope.cancel()
     }
@@ -110,12 +108,10 @@ class SettingsViewModelTest {
 
         viewModel.onLanSyncChanged(false)
         viewModel.onHistoryLimitChanged(150)
-        viewModel.onPlainTextModeChanged(true)
         runCurrent()
 
         assertEquals(listOf(false), settingsRepository.lanSyncCalls)
         assertEquals(listOf(150), settingsRepository.historyLimitCalls)
-        assertEquals(listOf(true), settingsRepository.plainTextCalls)
         viewModel.viewModelScope.cancel()
     }
     
@@ -198,31 +194,5 @@ class SettingsViewModelTest {
         viewModel.viewModelScope.cancel()
     }
     
-    @Test
-    fun `orphaned keys are cleaned up`() = runTest {
-        // Setup orphaned key (exists in keystore but no name in transport manager)
-        coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("orphaned-device")
-        every { transportManager.getDeviceName("orphaned-device") } returns null
-        
-        val viewModel = SettingsViewModel(
-            settingsRepository = settingsRepository,
-            transportManager = transportManager,
-            deviceKeyStore = deviceKeyStore,
-            lanTransportClient = lanTransportClient,
-            syncCoordinator = syncCoordinator,
-            connectionStatusProber = connectionStatusProber,
-            accessibilityServiceChecker = accessibilityServiceChecker,
-            context = context
-        )
-        runCurrent()
-        
-        // Should trigger deleteKey
-        coVerify { deviceKeyStore.deleteKey("orphaned-device") }
-        coVerify { transportManager.forgetPairedDevice("orphaned-device") }
-        
-        // ui state should be empty
-        assertTrue(viewModel.state.value.discoveredPeers.isEmpty())
-        
-        viewModel.viewModelScope.cancel()
-    }
+
 }

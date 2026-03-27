@@ -66,7 +66,6 @@ class ClipboardSyncService : Service() {
     private lateinit var listener: ClipboardListener
     private lateinit var notificationManager: NotificationManagerCompat
     private var notificationJob: Job? = null
-    private var peerStatusJob: Job? = null
     private var clipboardPermissionJob: Job? = null
     private var latestPreview: String? = null
     private var isPaused: Boolean = false
@@ -216,7 +215,6 @@ class ClipboardSyncService : Service() {
         registerScreenStateReceiver()
         registerNetworkChangeCallback()
         connectionStatusProber.start()
-        observePeerStatusNotifications()
         
         // Monitor app foreground state
         scope.launch {
@@ -242,7 +240,6 @@ class ClipboardSyncService : Service() {
         
         transportManager.clearPeerStatusChangedHandler()
         notificationJob?.cancel()
-        peerStatusJob?.cancel()
         unregisterScreenStateReceiver()
         unregisterNetworkChangeCallback()
         listener.stop()
@@ -409,19 +406,6 @@ class ClipboardSyncService : Service() {
                 Log.e(TAG, "❌ CRITICAL: Failed to create notification channel: $CHANNEL_ID")
             }
 
-            // Peer status channel
-            val peerStatusChannel = NotificationChannel(
-                PEER_STATUS_CHANNEL_ID,
-                getString(R.string.peer_status_notification_channel_name),
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = getString(R.string.peer_status_notification_channel_description)
-                setShowBadge(true)
-                enableLights(false)
-                enableVibration(true)
-            }
-            manager.createNotificationChannel(peerStatusChannel)
-            
             // Warning channel (for file size warnings)
             val warningChannel = NotificationChannel(
                 WARNING_CHANNEL_ID,
@@ -532,55 +516,7 @@ class ClipboardSyncService : Service() {
         }
     }
 
-    private fun showStatusNotification(deviceId: String, title: String, message: String) {
-        if (!notificationManager.areNotificationsEnabled()) return
-        
-        Log.d(TAG, "🔔 Showing status notification: $title - $message")
-        
-        val builder = NotificationCompat.Builder(this, PEER_STATUS_CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(message)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            
-        // Per-device coalescing: latest status replaces prior for the same device
-        val notificationId = deviceId.hashCode()
-        
-        try {
-            notificationManager.notify(notificationId, builder.build())
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Failed to show status notification: ${e.message}")
-        }
-    }
 
-    private fun observePeerStatusNotifications() {
-        peerStatusJob?.cancel()
-        peerStatusJob = scope.launch {
-            connectionStatusProber.deviceDualStatus.collectLatest { statuses ->
-                val activeIds = statuses.keys
-                val removedIds = lastPeerOnlineStatus.keys - activeIds
-                removedIds.forEach { lastPeerOnlineStatus.remove(it) }
-
-                statuses.forEach { (deviceId, status) ->
-                    val isOnline = status.isConnectedViaLan || status.isConnectedViaCloud
-                    val previous = lastPeerOnlineStatus[deviceId]
-                    if (previous == null) {
-                        lastPeerOnlineStatus[deviceId] = isOnline
-                        return@forEach
-                    }
-
-                    if (previous != isOnline) {
-                        lastPeerOnlineStatus[deviceId] = isOnline
-                        val displayName = transportManager.getServiceNameForDevice(deviceId) ?: deviceId.take(20)
-                        val statusText = if (isOnline) "Online" else "Offline"
-                        showStatusNotification(deviceId, "Device Status Changed", "$displayName is now $statusText")
-                    }
-                }
-            }
-        }
-    }
 
     private fun observeLatestItem() {
         notificationJob?.cancel() // Cancel previous job if exists
@@ -1129,7 +1065,6 @@ class ClipboardSyncService : Service() {
         // Changed channel ID to force recreation with IMPORTANCE_DEFAULT
         // Old channel with IMPORTANCE_LOW cannot be changed programmatically on Android 8.0+
         private const val CHANNEL_ID = "clipboard-sync-v2"
-        private const val PEER_STATUS_CHANNEL_ID = "peer-status-v1"
         private const val WARNING_CHANNEL_ID = "clipboard-warnings"
         private const val NOTIFICATION_ID = 42
         private const val WARNING_NOTIFICATION_ID = 43

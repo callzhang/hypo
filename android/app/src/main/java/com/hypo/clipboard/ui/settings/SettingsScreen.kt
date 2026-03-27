@@ -61,7 +61,6 @@ fun SettingsRoute(
     SettingsScreen(
         state = state,
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
-        onPlainTextModeChanged = viewModel::onPlainTextModeChanged,
         onOpenBatterySettings = onOpenBatterySettings,
         onRequestSmsPermission = onRequestSmsPermission,
         onRequestNotificationPermission = onRequestNotificationPermission,
@@ -77,7 +76,6 @@ fun SettingsRoute(
 fun SettingsScreen(
     state: SettingsUiState,
     onHistoryLimitChanged: (Int) -> Unit,
-    onPlainTextModeChanged: (Boolean) -> Unit,
     onOpenBatterySettings: () -> Unit,
     onRequestSmsPermission: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -103,13 +101,6 @@ fun SettingsScreen(
                 ConnectionStatusSection(connectionState = state.connectionState)
             }
             
-            item {
-                SyncSection(
-                    plainTextMode = state.plainTextModeEnabled,
-                    onPlainTextModeChanged = onPlainTextModeChanged
-                )
-            }
-
             item {
                 HistorySection(
                     historyLimit = state.historyLimit,
@@ -233,56 +224,48 @@ private fun ConnectionStatusSection(connectionState: ConnectionState) {
     }
 }
 
-@Composable
-private fun SyncSection(
-    plainTextMode: Boolean,
-    onPlainTextModeChanged: (Boolean) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = stringResource(id = R.string.settings_sync),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-        ListItem(
-            headlineContent = { Text(text = "Plain Text Mode") },
-            trailingContent = {
-                Switch(checked = plainTextMode, onCheckedChange = onPlainTextModeChanged)
-            }
-        )
-    }
-}
+
 
 @Composable
 private fun HistorySection(
     historyLimit: Int,
     onHistoryLimitChanged: (Int) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = stringResource(id = R.string.settings_history),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold
         )
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                text = stringResource(id = R.string.settings_history_limit_description),
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Slider(
-                value = historyLimit.toFloat(),
-                onValueChange = { newValue ->
-                    val snapped = ((newValue / UserSettings.HISTORY_STEP).roundToInt() * UserSettings.HISTORY_STEP)
-                        .coerceIn(UserSettings.MIN_HISTORY_LIMIT, UserSettings.MAX_HISTORY_LIMIT)
-                    onHistoryLimitChanged(snapped)
-                },
-                valueRange = UserSettings.MIN_HISTORY_LIMIT.toFloat()..UserSettings.MAX_HISTORY_LIMIT.toFloat(),
-                steps = ((UserSettings.MAX_HISTORY_LIMIT - UserSettings.MIN_HISTORY_LIMIT) / UserSettings.HISTORY_STEP) - 1
-            )
-            Text(
-                text = stringResource(id = R.string.settings_history_limit_value, historyLimit),
-                style = MaterialTheme.typography.labelLarge
-            )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(id = R.string.settings_history_limit_description),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Slider(
+                    value = historyLimit.toFloat(),
+                    onValueChange = { newValue ->
+                        val snapped = ((newValue / UserSettings.HISTORY_STEP).roundToInt() * UserSettings.HISTORY_STEP)
+                            .coerceIn(UserSettings.MIN_HISTORY_LIMIT, UserSettings.MAX_HISTORY_LIMIT)
+                        onHistoryLimitChanged(snapped)
+                    },
+                    valueRange = UserSettings.MIN_HISTORY_LIMIT.toFloat()..UserSettings.MAX_HISTORY_LIMIT.toFloat(),
+                    steps = ((UserSettings.MAX_HISTORY_LIMIT - UserSettings.MIN_HISTORY_LIMIT) / UserSettings.HISTORY_STEP) - 1
+                )
+                Text(
+                    text = stringResource(id = R.string.settings_history_limit_value, historyLimit),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
         }
     }
 }

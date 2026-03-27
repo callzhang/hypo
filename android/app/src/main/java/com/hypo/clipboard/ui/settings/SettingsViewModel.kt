@@ -128,17 +128,6 @@ class SettingsViewModel @Inject constructor(
                             deviceName = deviceName,
                             discoveredPeer = discoveredPeer
                         ))
-                    } else {
-                        // Found an orphaned key (valid key in keystore, but no name in prefs)
-                        // This happens if pairing was interrupted or during migration
-                        // Heal the state by deleting the orphaned key
-                        android.util.Log.w("SettingsViewModel", "⚠️ Found orphaned key for device $deviceId (no name found). Deleting key to clean up state.")
-                        runCatching {
-                            deviceKeyStore.deleteKey(deviceId)
-                            transportManager.forgetPairedDevice(deviceId)
-                        }.onFailure { e ->
-                            android.util.Log.e("SettingsViewModel", "❌ Failed to delete orphaned key for $deviceId", e)
-                        }
                     }
                 }
                 
@@ -203,7 +192,6 @@ class SettingsViewModel @Inject constructor(
                 SettingsUiState(
                     lanSyncEnabled = settings.lanSyncEnabled,
                     historyLimit = settings.historyLimit,
-                    plainTextModeEnabled = settings.plainTextModeEnabled,
                     discoveredPeers = pairedPeersForUi,
                     isAccessibilityServiceEnabled = isAccessibilityServiceEnabled,
                     deviceStatuses = peerStatuses,
@@ -227,10 +215,6 @@ class SettingsViewModel @Inject constructor(
 
     fun onHistoryLimitChanged(limit: Int) {
         viewModelScope.launch { settingsRepository.setHistoryLimit(limit) }
-    }
-
-    fun onPlainTextModeChanged(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setPlainTextModeEnabled(enabled) }
     }
     
     fun removeDevice(peer: DiscoveredPeer) {
@@ -298,7 +282,6 @@ class SettingsViewModel @Inject constructor(
 data class SettingsUiState(
         val lanSyncEnabled: Boolean = true,
         val historyLimit: Int = UserSettings.DEFAULT_HISTORY_LIMIT,
-        val plainTextModeEnabled: Boolean = false,
         val discoveredPeers: List<DiscoveredPeer> = emptyList(),
         val deviceStatuses: Map<String, DeviceConnectionStatus> = emptyMap(),
         val deviceTransports: Map<String, ActiveTransport?> = emptyMap(),

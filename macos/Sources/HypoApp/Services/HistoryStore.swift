@@ -266,7 +266,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         store: HistoryStore = HistoryStore(),
         transportManager: TransportManager? = nil,
         defaults: UserDefaults = .standard,
-        deviceIdentity: DeviceIdentityProviding = DeviceIdentity()
+        deviceIdentity: DeviceIdentityProviding = DeviceIdentity(),
+        notificationController: ClipboardNotificationScheduling? = ClipboardNotificationController.shared
     ) {
         self.store = store
         self.transportManager = transportManager
@@ -282,7 +283,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             self.appearancePreference = .system
         }
 #if canImport(UserNotifications)
-        self.notificationController = ClipboardNotificationController.shared
+        self.notificationController = notificationController
         if let controller = self.notificationController {
             controller.configure(handler: self)
             logger.info("✅ Notification controller initialized successfully")
@@ -373,24 +374,17 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         
         logger.debug("✅ [ClipboardHistoryViewModel] items array updated: \(updated.count) entries")
         
-        // Only show notifications for remote clipboard items (not local copies)
         let localId = deviceIdentity.deviceId.uuidString.lowercased()
         let isRemote = entry.deviceId.lowercased() != localId
-        
-        // Determine if we should notify
-        // 1. Must be a remote item
-        // 2. Must NOT be an echo of a local item (originated from here, sent back by peer)
         var shouldNotify = isRemote
-        
-        if isRemote, let duplicate = duplicate {
-            // Check if the duplicate (existing item) was local
-            // If we already have this content and it originated locally, this is an echo
-            if duplicate.deviceId.lowercased() == localId {
-                logger.debug("📢 [ClipboardHistoryViewModel] Duplicate of local item detected (echo), suppressing notification")
-                shouldNotify = false
-            }
+
+        if isRemote, let duplicate = duplicate, duplicate.deviceId.lowercased() == localId {
+            // If we already have this content and it originated locally, the remote item is
+            // just the sync echo of a pasteboard change the user already made on this Mac.
+            logger.debug("📢 [ClipboardHistoryViewModel] Duplicate of local item detected (echo), suppressing notification")
+            shouldNotify = false
         }
-        
+
         if shouldNotify {
             logger.debug("📢 [ClipboardHistoryViewModel] Remote clipboard item detected, showing notification")
 #if canImport(UserNotifications)

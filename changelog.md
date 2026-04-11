@@ -5,6 +5,7 @@ All notable changes to the Hypo project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **macOS Clipboard Notifications**: Only remote clipboard items from other devices trigger notifications; local macOS copies and remote echo items stay silent.
 - **macOS LAN Discovery Hang**: Eliminated a recursive peer resync path in `LanSyncTransport` that could make the menu bar app stop responding when Bonjour reported the same peer with a changed LAN endpoint.
 - **macOS Local Build Icon Fallback**: Documented and verified local icon generation so debug app bundles include the correct `AppIcon.icns` when `Pillow` is installed.
 

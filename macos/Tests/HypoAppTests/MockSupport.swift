@@ -220,11 +220,14 @@ final class MockNotificationController: ClipboardNotificationScheduling {
         let body: String
     }
 
+    private(set) var deliveredEntries: [ClipboardEntry] = []
     private(set) var statusNotifications: [StatusNotification] = []
 
     func configure(handler: ClipboardNotificationHandling) {}
     func requestAuthorizationIfNeeded() {}
-    func deliverNotification(for entry: ClipboardEntry) {}
+    func deliverNotification(for entry: ClipboardEntry) {
+        deliveredEntries.append(entry)
+    }
 
     func deliverStatusNotification(deviceId: String, title: String, body: String) {
         statusNotifications.append(.init(deviceId: deviceId, title: title, body: body))

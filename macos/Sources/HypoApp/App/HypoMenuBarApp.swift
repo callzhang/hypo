@@ -953,46 +953,66 @@ extension HypoMenuBarApp {
         image.isTemplate = true
         return image
     }
+
+    private func makeMenuBarTemplateImage(pointSize: CGFloat) -> NSImage {
+        let image = NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: false) { rect in
+            let center = NSPoint(x: rect.midX, y: rect.midY)
+            let outerRadius = pointSize * 0.42
+            let innerRadius = pointSize * 0.26
+            let dotRadius = pointSize * 0.07
+            let outerStroke = max(1.4, pointSize * 0.09)
+            let innerStroke = max(1.3, pointSize * 0.085)
+
+            NSColor.black.setStroke()
+            NSColor.black.setFill()
+
+            let outerRing = NSBezierPath()
+            outerRing.lineWidth = outerStroke
+            outerRing.appendArc(
+                withCenter: center,
+                radius: outerRadius,
+                startAngle: 0,
+                endAngle: 360
+            )
+            outerRing.stroke()
+
+            let innerRing = NSBezierPath()
+            innerRing.lineWidth = innerStroke
+            innerRing.appendArc(
+                withCenter: center,
+                radius: innerRadius,
+                startAngle: 0,
+                endAngle: 360
+            )
+            innerRing.stroke()
+
+            let dotRect = NSRect(
+                x: center.x - dotRadius,
+                y: center.y - dotRadius,
+                width: dotRadius * 2,
+                height: dotRadius * 2
+            )
+            NSBezierPath(ovalIn: dotRect).fill()
+
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
     
     /// Load the menu bar icon from the app bundle
     func menuBarIcon() -> some View {
-        // Always return a valid view to ensure MenuBarExtra always has a label
-        // Try to load from MenuBarIcon.iconset (monochrome template version)
-        
-        let iconPath = Bundle.main.path(forResource: "MenuBarIcon", ofType: "iconset")
-        
-        if let iconPath = iconPath {
-            // Determine best resolution based on screen scale
-            let screenScale = NSScreen.main?.backingScaleFactor ?? 2.0
-            let iconFile = screenScale > 1.0 ? "icon_16x16@2x.png" : "icon_16x16.png"
-            let fullPath = "\(iconPath)/\(iconFile)"
-            
-            // Try loading specific resolution first, fallback to 1x
-            var nsImage: NSImage?
-            if FileManager.default.fileExists(atPath: fullPath),
-               let image = NSImage(contentsOfFile: fullPath) {
-                nsImage = image
-            } else if let image = NSImage(contentsOfFile: "\(iconPath)/icon_16x16.png") {
-                nsImage = image
-            } else {
-                logger.error("❌ [HypoMenuBarApp] Failed to load any image from \(iconPath)")
-            }
-            
-            if let iconImage = nsImage {
-                iconImage.isTemplate = true // Ensure NSImage is template
-                // IMPORTANT: Use .renderingMode(.template) on SwiftUI Image
-                return AnyView(
-                    Image(nsImage: iconImage)
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 16, height: 16)
-                )
-            }
-        }
-        
-        logger.error("⚠️ [HypoMenuBarApp] Using fallback system icon")
-        return AnyView(Image(systemName: "clipboard").frame(width: 16, height: 16))
+        let pointSize: CGFloat = 18
+        let iconImage = makeMenuBarTemplateImage(pointSize: pointSize)
+        return AnyView(
+            Image(nsImage: iconImage)
+                .renderingMode(.template)
+                .interpolation(.high)
+                .antialiased(true)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: pointSize, height: pointSize)
+        )
     }
 }
 
@@ -1577,6 +1597,10 @@ private struct ClipboardCard: View {
     private var isLocal: Bool {
         entry.isLocal(localDeviceId: localDeviceId)
     }
+
+    private var shouldShowOriginBadge: Bool {
+        !isLocal
+    }
     
     private var isTruncated: Bool {
         switch entry.content {
@@ -1642,32 +1666,31 @@ private struct ClipboardCard: View {
                         Text(entry.content.title)
                             .font(.headline)
                         // Origin badge with icons
-                        HStack(spacing: 4) {
-                            // Encryption icon (shield)
-                            if entry.isEncrypted {
-                                Image(systemName: "shield.fill")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.blue)
-                                    .help("Encrypted")
+                        if shouldShowOriginBadge {
+                            HStack(spacing: 4) {
+                                if entry.isEncrypted {
+                                    Image(systemName: "shield.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.blue)
+                                        .help("Encrypted")
+                                }
+                                if let transportOrigin = entry.transportOrigin, transportOrigin == .cloud {
+                                    Image(systemName: "cloud.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                        .help("Via cloud relay")
+                                }
+                                Text(originName)
+                                    .font(.caption)
                             }
-                            // Transport origin icon (cloud only - no icon for LAN)
-                            if let transportOrigin = entry.transportOrigin, transportOrigin == .cloud {
-                                Image(systemName: "cloud.fill")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
-                                    .help("Via cloud relay")
-                            }
-                            // Origin name
-                            Text(originName)
-                                .font(.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(Color.secondary.opacity(0.2))
+                            )
+                            .foregroundStyle(.secondary)
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(isLocal ? Color.blue.opacity(0.2) : Color.secondary.opacity(0.2))
-                        )
-                        .foregroundStyle(isLocal ? .blue : .secondary)
                     }
                     // Show preview text with magnetic icon if truncated or previewable
                     HStack(alignment: .top, spacing: 4) {
@@ -1797,6 +1820,10 @@ private struct ClipboardRow: View {
     private var isLocal: Bool {
         entry.isLocal(localDeviceId: viewModel.localDeviceId)
     }
+
+    private var shouldShowOriginBadge: Bool {
+        !isLocal
+    }
     
     private var isTruncated: Bool {
         switch entry.content {
@@ -1880,32 +1907,31 @@ private struct ClipboardRow: View {
                         Text(entry.content.title)
                             .font(.headline)
                         // Origin badge with icons
-                        HStack(spacing: 4) {
-                            // Encryption icon (shield)
-                            if entry.isEncrypted {
-                                Image(systemName: "shield.fill")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.blue)
-                                    .help("Encrypted")
+                        if shouldShowOriginBadge {
+                            HStack(spacing: 4) {
+                                if entry.isEncrypted {
+                                    Image(systemName: "shield.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.blue)
+                                        .help("Encrypted")
+                                }
+                                if let transportOrigin = entry.transportOrigin, transportOrigin == .cloud {
+                                    Image(systemName: "cloud.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                        .help("Via cloud relay")
+                                }
+                                Text(originName)
+                                    .font(.caption)
                             }
-                            // Transport origin icon (cloud only - no icon for LAN)
-                            if let transportOrigin = entry.transportOrigin, transportOrigin == .cloud {
-                                Image(systemName: "cloud.fill")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
-                                    .help("Via cloud relay")
-                            }
-                            // Origin name
-                            Text(originName)
-                                .font(.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(Color.secondary.opacity(0.2))
+                            )
+                            .foregroundStyle(.secondary)
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(isLocal ? Color.blue.opacity(0.2) : Color.secondary.opacity(0.2))
-                        )
-                        .foregroundStyle(isLocal ? .blue : .secondary)
                     }
                     // Preview text (no icon here - moved to right column)
                     Text(entry.previewText)

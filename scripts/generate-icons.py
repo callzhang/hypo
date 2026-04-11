@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Generate app icons for Android and macOS from vector design.
-Creates minimal, vectorized icons with ripple design.
+Generate app icons for Android and macOS.
+Creates a polished ripple-based icon with a luminous core and concentric waves.
 """
 
 import os
@@ -19,16 +19,17 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 
-# Icon color scheme from SVG (hypo_minimal_ripple_purple.svg)
-BG_START = "#05010F"  # Dark futuristic background start
-BG_END = "#0B0220"    # Dark futuristic background end
+BG_START = "#03131D"
+BG_END = "#0A2740"
+BG_GLOW = "#123D63"
+CENTER_GLOW = "#DFFBFF"
+CORE_COLOR = "#8EF2FF"
 
-# Ripple gradient colors (cyan -> purple)
 RIPPLE_COLORS = [
-    ("#7DD3FC", 0.9),   # Soft cyan (center)
-    ("#38BDF8", 0.7),   # Sky blue
-    ("#8B5CF6", 0.55),  # Purple-blue
-    ("#9333EA", 0.9),   # Neon purple (outer)
+    ("#C9FBFF", 0.95),
+    ("#74E7FF", 0.92),
+    ("#33C7F3", 0.84),
+    ("#1592D1", 0.72),
 ]
 
 def hex_to_rgb(hex_color):
@@ -54,6 +55,27 @@ def create_gradient_background(size, start_color, end_color):
             pixels[x, y] = (r, g, b)
     
     return img
+
+def create_radial_glow(size, center_x, center_y, radius, color, max_alpha):
+    """Create a soft radial glow layer."""
+    glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(glow)
+    rgb = hex_to_rgb(color)
+
+    steps = 10
+    for step in range(steps, 0, -1):
+        t = step / steps
+        current_radius = radius * t
+        alpha = int(max_alpha * (t ** 2))
+        bbox = [
+            center_x - current_radius,
+            center_y - current_radius,
+            center_x + current_radius,
+            center_y + current_radius,
+        ]
+        draw.ellipse(bbox, fill=(*rgb, alpha))
+
+    return glow
 
 def draw_rounded_rectangle(draw, bbox, radius, fill=None):
     """Draw a rounded rectangle."""
@@ -98,96 +120,124 @@ def get_gradient_color_at_distance(distance, max_distance, colors):
     return colors[-1]
 
 def create_icon_image(size):
-    """Create the icon image at specified size based on the SVG design."""
-    # Create gradient background
+    """Create the main app icon image."""
     img = create_gradient_background(size, BG_START, BG_END)
-    
-    # Scale factor (SVG is 512x512)
+
     scale = size / 512.0
     center = size / 2
-    
+
     def scale_val(v):
         return int(v * scale)
-    
-    # Squircle corner radius (rx=120 in SVG)
+
     squircle_radius = scale_val(120)
-    
-    # Create rounded rectangle mask for squircle
+
     squircle_mask = Image.new("L", (size, size), 0)
     squircle_draw = ImageDraw.Draw(squircle_mask)
     squircle_draw.rounded_rectangle([0, 0, size, size], radius=squircle_radius, fill=255)
-    
-    # Apply squircle mask to background
+
     img = Image.composite(img, Image.new("RGB", (size, size), (0, 0, 0)), squircle_mask)
-    
-    # Convert to RGBA for compositing
     img = img.convert("RGBA")
-    
-    # Draw ripples (three concentric circles)
-    # Core pulse: r=22, stroke-width=6
-    # Main ripple: r=110, stroke-width=10
-    # Outer echo: r=180, stroke-width=6, opacity=0.6
-    
+
+    glow_center_x = center - scale_val(22)
+    glow_center_y = center - scale_val(26)
+    background_glow = create_radial_glow(
+        size=size,
+        center_x=glow_center_x,
+        center_y=glow_center_y,
+        radius=scale_val(290),
+        color=BG_GLOW,
+        max_alpha=120,
+    )
+    img = Image.alpha_composite(img, background_glow)
+
     ripple_layers = [
-        (22, 6, 1.0),   # Core pulse
-        (110, 10, 1.0), # Main ripple
-        (180, 6, 0.6),  # Outer echo
+        (40, 12, 1.0),
+        (112, 16, 0.95),
+        (184, 10, 0.82),
     ]
-    
-    # Create composite image for ripples
+
     ripple_composite = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ripple_draw = ImageDraw.Draw(ripple_composite)
-    
-    max_radius = scale_val(180) + scale_val(6)
-    
+    max_radius = scale_val(184) + scale_val(16)
+
     for radius, stroke_width, opacity in ripple_layers:
         r = scale_val(radius)
         sw = max(1, scale_val(stroke_width))
-        
-        # Get color for this radius
+
         color_rgb, color_opacity = get_gradient_color_at_distance(r, max_radius, RIPPLE_COLORS)
         final_opacity = color_opacity * opacity
-        
-        # Create a temporary layer for this ripple
+
         ripple_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         layer_draw = ImageDraw.Draw(ripple_layer)
-        
-        # Draw outer circle filled with RGB color
+
         bbox_outer = [center - r - sw//2, center - r - sw//2,
                       center + r + sw//2, center + r + sw//2]
         layer_draw.ellipse(bbox_outer, fill=color_rgb)
-        
-        # Erase inner circle to create stroke effect
+
         bbox_inner = [center - r + sw//2, center - r + sw//2,
                       center + r - sw//2, center + r - sw//2]
-        # Draw inner circle with transparent color to erase
         erase_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         erase_draw = ImageDraw.Draw(erase_layer)
         erase_draw.ellipse(bbox_inner, fill=(0, 0, 0, 255))
-        # Composite to erase inner
         ripple_layer = Image.composite(
             Image.new("RGBA", (size, size), (0, 0, 0, 0)),
             ripple_layer,
-            erase_layer.split()[3]  # Use alpha as mask
+            erase_layer.split()[3]
         )
-        
-        # Apply opacity to the layer
+
         if final_opacity < 1.0:
             alpha = ripple_layer.split()[3]
             alpha = alpha.point(lambda p: int(p * final_opacity))
             ripple_layer.putalpha(alpha)
-        
-        # Composite onto main ripple image
+
         ripple_composite = Image.alpha_composite(ripple_composite, ripple_layer)
-    
-    # Apply glow effect (Gaussian blur)
-    glow_radius = max(1, scale_val(10))
-    blurred_ripples = ripple_composite.filter(ImageFilter.GaussianBlur(radius=glow_radius))
-    
-    # Composite blurred ripples first (glow), then sharp ripples
-    img = Image.alpha_composite(img, blurred_ripples)
+
+    ripple_glow = ripple_composite.filter(ImageFilter.GaussianBlur(radius=max(1, scale_val(16))))
+    img = Image.alpha_composite(img, ripple_glow)
     img = Image.alpha_composite(img, ripple_composite)
-    
+
+    core_glow = create_radial_glow(
+        size=size,
+        center_x=center,
+        center_y=center,
+        radius=scale_val(92),
+        color=CENTER_GLOW,
+        max_alpha=140,
+    )
+    img = Image.alpha_composite(img, core_glow)
+
+    core_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    core_draw = ImageDraw.Draw(core_layer)
+    core_radius = scale_val(24)
+    core_draw.ellipse(
+        [center - core_radius, center - core_radius, center + core_radius, center + core_radius],
+        fill=hex_to_rgb(CORE_COLOR),
+    )
+    highlight_radius = scale_val(10)
+    highlight_offset = scale_val(8)
+    core_draw.ellipse(
+        [
+            center - highlight_offset - highlight_radius,
+            center - highlight_offset - highlight_radius,
+            center - highlight_offset + highlight_radius,
+            center - highlight_offset + highlight_radius,
+        ],
+        fill=(*hex_to_rgb("#FFFFFF"), 190),
+    )
+    img = Image.alpha_composite(img, core_layer)
+
+    vignette = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    vignette_draw = ImageDraw.Draw(vignette)
+    for step in range(4):
+        inset = scale_val(step * 9)
+        alpha = int(18 + step * 10)
+        vignette_draw.rounded_rectangle(
+            [inset, inset, size - inset, size - inset],
+            radius=max(1, squircle_radius - inset),
+            outline=(0, 0, 0, alpha),
+            width=max(1, scale_val(2)),
+        )
+    img = Image.alpha_composite(img, vignette)
+
     return img.convert("RGB")
 
 def generate_android_icons():
@@ -227,9 +277,9 @@ def generate_android_icons():
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Dark futuristic background gradient (from SVG) -->
+    <!-- Deep ocean background -->
     <path
-        android:fillColor="#05010F"
+        android:fillColor="#03131D"
         android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
 </vector>
 '''
@@ -242,29 +292,34 @@ def generate_android_icons():
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Ripple design matching SVG (cyan -> purple gradient) -->
+    <!-- Ripple design matching the app icon -->
     <group>
-        <!-- Core pulse (r=22 in 512px = ~4.6dp in 108dp) -->
+        <!-- Core pulse -->
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#7DD3FC"
-            android:strokeWidth="1.3"
+            android:strokeColor="#C9FBFF"
+            android:strokeWidth="2.5"
+            android:strokeAlpha="0.95"
+            android:pathData="M54,54 m-8.4,0 a8.4,8.4 0 1,1 16.8,0 a8.4,8.4 0 1,1 -16.8,0" />
+        <!-- Mid ripple -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#74E7FF"
+            android:strokeWidth="3.4"
             android:strokeAlpha="0.9"
-            android:pathData="M54,54 m-4.6,0 a4.6,4.6 0 1,1 9.2,0 a4.6,4.6 0 1,1 -9.2,0" />
-        <!-- Main ripple (r=110 in 512px = ~23.2dp in 108dp) -->
+            android:pathData="M54,54 m-23.6,0 a23.6,23.6 0 1,1 47.2,0 a23.6,23.6 0 1,1 -47.2,0" />
+        <!-- Outer ripple -->
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#8B5CF6"
+            android:strokeColor="#1592D1"
             android:strokeWidth="2.1"
-            android:strokeAlpha="0.7"
-            android:pathData="M54,54 m-23.2,0 a23.2,23.2 0 1,1 46.4,0 a23.2,23.2 0 1,1 -46.4,0" />
-        <!-- Outer echo (r=180 in 512px = ~38dp in 108dp) -->
+            android:strokeAlpha="0.74"
+            android:pathData="M54,54 m-38.8,0 a38.8,38.8 0 1,1 77.6,0 a38.8,38.8 0 1,1 -77.6,0" />
+        <!-- Filled center -->
         <path
-            android:fillColor="#00000000"
-            android:strokeColor="#9333EA"
-            android:strokeWidth="1.3"
-            android:strokeAlpha="0.54"
-            android:pathData="M54,54 m-38,0 a38,38 0 1,1 76,0 a38,38 0 1,1 -76,0" />
+            android:fillColor="#8EF2FF"
+            android:fillAlpha="0.95"
+            android:pathData="M54,54 m-4.8,0 a4.8,4.8 0 1,1 9.6,0 a4.8,4.8 0 1,1 -9.6,0" />
     </group>
 </vector>
 '''
@@ -275,35 +330,29 @@ def generate_android_icons():
 
 def create_menu_bar_icon(size):
     """Create a simplified monochrome icon for menu bar (template image)."""
-    # Create transparent background
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    
+
     center = size / 2
-    scale = size / 512.0
-    
-    def scale_val(v):
-        return int(round(v * scale))
-    
-    # Draw simplified ripple design in white/black for template
-    # Use white circles on transparent background (macOS will invert as needed)
+    stroke = max(2, int(round(size * 0.10)))
+    core_radius = max(3, int(round(size * 0.12)))
+    inner_radius = int(round(size * 0.29))
+    outer_radius = int(round(size * 0.44))
+
+    draw.ellipse(
+        [center - core_radius, center - core_radius, center + core_radius, center + core_radius],
+        fill=(255, 255, 255, 255),
+    )
+
     ripple_layers = [
-        (22, 3),   # Core pulse
-        (110, 5),  # Main ripple
-        (180, 3),  # Outer echo
+        (inner_radius, stroke),
+        (outer_radius, stroke),
     ]
-    
+
     for radius, stroke_width in ripple_layers:
-        r = scale_val(radius)
-        sw = max(1, scale_val(stroke_width))
-        
-        # Draw white circle outline (will be rendered as black in menu bar)
-        bbox = [center - r, center - r, center + r, center + r]
-        # Draw multiple circles for stroke width
-        for i in range(sw):
-            bbox_stroke = [center - r - i, center - r - i, center + r + i, center + r + i]
-            draw.ellipse(bbox_stroke, outline=(255, 255, 255, 255), width=1)
-    
+        bbox = [center - radius, center - radius, center + radius, center + radius]
+        draw.ellipse(bbox, outline=(255, 255, 255, 255), width=stroke_width)
+
     return img
 
 def generate_macos_icons():
@@ -445,5 +494,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

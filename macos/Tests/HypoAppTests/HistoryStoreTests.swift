@@ -4,6 +4,88 @@ import Testing
 
 struct HistoryStoreTests {
     @Test
+    @MainActor
+    func testLocalClipboardInsertDoesNotDeliverNotification() async {
+        let store = makeStore(maxEntries: 10)
+        let notificationController = MockNotificationController()
+        let deviceIdentity = TestDeviceIdentity(id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!)
+        let viewModel = ClipboardHistoryViewModel(
+            store: store,
+            defaults: makeDefaults(suiteName: "HistoryStoreTests.LocalNotification.\(UUID().uuidString)"),
+            deviceIdentity: deviceIdentity,
+            notificationController: notificationController
+        )
+
+        let entry = ClipboardEntry(
+            deviceId: deviceIdentity.deviceIdString,
+            originPlatform: .macOS,
+            originDeviceName: "Test Mac",
+            content: .text("Local copy")
+        )
+
+        await viewModel.add(entry)
+
+        #expect(notificationController.deliveredEntries.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func testRemoteEchoOfLocalClipboardDoesNotDeliverNotification() async {
+        let store = makeStore(maxEntries: 10)
+        let notificationController = MockNotificationController()
+        let deviceIdentity = TestDeviceIdentity(id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!)
+        let viewModel = ClipboardHistoryViewModel(
+            store: store,
+            defaults: makeDefaults(suiteName: "HistoryStoreTests.RemoteEcho.\(UUID().uuidString)"),
+            deviceIdentity: deviceIdentity,
+            notificationController: notificationController
+        )
+
+        let localEntry = ClipboardEntry(
+            deviceId: deviceIdentity.deviceIdString,
+            originPlatform: .macOS,
+            originDeviceName: "Test Mac",
+            content: .text("Echo me")
+        )
+        await viewModel.add(localEntry)
+
+        let remoteEcho = ClipboardEntry(
+            deviceId: "android-device",
+            originPlatform: .Android,
+            originDeviceName: "Pixel",
+            content: .text("Echo me")
+        )
+        await viewModel.add(remoteEcho)
+
+        #expect(notificationController.deliveredEntries.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func testRemoteClipboardInsertStillDeliversNotification() async {
+        let store = makeStore(maxEntries: 10)
+        let notificationController = MockNotificationController()
+        let deviceIdentity = TestDeviceIdentity(id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!)
+        let viewModel = ClipboardHistoryViewModel(
+            store: store,
+            defaults: makeDefaults(suiteName: "HistoryStoreTests.RemoteNotification.\(UUID().uuidString)"),
+            deviceIdentity: deviceIdentity,
+            notificationController: notificationController
+        )
+
+        let remoteEntry = ClipboardEntry(
+            deviceId: "android-device",
+            originPlatform: .Android,
+            originDeviceName: "Pixel",
+            content: .text("Remote copy")
+        )
+
+        await viewModel.add(remoteEntry)
+
+        #expect(notificationController.deliveredEntries.map(\.id) == [remoteEntry.id])
+    }
+
+    @Test
     func testInsertDeDuplicatesEntriesByContent() async {
         let store = makeStore(maxEntries: 10)
         let textEntry = ClipboardEntry(
@@ -162,8 +244,27 @@ struct HistoryStoreTests {
 }
 
 private func makeStore(maxEntries: Int) -> HistoryStore {
-    let suiteName = "HistoryStoreTests.\(UUID().uuidString)"
+    let defaults = makeDefaults(suiteName: "HistoryStoreTests.\(UUID().uuidString)")
+    return HistoryStore(maxEntries: maxEntries, defaults: defaults)
+}
+
+private func makeDefaults(suiteName: String) -> UserDefaults {
     let defaults = UserDefaults(suiteName: suiteName) ?? .standard
     defaults.removePersistentDomain(forName: suiteName)
-    return HistoryStore(maxEntries: maxEntries, defaults: defaults)
+    defaults.set(true, forKey: "com.hypo.clipboard.file_storage_migration_v2")
+    return defaults
+}
+
+private struct TestDeviceIdentity: DeviceIdentityProviding {
+    let deviceId: UUID
+    let platform: DevicePlatform = .macOS
+    let deviceName: String = "Test Mac"
+
+    var deviceIdString: String {
+        deviceId.uuidString.lowercased()
+    }
+
+    init(id: UUID) {
+        self.deviceId = id
+    }
 }

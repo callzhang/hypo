@@ -24,4 +24,10 @@ final class AppContext {
     /// Single clipboard monitor instance shared across app lifecycle to avoid double-captures.
     var clipboardMonitor: ClipboardMonitor?
     #endif
+
+    /// Blocks the Show Clipboard hotkey while the settings recorder is capturing a new shortcut.
+    var isRecordingShowClipboardShortcut = false
+
+    /// Current Carbon event id for the active Show Clipboard shortcut registration.
+    var activeShowClipboardHotKeyID: UInt32 = 0
 }

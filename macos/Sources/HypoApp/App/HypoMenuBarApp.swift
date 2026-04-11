@@ -49,13 +49,18 @@ private func checkAccessibilityStatus() -> Bool {
 class HypoAppDelegate: NSObject, NSApplicationDelegate {
     private let logger = HypoLogger(category: "HypoAppDelegate")
     private var hotKeyRef: EventHotKeyRef?
+    private var showClipboardHotKeyRefs: [UInt32: EventHotKeyRef] = [:]
     private var altNumberHotKeys: [Int: EventHotKeyRef] = [:]
     private static var eventHandlerInstalled = false
     private var clipboardMonitor: ClipboardMonitor?
     private var showHistoryObserver: NSObjectProtocol?
+    private let defaults = UserDefaults.standard
+    private var activeShowClipboardHotKeyID: UInt32 = 0
+    private var nextShowClipboardHotKeyID: UInt32 = 100
     
     override init() {
         super.init()
+        globalAppDelegate = self
         // Removed logging to reduce duplicates
     }
     
@@ -262,10 +267,13 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 
                 if err == noErr {
-                    if hotKeyID.id == 1 {
-                        // Alt+V - Show history popup
-                        // Note: Can't use logger here as this is a C callback, use NSLog
-                        NSLog("🎯 [HypoAppDelegate] HOTKEY TRIGGERED: Alt+V pressed")
+                    if hotKeyID.id == AppContext.shared.activeShowClipboardHotKeyID {
+                        if AppContext.shared.isRecordingShowClipboardShortcut {
+                            NSLog("⏸️ [HypoAppDelegate] Ignoring Show Clipboard while shortcut recorder is active")
+                            return noErr
+                        }
+                        // Show history popup
+                        NSLog("🎯 [HypoAppDelegate] HOTKEY TRIGGERED: Show Clipboard pressed")
                         
                         DispatchQueue.main.async {
                             // CRITICAL: Save frontmost app BEFORE activating Hypo
@@ -369,36 +377,10 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         
-        // Register hotkey: Alt+V (keyCode 9 = 'V')
-        var hotKeyID = EventHotKeyID()
-        hotKeyID.signature = OSType(0x4859504F) // "HYPO" signature
-        hotKeyID.id = 1
-        
-        var hotKeyRef: EventHotKeyRef?
-        let keyCode = UInt32(9) // 'V' key
-        let modifiers = UInt32(optionKey) // Alt/Option
-        
-        // logger.debug("🔧 [HypoAppDelegate] Registering hotkey: keyCode=\(keyCode), modifiers=\(modifiers), signature=\(hotKeyID.signature), id=\(hotKeyID.id)")
-        
-        let status = RegisterEventHotKey(
-            keyCode,
-            modifiers,
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRef
-        )
-        
-        if status == noErr, let hotKey = hotKeyRef {
-            self.hotKeyRef = hotKey
-            // logger.debug("✅ [HypoAppDelegate] Carbon hotkey registered: Alt+V (status: \(status), ref: \(hotKey))")
-        } else if self.hotKeyRef == nil {
-            // If registration failed but we don't have a ref, check if it's just because hotkey already exists
-            if status == -9878 { // eventHotKeyExistsErr
-                // Already exists, this is fine, suppress the log
-            } else {
-                // Only log warning for actual errors (not "already exists")
-                logger.warning("⚠️ [HypoAppDelegate] Hotkey registration returned status=\(status). Ref: \(hotKeyRef != nil ? "exists" : "nil")")
+        if let shortcut = loadShowClipboardShortcut() {
+            let status = registerShowClipboardHotKey(shortcut)
+            if status != noErr && status != -9878 {
+                logger.warning("⚠️ [HypoAppDelegate] Show Clipboard hotkey registration returned status=\(status)")
             }
         }
         
@@ -442,6 +424,97 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    private func loadShowClipboardShortcut() -> KeyboardShortcut? {
+        if let rawShortcut = defaults.string(forKey: "show_clipboard_shortcut") {
+            if rawShortcut.isEmpty {
+                return nil
+            }
+            if let shortcut = KeyboardShortcut(defaultsValue: rawShortcut) {
+                return shortcut
+            }
+        }
+        return .defaultShowClipboard
+    }
+
+    @discardableResult
+    private func registerShowClipboardHotKey(_ shortcut: KeyboardShortcut) -> OSStatus {
+        guard !shortcut.isReservedByHypo else { return OSStatus(paramErr) }
+
+        var hotKeyID = EventHotKeyID()
+        hotKeyID.signature = OSType(0x4859504F)
+        hotKeyID.id = nextShowClipboardHotKeyID
+
+        var hotKeyRef: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            shortcut.keyCode,
+            shortcut.carbonModifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKeyRef
+        )
+
+        if status == noErr, let hotKey = hotKeyRef {
+            self.hotKeyRef = hotKey
+            self.showClipboardHotKeyRefs[hotKeyID.id] = hotKey
+            self.activeShowClipboardHotKeyID = hotKeyID.id
+            AppContext.shared.activeShowClipboardHotKeyID = hotKeyID.id
+            nextShowClipboardHotKeyID += 1
+        }
+
+        return status
+    }
+
+    func updateShowClipboardShortcut(_ shortcut: KeyboardShortcut) -> Result<Void, ShortcutRegistrationError> {
+        guard shortcut.carbonModifiers & UInt32(cmdKey | optionKey | controlKey) != 0 else {
+            return .failure(.missingModifier)
+        }
+        guard KeyboardShortcut.supports(keyCode: shortcut.keyCode) else {
+            return .failure(.unsupportedKey)
+        }
+        guard !shortcut.isReservedByHypo else {
+            return .failure(.reservedByHypo)
+        }
+
+        let previousShortcut = loadShowClipboardShortcut()
+        if previousShortcut == shortcut {
+            return .success(())
+        }
+        unregisterAllShowClipboardHotKeys()
+
+        let status = registerShowClipboardHotKey(shortcut)
+        if status == noErr {
+            return .success(())
+        }
+
+        if let previousShortcut {
+            _ = registerShowClipboardHotKey(previousShortcut)
+        }
+        return .failure(.systemConflict)
+    }
+
+    func clearShowClipboardShortcut() {
+        unregisterAllShowClipboardHotKeys()
+        activeShowClipboardHotKeyID = 0
+        AppContext.shared.activeShowClipboardHotKeyID = 0
+    }
+
+    func beginShowClipboardShortcutRecording() {
+        AppContext.shared.isRecordingShowClipboardShortcut = true
+    }
+
+    func endShowClipboardShortcutRecording() {
+        AppContext.shared.isRecordingShowClipboardShortcut = false
+    }
+
+    private func unregisterAllShowClipboardHotKeys() {
+        for (_, ref) in showClipboardHotKeyRefs {
+            UnregisterEventHotKey(ref)
+        }
+        showClipboardHotKeyRefs.removeAll()
+        hotKeyRef = nil
     }
     
     /// Start clipboard monitoring as early as possible so local copies are captured even before the UI appears.
@@ -505,9 +578,7 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
         }
         
         // Clean up hotkeys
-        if let hotKey = hotKeyRef {
-            UnregisterEventHotKey(hotKey)
-        }
+        unregisterAllShowClipboardHotKeys()
         for (_, hotKey) in altNumberHotKeys {
             UnregisterEventHotKey(hotKey)
         }
@@ -533,6 +604,14 @@ class HypoAppDelegate: NSObject, NSApplicationDelegate {
 
 // Global reference to prevent AppDelegate deallocation
 @MainActor private var globalAppDelegate: HypoAppDelegate?
+
+@MainActor
+private func activeHypoAppDelegate() -> HypoAppDelegate? {
+    if let globalAppDelegate {
+        return globalAppDelegate
+    }
+    return NSApplication.shared.delegate as? HypoAppDelegate
+}
 
 /// Directly type text at cursor position (similar to pynput) - more reliable than Cmd+V
 /// This method directly inputs text characters without relying on clipboard
@@ -801,19 +880,11 @@ public struct HypoMenuBarApp: App {
 
     public var body: some Scene {
         MenuBarExtra(content: {
-            MenuBarContentView(viewModel: viewModel, applySwiftUIBackground: false)
+            MenuBarContentView(viewModel: viewModel, settingsOnly: true, applySwiftUIBackground: false)
                 .frame(width: 360, height: 480)
                 .environmentObject(viewModel)
                 .onAppear {
-                    // CRITICAL FALLBACK: If @NSApplicationDelegateAdaptor didn't work, set up delegate manually
-                    if NSApplication.shared.delegate == nil || !(NSApplication.shared.delegate is HypoAppDelegate) {
-                        logger.warning("⚠️ [HypoMenuBarApp] AppDelegate not set, setting up manually")
-                        let delegate = HypoAppDelegate()
-                        globalAppDelegate = delegate
-                        NSApplication.shared.delegate = delegate
-                        // Call applicationDidFinishLaunching manually
-                        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
-                    }
+                    globalAppDelegate = appDelegate
                     
                     // CRITICAL: Ensure setHistoryViewModel is called when view appears
                     if let transportManager = viewModel.transportManager {
@@ -948,56 +1019,31 @@ private enum MenuSection: String, CaseIterable, Identifiable {
 }
 
 extension HypoMenuBarApp {
-    /// Helper to create a template image for menu bar
-    private func makeTemplateImage(_ image: NSImage) -> NSImage {
-        image.isTemplate = true
-        return image
-    }
-
     private func makeMenuBarTemplateImage(pointSize: CGFloat) -> NSImage {
-        let image = NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: false) { rect in
-            let center = NSPoint(x: rect.midX, y: rect.midY)
-            let outerRadius = pointSize * 0.42
-            let innerRadius = pointSize * 0.26
-            let dotRadius = pointSize * 0.07
-            let outerStroke = max(1.4, pointSize * 0.09)
-            let innerStroke = max(1.3, pointSize * 0.085)
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("MenuBarIcon.iconset/icon_16x16@2x.png"),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: pointSize, height: pointSize)
+            image.isTemplate = true
+            return image
+        }
 
-            NSColor.black.setStroke()
+        let fallbackImage = NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: false) { rect in
             NSColor.black.setFill()
-
-            let outerRing = NSBezierPath()
-            outerRing.lineWidth = outerStroke
-            outerRing.appendArc(
-                withCenter: center,
-                radius: outerRadius,
-                startAngle: 0,
-                endAngle: 360
+            let capsule = NSBezierPath(
+                roundedRect: NSRect(
+                    x: rect.minX + pointSize * 0.1,
+                    y: rect.minY + pointSize * 0.24,
+                    width: pointSize * 0.8,
+                    height: pointSize * 0.52
+                ),
+                xRadius: pointSize * 0.26,
+                yRadius: pointSize * 0.26
             )
-            outerRing.stroke()
-
-            let innerRing = NSBezierPath()
-            innerRing.lineWidth = innerStroke
-            innerRing.appendArc(
-                withCenter: center,
-                radius: innerRadius,
-                startAngle: 0,
-                endAngle: 360
-            )
-            innerRing.stroke()
-
-            let dotRect = NSRect(
-                x: center.x - dotRadius,
-                y: center.y - dotRadius,
-                width: dotRadius * 2,
-                height: dotRadius * 2
-            )
-            NSBezierPath(ovalIn: dotRect).fill()
-
+            capsule.fill()
             return true
         }
-        image.isTemplate = true
-        return image
+        fallbackImage.isTemplate = true
+        return fallbackImage
     }
     
     /// Load the menu bar icon from the app bundle
@@ -1020,9 +1066,10 @@ struct MenuBarContentView: View {
     private let logger = HypoLogger(category: "MenuBarContentView")
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     var historyOnly: Bool = false
+    var settingsOnly: Bool = false
     var applySwiftUIBackground: Bool = true
     @State private var windowPinned = HistoryPopupPresenter.shared.pinned
-    @State private var selectedSection: MenuSection = .history
+    @State private var selectedSection: MenuSection = .settings
     @State private var search = ""
     @State private var isVisible = false
     @State private var eventMonitor: Any?
@@ -1052,7 +1099,7 @@ struct MenuBarContentView: View {
                 .padding(.top, 4)
             }
             
-            if !historyOnly {
+            if !historyOnly && !settingsOnly {
                 Picker("Section", selection: $selectedSection) {
                     ForEach(MenuSection.allCases) { section in
                         Label(section.title, systemImage: section.icon).tag(section)
@@ -1063,7 +1110,7 @@ struct MenuBarContentView: View {
                 .accessibilityLabel("Menu sections")
             }
             
-            let section = historyOnly ? MenuSection.history : selectedSection
+            let section = historyOnly ? MenuSection.history : (settingsOnly ? MenuSection.settings : selectedSection)
             switch section {
             case .history:
                 HistorySectionView(
@@ -1089,7 +1136,11 @@ struct MenuBarContentView: View {
         .onAppear {
             isVisible = true
             windowPinned = HistoryPopupPresenter.shared.pinned
-            if historyOnly { selectedSection = .history }
+            if historyOnly {
+                selectedSection = .history
+            } else if settingsOnly {
+                selectedSection = .settings
+            }
             // Initialize color scheme from viewModel
             currentColorScheme = viewModel.appearancePreference.colorScheme
             // Note: Connection status probe runs continuously in the background via ConnectionStatusProber
@@ -2060,6 +2111,9 @@ private struct SettingsSectionView: View {
     @State private var isPresentingPairing = false
     @State private var localHistoryLimit: Double = 200
     @State private var historyLimitUpdateTask: Task<Void, Never>?
+    @State private var isRecordingShortcut = false
+    @State private var shortcutRecorderMonitor: Any?
+    @State private var shortcutErrorMessage: String?
 
     init(viewModel: ClipboardHistoryViewModel, transportManager: TransportManager? = nil, securityManager: SecurityManager? = nil) {
         self.viewModel = viewModel
@@ -2163,20 +2217,37 @@ private struct SettingsSectionView: View {
                             localHistoryLimit = Double(newValue)
                         }
                     }
-                    Toggle("Auto-delete after a delay", isOn: Binding(
-                        get: { viewModel.autoDeleteAfterHours > 0 },
-                        set: { newValue in
-                            let hours = newValue ? max(viewModel.autoDeleteAfterHours, 6) : 0
-                            viewModel.setAutoDelete(hours: hours)
+                    HStack {
+                        Text("Auto-delete")
+                        Spacer()
+                        Button {
+                            let current = viewModel.autoDeleteAfterHours
+                            let next = current <= 1 ? 0 : current - 1
+                            viewModel.setAutoDelete(hours: next)
+                        } label: {
+                            Image(systemName: "minus")
+                                .frame(width: 28, height: 24)
                         }
-                    ))
-                    if viewModel.autoDeleteAfterHours > 0 {
-                        Stepper(value: Binding(
-                            get: { viewModel.autoDeleteAfterHours },
-                            set: { viewModel.setAutoDelete(hours: $0) }
-                        ), in: 1...72, step: 1) {
-                            Text("Delete after \(viewModel.autoDeleteAfterHours) hour(s)")
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(viewModel.autoDeleteAfterHours == 0)
+
+                        Text(viewModel.autoDeleteAfterHours == 0 ? "Disabled" : "\(viewModel.autoDeleteAfterHours)h")
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 72, alignment: .center)
+
+                        Button {
+                            let current = viewModel.autoDeleteAfterHours
+                            let next = current == 0 ? 1 : min(current + 1, 72)
+                            viewModel.setAutoDelete(hours: next)
+                        } label: {
+                            Image(systemName: "plus")
+                                .frame(width: 28, height: 24)
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(viewModel.autoDeleteAfterHours >= 72)
                     }
                 }
 
@@ -2190,6 +2261,41 @@ private struct SettingsSectionView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                }
+
+                Section("Shortcuts") {
+                    HStack {
+                        Text("Show Clipboard")
+                        Spacer()
+                        if isRecordingShortcut {
+                            Button("Press Shortcut") {
+                                stopShortcutRecording()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        } else if let shortcut = viewModel.showClipboardShortcut {
+                            Text(shortcut.displayString)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Button {
+                                clearShortcut()
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear shortcut")
+                        } else {
+                            Button("Record") {
+                                startShortcutRecording()
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+                if let shortcutErrorMessage {
+                    Text(shortcutErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
                 
                 #if canImport(UserNotifications)
@@ -2261,6 +2367,9 @@ private struct SettingsSectionView: View {
             }
             .scrollContentBackground(.hidden)
             .formStyle(.grouped)
+            .onDisappear {
+                stopShortcutRecording()
+            }
         }
         }
     }
@@ -2293,6 +2402,74 @@ private struct SettingsSectionView: View {
         case .light: return "Light"
         case .dark: return "Dark"
         }
+    }
+
+    private func toggleShortcutRecording() {
+        if isRecordingShortcut {
+            stopShortcutRecording()
+        } else {
+            startShortcutRecording()
+        }
+    }
+
+    private func startShortcutRecording() {
+        stopShortcutRecording()
+        shortcutErrorMessage = nil
+        isRecordingShortcut = true
+        activeHypoAppDelegate()?.beginShowClipboardShortcutRecording()
+        shortcutRecorderMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            if event.keyCode == 53 {
+                stopShortcutRecording()
+                return nil
+            }
+            switch KeyboardShortcut.captureResult(from: event) {
+            case .success(let shortcut):
+                applyShortcut(shortcut)
+            case .failure(let error):
+                shortcutErrorMessage = error.localizedDescription
+                stopShortcutRecording()
+            }
+            return nil
+        }
+    }
+
+    private func stopShortcutRecording() {
+        isRecordingShortcut = false
+        activeHypoAppDelegate()?.endShowClipboardShortcutRecording()
+        if let monitor = shortcutRecorderMonitor {
+            NSEvent.removeMonitor(monitor)
+            shortcutRecorderMonitor = nil
+        }
+    }
+
+    private func applyShortcut(_ shortcut: KeyboardShortcut) {
+        if shortcut.isReservedByHypo {
+            shortcutErrorMessage = ShortcutRegistrationError.reservedByHypo.localizedDescription
+            stopShortcutRecording()
+            return
+        }
+
+        guard let delegate = activeHypoAppDelegate() else {
+            shortcutErrorMessage = "Hotkey service is not ready yet."
+            stopShortcutRecording()
+            return
+        }
+
+        switch delegate.updateShowClipboardShortcut(shortcut) {
+        case .success:
+            viewModel.updateShowClipboardShortcut(shortcut)
+            shortcutErrorMessage = nil
+        case .failure(let error):
+            shortcutErrorMessage = error.localizedDescription
+        }
+        stopShortcutRecording()
+    }
+
+    private func clearShortcut() {
+        stopShortcutRecording()
+        activeHypoAppDelegate()?.clearShowClipboardShortcut()
+        viewModel.updateShowClipboardShortcut(nil)
+        shortcutErrorMessage = nil
     }
     
     

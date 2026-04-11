@@ -223,6 +223,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     @Published public var historyLimit: Int = 200
     @Published public var allowsCloudFallback: Bool
     @Published public var appearancePreference: AppearancePreference
+    @Published public private(set) var showClipboardShortcut: KeyboardShortcut?
     @Published public var autoDeleteAfterHours: Int
     @Published public var plainTextModeEnabled: Bool {
         didSet {
@@ -260,6 +261,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         static let autoDeleteHours = "auto_delete_hours"
         static let appearance = "appearance_preference"
         static let plainTextMode = "plain_text_mode_enabled"
+        static let showClipboardShortcut = "show_clipboard_shortcut"
     }
 
     public init(
@@ -281,6 +283,17 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             self.appearancePreference = appearance
         } else {
             self.appearancePreference = .system
+        }
+        if let rawShortcut = defaults.string(forKey: DefaultsKey.showClipboardShortcut) {
+            if rawShortcut.isEmpty {
+                self.showClipboardShortcut = nil
+            } else if let shortcut = KeyboardShortcut(defaultsValue: rawShortcut) {
+                self.showClipboardShortcut = shortcut
+            } else {
+                self.showClipboardShortcut = .defaultShowClipboard
+            }
+        } else {
+            self.showClipboardShortcut = .defaultShowClipboard
         }
 #if canImport(UserNotifications)
         self.notificationController = notificationController
@@ -902,6 +915,16 @@ public final class ClipboardHistoryViewModel: ObservableObject {
     public func updateAppearance(_ appearance: AppearancePreference) {
         appearancePreference = appearance
         defaults.set(appearance.rawValue, forKey: DefaultsKey.appearance)
+    }
+
+    public func updateShowClipboardShortcut(_ shortcut: KeyboardShortcut?) {
+        showClipboardShortcut = shortcut
+        defaults.set(shortcut?.defaultsValue ?? "", forKey: DefaultsKey.showClipboardShortcut)
+        NotificationCenter.default.post(
+            name: .showClipboardShortcutChanged,
+            object: nil,
+            userInfo: ["shortcut": shortcut?.defaultsValue ?? ""]
+        )
     }
 
     

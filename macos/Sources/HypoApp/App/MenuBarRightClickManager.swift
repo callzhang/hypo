@@ -13,6 +13,8 @@ class MenuBarRightClickManager {
     private var eventMonitors: [Any] = []
     private var isSetup = false
     private var rightClickMenu: NSMenu?
+    private weak var showHistoryItem: NSMenuItem?
+    private var shortcutObserver: NSObjectProtocol?
     
     // Prevent external initialization
     nonisolated private init() {}
@@ -28,6 +30,7 @@ class MenuBarRightClickManager {
         // Create the menu
         let menu = createRightClickMenu()
         self.rightClickMenu = menu
+        setupShortcutObserver()
         
         // Setup global/local event monitors immediately
         setupEventMonitors(menu: menu)
@@ -41,6 +44,7 @@ class MenuBarRightClickManager {
     
     private func createRightClickMenu() -> NSMenu {
         let menu = NSMenu()
+        let shortcut = currentShowClipboardShortcut()
         
         // Version (disabled)
         let baseVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
@@ -53,12 +57,13 @@ class MenuBarRightClickManager {
 
         // Show Clipboard (alt+v)
         let showHistoryItem = NSMenuItem(
-            title: "Show Clipboard (alt+v)",
+            title: "Show Clipboard",
             action: #selector(MenuActionTarget.showHistory),
-            keyEquivalent: "v"
+            keyEquivalent: shortcut?.keyEquivalent ?? ""
         )
-        showHistoryItem.keyEquivalentModifierMask = [.option]
+        showHistoryItem.keyEquivalentModifierMask = shortcut?.eventModifierFlags ?? []
         showHistoryItem.target = MenuActionTarget.shared
+        self.showHistoryItem = showHistoryItem
         
         // Configure actions
         MenuActionTarget.shared.showHistoryAction = {
@@ -67,6 +72,8 @@ class MenuBarRightClickManager {
                 // Save frontmost app before showing (right-click menu may have activated Hypo)
                 HistoryPopupPresenter.shared.saveFrontmostAppBeforeActivation()
                 if let viewModel = AppContext.shared.historyViewModel {
+                    menu.cancelTracking()
+                    NSApplication.shared.activate(ignoringOtherApps: true)
                     HistoryPopupPresenter.shared.show(with: viewModel)
                 }
             }
@@ -98,6 +105,41 @@ class MenuBarRightClickManager {
         menu.addItem(quitItem)
         
         return menu
+    }
+
+    private func setupShortcutObserver() {
+        if let observer = shortcutObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        shortcutObserver = NotificationCenter.default.addObserver(
+            forName: .showClipboardShortcutChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let rawShortcut = notification.userInfo?["shortcut"] as? String ?? ""
+            Task { @MainActor [weak self] in
+                let shortcut = rawShortcut.isEmpty ? nil : KeyboardShortcut(defaultsValue: rawShortcut)
+                self?.applyShortcut(shortcut)
+            }
+        }
+    }
+
+    private func currentShowClipboardShortcut() -> KeyboardShortcut? {
+        if let rawShortcut = UserDefaults.standard.string(forKey: "show_clipboard_shortcut") {
+            if rawShortcut.isEmpty {
+                return nil
+            }
+            if let shortcut = KeyboardShortcut(defaultsValue: rawShortcut) {
+                return shortcut
+            }
+        }
+        return .defaultShowClipboard
+    }
+
+    private func applyShortcut(_ shortcut: KeyboardShortcut?) {
+        showHistoryItem?.title = "Show Clipboard"
+        showHistoryItem?.keyEquivalent = shortcut?.keyEquivalent ?? ""
+        showHistoryItem?.keyEquivalentModifierMask = shortcut?.eventModifierFlags ?? []
     }
     
     private func setupEventMonitors(menu: NSMenu) {

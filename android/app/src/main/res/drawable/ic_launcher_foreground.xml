@@ -4,33 +4,26 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Ripple design matching the app icon -->
-    <group>
-        <!-- Core pulse -->
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#C9FBFF"
-            android:strokeWidth="2.5"
-            android:strokeAlpha="0.95"
-            android:pathData="M54,54 m-8.4,0 a8.4,8.4 0 1,1 16.8,0 a8.4,8.4 0 1,1 -16.8,0" />
-        <!-- Mid ripple -->
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#74E7FF"
-            android:strokeWidth="3.4"
-            android:strokeAlpha="0.9"
-            android:pathData="M54,54 m-23.6,0 a23.6,23.6 0 1,1 47.2,0 a23.6,23.6 0 1,1 -47.2,0" />
-        <!-- Outer ripple -->
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#1592D1"
-            android:strokeWidth="2.1"
-            android:strokeAlpha="0.74"
-            android:pathData="M54,54 m-38.8,0 a38.8,38.8 0 1,1 77.6,0 a38.8,38.8 0 1,1 -77.6,0" />
-        <!-- Filled center -->
-        <path
-            android:fillColor="#8EF2FF"
-            android:fillAlpha="0.95"
-            android:pathData="M54,54 m-4.8,0 a4.8,4.8 0 1,1 9.6,0 a4.8,4.8 0 1,1 -9.6,0" />
-    </group>
+    <path
+        android:pathData="M27,27 h54 a15.3,15.3 0 0 1 15.3,15.3 v23.4 a15.3,15.3 0 0 1 -15.3,15.3 h-54 a15.3,15.3 0 0 1 -15.3,-15.3 v-23.4 a15.3,15.3 0 0 1 15.3,-15.3 z">
+        <gradient
+            android:type="linear"
+            android:startX="27"
+            android:startY="27"
+            android:endX="81"
+            android:endY="81"
+            android:startColor="#5EB1FF"
+            android:endColor="#8458FF" />
+    </path>
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.12"
+        android:pathData="M34.1,61.2 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.25"
+        android:pathData="M34.1,54.9 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34.1,48.6 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
 </vector>

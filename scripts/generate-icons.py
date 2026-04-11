@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
 Generate app icons for Android and macOS.
-Creates a polished ripple-based icon with a luminous core and concentric waves.
+Uses macos/scripts/icon.svg as the single source of truth.
 """
 
 import os
+import subprocess
 import sys
-import math
+import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageDraw, ImageFilter
+    from PIL import Image, ImageDraw
 except ImportError:
     print("❌ PIL (Pillow) not found. Install with: pip install Pillow")
     sys.exit(1)
@@ -19,228 +21,153 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 
-BG_START = "#03131D"
-BG_END = "#0A2740"
-BG_GLOW = "#123D63"
-CENTER_GLOW = "#DFFBFF"
-CORE_COLOR = "#8EF2FF"
+SVG_PATH = PROJECT_ROOT / "macos" / "scripts" / "icon.svg"
+RSVG_CONVERT = "rsvg-convert"
 
-RIPPLE_COLORS = [
-    ("#C9FBFF", 0.95),
-    ("#74E7FF", 0.92),
-    ("#33C7F3", 0.84),
-    ("#1592D1", 0.72),
-]
+def svg_number(value):
+    """Parse an SVG numeric attribute."""
+    return float(str(value).replace("px", ""))
 
-def hex_to_rgb(hex_color):
-    """Convert hex color to RGB tuple."""
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
-def create_gradient_background(size, start_color, end_color):
-    """Create a linear gradient background."""
-    img = Image.new("RGB", (size, size))
-    pixels = img.load()
-    
-    start_rgb = hex_to_rgb(start_color)
-    end_rgb = hex_to_rgb(end_color)
-    
-    for y in range(size):
-        for x in range(size):
-            # Diagonal gradient
-            t = (x + y) / (size * 2)
-            r = int(start_rgb[0] * (1 - t) + end_rgb[0] * t)
-            g = int(start_rgb[1] * (1 - t) + end_rgb[1] * t)
-            b = int(start_rgb[2] * (1 - t) + end_rgb[2] * t)
-            pixels[x, y] = (r, g, b)
-    
-    return img
+def parse_icon_svg():
+    """Load the SVG and extract the geometry used across icon outputs."""
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+    root = ET.parse(SVG_PATH).getroot()
+    view_box = [svg_number(part) for part in root.attrib["viewBox"].split()]
 
-def create_radial_glow(size, center_x, center_y, radius, color, max_alpha):
-    """Create a soft radial glow layer."""
-    glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(glow)
-    rgb = hex_to_rgb(color)
+    rects = root.findall(".//svg:g/svg:rect", ns)
+    ellipses = root.findall(".//svg:g/svg:ellipse", ns)
+    group = root.find(".//svg:g", ns)
+    filter_ref = group.attrib.get("filter", "").removeprefix("url(#").removesuffix(")")
+    filter_node = root.find(f".//svg:filter[@id='{filter_ref}']", ns) if filter_ref else None
 
-    steps = 10
-    for step in range(steps, 0, -1):
-        t = step / steps
-        current_radius = radius * t
-        alpha = int(max_alpha * (t ** 2))
-        bbox = [
-            center_x - current_radius,
-            center_y - current_radius,
-            center_x + current_radius,
-            center_y + current_radius,
-        ]
-        draw.ellipse(bbox, fill=(*rgb, alpha))
+    blur = 0.0
+    offset_x = 0.0
+    offset_y = 0.0
+    if filter_node is not None:
+        blur_node = filter_node.find(".//svg:feGaussianBlur", ns)
+        offset_node = filter_node.find(".//svg:feOffset", ns)
+        if blur_node is not None:
+            blur = svg_number(blur_node.attrib.get("stdDeviation", "0"))
+        if offset_node is not None:
+            offset_x = svg_number(offset_node.attrib.get("dx", "0"))
+            offset_y = svg_number(offset_node.attrib.get("dy", "0"))
 
-    return glow
+    bounds = []
+    for rect in rects:
+        x = svg_number(rect.attrib["x"])
+        y = svg_number(rect.attrib["y"])
+        width = svg_number(rect.attrib["width"])
+        height = svg_number(rect.attrib["height"])
+        bounds.append((x, y, x + width, y + height))
+    for ellipse in ellipses:
+        cx = svg_number(ellipse.attrib["cx"])
+        cy = svg_number(ellipse.attrib["cy"])
+        rx = svg_number(ellipse.attrib["rx"])
+        ry = svg_number(ellipse.attrib["ry"])
+        bounds.append((cx - rx, cy - ry, cx + rx, cy + ry))
 
-def draw_rounded_rectangle(draw, bbox, radius, fill=None):
-    """Draw a rounded rectangle."""
-    x1, y1, x2, y2 = bbox
-    if fill:
-        # Main rectangle
-        draw.rectangle([x1 + radius, y1, x2 - radius, y2], fill=fill)
-        draw.rectangle([x1, y1 + radius, x2, y2 - radius], fill=fill)
-        # Corners (circles)
-        draw.ellipse([x1, y1, x1 + radius*2, y1 + radius*2], fill=fill)
-        draw.ellipse([x2 - radius*2, y1, x2, y1 + radius*2], fill=fill)
-        draw.ellipse([x1, y2 - radius*2, x1 + radius*2, y2], fill=fill)
-        draw.ellipse([x2 - radius*2, y2 - radius*2, x2, y2], fill=fill)
+    min_x = min(bound[0] for bound in bounds) - blur * 3 + min(0.0, offset_x)
+    min_y = min(bound[1] for bound in bounds) - blur * 3 + min(0.0, offset_y)
+    max_x = max(bound[2] for bound in bounds) + blur * 3 + max(0.0, offset_x)
+    max_y = max(bound[3] for bound in bounds) + blur * 3 + max(0.0, offset_y)
 
-def get_gradient_color_at_distance(distance, max_distance, colors):
-    """Get color from radial gradient at given distance."""
-    t = min(distance / max_distance, 1.0) if max_distance > 0 else 0
-    
-    # Map t to color stops (0%, 40%, 70%, 100%)
-    stops = [0.0, 0.4, 0.7, 1.0]
-    
-    # Find which segment we're in
-    if t <= stops[0]:
-        return colors[0]
-    elif t >= stops[-1]:
-        return colors[-1]
-    else:
-        for i in range(len(stops) - 1):
-            if stops[i] <= t <= stops[i + 1]:
-                local_t = (t - stops[i]) / (stops[i + 1] - stops[i])
-                c1_hex, o1 = colors[i]
-                c2_hex, o2 = colors[i + 1]
-                c1 = hex_to_rgb(c1_hex)
-                c2 = hex_to_rgb(c2_hex)
-                
-                r = int(c1[0] * (1 - local_t) + c2[0] * local_t)
-                g = int(c1[1] * (1 - local_t) + c2[1] * local_t)
-                b = int(c1[2] * (1 - local_t) + c2[2] * local_t)
-                opacity = o1 * (1 - local_t) + o2 * local_t
-                return ((r, g, b), opacity)
-    
-    return colors[-1]
+    width = max_x - min_x
+    height = max_y - min_y
+    side = max(width, height)
+    center_x = (min_x + max_x) / 2
+    center_y = (min_y + max_y) / 2
 
-def create_icon_image(size):
-    """Create the main app icon image."""
-    img = create_gradient_background(size, BG_START, BG_END)
+    crop_x = center_x - side / 2
+    crop_y = center_y - side / 2
 
-    scale = size / 512.0
-    center = size / 2
-
-    def scale_val(v):
-        return int(v * scale)
-
-    squircle_radius = scale_val(120)
-
-    squircle_mask = Image.new("L", (size, size), 0)
-    squircle_draw = ImageDraw.Draw(squircle_mask)
-    squircle_draw.rounded_rectangle([0, 0, size, size], radius=squircle_radius, fill=255)
-
-    img = Image.composite(img, Image.new("RGB", (size, size), (0, 0, 0)), squircle_mask)
-    img = img.convert("RGBA")
-
-    glow_center_x = center - scale_val(22)
-    glow_center_y = center - scale_val(26)
-    background_glow = create_radial_glow(
-        size=size,
-        center_x=glow_center_x,
-        center_y=glow_center_y,
-        radius=scale_val(290),
-        color=BG_GLOW,
-        max_alpha=120,
-    )
-    img = Image.alpha_composite(img, background_glow)
-
-    ripple_layers = [
-        (40, 12, 1.0),
-        (112, 16, 0.95),
-        (184, 10, 0.82),
-    ]
-
-    ripple_composite = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    max_radius = scale_val(184) + scale_val(16)
-
-    for radius, stroke_width, opacity in ripple_layers:
-        r = scale_val(radius)
-        sw = max(1, scale_val(stroke_width))
-
-        color_rgb, color_opacity = get_gradient_color_at_distance(r, max_radius, RIPPLE_COLORS)
-        final_opacity = color_opacity * opacity
-
-        ripple_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        layer_draw = ImageDraw.Draw(ripple_layer)
-
-        bbox_outer = [center - r - sw//2, center - r - sw//2,
-                      center + r + sw//2, center + r + sw//2]
-        layer_draw.ellipse(bbox_outer, fill=color_rgb)
-
-        bbox_inner = [center - r + sw//2, center - r + sw//2,
-                      center + r - sw//2, center + r - sw//2]
-        erase_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        erase_draw = ImageDraw.Draw(erase_layer)
-        erase_draw.ellipse(bbox_inner, fill=(0, 0, 0, 255))
-        ripple_layer = Image.composite(
-            Image.new("RGBA", (size, size), (0, 0, 0, 0)),
-            ripple_layer,
-            erase_layer.split()[3]
-        )
-
-        if final_opacity < 1.0:
-            alpha = ripple_layer.split()[3]
-            alpha = alpha.point(lambda p: int(p * final_opacity))
-            ripple_layer.putalpha(alpha)
-
-        ripple_composite = Image.alpha_composite(ripple_composite, ripple_layer)
-
-    ripple_glow = ripple_composite.filter(ImageFilter.GaussianBlur(radius=max(1, scale_val(16))))
-    img = Image.alpha_composite(img, ripple_glow)
-    img = Image.alpha_composite(img, ripple_composite)
-
-    core_glow = create_radial_glow(
-        size=size,
-        center_x=center,
-        center_y=center,
-        radius=scale_val(92),
-        color=CENTER_GLOW,
-        max_alpha=140,
-    )
-    img = Image.alpha_composite(img, core_glow)
-
-    core_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    core_draw = ImageDraw.Draw(core_layer)
-    core_radius = scale_val(24)
-    core_draw.ellipse(
-        [center - core_radius, center - core_radius, center + core_radius, center + core_radius],
-        fill=hex_to_rgb(CORE_COLOR),
-    )
-    highlight_radius = scale_val(10)
-    highlight_offset = scale_val(8)
-    core_draw.ellipse(
-        [
-            center - highlight_offset - highlight_radius,
-            center - highlight_offset - highlight_radius,
-            center - highlight_offset + highlight_radius,
-            center - highlight_offset + highlight_radius,
+    return {
+        "view_box": view_box,
+        "crop_box": (crop_x, crop_y, crop_x + side, crop_y + side),
+        "ellipses": [
+            {
+                "cx": svg_number(ellipse.attrib["cx"]),
+                "cy": svg_number(ellipse.attrib["cy"]),
+                "rx": svg_number(ellipse.attrib["rx"]),
+                "ry": svg_number(ellipse.attrib["ry"]),
+                "opacity": float(ellipse.attrib.get("opacity", "1")),
+            }
+            for ellipse in ellipses
         ],
-        fill=(*hex_to_rgb("#FFFFFF"), 190),
-    )
-    img = Image.alpha_composite(img, core_layer)
+    }
 
-    vignette = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    vignette_draw = ImageDraw.Draw(vignette)
-    for step in range(4):
-        inset = scale_val(step * 9)
-        alpha = int(18 + step * 10)
-        vignette_draw.rounded_rectangle(
-            [inset, inset, size - inset, size - inset],
-            radius=max(1, squircle_radius - inset),
-            outline=(0, 0, 0, alpha),
-            width=max(1, scale_val(2)),
+
+def render_svg_square(size, svg_data):
+    """Render the SVG, then crop it to the icon square derived from the SVG geometry."""
+    render_size = max(size * 3, 2048)
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+        temp_path = Path(temp_file.name)
+
+    try:
+        subprocess.run(
+            [
+                RSVG_CONVERT,
+                str(SVG_PATH),
+                "-w",
+                str(render_size),
+                "-h",
+                str(int(render_size * svg_data["view_box"][3] / svg_data["view_box"][2])),
+                "-o",
+                str(temp_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
         )
-    img = Image.alpha_composite(img, vignette)
+        image = Image.open(temp_path).convert("RGBA")
+        view_width = svg_data["view_box"][2]
+        scale = image.width / view_width
+        crop_box = tuple(int(round(value * scale)) for value in svg_data["crop_box"])
+        square = image.crop(crop_box).resize((size, size), Image.LANCZOS)
+        return square.convert("RGB")
+    finally:
+        temp_path.unlink(missing_ok=True)
 
-    return img.convert("RGB")
 
-def generate_android_icons():
+def create_icon_image(size, svg_data):
+    """Create the main app icon by rasterizing macos/scripts/icon.svg."""
+    return render_svg_square(size, svg_data)
+
+def build_android_foreground_xml():
+    """Adaptive icon foreground matching the stacked-card SVG motif."""
+    return '''<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M27,27 h54 a15.3,15.3 0 0 1 15.3,15.3 v23.4 a15.3,15.3 0 0 1 -15.3,15.3 h-54 a15.3,15.3 0 0 1 -15.3,-15.3 v-23.4 a15.3,15.3 0 0 1 15.3,-15.3 z">
+        <gradient
+            android:type="linear"
+            android:startX="27"
+            android:startY="27"
+            android:endX="81"
+            android:endY="81"
+            android:startColor="#5EB1FF"
+            android:endColor="#8458FF" />
+    </path>
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.12"
+        android:pathData="M34.1,61.2 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.25"
+        android:pathData="M34.1,54.9 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34.1,48.6 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+</vector>
+'''
+
+
+def generate_android_icons(svg_data):
     """Generate Android mipmap icons and adaptive icon drawables."""
     print("📱 Generating Android icons...")
     
@@ -259,7 +186,7 @@ def generate_android_icons():
         density_dir = android_res / density
         density_dir.mkdir(parents=True, exist_ok=True)
         
-        icon = create_icon_image(size)
+        icon = create_icon_image(size, svg_data)
         icon.save(density_dir / "ic_launcher.png", "PNG")
         icon.save(density_dir / "ic_launcher_round.png", "PNG")
         
@@ -270,92 +197,73 @@ def generate_android_icons():
     drawable_dir = android_res / "drawable"
     drawable_dir.mkdir(parents=True, exist_ok=True)
     
-    # Background: dark gradient matching SVG
+    # Background and foreground are a simplified vector reduction of the same SVG.
     background_xml = '''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Deep ocean background -->
     <path
-        android:fillColor="#03131D"
+        android:fillColor="#E6EEFF"
         android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
 </vector>
 '''
     (drawable_dir / "ic_launcher_background.xml").write_text(background_xml)
-    
-    # Foreground: ripple design matching SVG
-    foreground_xml = '''<?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- Ripple design matching the app icon -->
-    <group>
-        <!-- Core pulse -->
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#C9FBFF"
-            android:strokeWidth="2.5"
-            android:strokeAlpha="0.95"
-            android:pathData="M54,54 m-8.4,0 a8.4,8.4 0 1,1 16.8,0 a8.4,8.4 0 1,1 -16.8,0" />
-        <!-- Mid ripple -->
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#74E7FF"
-            android:strokeWidth="3.4"
-            android:strokeAlpha="0.9"
-            android:pathData="M54,54 m-23.6,0 a23.6,23.6 0 1,1 47.2,0 a23.6,23.6 0 1,1 -47.2,0" />
-        <!-- Outer ripple -->
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#1592D1"
-            android:strokeWidth="2.1"
-            android:strokeAlpha="0.74"
-            android:pathData="M54,54 m-38.8,0 a38.8,38.8 0 1,1 77.6,0 a38.8,38.8 0 1,1 -77.6,0" />
-        <!-- Filled center -->
-        <path
-            android:fillColor="#8EF2FF"
-            android:fillAlpha="0.95"
-            android:pathData="M54,54 m-4.8,0 a4.8,4.8 0 1,1 9.6,0 a4.8,4.8 0 1,1 -9.6,0" />
-    </group>
-</vector>
-'''
+    foreground_xml = build_android_foreground_xml()
     (drawable_dir / "ic_launcher_foreground.xml").write_text(foreground_xml)
     print("  ✓ Adaptive icon drawables generated")
     
     print("✅ Android icons generated")
 
-def create_menu_bar_icon(size):
-    """Create a simplified monochrome icon for menu bar (template image)."""
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+def create_menu_bar_icon(size, svg_data):
+    """Create a monochrome outline icon derived from the SVG ellipses."""
+    master_size = 512
+    img = Image.new("RGBA", (master_size, master_size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    center = size / 2
-    stroke = max(2, int(round(size * 0.10)))
-    core_radius = max(3, int(round(size * 0.12)))
-    inner_radius = int(round(size * 0.29))
-    outer_radius = int(round(size * 0.44))
+    ellipses = svg_data["ellipses"]
+    stack_min_x = min(ellipse["cx"] - ellipse["rx"] for ellipse in ellipses)
+    stack_max_x = max(ellipse["cx"] + ellipse["rx"] for ellipse in ellipses)
+    stack_min_y = min(ellipse["cy"] - ellipse["ry"] for ellipse in ellipses)
+    stack_max_y = max(ellipse["cy"] + ellipse["ry"] for ellipse in ellipses)
 
-    draw.ellipse(
-        [center - core_radius, center - core_radius, center + core_radius, center + core_radius],
-        fill=(255, 255, 255, 255),
-    )
+    stack_width = stack_max_x - stack_min_x
+    stack_height = stack_max_y - stack_min_y
+    content_width = master_size * 0.86
+    content_height = master_size * 0.70
+    scale = min(content_width / stack_width, content_height / stack_height)
+    x_offset = (master_size - stack_width * scale) / 2
+    y_offset = (master_size - stack_height * scale) / 2
 
-    ripple_layers = [
-        (inner_radius, stroke),
-        (outer_radius, stroke),
+    stroke_alphas = [72, 136, 255]
+    stroke_widths = [
+        max(1, int(round(master_size * 0.045))),
+        max(1, int(round(master_size * 0.048))),
+        max(1, int(round(master_size * 0.052))),
     ]
+    vertical_offsets = [master_size * 0.07, 0.0, -master_size * 0.07]
 
-    for radius, stroke_width in ripple_layers:
-        bbox = [center - radius, center - radius, center + radius, center + radius]
-        draw.ellipse(bbox, outline=(255, 255, 255, 255), width=stroke_width)
+    for index, ellipse in enumerate(ellipses):
+        left = x_offset + (ellipse["cx"] - ellipse["rx"] - stack_min_x) * scale
+        top = y_offset + (ellipse["cy"] - ellipse["ry"] - stack_min_y) * scale + vertical_offsets[index]
+        right = x_offset + (ellipse["cx"] + ellipse["rx"] - stack_min_x) * scale
+        bottom = y_offset + (ellipse["cy"] + ellipse["ry"] - stack_min_y) * scale + vertical_offsets[index]
+        bbox = [
+            left,
+            top,
+            right,
+            bottom,
+        ]
+        draw.ellipse(
+            bbox,
+            outline=(255, 255, 255, stroke_alphas[index]),
+            width=stroke_widths[index],
+        )
 
-    return img
+    return img.resize((size, size), Image.Resampling.LANCZOS)
 
-def generate_macos_icons():
+def generate_macos_icons(svg_data):
     """Generate macOS iconset."""
     print("🍎 Generating macOS icons...")
     
@@ -382,7 +290,7 @@ def generate_macos_icons():
     ]
     
     for size, filename in icon_sizes:
-        icon = create_icon_image(size)
+        icon = create_icon_image(size, svg_data)
         icon.save(iconset_dir / filename, "PNG")
         print(f"  ✓ {filename}: {size}x{size}")
     
@@ -394,7 +302,7 @@ def generate_macos_icons():
     ]
     
     for size, filename in menu_bar_sizes:
-        menu_icon = create_menu_bar_icon(size)
+        menu_icon = create_menu_bar_icon(size, svg_data)
         menu_icon.save(menu_bar_dir / filename, "PNG")
         print(f"  ✓ MenuBar {filename}: {size}x{size}")
     
@@ -484,9 +392,10 @@ def main():
     print("🎨 Generating Hypo app icons...\n")
     
     try:
-        generate_android_icons()
+        svg_data = parse_icon_svg()
+        generate_android_icons(svg_data)
         print()
-        generate_macos_icons()
+        generate_macos_icons(svg_data)
         print("\n✅ All icons generated successfully!")
     except Exception as e:
         print(f"\n❌ Error: {e}")

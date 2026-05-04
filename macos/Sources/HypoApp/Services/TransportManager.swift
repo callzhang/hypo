@@ -66,9 +66,6 @@ public final class TransportManager: ObservableObject {
     // Messaging and transport state
     private var lastSuccessfulTransportMap: [String: TransportChannel] = [:]
     
-    // Track when devices went offline to only notify after long disconnections
-    private var deviceOfflineTimes: [String: Date] = [:]
-    
     public func pairingParameters() -> (service: String, port: Int, relayHint: URL?) {
         let config = currentLanConfiguration()
         let domain = config.domain
@@ -266,22 +263,13 @@ public final class TransportManager: ObservableObject {
             }
             pairedDevices[index].isOnline = isOnline
             
-            let now = Date()
-            if !isOnline {
-                // Record when the device went offline
-                deviceOfflineTimes[deviceId] = now
-            } else {
-                // Device came online. Only notify if it was offline for > 1 hour (3600 seconds)
-                if let offlineTime = deviceOfflineTimes[deviceId], now.timeIntervalSince(offlineTime) > 3600 {
-                    let deviceName = pairedDevices[index].name
-                    notificationController.deliverStatusNotification(
-                        deviceId: pairedDevices[index].id,
-                        title: "Device Connected",
-                        body: "\(deviceName) is now Online"
-                    )
-                }
-                // Clear the offline time since it's now online
-                deviceOfflineTimes.removeValue(forKey: deviceId)
+            if isOnline {
+                let deviceName = pairedDevices[index].name
+                notificationController.deliverStatusNotification(
+                    deviceId: pairedDevices[index].id,
+                    title: "Device Connected",
+                    body: "\(deviceName) is now Online"
+                )
             }
             
             // Explicitly notify change to ensure SwiftUI picks it up across potential actor boundaries
@@ -449,18 +437,12 @@ public final class TransportManager: ObservableObject {
     }
 
     public func setHistoryViewModel(_ viewModel: ClipboardHistoryViewModel) {
-        // Prevent duplicate initialization
-        guard self.historyViewModel == nil || connectionStatusProber == nil else {
-            logger.info("🔧 [TransportManager] setHistoryViewModel already called, skipping")
-            return
-        }
-        
         logger.info("🔧 [TransportManager] setHistoryViewModel called")
         
         self.historyViewModel = viewModel
         // Set up callback for incoming clipboard handler
-        incomingHandler?.setOnEntryAdded { [weak self] entry in
-            await self?.historyViewModel?.add(entry)
+        incomingHandler?.setOnEntryAdded { [weak self] entry, duplicate in
+            await self?.historyViewModel?.handleIncomingRemoteEntry(entry, duplicate: duplicate)
         }
         
         // Initialize connection status prober now that we have the ViewModel

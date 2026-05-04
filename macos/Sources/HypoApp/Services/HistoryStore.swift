@@ -373,7 +373,7 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         // Insert entry into store (for local entries from ClipboardMonitor)
         // Remote entries are already inserted by IncomingClipboardHandler, but local entries need to be inserted here
         // We get back the updated list and potentially a duplicate entry if one existed
-        let (insertedEntries, duplicate) = await store.insert(entry)
+        let (insertedEntries, _) = await store.insert(entry)
         logger.debug("💾 [ClipboardHistoryViewModel] Inserted entry into store: \(insertedEntries.count) total entries")
         
         // Reload all entries from store to get the latest state including any sorting/trimming that happened
@@ -387,14 +387,24 @@ public final class ClipboardHistoryViewModel: ObservableObject {
         
         logger.debug("✅ [ClipboardHistoryViewModel] items array updated: \(updated.count) entries")
         
-        let localId = deviceIdentity.deviceId.uuidString.lowercased()
-        let isRemote = entry.deviceId.lowercased() != localId
-        var shouldNotify = isRemote
+        // ✅ Auto-sync to paired devices
+        await syncToPairedDevices(entry)
+    }
 
-        if isRemote, let duplicate = duplicate, duplicate.deviceId.lowercased() == localId {
-            // If we already have this content and it originated locally, the remote item is
-            // just the sync echo of a pasteboard change the user already made on this Mac.
-            logger.debug("📢 [ClipboardHistoryViewModel] Duplicate of local item detected (echo), suppressing notification")
+    public func handleIncomingRemoteEntry(_ entry: ClipboardEntry, duplicate: ClipboardEntry?) async {
+        let updated = await store.all()
+        logger.debug("🔄 [ClipboardHistoryViewModel] Applying remote store snapshot: \(updated.count) entries")
+
+        await MainActor.run {
+            self.items = updated
+            self.latestItem = updated.first
+        }
+
+        let localId = deviceIdentity.deviceId.uuidString.lowercased()
+        var shouldNotify = entry.deviceId.lowercased() != localId
+
+        if shouldNotify, let duplicate, duplicate.deviceId.lowercased() == localId {
+            logger.debug("📢 [ClipboardHistoryViewModel] Remote echo of local item detected, suppressing notification")
             shouldNotify = false
         }
 
@@ -404,11 +414,8 @@ public final class ClipboardHistoryViewModel: ObservableObject {
             notificationController?.deliverNotification(for: entry)
 #endif
         } else {
-            logger.debug("📢 [ClipboardHistoryViewModel] Local clipboard item or echo, skipping notification")
+            logger.debug("📢 [ClipboardHistoryViewModel] Remote item does not require notification")
         }
-        
-        // ✅ Auto-sync to paired devices
-        await syncToPairedDevices(entry)
     }
     
     private func syncToPairedDevices(_ entry: ClipboardEntry) async {

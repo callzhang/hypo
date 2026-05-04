@@ -24,6 +24,17 @@ echo ""
 
 # Get project root (script is in scripts/ directory)
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SOURCE_ANDROID_DIR="$PROJECT_ROOT/android"
+ANDROID_DIR="$SOURCE_ANDROID_DIR"
+TEMP_ANDROID_DIR=""
+
+cleanup_temp_android_dir() {
+    if [ -n "$TEMP_ANDROID_DIR" ] && [ -d "$TEMP_ANDROID_DIR" ]; then
+        rm -rf "$TEMP_ANDROID_DIR"
+    fi
+}
+trap cleanup_temp_android_dir EXIT
+
 cd "$PROJECT_ROOT"
 
 # Check for Java 17
@@ -82,9 +93,10 @@ if [ -z "$ANDROID_SDK_ROOT" ]; then
     fi
 fi
 
-# Gradle User Home (optional, for reproducible builds)
-if [ -z "$GRADLE_USER_HOME" ]; then
-    export GRADLE_USER_HOME="$PROJECT_ROOT/android/.gradle"
+# Gradle User Home. Keep this outside the repo so cache writes do not hit the
+# file-provider-backed project directory.
+if [ -z "$GRADLE_USER_HOME" ] || [[ "$GRADLE_USER_HOME" == "$PROJECT_ROOT"* ]]; then
+    export GRADLE_USER_HOME="${TMPDIR:-/tmp}/hypo-gradle-home"
 fi
 
 echo "   JAVA_HOME: $JAVA_HOME"
@@ -123,7 +135,24 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
 fi
 
 echo -e "${YELLOW}Building Android APK...${NC}"
-cd "$PROJECT_ROOT/android"
+echo -e "${YELLOW}Preparing isolated Android build workspace...${NC}"
+TEMP_ANDROID_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hypo-android-build.XXXXXX")"
+cp "$PROJECT_ROOT/VERSION" "$(dirname "$TEMP_ANDROID_DIR")/VERSION"
+cp "$PROJECT_ROOT/.env" "$(dirname "$TEMP_ANDROID_DIR")/.env" 2>/dev/null || true
+cp "$SOURCE_ANDROID_DIR/settings.gradle.kts" "$TEMP_ANDROID_DIR/"
+cp "$SOURCE_ANDROID_DIR/build.gradle.kts" "$TEMP_ANDROID_DIR/"
+cp "$SOURCE_ANDROID_DIR/gradle.properties" "$TEMP_ANDROID_DIR/"
+cp "$SOURCE_ANDROID_DIR/local.properties" "$TEMP_ANDROID_DIR/" 2>/dev/null || true
+cp "$SOURCE_ANDROID_DIR/gradlew" "$TEMP_ANDROID_DIR/"
+mkdir -p "$TEMP_ANDROID_DIR/gradle/wrapper"
+cp "$SOURCE_ANDROID_DIR/gradle/wrapper/gradle-wrapper.jar" "$TEMP_ANDROID_DIR/gradle/wrapper/"
+cp "$SOURCE_ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties" "$TEMP_ANDROID_DIR/gradle/wrapper/"
+mkdir -p "$TEMP_ANDROID_DIR/app"
+cp "$SOURCE_ANDROID_DIR/app/build.gradle.kts" "$TEMP_ANDROID_DIR/app/"
+cp "$SOURCE_ANDROID_DIR/app/proguard-rules.pro" "$TEMP_ANDROID_DIR/app/" 2>/dev/null || true
+cp -R "$SOURCE_ANDROID_DIR/app/src" "$TEMP_ANDROID_DIR/app/src"
+ANDROID_DIR="$TEMP_ANDROID_DIR"
+cd "$ANDROID_DIR"
 
 # Parse arguments
 BUILD_TYPE="debug"  # default: build debug only
@@ -154,7 +183,7 @@ done
 # Clean build if requested
 if [ "$CLEAN_BUILD" = true ]; then
     echo "   Running clean build..."
-    ./gradlew clean
+    ./gradlew --no-daemon clean
 fi
 
 # Build function
@@ -174,29 +203,44 @@ build_apk() {
     echo ""
     echo -e "${YELLOW}Building $variant APK...${NC}"
     set +e  # Temporarily disable exit on error to handle return codes
-    ./gradlew "$task" --stacktrace 2>&1 | tee "$build_log"
+    ./gradlew --no-daemon "$task" --stacktrace 2>&1 | tee "$build_log"
     local build_result=${PIPESTATUS[0]}
     set -e  # Re-enable exit on error
     
     # Check for duplicate class errors (Hilt annotation processor issue)
     if [ $build_result -ne 0 ] && grep -q "is defined multiple times\|duplicate class" "$build_log"; then
         echo -e "${YELLOW}⚠️  Duplicate class error detected, cleaning build...${NC}"
-        ./gradlew clean 2>&1 | tee -a "$build_log"
+        ./gradlew --no-daemon clean 2>&1 | tee -a "$build_log"
         echo -e "${YELLOW}Rebuilding after clean...${NC}"
         set +e
-        ./gradlew "$task" --stacktrace 2>&1 | tee -a "$build_log"
+        ./gradlew --no-daemon "$task" --stacktrace 2>&1 | tee -a "$build_log"
         build_result=${PIPESTATUS[0]}
         set -e
     fi
 
     # Gradle distribution cache corruption (missing GradleMain)
-    if [ $build_result -ne 0 ] && grep -q "ClassNotFoundException: org.gradle.launcher.GradleMain" "$build_log"; then
+    if [ $build_result -ne 0 ] && grep -q "ClassNotFoundException: org.gradle.launcher.GradleMain\\|NoSuchFileException: .*gradle-.*\\.jar" "$build_log"; then
         echo -e "${YELLOW}⚠️  Gradle distribution appears corrupted, clearing wrapper cache...${NC}"
         ./gradlew --stop >/dev/null 2>&1 || true
         rm -rf "$GRADLE_USER_HOME/wrapper/dists/gradle-"*
+        rm -rf "$GRADLE_USER_HOME/caches"
+        rm -rf "$ANDROID_DIR/.gradle"
         echo -e "${YELLOW}Rebuilding after cache clear...${NC}"
         set +e
-        ./gradlew "$task" --stacktrace 2>&1 | tee -a "$build_log"
+        ./gradlew --no-daemon "$task" --stacktrace 2>&1 | tee -a "$build_log"
+        build_result=${PIPESTATUS[0]}
+        set -e
+    fi
+
+    # Repo-local Gradle cache corruption (for example fileHashes.bin EOF)
+    if [ $build_result -ne 0 ] && grep -q "Could not open cache .*\\.bin\\|java.io.EOFException" "$build_log"; then
+        echo -e "${YELLOW}⚠️  Gradle cache appears corrupted, clearing local Gradle cache...${NC}"
+        ./gradlew --stop >/dev/null 2>&1 || true
+        rm -rf "$GRADLE_USER_HOME/caches"
+        rm -rf "$ANDROID_DIR/.gradle"
+        echo -e "${YELLOW}Rebuilding after local cache clear...${NC}"
+        set +e
+        ./gradlew --no-daemon "$task" --stacktrace 2>&1 | tee -a "$build_log"
         build_result=${PIPESTATUS[0]}
         set -e
     fi
@@ -211,8 +255,15 @@ build_apk() {
     PACKAGE_NAME="com.hypo.clipboard"
     
     if [ $build_result -eq 0 ] && [ -f "$APK_PATH" ]; then
-        APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
-        APK_SHA=$(shasum -a 256 "$APK_PATH" | cut -d' ' -f1)
+        OUTPUT_APK_PATH="$SOURCE_ANDROID_DIR/$APK_PATH"
+        mkdir -p "$(dirname "$OUTPUT_APK_PATH")"
+        rm -f "$OUTPUT_APK_PATH"
+        if ! cp -X "$APK_PATH" "$OUTPUT_APK_PATH"; then
+            echo -e "${YELLOW}⚠️  Standard APK copy failed, retrying without extended attributes...${NC}"
+            ditto --noextattr --norsrc "$APK_PATH" "$OUTPUT_APK_PATH"
+        fi
+        APK_SIZE=$(du -h "$OUTPUT_APK_PATH" | cut -f1)
+        APK_SHA=$(shasum -a 256 "$OUTPUT_APK_PATH" | cut -d' ' -f1)
         
         echo ""
         echo -e "${GREEN}✅ $variant build successful!${NC}"

@@ -9,6 +9,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MACOS_DIR="$PROJECT_ROOT/macos"
 BINARY_NAME="HypoMenuBar"
+BUILD_PACKAGE_DIR="$MACOS_DIR"
+TEMP_BUILD_DIR=""
+
+cleanup_temp_build_dir() {
+    if [ -n "$TEMP_BUILD_DIR" ] && [ -d "$TEMP_BUILD_DIR" ]; then
+        rm -rf "$TEMP_BUILD_DIR"
+    fi
+}
+trap cleanup_temp_build_dir EXIT
 
 # Read version from centralized VERSION file
 VERSION_FILE="$PROJECT_ROOT/VERSION"
@@ -180,20 +189,34 @@ if [ -d ".build/checkouts" ]; then
     fi
 fi
 
+# Build in an isolated temporary SwiftPM workspace. This keeps SwiftPM away from
+# repository Git metadata and file-provider state, both of which can block builds.
+log_info "Preparing isolated SwiftPM workspace..."
+TEMP_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hypo-macos-build.XXXXXX")"
+mkdir -p "$TEMP_BUILD_DIR"
+cp "$MACOS_DIR/Package.swift" "$TEMP_BUILD_DIR/Package.swift"
+perl -0pi -e 's/,\n\s*\.testTarget\(\n.*?\n\s*\)//s' "$TEMP_BUILD_DIR/Package.swift"
+if [ -f "$MACOS_DIR/Package.resolved" ]; then
+    cp "$MACOS_DIR/Package.resolved" "$TEMP_BUILD_DIR/Package.resolved"
+fi
+cp -R "$MACOS_DIR/Sources" "$TEMP_BUILD_DIR/Sources"
+BUILD_PACKAGE_DIR="$TEMP_BUILD_DIR"
+cd "$BUILD_PACKAGE_DIR"
+
 # Always build - force rebuild by touching Package.swift to ensure SPM rebuilds
 # This ensures the app is always built with the latest code changes
-if [ -d ".build" ]; then
+if [ -d "$BUILD_PACKAGE_DIR/.build" ]; then
     log_info "Forcing rebuild to ensure latest code is built..."
-    touch Package.swift
+    touch "$BUILD_PACKAGE_DIR/Package.swift"
 fi
 
 # Build the app and capture exit status
 if [ "$BUILD_CONFIG" = "release" ]; then
     log_info "Building release configuration..."
-    swift build -c release 2>&1 | tee /tmp/hypo_build.log
+    GIT_DIR=/dev/null swift build --package-path "$BUILD_PACKAGE_DIR" --jobs 1 -Xswiftc -disable-batch-mode -c release --product "$BINARY_NAME" 2>&1 | tee /tmp/hypo_build.log
 else
     log_info "Building debug configuration (default)..."
-    swift build 2>&1 | tee /tmp/hypo_build.log
+    GIT_DIR=/dev/null swift build --package-path "$BUILD_PACKAGE_DIR" --jobs 1 -Xswiftc -disable-batch-mode --product "$BINARY_NAME" 2>&1 | tee /tmp/hypo_build.log
 fi
 BUILD_EXIT_CODE=${PIPESTATUS[0]}
 
@@ -216,16 +239,16 @@ fi
 
 # Find the built binary (look in the appropriate build directory)
 if [ "$BUILD_CONFIG" = "release" ]; then
-    BUILT_BINARY="$MACOS_DIR/.build/release/$BINARY_NAME"
+    BUILT_BINARY="$BUILD_PACKAGE_DIR/.build/release/$BINARY_NAME"
     if [ ! -f "$BUILT_BINARY" ]; then
         # Fallback: search for it
-        BUILT_BINARY=$(find "$MACOS_DIR/.build" -path "*/release/$BINARY_NAME" -type f 2>/dev/null | head -1)
+        BUILT_BINARY=$(find "$BUILD_PACKAGE_DIR/.build" -path "*/release/$BINARY_NAME" -type f 2>/dev/null | head -1)
     fi
 else
-    BUILT_BINARY="$MACOS_DIR/.build/debug/$BINARY_NAME"
+    BUILT_BINARY="$BUILD_PACKAGE_DIR/.build/debug/$BINARY_NAME"
     if [ ! -f "$BUILT_BINARY" ]; then
         # Fallback: search for it
-        BUILT_BINARY=$(find "$MACOS_DIR/.build" -name "$BINARY_NAME" -type f 2>/dev/null | head -1)
+        BUILT_BINARY=$(find "$BUILD_PACKAGE_DIR/.build" -name "$BINARY_NAME" -type f 2>/dev/null | head -1)
     fi
 fi
 
@@ -233,7 +256,7 @@ if [ -z "$BUILT_BINARY" ]; then
     log_error "Built binary not found in .build directory"
     log_error "Build may have succeeded but binary was not produced"
     log_info "Searching for any binaries in .build:"
-    find "$MACOS_DIR/.build" -name "*MenuBar*" -type f 2>/dev/null | head -5 | sed 's/^/  /'
+    find "$BUILD_PACKAGE_DIR/.build" -name "*MenuBar*" -type f 2>/dev/null | head -5 | sed 's/^/  /'
     log_info "Build log location: /tmp/hypo_build.log"
     exit 1
 fi
@@ -249,8 +272,9 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS"
 log_info "Copying binary to app bundle..."
 # Remove provenance attribute from source binary (Swift adds this, codesign rejects it)
 xattr -d com.apple.provenance "$BUILT_BINARY" 2>/dev/null || true
-cp -f "$BUILT_BINARY" "$APP_BINARY"
+cp -X -f "$BUILT_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+xattr -c "$APP_BINARY" 2>/dev/null || true
 
 # Verify the copy succeeded and binaries match
 if [ -f "$APP_BINARY" ]; then
@@ -373,6 +397,7 @@ fi
 # This fixes "resource fork, Finder information, or similar detritus not allowed" errors
 log_info "Cleaning extended attributes..."
 xattr -rc "$APP_BUNDLE" 2>/dev/null || true
+dot_clean -m "$APP_BUNDLE" 2>/dev/null || true
 
 # Ensure icon is up to date (check if icon generation script is newer than icon)
 # Icons are generated to Hypo.app
@@ -404,6 +429,7 @@ if [ -f "$SCRIPT_DIR/sign-macos.sh" ]; then
         # Fallback to simple ad-hoc signing
         # Clean aggressively - attributes may have been re-added
         xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+        dot_clean -m "$APP_BUNDLE" 2>/dev/null || true
         xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
         xattr -d com.apple.ResourceFork "$APP_BUNDLE" 2>/dev/null || true
         xattr -d com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
@@ -538,4 +564,3 @@ echo ""
 log_success "Build and launch complete!"
 log_info "App bundle: $APP_BUNDLE"
 log_info "View logs: log stream --predicate 'subsystem == \"com.hypo.clipboard\"' --level debug"
-

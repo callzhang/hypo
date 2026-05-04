@@ -55,7 +55,8 @@ struct HistoryStoreTests {
             originDeviceName: "Pixel",
             content: .text("Echo me")
         )
-        await viewModel.add(remoteEcho)
+        let (_, duplicate) = await store.insert(remoteEcho)
+        await viewModel.handleIncomingRemoteEntry(remoteEcho, duplicate: duplicate)
 
         #expect(notificationController.deliveredEntries.isEmpty)
     }
@@ -80,7 +81,8 @@ struct HistoryStoreTests {
             content: .text("Remote copy")
         )
 
-        await viewModel.add(remoteEntry)
+        let (_, duplicate) = await store.insert(remoteEntry)
+        await viewModel.handleIncomingRemoteEntry(remoteEntry, duplicate: duplicate)
 
         #expect(notificationController.deliveredEntries.map(\.id) == [remoteEntry.id])
     }

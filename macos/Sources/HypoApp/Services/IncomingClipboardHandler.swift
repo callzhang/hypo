@@ -16,7 +16,7 @@ public final class IncomingClipboardHandler {
     private let dispatcher: ClipboardEventDispatcher
     private let pasteboard: NSPasteboard
     private let frameCodec = TransportFrameCodec()
-    private var onEntryAdded: ((ClipboardEntry) async -> Void)?
+    private var onEntryAdded: ((ClipboardEntry, ClipboardEntry?) async -> Void)?
     
     // Direct callbacks for TransportManager internal needs
     public var onClipboardApplied: ((Int) -> Void)?
@@ -31,7 +31,7 @@ public final class IncomingClipboardHandler {
         historyStore: HistoryStore,
         dispatcher: ClipboardEventDispatcher,
         pasteboard: NSPasteboard = .general,
-        onEntryAdded: ((ClipboardEntry) async -> Void)? = nil
+        onEntryAdded: ((ClipboardEntry, ClipboardEntry?) async -> Void)? = nil
     ) {
         self.syncEngine = syncEngine
         self.historyStore = historyStore
@@ -40,7 +40,7 @@ public final class IncomingClipboardHandler {
         self.onEntryAdded = onEntryAdded
     }
     
-    public func setOnEntryAdded(_ callback: @escaping (ClipboardEntry) async -> Void) {
+    public func setOnEntryAdded(_ callback: @escaping (ClipboardEntry, ClipboardEntry?) async -> Void) {
         self.onEntryAdded = callback
     }
     
@@ -330,10 +330,10 @@ public final class IncomingClipboardHandler {
             transportOrigin: transportOrigin
         )
         
-        let (_, _) = await historyStore.insert(entry)
+        let (_, duplicate) = await historyStore.insert(entry)
         // Notify callback if provided (e.g., to update viewModel)
         if let onEntryAdded = onEntryAdded {
-            await onEntryAdded(entry)
+            await onEntryAdded(entry, duplicate)
         }
     }
 }

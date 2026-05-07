@@ -29,6 +29,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.hypo.clipboard.service.ClipboardServiceStartReason
+import com.hypo.clipboard.service.ClipboardServiceStarter
 import com.hypo.clipboard.service.ClipboardSyncService
 import com.hypo.clipboard.ui.history.HistoryRoute
 import com.hypo.clipboard.ui.settings.SettingsRoute
@@ -90,13 +92,7 @@ class MainActivity : ComponentActivity() {
         val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
         windowInsetsController.isAppearanceLightStatusBars = true
         
-        // Use startForegroundService for foreground services (required on Android 8.0+)
-        val serviceIntent = Intent(this, ClipboardSyncService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
+        ClipboardServiceStarter.start(this, ClipboardServiceStartReason.APP_LAUNCH)
 
         setContent {
             HypoTheme {
@@ -158,18 +154,11 @@ class MainActivity : ComponentActivity() {
         // Trigger clipboard check when app becomes active
         // This ensures we catch clipboard changes that occurred while app was in background
         android.util.Log.d("MainActivity", "📱 onResume - triggering clipboard check")
-        val serviceIntent = Intent(this, ClipboardSyncService::class.java).apply {
+        ClipboardServiceStarter.start(
+            context = this,
+            reason = ClipboardServiceStartReason.FORCE_PROCESS,
             action = ClipboardSyncService.ACTION_FORCE_PROCESS_CLIPBOARD
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("MainActivity", "⚠️ Failed to trigger clipboard check: ${e.message}")
-        }
+        )
     }
 
     private fun openBatterySettings() {

@@ -132,10 +132,11 @@ app/src/main/
    export ANDROID_SDK_ROOT="/path/to/hypo/.android-sdk"
    ```
 
-3. **Gradle User Home** (optional, for reproducible builds)
+3. **Gradle caches** (optional)
    ```bash
-   # Add to shell profile for consistent dependency caching
-   export GRADLE_USER_HOME="/path/to/hypo/.gradle"
+   # Keep Gradle caches outside the repository.
+   # The wrapper redirects repo-local Gradle caches to this location automatically.
+   export GRADLE_USER_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/hypo-gradle-home"
    ```
 
 ### Building from Source
@@ -149,13 +150,18 @@ cd /path/to/hypo
 # Set environment variables
 export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
 export ANDROID_SDK_ROOT="/path/to/hypo/.android-sdk"
-export GRADLE_USER_HOME="/path/to/hypo/.gradle"
+export GRADLE_USER_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/hypo-gradle-home"
 
-# Build debug APK
+# Build debug APK and copy it back under android/app/build/...
+./scripts/build-android.sh
+
+# Or run Gradle directly. Direct wrapper runs keep build outputs in the
+# user cache to avoid source-repository file-provider stalls.
 cd android
 ./gradlew assembleDebug --stacktrace
 
-# APK will be at: app/build/outputs/apk/debug/app-debug.apk
+# Build script APK: android/app/build/outputs/apk/debug/app-debug.apk
+# Direct Gradle APK: ${XDG_CACHE_HOME:-$HOME/.cache}/hypo-android-build/app/outputs/apk/debug/app-debug.apk
 ```
 
 **Build Output:**
@@ -640,7 +646,9 @@ $ANDROID_SDK_ROOT/platform-tools/adb devices
 **Xiaomi/HyperOS only**: Enable "Install via USB" in Developer Options.
 
 #### App won't stay running in background
-**Xiaomi/HyperOS**: Disable battery optimization and enable Autostart (see Xiaomi/HyperOS Setup section).
+Hypo runs the sync process as a foreground service and registers a WorkManager keep-alive check that can restore the service after reboot, app update, or process death. Android schedules periodic WorkManager checks at a minimum 15-minute interval, so recovery is not instantaneous.
+
+**Xiaomi/HyperOS**: Disable battery optimization and enable Autostart (see Xiaomi/HyperOS Setup section). OEM battery policy can still delay or block background starts if the user has not allowed background activity for Hypo.
 
 ### Monitoring Logs
 

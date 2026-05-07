@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Features -->
 
@@ -80,7 +81,18 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Accessibility Service for clipboard access in background (Android 10+) -->
+        <!-- Restarts sync scheduling after reboot or app update. -->
+        <receiver
+            android:name=".service.ClipboardServiceRestartReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Optional accessibility service. It must not be treated as a background clipboard bypass. -->
         <service
             android:name=".service.ClipboardAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"

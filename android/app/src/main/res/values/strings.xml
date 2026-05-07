@@ -12,13 +12,13 @@
     <string name="service_notification_status_active">Syncing clipboard</string>
     <string name="service_notification_status_paused">Sync paused</string>
     <string name="service_notification_status_permission">Permission required</string>
-    <string name="service_notification_permission_body">Enable \"Allow clipboard access\" in Settings → Apps → Hypo → Permissions to sync in background.</string>
-    <string name="accessibility_service_description">Monitors clipboard changes to sync with paired devices</string>
+    <string name="service_notification_permission_body">Android limits clipboard reads in the background. Open Hypo to sync the current clipboard.</string>
+    <string name="accessibility_service_description">Supports optional Hypo assist features; it does not make clipboard sync automatic in the background.</string>
 
     <!-- Actions -->
     <string name="action_pause">Pause</string>
     <string name="action_resume">Resume</string>
-    <string name="action_grant_clipboard_access">Grant access</string>
+    <string name="action_grant_clipboard_access">Open settings</string>
     <string name="action_stop">Stop</string>
 
     <!-- Home Screen -->
@@ -73,11 +73,11 @@
     <string name="settings_notification_permission_note">Note: Without notification permission, the persistent notification showing the latest clipboard item will not be displayed.</string>
     
     <string name="settings_accessibility_service">Accessibility Service (Optional)</string>
-    <string name="settings_accessibility_service_description">Improves reliability of background clipboard updates on Android 10+</string>
+    <string name="settings_accessibility_service_description">Optional assist service for Hypo workflows. Android still limits clipboard reads when Hypo is not open.</string>
     <string name="settings_accessibility_service_status_enabled">Enabled</string>
     <string name="settings_accessibility_service_status_disabled">Not Enabled</string>
     <string name="settings_accessibility_service_enable_button">Open Settings</string>
-    <string name="settings_accessibility_service_note">Note: This is optional. Background clipboard updates work without it, but enabling Accessibility Service may improve reliability on some devices. Go to Settings → Accessibility → Hypo to enable.</string>
+    <string name="settings_accessibility_service_note">Note: This is not a workaround for Android background limits. Use the notification, share sheet, or Copy to Hypo when Hypo is not open.</string>
     
     <string name="settings_history_limit_value">Storing up to %1$d items</string>
 
@@ -142,4 +142,9 @@
     <string name="error_copying_to_clipboard">Failed to copy: %1$s</string>
     <string name="error_clipboard_permission">Clipboard permission denied</string>
     <string name="error_clipboard_state">Clipboard error: %1$s</string>
+    <string name="action_save">Save</string>
+    <string name="saved_image">Image saved</string>
+    <string name="error_image_not_loaded">Image is still loading</string>
+    <string name="error_image_save_target">Unable to open the save location</string>
+    <string name="error_saving_image">Failed to save image: %1$s</string>
 </resources>

@@ -299,7 +299,7 @@ class SyncCoordinator @Inject constructor(
                 // 3. Notification already shows the latest content
                 // 4. Updating clipboard would trigger ClipboardListener.onPrimaryClipChanged(),
                 //    which could cause loops or overwrite the database entry
-                // If background clipboard update is needed, use Accessibility Service (see settings)
+                // Incoming remote updates attempt system clipboard writes separately.
 
                 // Only broadcast if not a received item (prevent loops)
                 // IMPORTANT: Broadcast even if item matched history - user may have re-copied it

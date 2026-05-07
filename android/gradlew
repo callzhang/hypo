@@ -88,6 +88,31 @@ APP_BASE_NAME=${0##*/}
 # Discard cd standard output in case $CDPATH is set (https://github.com/gradle/gradle/issues/25036)
 APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s\n' "$PWD" ) || exit
 
+# Keep Gradle's distribution cache outside this repository. A repo-local
+# GRADLE_USER_HOME can be backed by cloud/file-provider storage and leave the
+# wrapper reading a corrupt distribution JAR indefinitely.
+PROJECT_ROOT=$( cd -P "$APP_HOME/.." > /dev/null && printf '%s\n' "$PWD" ) || PROJECT_ROOT=$APP_HOME
+repo_gradle_home=false
+case "${GRADLE_USER_HOME:-}" in
+  ""|"$APP_HOME"|"$PROJECT_ROOT") repo_gradle_home=true ;;
+  "$APP_HOME"/*|"$PROJECT_ROOT"/*) repo_gradle_home=true ;;
+esac
+
+if "$repo_gradle_home"; then
+    GRADLE_USER_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/hypo-gradle-home"
+    export GRADLE_USER_HOME
+fi
+
+if [ -z "${HYPO_ANDROID_BUILD_DIR:-}" ] && [ -d "$PROJECT_ROOT/.git" ]; then
+    HYPO_ANDROID_BUILD_DIR="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/hypo-android-build"
+    export HYPO_ANDROID_BUILD_DIR
+fi
+
+if [ -z "${HYPO_ANDROID_PROJECT_CACHE_DIR:-}" ] && [ -d "$PROJECT_ROOT/.git" ]; then
+    HYPO_ANDROID_PROJECT_CACHE_DIR="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/hypo-android-project-cache"
+    export HYPO_ANDROID_PROJECT_CACHE_DIR
+fi
+
 # Bootstrap Gradle wrapper JAR when omitted from the repository.
 if [ ! -f "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" ]; then
     BASE64_WRAPPER="$APP_HOME/gradle/wrapper/gradle-wrapper.jar.b64"
@@ -262,11 +287,20 @@ DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
 #   * For example: A user cannot expect ${Hostname} to be expanded, as it is an environment variable and will be
 #     treated as '${Hostname}' itself on the command line.
 
-set -- \
-        "-Dorg.gradle.appname=$APP_BASE_NAME" \
-        -classpath "$CLASSPATH" \
-        -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
-        "$@"
+if [ -n "${HYPO_ANDROID_PROJECT_CACHE_DIR:-}" ]; then
+    set -- \
+            "-Dorg.gradle.appname=$APP_BASE_NAME" \
+            -classpath "$CLASSPATH" \
+            -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
+            --project-cache-dir "$HYPO_ANDROID_PROJECT_CACHE_DIR" \
+            "$@"
+else
+    set -- \
+            "-Dorg.gradle.appname=$APP_BASE_NAME" \
+            -classpath "$CLASSPATH" \
+            -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
+            "$@"
+fi
 
 # Stop when "xargs" is not available.
 if ! command -v xargs >/dev/null 2>&1

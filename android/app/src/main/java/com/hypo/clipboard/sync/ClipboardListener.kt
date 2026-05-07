@@ -51,8 +51,8 @@ class ClipboardListener(
             }
             
             // EVENT-DRIVEN: Rely only on onPrimaryClipChanged() events
-            // Note: On Android 10+, onPrimaryClipChanged() may not fire in background,
-            // but if AccessibilityService is enabled, it will handle clipboard events.
+            // Note: On Android 10+, onPrimaryClipChanged() may not fire when Hypo
+            // is not the focused app. Users can use explicit share/Copy to Hypo flows.
             // Polling is removed - everything is now event-driven.
             
             isListening = true

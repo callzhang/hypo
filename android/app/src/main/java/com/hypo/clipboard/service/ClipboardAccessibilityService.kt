@@ -17,13 +17,11 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 
 /**
- * Accessibility Service for clipboard monitoring on Android 10+.
- * 
- * This service can access clipboard in the background, bypassing Android 10+ restrictions.
- * Users must explicitly enable this service in Settings → Accessibility.
- * 
- * Note: This is a legitimate use case for accessibility services as it helps users
- * with clipboard synchronization across devices.
+ * Optional accessibility service for Hypo assist workflows.
+ *
+ * Android 10+ restricts clipboard reads to the focused app or the default input
+ * method. This service should not be presented as a background clipboard bypass.
+ * Users must explicitly enable it in Settings > Accessibility.
  */
 class ClipboardAccessibilityService : AccessibilityService(), ClipboardManager.OnPrimaryClipChangedListener {
 
@@ -123,8 +121,8 @@ class ClipboardAccessibilityService : AccessibilityService(), ClipboardManager.O
     }
 
     /**
-     * Update system clipboard from Accessibility Service context.
-     * This bypasses Android 10+ background clipboard restrictions.
+     * Update system clipboard from the Accessibility Service context when the
+     * service is available. This is still subject to platform clipboard rules.
      * 
      * @param item The clipboard item to set
      * @return true if clipboard was updated successfully, false otherwise
@@ -220,8 +218,8 @@ class ClipboardAccessibilityService : AccessibilityService(), ClipboardManager.O
         private var instance: ClipboardAccessibilityService? = null
         
         /**
-         * Update system clipboard using Accessibility Service context.
-         * This bypasses Android 10+ background clipboard restrictions.
+         * Update system clipboard using Accessibility Service context when available.
+         * This does not guarantee background clipboard access on Android 10+.
          * 
          * @param item The clipboard item to set
          * @return true if clipboard was updated successfully, false if service is not available
@@ -237,4 +235,3 @@ class ClipboardAccessibilityService : AccessibilityService(), ClipboardManager.O
         }
     }
 }
-

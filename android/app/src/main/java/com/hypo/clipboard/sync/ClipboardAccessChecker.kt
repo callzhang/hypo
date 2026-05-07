@@ -9,9 +9,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Helper that checks whether the app is currently allowed to observe clipboard
- * changes in the background. Android 10+ blocks clipboard access for background
- * apps unless the user explicitly grants the "Allow clipboard access" toggle.
+ * Helper that probes AppOps state for clipboard reads.
+ *
+ * On Android 10+, AppOps is advisory for this app: the platform still limits
+ * actual clipboard reads to the focused app or default input method.
  */
 @Singleton
 class ClipboardAccessChecker @Inject constructor(
@@ -30,9 +31,8 @@ class ClipboardAccessChecker @Inject constructor(
         val uid = Process.myUid()
         val packageName = context.packageName
 
-        // Check clipboard access permission
-        // On Android 10+, this checks both foreground and background access
-        // The OS will enforce background restrictions separately if needed
+        // Check known clipboard AppOps names. The OS still enforces focused-app
+        // restrictions separately on Android 10+.
         val opCandidates = listOf("android:read_clipboard", "android:read_clipboard_in_background")
         opCandidates.forEach { op ->
             try {

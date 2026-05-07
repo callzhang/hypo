@@ -96,7 +96,7 @@ fi
 # Gradle User Home. Keep this outside the repo so cache writes do not hit the
 # file-provider-backed project directory.
 if [ -z "$GRADLE_USER_HOME" ] || [[ "$GRADLE_USER_HOME" == "$PROJECT_ROOT"* ]]; then
-    export GRADLE_USER_HOME="${TMPDIR:-/tmp}/hypo-gradle-home"
+    export GRADLE_USER_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/hypo-gradle-home"
 fi
 
 echo "   JAVA_HOME: $JAVA_HOME"

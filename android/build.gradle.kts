@@ -7,7 +7,20 @@ plugins {
     id("com.google.dagger.hilt.android") version "2.50" apply false
 }
 
-tasks.register("clean", Delete::class) {
-    delete(rootProject.layout.buildDirectory.get().asFile)
+val externalBuildRoot = System.getenv("HYPO_ANDROID_BUILD_DIR")?.takeIf { it.isNotBlank() }
+
+if (externalBuildRoot != null) {
+    layout.buildDirectory.set(file("$externalBuildRoot/root"))
 }
 
+subprojects {
+    if (externalBuildRoot != null) {
+        val moduleBuildPath = path.removePrefix(":").replace(':', '-')
+        layout.buildDirectory.set(file("$externalBuildRoot/$moduleBuildPath"))
+    }
+}
+
+tasks.register("clean", Delete::class) {
+    delete(rootProject.layout.buildDirectory)
+    delete(subprojects.map { it.layout.buildDirectory })
+}

@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.83-alpine AS builder
+FROM rust:1.88-alpine AS builder
 
 RUN apk add --no-cache musl-dev openssl-dev
 
@@ -53,4 +53,3 @@ USER hypo
 EXPOSE 8080
 
 CMD ["/app/start.sh"]
-

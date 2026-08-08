@@ -9,7 +9,7 @@ import javax.inject.Singleton
 
 /**
  * Helper to check if the ClipboardAccessibilityService is enabled.
- * This service allows the app to access and modify clipboard in background on Android 10+.
+ * The service does not grant reliable background clipboard access on Android 10+.
  */
 @Singleton
 class AccessibilityServiceChecker @Inject constructor(
@@ -33,5 +33,4 @@ class AccessibilityServiceChecker @Inject constructor(
         private const val TAG = "AccessibilityServiceChecker"
     }
 }
-
 

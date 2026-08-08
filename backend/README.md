@@ -19,7 +19,7 @@ The backend relay:
 
 ## Requirements
 
-- **Rust**: 1.75+
+- **Rust**: 1.88+
 - **Redis**: 7+ (or Docker)
 - **Docker** (optional, for containerized deployment)
 

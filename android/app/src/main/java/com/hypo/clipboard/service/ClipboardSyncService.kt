@@ -78,6 +78,7 @@ class ClipboardSyncService : Service() {
     private lateinit var connectivityManager: android.net.ConnectivityManager
 
     private var isInitialized = false
+    private var stopRequestedByUser = false
 
     override fun onCreate() {
         super.onCreate()
@@ -95,6 +96,7 @@ class ClipboardSyncService : Service() {
         
         notificationManager = NotificationManagerCompat.from(this)
         createNotificationChannel()
+        ClipboardKeepAliveScheduler.schedulePeriodic(this)
         
         // Start foreground service immediately to keep app alive
         val notification = buildNotification()
@@ -236,6 +238,7 @@ class ClipboardSyncService : Service() {
     }
 
     override fun onDestroy() {
+        val shouldScheduleRestart = !stopRequestedByUser
         shutdownForRemoval("onDestroy")
         
         transportManager.clearPeerStatusChangedHandler()
@@ -245,6 +248,9 @@ class ClipboardSyncService : Service() {
         listener.stop()
         syncCoordinator.stop()
         clipboardPermissionJob?.cancel()
+        if (shouldScheduleRestart) {
+            ClipboardKeepAliveScheduler.enqueueOneTime(this, "service_destroyed")
+        }
         
         super.onDestroy()
     }
@@ -335,6 +341,8 @@ class ClipboardSyncService : Service() {
                 }
             }
             ACTION_STOP -> {
+                stopRequestedByUser = true
+                ClipboardKeepAliveScheduler.cancel(this)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -427,7 +435,7 @@ class ClipboardSyncService : Service() {
             // Always show latest clipboard preview if available (from database)
             // Only show background warning if no preview is available
             latestPreview != null -> latestPreview!!
-            !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> "App must be in foreground for clipboard access on Android 10+"
+            !isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> "Open Hypo to sync the current clipboard"
             else -> getString(R.string.service_notification_text)
         }
 

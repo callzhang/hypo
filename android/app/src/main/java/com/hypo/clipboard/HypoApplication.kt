@@ -2,6 +2,7 @@ package com.hypo.clipboard
 
 import android.app.Application
 import android.util.Log
+import com.hypo.clipboard.service.ClipboardKeepAliveScheduler
 import dagger.hilt.android.HiltAndroidApp
 import io.sentry.android.core.SentryAndroid
 import io.sentry.Sentry
@@ -21,5 +22,6 @@ class HypoApplication : Application() {
             options.isDebug = false
             options.environment = if (com.hypo.clipboard.BuildConfig.DEBUG) "debug" else "production"
         }
+        ClipboardKeepAliveScheduler.schedulePeriodic(this)
     }
 }

@@ -101,7 +101,7 @@ See `docs/architecture.mermaid` for visual representation.
   - Automatic temp file management with proper permissions
 
 #### Backend Relay ✅ Deployed
-- **Language**: Rust 1.83+
+- **Language**: Rust 1.88+
 - **Framework**: Actix-web 4.x for WebSocket connections
 - **State**: Embedded Redis 7+ for ephemeral connection mapping
 - **Deployment**: Docker + Fly.io production (https://hypo.fly.dev)
@@ -714,6 +714,13 @@ class ClipboardSyncService : Service() {
 - **Visibility**: Always visible in notification list (not minimized like `IMPORTANCE_LOW`)
 - **Sound**: Disabled (`setSound(null, null)`) to avoid intrusive alerts for persistent notification
 - **User Interaction**: Tapping notification opens app for quick clipboard sync (required for Android 10+ clipboard access)
+
+**Keep-alive Strategy**:
+- `ClipboardServiceStarter` centralizes foreground-service startup and catches Android 12+ background-start failures.
+- `ClipboardKeepAliveScheduler` registers a persisted WorkManager periodic health check with the platform minimum 15-minute interval.
+- `ClipboardServiceRestartReceiver` re-schedules sync after `BOOT_COMPLETED` and `MY_PACKAGE_REPLACED`.
+- If the service is destroyed without an explicit stop action, a one-time WorkManager restart is queued.
+- This improves recovery after process death, reboot, and app update, but Android/OEM battery policy can still delay or block background starts.
 
 #### 4.2.3 Room Database Schema
 ```kotlin

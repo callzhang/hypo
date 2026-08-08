@@ -7,6 +7,8 @@ import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
@@ -32,6 +34,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Shield
@@ -64,7 +67,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -764,6 +766,40 @@ private fun ClipboardDetailContent(
             null
         }
     }
+    
+    val imageSaveFileName = remember(item.id, item.metadata) {
+        resolveImageSaveFileName(item)
+    }
+    
+    val imageSaveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("image/*")
+    ) { uri ->
+        if (uri == null) {
+            return@rememberLauncherForActivityResult
+        }
+
+        val bytesToSave = fileBytes
+        if (bytesToSave == null) {
+            Toast.makeText(context, context.getString(R.string.error_image_not_loaded), Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+
+        try {
+            val outputStream = context.contentResolver.openOutputStream(uri)
+            if (outputStream == null) {
+                Toast.makeText(context, context.getString(R.string.error_image_save_target), Toast.LENGTH_SHORT).show()
+                return@rememberLauncherForActivityResult
+            }
+
+            outputStream.use { stream ->
+                stream.write(bytesToSave)
+            }
+            Toast.makeText(context, context.getString(R.string.saved_image), Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            val message = e.localizedMessage ?: e.javaClass.simpleName
+            Toast.makeText(context, context.getString(R.string.error_saving_image, message), Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Determine Metadata
     val fileName = remember(item.id, item.metadata) {
@@ -794,6 +830,15 @@ private fun ClipboardDetailContent(
     val extension = getExtension(fileName)
     
     val isImage = item.type == ClipboardType.IMAGE || mimeType.startsWith("image/")
+    
+    fun saveImage() {
+        if (isLoading || fileBytes == null) {
+            Toast.makeText(context, context.getString(R.string.error_image_not_loaded), Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        imageSaveLauncher.launch(imageSaveFileName)
+    }
     
     // Logic to open file
     fun openFile() {
@@ -833,7 +878,7 @@ private fun ClipboardDetailContent(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Header Row: Title + Open Button
+        // Header Row: Title + Actions
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -847,14 +892,31 @@ private fun ClipboardDetailContent(
                 modifier = Modifier.weight(1f)
             )
             
-            Button(onClick = { openFile() }) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                    contentDescription = "Open",
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Open")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (item.type == ClipboardType.IMAGE) {
+                    Button(
+                        onClick = { saveImage() },
+                        enabled = !isLoading && fileBytes != null
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Save,
+                            contentDescription = stringResource(id = R.string.action_save),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = stringResource(id = R.string.action_save))
+                    }
+                }
+
+                Button(onClick = { openFile() }) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = "Open",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Open")
+                }
             }
         }
         

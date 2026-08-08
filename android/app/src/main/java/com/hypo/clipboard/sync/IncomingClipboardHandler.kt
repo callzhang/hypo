@@ -407,9 +407,8 @@ class IncomingClipboardHandler @Inject constructor(
                 Log.i(TAG, "✅ [VERIFIED-CONTENT] hash=$verificationHash type=${event.type} source=$senderDeviceName preview='$contentPreview'")
                 Log.i(TAG, "✅ Decoded clipboard event: type=${event.type}, sourceDevice=$senderDeviceName, content: $contentPreview")
                 
-                // Always try to update system clipboard (same mechanism as macOS)
-                // If Accessibility Service is enabled, it will succeed in background
-                // If not enabled, it may fail in background (Android 10+ restriction) but will work in foreground
+                // Always try to update system clipboard (same mechanism as macOS).
+                // Android may reject clipboard access when Hypo is not the focused app.
                 val clipboardItem = com.hypo.clipboard.domain.model.ClipboardItem(
                     id = java.util.UUID.randomUUID().toString(),
                     type = clipboardPayload.contentType,
@@ -484,15 +483,17 @@ class IncomingClipboardHandler @Inject constructor(
     /**
      * Update system clipboard with received item (same mechanism as macOS).
      * Always attempts to update clipboard:
-     * - If Accessibility Service is enabled: uses Accessibility Service context (works in background)
-     * - If not enabled: uses regular context (works in foreground, may fail in background on Android 10+)
+     * - If Accessibility Service is enabled: uses Accessibility Service context first
+     * - Otherwise: uses regular app context
+     *
+     * Android may still reject access when Hypo is not the focused app.
      * 
      * Uses "Hypo Remote" label to prevent ClipboardListener from processing this update.
      */
     private fun updateSystemClipboard(item: com.hypo.clipboard.domain.model.ClipboardItem) {
         scope.launch(Dispatchers.IO) {
             try {
-                // Try Accessibility Service first if enabled (works in background)
+                // Try Accessibility Service first if enabled.
                 if (accessibilityServiceChecker.isAccessibilityServiceEnabled()) {
                     val updated = com.hypo.clipboard.service.ClipboardAccessibilityService.updateClipboard(item)
                     if (updated) {
@@ -610,7 +611,7 @@ class IncomingClipboardHandler @Inject constructor(
                         Log.d(TAG, "✅ Updated system clipboard: type=${item.type}, preview=${item.preview.take(50)}")
                     } catch (e: SecurityException) {
                         // Android 10+ may block clipboard access in background
-                        Log.d(TAG, "🔒 Failed to update clipboard in background (Android 10+ restriction). Enable Accessibility Service in Settings to allow background updates: ${e.message}")
+                        Log.d(TAG, "🔒 Failed to update clipboard while Hypo is not focused (Android clipboard restriction): ${e.message}")
                     } catch (e: Exception) {
                         Log.w(TAG, "⚠️ Failed to update system clipboard: ${e.message}", e)
                     }
@@ -625,4 +626,3 @@ class IncomingClipboardHandler @Inject constructor(
         private const val TAG = "IncomingClipboardHandler"
     }
 }
-

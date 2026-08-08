@@ -10,6 +10,9 @@ import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import com.hypo.clipboard.service.ClipboardServiceStartReason
+import com.hypo.clipboard.service.ClipboardServiceStarter
+import com.hypo.clipboard.service.ClipboardSyncService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -104,16 +107,15 @@ class ShareImageActivity : AppCompatActivity() {
                         Log.i(TAG, "✅ Image copied to clipboard (${imageBytes.size.formattedAsKB()}, format: $format) - will sync to other devices")
                         
                         // Force process the clipboard immediately
-                        val serviceIntent = Intent(this@ShareImageActivity, com.hypo.clipboard.service.ClipboardSyncService::class.java).apply {
-                            action = com.hypo.clipboard.service.ClipboardSyncService.ACTION_FORCE_PROCESS_CLIPBOARD
-                            // For images, we can't pass the content directly, so rely on clipboard
-                        }
-                        try {
-                            startForegroundService(serviceIntent)
+                        val started = ClipboardServiceStarter.start(
+                            context = this@ShareImageActivity,
+                            reason = ClipboardServiceStartReason.FORCE_PROCESS,
+                            action = ClipboardSyncService.ACTION_FORCE_PROCESS_CLIPBOARD
+                        )
+                        if (started) {
                             Log.d(TAG, "🔄 Triggered force process clipboard")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "⚠️ Failed to trigger force process (service may not be running): ${e.message}")
-                            // Continue anyway - polling will catch it within 2 seconds
+                        } else {
+                            Log.w(TAG, "⚠️ Failed to trigger force process (service may not be running)")
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Failed to copy image to clipboard: ${e.message}", e)
@@ -163,4 +165,3 @@ class ShareImageActivity : AppCompatActivity() {
         private const val TAG = "ShareImageActivity"
     }
 }
-

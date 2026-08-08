@@ -7,6 +7,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
+import com.hypo.clipboard.service.ClipboardServiceStartReason
+import com.hypo.clipboard.service.ClipboardServiceStarter
+import com.hypo.clipboard.service.ClipboardSyncService
 
 /**
  * Activity that handles ACTION_PROCESS_TEXT intent.
@@ -53,16 +56,17 @@ class ProcessTextActivity : AppCompatActivity() {
         // Force process the clipboard immediately to ensure it's processed even if
         // onPrimaryClipChanged doesn't fire (Android 10+ background restrictions)
         // Pass the text directly in the intent to avoid timing issues with clipboard access
-        val serviceIntent = Intent(this, com.hypo.clipboard.service.ClipboardSyncService::class.java).apply {
-            action = com.hypo.clipboard.service.ClipboardSyncService.ACTION_FORCE_PROCESS_CLIPBOARD
+        val started = ClipboardServiceStarter.start(
+            context = this,
+            reason = ClipboardServiceStartReason.FORCE_PROCESS,
+            action = ClipboardSyncService.ACTION_FORCE_PROCESS_CLIPBOARD
+        ) {
             putExtra("text", selectedText.toString())
         }
-        try {
-            startForegroundService(serviceIntent)
+        if (started) {
             Log.d(TAG, "🔄 Triggered force process clipboard")
-        } catch (e: Exception) {
-            Log.w(TAG, "⚠️ Failed to trigger force process (service may not be running): ${e.message}")
-            // Continue anyway - polling will catch it within 2 seconds
+        } else {
+            Log.w(TAG, "⚠️ Failed to trigger force process (service may not be running)")
         }
         
         // Finish immediately for seamless UX
@@ -73,4 +77,3 @@ class ProcessTextActivity : AppCompatActivity() {
         private const val TAG = "ProcessTextActivity"
     }
 }
-

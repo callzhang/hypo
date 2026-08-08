@@ -101,7 +101,7 @@ See `docs/architecture.mermaid` for visual representation.
   - Automatic temp file management with proper permissions
 
 #### Backend Relay ✅ Deployed
-- **Language**: Rust 1.83+
+- **Language**: Rust 1.88+
 - **Framework**: Actix-web 4.x for WebSocket connections
 - **State**: Embedded Redis 7+ for ephemeral connection mapping
 - **Deployment**: Docker + Fly.io production (https://hypo.fly.dev)

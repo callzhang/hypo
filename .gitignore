@@ -214,6 +214,9 @@ TODO.txt
 # Gradle caches (avoid committing repo-root caches)
 .gradle/
 
+# Local isolated Git worktrees
+.worktrees/
+
 
 # macOS build artifacts (app bundles)
 macos/HypoApp.app

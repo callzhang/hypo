@@ -208,7 +208,7 @@ docker-compose up
 - Pairing: `POST /pairing/claim` - Claim pairing code
 
 **Requirements**:
-- Rust 1.83+ (for local development)
+- Rust 1.88+ (for local development)
 - Redis 7+ (embedded in production Docker image, or Docker for local)
 - Fly.io CLI (for deployment)
 

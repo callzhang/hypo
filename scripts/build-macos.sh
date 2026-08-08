@@ -213,10 +213,10 @@ fi
 # Build the app and capture exit status
 if [ "$BUILD_CONFIG" = "release" ]; then
     log_info "Building release configuration..."
-    GIT_DIR=/dev/null swift build --package-path "$BUILD_PACKAGE_DIR" --jobs 1 -Xswiftc -disable-batch-mode -c release --product "$BINARY_NAME" 2>&1 | tee /tmp/hypo_build.log
+    env -u GIT_DIR swift build --package-path "$BUILD_PACKAGE_DIR" --jobs 1 -Xswiftc -disable-batch-mode -c release --product "$BINARY_NAME" 2>&1 | tee /tmp/hypo_build.log
 else
     log_info "Building debug configuration (default)..."
-    GIT_DIR=/dev/null swift build --package-path "$BUILD_PACKAGE_DIR" --jobs 1 -Xswiftc -disable-batch-mode --product "$BINARY_NAME" 2>&1 | tee /tmp/hypo_build.log
+    env -u GIT_DIR swift build --package-path "$BUILD_PACKAGE_DIR" --jobs 1 -Xswiftc -disable-batch-mode --product "$BINARY_NAME" 2>&1 | tee /tmp/hypo_build.log
 fi
 BUILD_EXIT_CODE=${PIPESTATUS[0]}
 

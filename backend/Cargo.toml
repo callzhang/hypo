@@ -55,7 +55,7 @@ base64 = "0.21"
 aes-gcm = "0.10"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 hkdf = "0.12"
-rand = { version = "0.8", features = ["std"] }
+rand = { version = "0.10", features = ["std"] }
 hex = "0.4"
 
 # Security: Force protobuf to 3.7.2+ to fix CVE-2025-53605 (uncontrolled recursion vulnerability)

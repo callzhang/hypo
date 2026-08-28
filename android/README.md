@@ -787,7 +787,7 @@ adb -s <device_id> logcat | grep -E "SmsReceiver|ClipboardListener"
 
 - [ ] Support multi-device sync (>2 devices)
 - [ ] Implement clipboard filtering
-- [ ] Add Quick Settings tile for toggle
+- [x] Add Quick Settings tile for opening Hypo from the notification shade
 - [ ] Support rich text formatting
 - [ ] Add wear OS companion app
 

@@ -614,6 +614,7 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 - Open app to view clipboard history
 - Swipe to refresh history
 - Tap items to copy them back to clipboard
+- In the notification shade, edit Quick Settings and add **Open Hypo**; tapping this tile opens Hypo immediately
 
 ---
 
@@ -723,6 +724,10 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 - **Content**: Shows latest clipboard content or status message
 - **Tap Notification**: Opens app for quick clipboard sync
 - **Note**: On Android 10+, clipboard access requires app to be in foreground. The notification provides quick access to sync content.
+
+**Quick Settings tile**:
+- Pull down the notification shade, tap the edit button, and add **Open Hypo** to Quick Settings
+- Tap **Open Hypo** to bring the main Hypo screen to the foreground; it is a shortcut action and does not toggle synchronization
 
 ### Settings Configuration
 

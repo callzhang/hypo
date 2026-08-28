@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">Hypo</string>
     <string name="app_description">Cross-platform clipboard sync</string>
+    <string name="quick_settings_tile_label">Open Hypo</string>
 
     <!-- Service -->
     <string name="service_notification_title">Click to sync</string>

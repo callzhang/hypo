@@ -31,8 +31,10 @@ iOS 不允许后台轮询剪贴板。macOS 的 `ClipboardMonitor` 依赖 `NSPast
 
 macOS 客户端共 51 个 Swift 文件，其中 16 个 `import AppKit`。实际耦合远比数字浅：
 
-- `ConnectionStatusProber`、`PairingSession`、`MemoryProfiler` 的 `import AppKit` 是多余的，没有任何 `NS*` 类型使用，删掉即跨平台。
-- 真正的耦合只有 5 处：`IncomingClipboardHandler`（写 `NSPasteboard`、`NSImage` 解码）、`SecurityManager`（1 行）、`HistoryStore`（1 行）、`TempFileManager`（pasteboard 引用）、`TransportManager`（3 行 `NSApplication` 生命周期通知）。
+- **16 个中有 15 个的 `import AppKit` 已经被 `#if canImport(AppKit)` 包裹**——这个代码库为了 Linux 兼容早已建立了可移植性纪律（全包 200+ 处 `canImport` 判断）。`AppKit` 在 iOS 上不存在，因此这些文件在 iOS 上已经能编译。唯一的裸 import 是 `IncomingClipboardHandler.swift:2`。
+- 所以第 1 期的工作**不是"让代码在 iOS 上编译通过"，而是"为那些在 iOS 上被条件编译掉的能力补上 iOS 实现"**——写剪贴板、应用生命周期观察、历史持久化。已有的 `canImport` 守卫是脚手架，不是终点。
+- 真正的耦合有 5 处：`IncomingClipboardHandler`（写 `NSPasteboard`、`NSImage` 解码，且是裸 import）、`SecurityManager`（`copyEncryptionKeyToPasteboard`，已守卫）、`HistoryStore`（`ClipboardHistoryViewModel` 里写 pasteboard，已守卫）、`TempFileManager`（pasteboard 引用，已守卫）、`TransportManager`（私有类 `ApplicationLifecycleObserver` 监听 `NSApplication` 通知，已守卫）。
+- `ConnectionStatusProber`、`PairingSession`、`MemoryProfiler` 的 `import AppKit` 确实没有任何 `NS*` 使用，但因为已被守卫，删除属于清理而非必需。
 - 传输层核心（`SyncEngine`、`CloudRelayTransport`、`LanWebSocketTransport`、`TransportFrameCodec`、`WebSocketConnectionPool`）、`CryptoService`（CryptoKit，iOS 原生支持）、Models、Compression 全部零 AppKit 依赖。
 - `LanWebSocketServer`（1235 行）用的是 Network.framework 的 `NWListener`，iOS 上同一套 API 可用；`BonjourPublisher`/`BonjourBrowser` 只依赖 Foundation/Darwin。
 
@@ -48,7 +50,8 @@ iOS 侧**必须**有 xcodeproj——App Extension、App Group、APNs capability 
 
 - 后端 `backend/src/models/device.rs` 的 `Platform` enum 已包含 `Ios`。
 - Android 的 `device_platform` 是裸字符串直接透传（`SyncModels.kt:35`）。
-- 唯一缺口：macOS 的 `DevicePlatform` enum 只有 `.macOS` 和 `.Android`，需新增 `case iOS = "ios"`。
+- macOS 的 `DevicePlatform` enum **已经有 `case iOS = "ios"`**（还有 `windows`、`linux`）。
+- 唯一缺口：`DeviceIdentity.swift:26` 把当前平台硬编码为 `private static let currentPlatform = DevicePlatform.macOS`，需改成按 `#if os(iOS)` 判定。
 
 ### 2.4 后端现状
 
@@ -100,12 +103,12 @@ macOS 约 4500 行 UI 代码中，`HypoMenuBarApp.swift`（3404 行）、`Histor
 | 目录 | 内容（均来自现有文件） | 改动 |
 |---|---|---|
 | `Crypto/` | `CryptoService`、`DeviceKeyProvider`、`KeychainKeyStore`、`PairingSigningKeyStore`、`FileBasedKeyStore` | Keychain access group 参数化（扩展进程需读同一份密钥） |
-| `Models/` | `ClipboardEntry`、`PairedDevice`、`DevicePlatform` | `DevicePlatform` 新增 `case iOS = "ios"` |
+| `Models/` | `ClipboardEntry`、`PairedDevice`、`DevicePlatform`、`DeviceIdentity` | `DeviceIdentity.currentPlatform` 改为按 `#if os(iOS)` 判定 |
 | `Pairing/` | `PairingModels`、`PairingSession`、`PairingRelayClient` | 删除未使用的 `import AppKit` |
 | `Transport/` | `TransportFrameCodec`、`WebSocketTransport`、`LanWebSocketTransport`、`CloudRelayTransport`、`DualSyncTransport`、`WebSocketConnectionPool`、`LanWebSocketServer`、`RateLimiter`、`TransportMetricsRecorder`、`TransportAnalytics` | `LanWebSocketServer` 在 iOS 编译但不启动 |
 | `Discovery/` | `BonjourBrowser`、`BonjourPublisher` | 无 |
 | `Sync/` | `SyncEngine`、`ClipboardEventDispatcher`、`IncomingClipboardHandler` | `IncomingClipboardHandler` 的 `NSPasteboard` 写入抽成协议 |
-| `History/` | `HistoryStore`、`OptimizedHistoryStore`、`StorageManager` | 持久化与存储目录参数化 |
+| `History/` | `HistoryStore`（actor 部分）、`OptimizedHistoryStore`、`StorageManager` | 持久化与存储目录参数化；`ClipboardHistoryViewModel` 不迁移 |
 | `Utils/` | `Compression`、`SizeConstants`、`Logger`、`StringExtensions` | 无 |
 
 ### 4.2 平台适配协议
@@ -120,7 +123,18 @@ macOS 约 4500 行 UI 代码中，`HypoMenuBarApp.swift`（3404 行）、`Histor
 
 ### 4.3 macOS 侧改动范围
 
-只有 5 个文件各改 1~3 行 AppKit 调用为协议调用：`IncomingClipboardHandler`、`SecurityManager`、`HistoryStore`、`TempFileManager`、`TransportManager`。外加删除 3 个多余 import。
+除了把文件搬进 `HypoCore`，macOS 侧有两类实质改动：
+
+**一、把已有的条件编译守卫换成协议注入**——只涉及**迁入 `HypoCore` 且带 AppKit 耦合**的文件，共 2 处：`IncomingClipboardHandler`（`ClipboardWriting`）、`TransportManager`（`AppLifecycleObserving`）。macOS 的行为保持不变，只是实现从 `#if canImport(AppKit)` 内联代码变成注入的 macOS 实现。
+
+`SecurityManager`、`TempFileManager`、`MemoryProfiler`、`ConnectionStatusProber`、`ClipboardMonitor`、`ClipboardNotificationController` 按 §4.1 的归位表**留在 `HypoApp`**，它们的 AppKit 用法在 macOS 目标内合法，第 1 期不改动。iOS 侧的等价能力属于第 2 期。
+
+**二、拆分 `Services/HistoryStore.swift`（1187 行，两个职责）**：
+
+- 第 24~218 行的 `public actor HistoryStore` —— 纯持久化，进 `HypoCore`
+- 第 219~1187 行的 `ClipboardHistoryViewModel` —— macOS UI 层，依赖 `KeyboardShortcut`、`ClipboardMonitorDelegate`、`NSPasteboard`，**留在 `HypoApp`**
+
+另有两处默认参数值需要解绑：`HistoryStore.swift:272` 和 `TransportManager.swift:116` 都把 `ClipboardNotificationScheduling`（已经是协议）的默认值写成了具体的 `ClipboardNotificationController.shared`。协议本身随文件进 `HypoCore`，默认值上移到 App 层。
 
 `macos/Tests/HypoAppTests` 的 23 个测试文件是这次搬迁的回归网，全绿才算完成。
 

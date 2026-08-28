@@ -127,7 +127,11 @@ macOS 约 4500 行 UI 代码中，`HypoMenuBarApp.swift`（3404 行）、`Histor
 
 **一、把已有的条件编译守卫换成协议注入**——只涉及**迁入 `HypoCore` 且带 AppKit 耦合**的文件，共 2 处：`IncomingClipboardHandler`（`ClipboardWriting`）、`TransportManager`（`AppLifecycleObserving`）。macOS 的行为保持不变，只是实现从 `#if canImport(AppKit)` 内联代码变成注入的 macOS 实现。
 
-`SecurityManager`、`TempFileManager`、`MemoryProfiler`、`ConnectionStatusProber`、`ClipboardMonitor`、`ClipboardNotificationController` 按 §4.1 的归位表**留在 `HypoApp`**，它们的 AppKit 用法在 macOS 目标内合法，第 1 期不改动。iOS 侧的等价能力属于第 2 期。
+留在 `HypoApp` 的是：`App/` 下 6 个文件、`ClipboardMonitor`、`ClipboardNotificationController`、`SecurityManager`、`MemoryProfiler`、`RemotePairingViewModel`，以及从 `HistoryStore.swift` 拆出的 `ClipboardHistoryViewModel`。
+
+`TempFileManager` 与 `ConnectionStatusProber` **必须一起迁入 `HypoCore`**——前者被 `TransportManager.swift:138` 与 `IncomingClipboardHandler.swift:216` 真实调用，后者被 `TransportManager.swift:35` 持有。两者的 AppKit import 都已被守卫，本来就能在 iOS 上编译。
+
+另需把 `ClipboardNotificationScheduling` 协议（现声明于 `ClipboardNotificationController.swift:19`）单独提取到 `HypoCore`，具体的 `ClipboardNotificationController` 留在 `HypoApp`。
 
 **二、拆分 `Services/HistoryStore.swift`（1187 行，两个职责）**：
 

@@ -168,6 +168,30 @@ git add shared/HypoCore
 git commit -m "build(shared): add HypoCore cross-platform package skeleton"
 ```
 
+- [ ] **Step 6: 忽略新的构建产物路径**
+
+`swift build` 会生成 `shared/HypoCore/.build/`。现有 `.gitignore` 只忽略 `macos/.build/`，不补规则的话它会在后续每个任务里污染 `git status`。追加两行：
+
+```
+shared/**/.build/
+shared/**/Package.resolved
+```
+
+单独提交，不要混进 Step 5 的提交：
+
+```bash
+git add .gitignore
+git commit -m "chore: ignore HypoCore build artifacts"
+```
+
+- [ ] **Step 7: 确认工作区干净**
+
+```bash
+git status --short
+```
+
+期望：无输出。每个任务结束时工作区都必须干净，不允许留未提交的改动。
+
 ---
 
 ## Task 1B: 建立 iOS 构建的 CI 验证

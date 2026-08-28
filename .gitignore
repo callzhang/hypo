@@ -32,6 +32,8 @@ macos/*.perspectivev3
 macos/.swiftpm/
 macos/.build/
 macos/Package.resolved
+shared/**/.build/
+shared/**/Package.resolved
 
 # CocoaPods (if used)
 macos/Pods/

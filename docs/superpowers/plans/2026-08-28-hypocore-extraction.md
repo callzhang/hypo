@@ -20,15 +20,23 @@
 cd macos && swift test 2>&1 | tail -20
 ```
 
-期望输出结尾包含 `Test run with N tests passed`（当前 N 来自 23 个测试文件，任务过程中不应减少）。
+期望输出结尾包含 `Test run with N tests passed`，且 N ≥ 193。
 
-**iOS 构建验证命令**（从 Task 1 起每个任务都要跑）：
+**本机没有 Xcode。** `xcode-select -p` 指向 `/Library/Developer/CommandLineTools`，`/Applications` 下无 `Xcode.app`，因此**没有 iOS SDK、没有模拟器、`xcodebuild` 不可用**。SwiftPM 也无法绕过：交叉编译到 iOS 需要随 Xcode 分发的 iOS SDK。
+
+因此 iOS 验证分成两层：
+
+**本地可移植性闸门**（每个搬迁任务都要跑）：
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望输出包含 `BUILD SUCCEEDED`。
+期望：无输出，`exit=1`。这不能证明 iOS 构建成功，但能在本地立刻抓住最可能的破坏源——把 macOS 专有类型带进了 core。
+
+**CI 上的权威验证**：Task 1B 新增的 `ios-core-build` job 在 `macos-15` runner 上跑真正的 `xcodebuild`。**每个任务提交后都要推送并确认该 job 通过**，不要攒着一次推。
+
+**基线**：抽取开始前 `cd macos && swift test` 的结果是 `✔ Test run with 193 tests passed after 5.699 seconds.`（2026-08-28 实测）。任务过程中通过数只应增加，不应减少。
 
 **为什么 package 放在 `shared/HypoCore/` 而不是 `shared/`**：SwiftPM 对本地路径依赖使用目录名作为 package identity。放在 `shared/` 会得到 identity `shared`，产品引用要写成 `.product(name: "HypoCore", package: "shared")`，易错。放在 `shared/HypoCore/` 则 identity 与 package 名一致。第 5 期的 `HypoUI` 将来放 `shared/HypoUI/`。
 
@@ -145,19 +153,85 @@ cd shared/HypoCore && swift build 2>&1 | tail -3
 
 期望：`Build complete!`
 
-- [ ] **Step 4: 验证 iOS 构建**
+- [ ] **Step 4: 确认本地无法验证 iOS**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+xcodebuild -version 2>&1 | head -2
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：报错 `tool 'xcodebuild' requires Xcode`。这是已知状态，不是故障——iOS 构建验证由 Task 1B 建立的 CI job 承担。确认后继续。
 
 - [ ] **Step 5: 提交**
 
 ```bash
 git add shared/HypoCore
 git commit -m "build(shared): add HypoCore cross-platform package skeleton"
+```
+
+---
+
+## Task 1B: 建立 iOS 构建的 CI 验证
+
+本机无 Xcode，iOS 构建的权威结论只能来自 CI。必须在开始搬迁**之前**把这条通路建好，否则 17 个任务搬完才发现某个文件在 iOS 上编译不过，返工成本极高。
+
+**Files:**
+- Modify: `.github/workflows/ci.yml`
+
+- [ ] **Step 1: 新增 ios-core-build job**
+
+在 `.github/workflows/ci.yml` 的 `jobs:` 下追加（与 `macos-tests` 同级，缩进 2 空格）：
+
+```yaml
+  ios-core-build:
+    name: HypoCore iOS Build
+    runs-on: macos-15
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Show available iOS SDKs
+        run: xcodebuild -showsdks | grep -i ios
+      - name: Build HypoCore for iOS Simulator
+        working-directory: shared/HypoCore
+        run: |
+          xcodebuild build \
+            -scheme HypoCore \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation
+      - name: Build HypoCore for macOS
+        working-directory: shared/HypoCore
+        run: swift build
+```
+
+`macos-15` runner 自带 Xcode 与 iOS SDK，与现有 `macos-tests` job 用的是同一类 runner。
+
+- [ ] **Step 2: 本地校验 YAML 语法**
+
+```bash
+python3 -c "import yaml; d=yaml.safe_load(open('.github/workflows/ci.yml')); print(sorted(d['jobs'].keys()))"
+```
+
+期望：输出的 job 列表包含 `ios-core-build`，且不抛异常。若本机无 PyYAML，先 `pip3 install pyyaml`。
+
+- [ ] **Step 3: 提交并推送**
+
+```bash
+git add .github/workflows/ci.yml
+git commit -m "ci: build HypoCore for iOS on every push"
+git push -u origin feat/ios-hypocore
+```
+
+- [ ] **Step 4: 确认 CI 通过**
+
+```bash
+gh run list --branch feat/ios-hypocore --limit 3
+```
+
+等到 `HypoCore iOS Build` 显示 `success`。失败则先读日志修好再进入 Task 2——**这条通路不通，后续所有任务的 iOS 验证都是空的**。
+
+```bash
+gh run view --log-failed
 ```
 
 ---
@@ -254,13 +328,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿。若报某个符号不可见，说明该符号缺少 `public` 修饰——为它加上 `public`，不要改回内部可见性，也不要把文件搬回去。
 
-- [ ] **Step 3: 验证 iOS 构建**
+- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 4: 提交**
 
@@ -346,13 +420,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，且新增的 `DeviceIdentityPlatformTests` 通过。
 
-- [ ] **Step 6: 验证 iOS 构建**
+- [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 7: 提交**
 
@@ -400,13 +474,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿。`CryptoServiceTests` 必须通过——它校验的是与 Android 互通的加密行为，一旦回归就是协议级故障。
 
-- [ ] **Step 4: 验证 iOS 构建**
+- [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 5: 提交**
 
@@ -439,13 +513,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，含 `BonjourBrowserTests` 与 `BonjourPublisherTests`。
 
-- [ ] **Step 3: 验证 iOS 构建**
+- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 4: 提交**
 
@@ -481,13 +555,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，含 `TransportFrameCodecTests`、`TokenBucketTests`、`WebSocketTransportTests`、`TransportMetricsAggregatorTests`。
 
-- [ ] **Step 3: 验证 iOS 构建**
+- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 4: 提交**
 
@@ -523,13 +597,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，含 `LanWebSocketTransportTests`、`LanWebSocketServerTests`、`LanWebSocketServerBufferTests`、`LanSyncTransportTests`、`CloudRelayTransportTests`。
 
-- [ ] **Step 3: 验证 iOS 构建**
+- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`。`LanWebSocketServer.swift` 用的是 `NWListener`，iOS 上可编译；它在 iOS 上不启动是运行时决策（第 2 期），不是编译期决策。
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。。`LanWebSocketServer.swift` 用的是 `NWListener`，iOS 上可编译；它在 iOS 上不启动是运行时决策（第 2 期），不是编译期决策。
 
 - [ ] **Step 4: 提交**
 
@@ -576,13 +650,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，含 `PairingSessionTests`。
 
-- [ ] **Step 4: 验证 iOS 构建**
+- [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 5: 提交**
 
@@ -710,13 +784,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，新增 `StorageLocationsTests` 通过。
 
-- [ ] **Step 6: 验证 iOS 构建**
+- [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 7: 提交**
 
@@ -788,13 +862,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，含 `HistoryStoreTests`。若 `HistoryStoreTests` 同时覆盖 actor 与 ViewModel，保持它留在 `HypoAppTests` 不动——Task 15 才决定测试归属。
 
-- [ ] **Step 6: 验证 iOS 构建**
+- [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 7: 提交**
 
@@ -1004,13 +1078,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，含 `HistoryStoreTests` 与新增的 `HistoryPersistenceTests`。
 
-- [ ] **Step 6: 验证 iOS 构建**
+- [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 7: 提交**
 
@@ -1047,13 +1121,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，含 `SyncEngineTests`、`ClipboardEventDispatcherTests`。
 
-- [ ] **Step 3: 验证 iOS 构建**
+- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 4: 提交**
 
@@ -1254,13 +1328,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，含 `TransportManagerTests`、`TransportManagerLanTests` 与新增的 `AppLifecycleObservingTests`。
 
-- [ ] **Step 8: 验证 iOS 构建**
+- [ ] **Step 8: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 9: 提交**
 
@@ -1468,13 +1542,13 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿，含 `IncomingClipboardHandlerTests` 与新增的 `ClipboardWritingTests`。若 `IncomingClipboardHandlerTests` 里构造 handler 时传了 `pasteboard:`，改为传 `RecordingClipboardWriter()`，并把断言从检查 `NSPasteboard.general` 改为检查 `writer.writtenTexts` 等记录属性。
 
-- [ ] **Step 7: 验证 iOS 构建**
+- [ ] **Step 7: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -5
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
 ```
 
-期望：`BUILD SUCCEEDED`
+期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
 - [ ] **Step 8: 确认全包已无裸 AppKit import**
 
@@ -1557,13 +1631,28 @@ cd shared/HypoCore && swift test 2>&1 | tail -20
 
 期望：全绿。若某个文件引用了留在 `HypoAppTests` 的 `MockSupport.swift` / `TestSupport.swift` 中的辅助类型，把**该辅助类型**复制进 `shared/HypoCore/Tests/HypoCoreTests/CoreTestSupport.swift`；若某个测试文件对 macOS 类型的依赖无法解开，把该文件移回 `macos/Tests/HypoAppTests/` 并在本计划此处记录原因。
 
-- [ ] **Step 5: 运行 HypoCore 测试（iOS 模拟器）**
+- [ ] **Step 5: 把 iOS 模拟器测试加进 CI job**
 
-```bash
-cd shared/HypoCore && xcodebuild test -scheme HypoCore -destination 'platform=iOS Simulator,name=iPhone 16' 2>&1 | tail -20
+本机跑不了模拟器测试，加到 Task 1B 建立的 job 里。在 `.github/workflows/ci.yml` 的 `ios-core-build` job 末尾追加一步：
+
+```yaml
+      - name: Run HypoCore tests on iOS Simulator
+        working-directory: shared/HypoCore
+        run: |
+          xcodebuild test \
+            -scheme HypoCore \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -skipMacroValidation \
+            -enableCodeCoverage NO
 ```
 
-期望：`TEST SUCCEEDED`。若本机无 `iPhone 16` 模拟器，先用 `xcrun simctl list devicetypes` 选一个已安装的机型替换 `name=`。
+提交推送后确认该步骤通过：
+
+```bash
+gh run list --branch feat/ios-hypocore --limit 3
+```
+
+若 runner 上无 `iPhone 16` 机型，在该步骤前加一步 `xcrun simctl list devicetypes` 查看可用机型并替换 `name=`。
 
 - [ ] **Step 6: 运行 HypoApp 测试**
 
@@ -1611,7 +1700,9 @@ spec §2.2 的前提是 macOS 的构建、签名、CI 一律不动。这一任�
 grep -n "xcodebuild" .github/workflows/ci.yml
 ```
 
-CI 走 `xcodebuild` 指向 `macos/HypoApp.xcworkspace`，而该 workspace 引用的是 `Package.swift`（`macos/HypoApp.xcworkspace/contents.xcworkspacedata`）。新增的本地依赖由 SwiftPM 解析，workspace 文件不需要改。确认这一点后无需修改任何 CI 文件。
+现有 `macos-tests` job 在 `macos-15` runner 上跑 `xcodebuild test -scheme HypoApp-Package -destination 'platform=macOS'`，并且会先 `rm -rf HypoApp.xcworkspace`，因此直接使用 `Package.swift`。新增的本地路径依赖由 SwiftPM 自动解析，**该 job 无需任何修改**。
+
+本任务只确认 `macos-tests`、`backend-tests`、`android-tests` 三个既有 job 未被改动；Task 1B 与 Task 16 新增的 `ios-core-build` 是有意添加，不算违反。
 
 - [ ] **Step 4: 确认工作区干净**
 
@@ -1626,10 +1717,10 @@ git status --short
 ```bash
 cd macos && swift test 2>&1 | tail -5
 cd shared/HypoCore && swift test 2>&1 | tail -5
-cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build 2>&1 | tail -3
+gh run list --branch feat/ios-hypocore --limit 1
 ```
 
-期望：前两条 `Test run with N tests passed`，第三条 `BUILD SUCCEEDED`。
+期望：前两条 `Test run with N tests passed`，两个目标的通过数之和不少于基线 193；第三条显示最近一次 CI 全绿，含 `HypoCore iOS Build`。
 
 - [ ] **Step 6: 提交（若 Step 4 产生了 .gitignore 改动）**
 
@@ -1642,12 +1733,12 @@ git commit -m "chore: ignore HypoCore build artifacts"
 
 ## 第 1 期完成定义
 
-1. `cd macos && swift test` 全绿，通过数不少于抽取前
+1. `cd macos && swift test` 全绿；macOS 与 HypoCore 两个测试目标的通过数之和不少于基线 193
 2. `cd shared/HypoCore && swift test` 全绿
-3. `cd shared/HypoCore && xcodebuild -scheme HypoCore -destination 'generic/platform=iOS Simulator' build` 成功
-4. `cd shared/HypoCore && xcodebuild test -scheme HypoCore -destination 'platform=iOS Simulator,...'` 成功
+3. CI 的 `ios-core-build` job 中 `Build HypoCore for iOS Simulator` 步骤成功（本机无 Xcode，这是唯一的权威验证）
+4. CI 的 `ios-core-build` job 中 `Run HypoCore tests on iOS Simulator` 步骤成功
 5. `./scripts/build-macos.sh` 与 `./scripts/build-macos.sh release` 均成功
 6. `shared/HypoCore/Sources/` 下无裸 `import AppKit`
-7. `.github/workflows/` 与 `scripts/` 下无任何改动
+7. `scripts/` 下无任何改动；`.github/workflows/ci.yml` 仅新增 `ios-core-build` job，三个既有 job 未被修改
 
 达成后进入第 2 期（iOS 前台版），届时另写一份计划。

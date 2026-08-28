@@ -422,14 +422,32 @@ posture. Both are opt-in, and the cloud setting states the consequence in the UI
 
 ### 8.1 Shared test vectors
 
-`Hypo.Core.Tests` (xUnit) consumes `tests/transport/*.json` — the crypto and
-transport fixtures already shared by the macOS and Android suites. Passing the
-same fixtures establishes byte-level agreement on protocol encoding, gzip,
-AES-GCM and HKDF with the other two clients.
+`Hypo.Core.Tests` (xUnit) consumes the fixtures already shared by the macOS and
+Android suites. Both existing clients read these same two files:
 
-This is the primary mechanism preventing a third client implementation from
-drifting, not a supplementary one. It is also why the Rust-shared-core approach
-was rejected (§10).
+| Fixture | Covers |
+|---------|--------|
+| `tests/crypto_test_vectors.json` | HKDF salt and info constants, an AES-256-GCM case (RFC 5116 case 17), and an X25519 key agreement with its expected derived key |
+| `tests/transport/frame_vectors.json` | `TransportFrameCodec` framing — base64 wire bytes paired with the decoded envelope |
+
+The HKDF constants are `salt = "hypo-clipboard-ecdh"` and
+`info = "hypo-aes-256-gcm"`, recorded base64-encoded in the fixture.
+
+Passing these establishes byte-level agreement on frame encoding, AES-GCM and
+X25519/HKDF with the other two clients. This is the primary mechanism preventing
+a third client implementation from drifting, not a supplementary one. It is also
+why the Rust-shared-core approach was rejected (§10).
+
+**Known gap: gzip is not covered by any shared fixture.** Compression sits
+between JSON encoding and encryption (protocol §3.6) and is currently verified
+only by each client's own round-trip tests, which cannot catch cross-client
+divergence. The implementation plan adds a gzip vector to
+`tests/crypto_test_vectors.json` and back-fills it into the macOS and Android
+suites, so all three clients verify the same bytes.
+
+The other two files under `tests/transport/` — `cloud_metrics.json` and
+`lan_loopback_metrics.json` — are latency baselines for the transport metrics
+aggregator, not correctness vectors.
 
 ### 8.2 Coverage and suites
 

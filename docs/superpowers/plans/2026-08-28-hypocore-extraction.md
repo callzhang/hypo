@@ -344,7 +344,15 @@ git mv macos/Sources/HypoApp/Utilities/Logger.swift shared/HypoCore/Sources/Hypo
 git mv macos/Sources/HypoApp/Utilities/StringExtensions.swift shared/HypoCore/Sources/HypoCore/Utils/StringExtensions.swift
 ```
 
-- [ ] **Step 2: 运行测试**
+- [ ] **Step 2: 删除占位文件**
+
+Task 1 建的 `Sources/HypoCore/HypoCore.swift` 只是为了让 target 有源文件。本任务搬进 4 个真文件后它就没用了，且它的类型名与模块同名（`HypoCore.HypoCore`），留着会变成死代码。Task 2 的再导出验证已经用完它了，现在删：
+
+```bash
+git rm shared/HypoCore/Sources/HypoCore/HypoCore.swift
+```
+
+- [ ] **Step 3: 运行测试**
 
 ```bash
 cd macos && swift test 2>&1 | tail -20
@@ -352,7 +360,7 @@ cd macos && swift test 2>&1 | tail -20
 
 期望：全绿。若报某个符号不可见，说明该符号缺少 `public` 修饰——为它加上 `public`，不要改回内部可见性，也不要把文件搬回去。
 
-- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
+- [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
 
 ```bash
 cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
@@ -360,7 +368,7 @@ cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplicat
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
 
-- [ ] **Step 4: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
 git add -A

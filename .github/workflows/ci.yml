@@ -118,3 +118,24 @@ jobs:
         with:
           name: macos-test-results
           path: ${{ runner.temp }}/hypo-macos-tests.xcresult
+
+  ios-core-build:
+    name: HypoCore iOS Build
+    runs-on: macos-15
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Show available iOS SDKs
+        run: xcodebuild -showsdks | grep -i ios
+      - name: Build HypoCore for iOS Simulator
+        working-directory: shared/HypoCore
+        run: |
+          xcodebuild build \
+            -scheme HypoCore \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation
+      - name: Build HypoCore for macOS
+        working-directory: shared/HypoCore
+        run: swift build

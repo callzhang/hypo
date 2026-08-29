@@ -3,9 +3,6 @@ import CryptoKit
 #if canImport(Combine)
 import Combine
 #endif
-#if canImport(AppKit)
-import AppKit
-#endif
 #if canImport(os)
 import os
 #endif
@@ -93,9 +90,7 @@ public final class TransportManager: ObservableObject {
 
     public var webSocketServerInstance: LanWebSocketServer { webSocketServer }
 
-    #if canImport(AppKit)
-    private var lifecycleObserver: ApplicationLifecycleObserver?
-    #endif
+    private let lifecycleObserver: AppLifecycleObserving?
 
     private let notificationController: ClipboardNotificationScheduling
 
@@ -114,6 +109,7 @@ public final class TransportManager: ObservableObject {
         defaults: UserDefaults = .standard,
         dispatcher: ClipboardEventDispatcher? = nil,
         notificationController: ClipboardNotificationScheduling,
+        lifecycleObserver: AppLifecycleObserving? = nil,
         autoStartLanServices: Bool = true
     ) {
         self.defaults = defaults
@@ -133,6 +129,7 @@ public final class TransportManager: ObservableObject {
         self.webSocketServer = webSocketServer
         self.dispatcher = dispatcher ?? ClipboardEventDispatcher()
         self.notificationController = notificationController
+        self.lifecycleObserver = lifecycleObserver
 
         // Configure TempFileManager with the dispatcher
         TempFileManager.shared.configure(dispatcher: self.dispatcher)
@@ -218,9 +215,8 @@ public final class TransportManager: ObservableObject {
         }
 
         if autoStartLanServices {
-            #if canImport(AppKit)
             // Consolidated Application Lifecycle Observer
-            self.lifecycleObserver = ApplicationLifecycleObserver(
+            lifecycleObserver?.start(
                 onActivate: { [weak self] in
                     Task { @MainActor in
                         await self?.activateLanServices()
@@ -234,6 +230,7 @@ public final class TransportManager: ObservableObject {
                     Task { await self?.shutdownLanServices() }
                 }
             )
+            #if canImport(AppKit)
             // Start LAN services immediately (menu bar apps don't trigger didBecomeActive on launch)
             initTask = Task { @MainActor [weak self] in
                 guard let self = self else { return }
@@ -1564,30 +1561,6 @@ public struct UserDefaultsLanDiscoveryCache: LanDiscoveryCache {
         let lastSeen: Date
     }
 }
-
-#if canImport(AppKit)
-private final class ApplicationLifecycleObserver {
-    private var tokens: [NSObjectProtocol] = []
-
-    init(onActivate: @escaping @Sendable () -> Void, onDeactivate: @escaping @Sendable () -> Void, onTerminate: @escaping @Sendable () -> Void) {
-        let center = NotificationCenter.default
-        tokens.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            onActivate()
-        })
-        tokens.append(center.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
-            onDeactivate()
-        })
-        tokens.append(center.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
-            onTerminate()
-        })
-    }
-
-    deinit {
-        let center = NotificationCenter.default
-        tokens.forEach { center.removeObserver($0) }
-    }
-}
-#endif
 
 // MARK: - LanWebSocketServerDelegate
 

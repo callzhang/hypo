@@ -19,7 +19,7 @@ import SwiftUI
 #endif
 
 @MainActor
-public final class ClipboardHistoryViewModel: ObservableObject {
+public final class ClipboardHistoryViewModel: ObservableObject, RemoteEntryReceiving {
     @Published public private(set) var items: [ClipboardEntry] = []
     @Published public private(set) var latestItem: ClipboardEntry?
     @Published public var historyLimit: Int = 200

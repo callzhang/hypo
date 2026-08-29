@@ -28,7 +28,7 @@ public final class TransportManager: ObservableObject {
     private var lanConfiguration: BonjourPublisher.Configuration
     private let webSocketServer: LanWebSocketServer
     private let incomingHandler: IncomingClipboardHandler?
-    private weak var historyViewModel: ClipboardHistoryViewModel?
+    private weak var historyViewModel: (any RemoteEntryReceiving)?
     private var connectionStatusProber: ConnectionStatusProber?
     private var lanConnectedDeviceIds = Set<String>()
     private var cloudConnectedDeviceIds = Set<String>()
@@ -437,7 +437,7 @@ public final class TransportManager: ObservableObject {
         return provider.preferredTransport()
     }
 
-    public func setHistoryViewModel(_ viewModel: ClipboardHistoryViewModel) {
+    public func setHistoryViewModel(_ viewModel: any RemoteEntryReceiving) {
         logger.info("🔧 [TransportManager] setHistoryViewModel called")
         
         self.historyViewModel = viewModel

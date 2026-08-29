@@ -96,23 +96,38 @@ async Task PairAsync(string? target)
     await using var client = new LanWebSocketClient(peer, deviceId);
     var ackReceived = new TaskCompletionSource<PairingAckMessage>();
 
-    client.EnvelopeReceived += (_, e) =>
+    client.PairingMessageReceived += (_, e) =>
     {
-        var ack = TryReadAck(e.Envelope);
-        if (ack is not null)
+        try
         {
-            ackReceived.TrySetResult(ack);
+            var ack = JsonSerializer.Deserialize<PairingAckMessage>(e.Json, ProtocolJson.Options);
+            if (ack is not null)
+            {
+                ackReceived.TrySetResult(ack);
+            }
         }
-        else
+        catch (JsonException)
         {
-            PrintClipboard(e);
+            Console.WriteLine($"Ignoring unparseable pairing message: {e.Json}");
         }
     };
+    client.EnvelopeReceived += (_, e) => PrintClipboard(e);
 
     await client.ConnectAsync();
-    await client.SendAsync(WrapControl(challenge));
+    await client.SendPairingAsync(challenge);
 
-    var ack = await ackReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
+    PairingAckMessage ack;
+    try
+    {
+        ack = await ackReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
+    }
+    catch (TimeoutException)
+    {
+        Console.WriteLine(
+            "No pairing reply within 30s. The peer accepted the connection but did not answer.");
+        return;
+    }
+
     var completed = session.CompleteWithAck(ack, peer.PublicKey);
 
     if (completed is null)
@@ -188,36 +203,3 @@ static string Preview(ClipboardPayload payload) =>
     payload.ContentType is ContentType.Text or ContentType.Link
         ? Encoding.UTF8.GetString(payload.Data)
         : $"{payload.Data.Length} bytes";
-
-static SyncEnvelope WrapControl(PairingChallengeMessage challenge) => new()
-{
-    Id = Guid.NewGuid(),
-    Timestamp = DateTimeOffset.UtcNow,
-    Type = MessageType.Control,
-    Payload = new EnvelopePayload
-    {
-        ContentType = ContentType.Text,
-        Ciphertext = JsonSerializer.SerializeToUtf8Bytes(challenge, ProtocolJson.Options),
-        DeviceId = challenge.InitiatorDeviceId,
-        DevicePlatform = "windows",
-        Encryption = new EncryptionMetadata { Nonce = [], Tag = [] },
-    },
-};
-
-static PairingAckMessage? TryReadAck(SyncEnvelope envelope)
-{
-    if (envelope.Type != MessageType.Control)
-    {
-        return null;
-    }
-
-    try
-    {
-        return JsonSerializer.Deserialize<PairingAckMessage>(
-            envelope.Payload.Ciphertext, ProtocolJson.Options);
-    }
-    catch (JsonException)
-    {
-        return null;
-    }
-}

@@ -3611,6 +3611,103 @@ receive path to recognise a bare pairing message before handing bytes to
 `FrameReader`. That is the first thing Plan 3 has to design, and `WrapControl`
 should be deleted rather than generalised.
 
+### Task 18 outcome
+
+Attempted 2026-08-29, immediately after Task 17 split the transport by opcode.
+Same machine, same phone, same session as the Task 15 attempt above.
+
+**Step 1 — discovery, unchanged.** `cd windows && dotnet run --project
+tools/Hypo.Harness -- discover`:
+
+```
+Browsing for _hypo._tcp peers for 12s...
+  OPPO PLP110
+    address    10.0.0.17:7010
+    device_id  bbe296d6-0785-43d2-91b6-b135b72f4c41
+    version    1.1.6-debug
+    pub_key    ZuPQTwT2QainOfqI5TikmthXtYGM6ENfrtH3szCnfEo=
+```
+
+Still only the Android client. The macOS peer never appeared, and it was not
+started — it is the user's clipboard application, not this plan's to launch.
+
+**Step 5 — pairing still did not complete, but for a different reason and a
+smaller one.** `dotnet run --project tools/Hypo.Harness -- pair
+bbe296d6-0785-43d2-91b6-b135b72f4c41`:
+
+```
+Pairing with OPPO PLP110 at 10.0.0.17:7010...
+No pairing reply within 30s. The peer accepted the connection but did not answer.
+```
+
+No stack trace this time — Step 3's timeout handling did its job — but also no
+ack. The message is, as it turns out, wrong: the peer *did* answer.
+
+**The send side is now correct. This was measured, not assumed.** A throwaway
+probe (scratch only, not committed) built the challenge with `Hypo.Core`'s own
+`PairingSession`, serialised it as bare JSON exactly as `SendPairingAsync` now
+does, and sent it three ways to the same phone. All three were answered within a
+second:
+
+```
+[text-raw] connected; sending 426 bytes as Text
+[text-raw] <-- Binary 374 bytes eom=True
+[text-raw]     {"challenge_id":"8f9ebd03-a4d1-4de5-896e-98627c6aa290","responder_device_id":"bbe296d6-...",
+                "responder_device_name":"OPPO PLP110","nonce":"G3zy8LZAnu9SSiIA","ciphertext":"G2+vD8Nf...
+
+[binary-raw] connected; sending 426 bytes as Binary
+[binary-raw] <-- Binary 374 bytes eom=True
+
+[binary-prefix] connected; sending 430 bytes as Binary
+[binary-prefix] <-- Binary 374 bytes eom=True
+```
+
+So Task 17's challenge shape interoperates. A bare `PairingChallengeMessage` in
+a text frame is recognised by the shipping Android client and answered with a
+well-formed `PairingAckMessage`. Gap 1 from the Task 15 record is closed.
+
+**Gap 2 is not closed, and the opcode is not the discriminator we assumed.**
+Android replies to a pairing challenge with a **binary** frame carrying bare,
+unprefixed JSON — `Binary 374 bytes` on all three shapes above, including the
+one we sent as text. The Kotlin source says why:
+`LanWebSocketServer.sendPairingAck(ackJson, to)` calls `send(ackJson.toByteArray())`,
+and Java-WebSocket's `send(byte[])` is opcode `0x2`. There is no text-frame path
+on Android's ack at all.
+
+Task 17's split therefore routes that ack into `FrameReader`, which reads its
+first four bytes `{"ch` as a big-endian length of 2,065,851,240, exceeds the
+20,971,520-byte ceiling, throws `TransportFrameException`, and faults the
+connection — the identical failure Task 15 recorded, now reached by a different
+route. `PairingMessageReceived` never fires and the harness waits out its 30
+seconds.
+
+**What the two clients actually do, side by side.** This is the table Task 17
+was written from, corrected by measurement:
+
+| | macOS | Android |
+|---|---|---|
+| Challenge accepted as | text frame, bare JSON | text or binary, prefixed or bare |
+| Ack sent as | text frame (`0x1`), bare JSON | **binary frame (`0x2`), bare JSON** |
+
+The macOS column is read off `LanWebSocketServer.swift`'s `sendFrame(opcode: 0x1)`
+and remains unmeasured; the macOS peer was not running. The Android column is
+measured, three times.
+
+**Where this leaves the plan.** Done criterion 2 is met. Criterion 3 is closer
+than it was — the challenge now interoperates and the cryptography was already
+proven — but is still not met, and criterion 4 follows it.
+
+The remaining gap is one decision, and it is a design decision rather than a
+bug, which is why this task stopped here instead of guessing at it: **the
+WebSocket opcode alone cannot classify an inbound frame from Android.** A binary
+frame may be either a length-prefixed `SyncEnvelope` or a bare pairing ack, and
+only its content distinguishes them. The obvious candidate is to sniff the first
+byte on the binary path — `{` cannot begin a valid length prefix, because a
+frame of 2,065,851,240 bytes is already over the ceiling `FrameReader` enforces
+— and hand such frames to the pairing channel instead. That is a deliberate
+protocol-sniffing rule with its own failure modes, and it belongs in a plan
+rather than in an improvised third framing.
+
 ---
 
 ## Task 16: CI

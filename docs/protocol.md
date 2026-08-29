@@ -633,9 +633,18 @@ function can_send():
 
 **Key Derivation**:
 ```
-shared_secret = ECDH(client_private_key, server_public_key)
-encryption_key = HKDF-SHA256(shared_secret, salt="hypo-clipboard-v1", length=32)
+shared_secret  = X25519(own_private_key, peer_public_key)
+encryption_key = HKDF-SHA256(
+    ikm    = shared_secret,
+    salt   = "hypo-clipboard-ecdh",
+    info   = "hypo-aes-256-gcm",
+    length = 32)
 ```
+
+The exchange is peer to peer. The relay never holds or derives a key; it
+forwards ciphertext it cannot read. The `salt` and `info` byte strings are
+fixed and are recorded, base64-encoded, in `tests/crypto_test_vectors.json`,
+which every client's test suite verifies against.
 
 **Key Rotation During Pairing** (Implemented November 2025):
 - Keys are always rotated during pairing requests, even when re-pairing with existing devices
@@ -647,15 +656,31 @@ encryption_key = HKDF-SHA256(shared_secret, salt="hypo-clipboard-v1", length=32)
 
 **Encryption Process**:
 ```
-nonce = random_bytes(12)
-associated_data = device_id + timestamp
+nonce           = random_bytes(12)
+associated_data = utf8(sender_device_id)        # lowercase UUID, no timestamp
+plaintext       = gzip(json(ClipboardPayload))  # see section 3.6
 ciphertext, tag = AES-256-GCM.encrypt(
-    key=encryption_key,
-    nonce=nonce,
-    plaintext=clipboard_data,
-    associated_data=associated_data
+    key             = encryption_key,
+    nonce           = nonce,
+    plaintext       = plaintext,
+    associated_data = associated_data
 )
 ```
+
+**The associated data is the sender's device id alone.** Earlier revisions of
+this document described it as `device_id + timestamp`; no client has ever
+implemented that, and a client that did would fail authentication on every
+message against every peer. The shipping implementations are the authority:
+
+| Client | Encrypt | Decrypt |
+|--------|---------|---------|
+| macOS | `Data(entry.deviceId.utf8)` (`SyncEngine.swift`) | `Data(senderId.utf8)` |
+| Android | `normalizedSenderDeviceId.encodeToByteArray()` | `deviceId.lowercase().encodeToByteArray()` |
+
+Device ids are lowercase UUIDs (section 3.4), so the two forms agree for any
+conforming peer. Android normalises defensively on both sides; macOS relies on
+the value already being lowercase. New clients should follow Android and
+normalise, which fails closed rather than mismatching silently.
 
 ### 9.3 Rate Limiting
 

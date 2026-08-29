@@ -387,12 +387,17 @@ class ClipboardParser(
                 return null
             }
 
-            if (localPath == null) return null
+            // localPath is assigned inside the use { } lambda above, so Kotlin
+            // will not smart-cast it after a null check: a var captured by a
+            // closure could in principle be reassigned between the check and the
+            // use. Binding it to a val is what the compiler needs. This also
+            // drops a @Suppress("SENSELESS_COMPARISON") that silenced a
+            // different diagnostic than the one actually being reported, which
+            // is why the warning survived it.
+            val savedPath = localPath ?: return null
 
             // Verify size from saved file (optional, but good practice)
-            // Safe to use localPath directly since we checked for null above
-            @Suppress("SENSELESS_COMPARISON")
-            val savedFile = File(localPath)
+            val savedFile = File(savedPath)
             if (savedFile.length() > SizeConstants.MAX_ATTACHMENT_BYTES) {
                  android.util.Log.w("ClipboardParser", "⚠️ Saved file too large: ${formatBytes(savedFile.length())}, deleting...")
                  savedFile.delete()
@@ -417,7 +422,7 @@ class ClipboardParser(
                 preview = preview,
                 metadata = meta,
                 createdAt = Instant.now(),
-                localPath = localPath
+                localPath = savedPath
             )
         } catch (e: SecurityException) {
             android.util.Log.d("ClipboardParser", "🔒 parseFile: Clipboard access blocked: ${e.message}")

@@ -1,9 +1,12 @@
 package com.hypo.clipboard.crypto
 
+import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.GeneralSecurityException
 import java.util.Base64
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 import kotlin.test.assertContentEquals
 import kotlin.test.assertFailsWith
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -87,6 +90,21 @@ class CryptoServiceTest {
         }
     }
 
+    @Test
+    fun `decompresses shared gzip vector`() {
+        val gzip = requireNotNull(loadVectors().gzip) { "crypto_test_vectors.json has no gzip section" }
+
+        val decompressed = GZIPInputStream(gzip.compressed.inputStream()).use { it.readBytes() }
+        assertContentEquals(gzip.plaintext, decompressed)
+
+        val ownCompressed = ByteArrayOutputStream().use { out ->
+            GZIPOutputStream(out).use { it.write(gzip.plaintext) }
+            out.toByteArray()
+        }
+        val roundTripped = GZIPInputStream(ownCompressed.inputStream()).use { it.readBytes() }
+        assertContentEquals(gzip.plaintext, roundTripped)
+    }
+
     private fun loadVectors(): CryptoVectors {
         val path = locateRepositoryRoot().resolve("tests/crypto_test_vectors.json")
         val content = Files.readAllBytes(path).decodeToString()
@@ -110,7 +128,8 @@ class CryptoServiceTest {
     @Serializable
     private data class CryptoVectors(
         @SerialName("test_cases") val testCases: List<TestCase>,
-        @SerialName("key_agreement") val keyAgreement: KeyAgreement
+        @SerialName("key_agreement") val keyAgreement: KeyAgreement,
+        @SerialName("gzip") val gzip: GzipVector? = null
     ) {
         @Serializable
         data class TestCase(
@@ -143,6 +162,15 @@ class CryptoServiceTest {
             val bobPrivate: ByteArray get() = decode(bobPrivateBase64)
             val bobPublic: ByteArray get() = decode(bobPublicBase64)
             val sharedKey: ByteArray get() = decode(sharedKeyBase64)
+        }
+
+        @Serializable
+        data class GzipVector(
+            @SerialName("plaintext_base64") val plaintextBase64: String,
+            @SerialName("compressed_base64") val compressedBase64: String
+        ) {
+            val plaintext: ByteArray get() = decode(plaintextBase64)
+            val compressed: ByteArray get() = decode(compressedBase64)
         }
 
         companion object {

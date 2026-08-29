@@ -90,6 +90,18 @@ struct CryptoServiceTests {
 
         #expect(derivedData == vectors.keyAgreement.sharedKey)
     }
+
+    @Test
+    func testDecompressesSharedGzipVector() throws {
+        let vectors = try loadCryptoVectors()
+        let gzip = try #require(vectors.gzip)
+
+        let decompressed = try CompressionUtils.decompress(gzip.compressed)
+        #expect(decompressed == gzip.plaintext)
+
+        let roundTripped = try CompressionUtils.decompress(CompressionUtils.compress(gzip.plaintext))
+        #expect(roundTripped == gzip.plaintext)
+    }
 }
 
 private struct DeterministicNonceGenerator: NonceGenerating {
@@ -164,12 +176,27 @@ private struct CryptoVectors: Decodable {
         }
     }
 
+    struct GzipVector: Decodable {
+        let plaintextBase64: String
+        let compressedBase64: String
+
+        var plaintext: Data { Data(base64Encoded: plaintextBase64) ?? Data() }
+        var compressed: Data { Data(base64Encoded: compressedBase64) ?? Data() }
+
+        private enum CodingKeys: String, CodingKey {
+            case plaintextBase64 = "plaintext_base64"
+            case compressedBase64 = "compressed_base64"
+        }
+    }
+
     let testCases: [TestCase]
     let keyAgreement: KeyAgreement
+    let gzip: GzipVector?
 
     enum CodingKeys: String, CodingKey {
         case testCases = "test_cases"
         case keyAgreement = "key_agreement"
+        case gzip
     }
 
 }

@@ -31,6 +31,8 @@ macos/*.perspectivev3
 # Swift Package Manager
 macos/.swiftpm/
 macos/.build/
+macos/.derived/
+macos/.spm-cache/
 macos/Package.resolved
 shared/**/.build/
 shared/**/Package.resolved

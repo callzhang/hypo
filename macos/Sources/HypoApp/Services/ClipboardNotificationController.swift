@@ -37,7 +37,18 @@ public final class ClipboardNotificationController: NSObject, ClipboardNotificat
         if Bundle.main.bundlePath.hasSuffix(".xctest") {
             return true
         }
-        return NSClassFromString("XCTest") != nil
+        // Swift Testing's runner trips none of the XCTest signals above. Under
+        // Xcode 16+ toolchains `swift test` runs via swiftpm-testing-helper,
+        // whose main bundle is SwiftPM's own host directory rather than an app
+        // bundle — so UNUserNotificationCenter.current() would throw
+        // "bundleProxyForCurrentProcess is nil" instead of being skipped.
+        if Bundle.main.bundlePath.contains("/usr/libexec/swift/pm") {
+            return true
+        }
+        if NSClassFromString("XCTest") != nil {
+            return true
+        }
+        return NSClassFromString("Testing.Test") != nil
     }()
 
     public init?(

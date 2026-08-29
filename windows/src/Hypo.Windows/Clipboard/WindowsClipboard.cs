@@ -17,8 +17,19 @@ namespace Hypo.Windows.Clipboard;
 [SupportedOSPlatform("windows")]
 public static class WindowsClipboard
 {
-    private const int OpenAttempts = 10;
+    private const int OpenAttempts = 25;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(20);
+
+    /// <summary>
+    /// Serialises clipboard sessions inside this process.
+    ///
+    /// <para>The clipboard is a single system-wide resource, and two of our own
+    /// threads reaching for it produces failures that look like someone else's
+    /// contention but are entirely self-inflicted -- EmptyClipboard reporting a
+    /// clipboard that is not open being the one CI found. With this, the retry
+    /// below is left handling only the contention that is genuinely external.</para>
+    /// </summary>
+    private static readonly Lock Gate = new();
 
     /// <summary>Reads CF_UNICODETEXT, or null when the clipboard holds no text.</summary>
     public static string? ReadText()
@@ -77,7 +88,9 @@ public static class WindowsClipboard
         // previous owner's data in place and is a documented way to leak it.
         if (!NativeMethods.EmptyClipboard())
         {
-            throw new Win32Exception(Marshal.GetLastPInvokeError(), "EmptyClipboard failed.");
+            throw new Win32Exception(
+                Marshal.GetLastPInvokeError(),
+                $"EmptyClipboard failed (error {Marshal.GetLastPInvokeError()}).");
         }
 
         var handle = NativeMethods.GlobalAlloc(NativeMethods.GmemMoveable, (nuint)bytes.Length);
@@ -105,7 +118,9 @@ public static class WindowsClipboard
 
             if (NativeMethods.SetClipboardData(ClipboardFormats.CfUnicodeText, handle) == 0)
             {
-                throw new Win32Exception(Marshal.GetLastPInvokeError(), "SetClipboardData failed.");
+                throw new Win32Exception(
+                    Marshal.GetLastPInvokeError(),
+                    $"SetClipboardData failed (error {Marshal.GetLastPInvokeError()}).");
             }
 
             // Ownership passed to the clipboard on success; freeing it now would
@@ -127,15 +142,27 @@ public static class WindowsClipboard
 
     private static ClipboardSession Open()
     {
-        for (var attempt = 0; attempt < OpenAttempts; attempt++)
-        {
-            if (NativeMethods.OpenClipboard(0))
-            {
-                return new ClipboardSession();
-            }
+        Gate.Enter();
 
-            Thread.Sleep(RetryDelay);
+        try
+        {
+            for (var attempt = 0; attempt < OpenAttempts; attempt++)
+            {
+                if (NativeMethods.OpenClipboard(0))
+                {
+                    return new ClipboardSession();
+                }
+
+                Thread.Sleep(RetryDelay);
+            }
         }
+        catch
+        {
+            Gate.Exit();
+            throw;
+        }
+
+        Gate.Exit();
 
         throw new Win32Exception(
             Marshal.GetLastPInvokeError(),
@@ -145,6 +172,10 @@ public static class WindowsClipboard
 
     private readonly struct ClipboardSession : IDisposable
     {
-        public void Dispose() => NativeMethods.CloseClipboard();
+        public void Dispose()
+        {
+            NativeMethods.CloseClipboard();
+            Gate.Exit();
+        }
     }
 }

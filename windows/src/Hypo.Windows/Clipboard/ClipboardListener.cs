@@ -23,19 +23,36 @@ namespace Hypo.Windows.Clipboard;
 /// loop forever. Comparing content instead would be wrong in a subtler way: a
 /// peer may legitimately send the same text again a moment later, and a content
 /// filter would swallow it.</para>
+///
+/// <para><b>Every clipboard call runs on the pump thread.</b> Not tidiness --
+/// correctness, in two ways CI demonstrated. Recording our own sequence number
+/// from a caller's thread races the update it caused: the notification can be
+/// handled before the field is assigned, and the echo escapes. And a reader on
+/// the pump thread contends with a writer on a caller's thread for a clipboard
+/// only one of them can hold, which surfaces as EmptyClipboard failing on a
+/// clipboard we thought we owned. Marshalling the work onto the thread that
+/// owns the window makes our own update strictly follow our own write, and
+/// leaves the retry to handle the only contention that is genuinely someone
+/// else's: other processes.</para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class ClipboardListener : IClipboard, IDisposable
 {
     private delegate nint WindowProcedure(nint hwnd, uint message, nint wParam, nint lParam);
 
+    /// <summary>A private message asking the pump to drain <see cref="_work"/>.</summary>
+    private const uint WmRunWork = 0x0400 + 1;
+
     private readonly Thread _pump;
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly WindowProcedure _procedure;
-    private readonly Lock _gate = new();
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _work = new();
 
     private nint _hwnd;
+
+    /// <summary>Only ever touched on the pump thread, which is what makes it reliable.</summary>
     private uint _ownSequence;
+
     private volatile bool _disposed;
 
     public ClipboardListener()
@@ -57,11 +74,12 @@ public sealed class ClipboardListener : IClipboard, IDisposable
 
     public event EventHandler<ClipboardContent>? ContentChanged;
 
-    public Task<ClipboardContent?> GetAsync(CancellationToken ct = default)
-    {
-        var text = WindowsClipboard.ReadText();
-        return Task.FromResult(text is null ? null : ClipboardFormats.FromText(text));
-    }
+    public Task<ClipboardContent?> GetAsync(CancellationToken ct = default) =>
+        OnPump(() =>
+        {
+            var text = WindowsClipboard.ReadText();
+            return text is null ? null : ClipboardFormats.FromText(text);
+        });
 
     public Task SetAsync(ClipboardContent content, CancellationToken ct = default)
     {
@@ -74,14 +92,44 @@ public sealed class ClipboardListener : IClipboard, IDisposable
             throw new NotSupportedException($"{content.ContentType} cannot be written yet.");
         }
 
-        var sequence = WindowsClipboard.WriteText(Encoding.UTF8.GetString(content.Data));
+        var text = Encoding.UTF8.GetString(content.Data);
 
-        lock (_gate)
+        return OnPump<object?>(() =>
         {
-            _ownSequence = sequence;
+            // Both statements on the pump thread, so the WM_CLIPBOARDUPDATE the
+            // write causes is dispatched afterwards, by which time the sequence
+            // number it must be compared against is already recorded.
+            _ownSequence = WindowsClipboard.WriteText(text);
+            return null;
+        });
+    }
+
+    /// <summary>Runs <paramref name="work"/> on the thread that owns the window.</summary>
+    private Task<T> OnPump<T>(Func<T> work)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _work.Enqueue(() =>
+        {
+            try
+            {
+                completion.TrySetResult(work());
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+            }
+        });
+
+        if (!PostMessageW(_hwnd, WmRunWork, 0, 0))
+        {
+            completion.TrySetException(new Win32Exception(
+                Marshal.GetLastPInvokeError(), "Could not reach the clipboard pump."));
         }
 
-        return Task.CompletedTask;
+        return completion.Task;
     }
 
     private void Run()
@@ -115,22 +163,25 @@ public sealed class ClipboardListener : IClipboard, IDisposable
         {
             OnClipboardUpdate();
         }
+        else if (message == WmRunWork)
+        {
+            while (_work.TryDequeue(out var work))
+            {
+                work();
+            }
+        }
 
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }
 
     private void OnClipboardUpdate()
     {
-        var sequence = NativeMethods.GetClipboardSequenceNumber();
-
-        lock (_gate)
+        // Same thread that performed the write, so this comparison cannot race it.
+        if (NativeMethods.GetClipboardSequenceNumber() == _ownSequence)
         {
-            if (sequence == _ownSequence)
-            {
-                // Our own write. Re-publishing it is how two devices end up
-                // echoing one item at each other forever.
-                return;
-            }
+            // Our own write. Re-publishing it is how two devices end up echoing
+            // one item at each other forever.
+            return;
         }
 
         string? text;
@@ -185,6 +236,12 @@ public sealed class ClipboardListener : IClipboard, IDisposable
         }
 
         _disposed = true;
+
+        // Anything still queued will never run; failing it beats leaving a
+        // caller awaiting a task that cannot complete.
+        while (_work.TryDequeue(out _))
+        {
+        }
 
         if (_hwnd != 0)
         {

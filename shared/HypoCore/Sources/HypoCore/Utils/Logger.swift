@@ -124,12 +124,3 @@ public struct HypoLogger {
 
 // Safe to mark unchecked: wraps os.Logger (value type) and immutable strings
 extension HypoLogger: @unchecked Sendable {}
-
-// MARK: - Extension for String appendToFile (to be removed)
-extension String {
-    @discardableResult
-    func appendToFile(path: String) -> Bool {
-        // No-op - file logging removed in favor of os_log
-        return true
-    }
-}

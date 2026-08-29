@@ -29,7 +29,7 @@ public enum SizeConstants {
     ///
     /// Note: 15MB was too small for 10MB images (~18MB after encoding). Increased to 20MB
     /// to provide safety margin while staying within reasonable WebSocket frame size limits.
-    /// macOS now only encodes `data_base64` for efficiency (~50-70% reduction).
+    /// Clients only encode `data_base64` for efficiency (~50-70% reduction).
     public static let maxTransportPayloadBytes = 20 * 1024 * 1024 // 20MB
     
     /// Target raw size for image compression (75% of maxAttachmentBytes).
@@ -40,7 +40,7 @@ public enum SizeConstants {
     /// Images with longest side > 2560px will be scaled down.
     public static let maxImageDimensionPx: CGFloat = 2560
     
-    /// Maximum size for WebSocket messages on macOS.
+    /// Maximum size for WebSocket messages.
     /// URLSessionWebSocketTask.maximumMessageSize is set to 1GB to support large file transfers.
     /// WebSocket will automatically fragment messages using RFC 6455 fragmentation.
     public static let maxWebSocketMessageBytes = 1_073_741_824 // 1GB

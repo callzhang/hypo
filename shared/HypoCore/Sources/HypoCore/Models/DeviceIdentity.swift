@@ -25,12 +25,17 @@ public final class DeviceIdentity: DeviceIdentityProviding {
 
     private static let currentPlatform = DevicePlatform.macOS
 
-    /// Default hostname for this device.
+    /// Default hostname for this device, used only when no explicit name is
+    /// supplied to the initializer.
     ///
-    /// `Host` is macOS-only Foundation API, so iOS uses ProcessInfo instead.
-    /// Both paths can return a name with a `.local` suffix, which the
-    /// initializer below already strips.
-    public static var defaultHostname: String {
+    /// `Host` is macOS-only Foundation API, so iOS falls back to
+    /// `ProcessInfo.processInfo.hostName`. On real iOS hardware that API is
+    /// sandboxed and returns the bare string `"localhost"` rather than a
+    /// device-specific name, so this fallback is a poor default on iOS.
+    /// The iOS app shell is expected to pass an explicit `hostname:` (e.g.
+    /// derived from the device's user-assigned name) rather than relying on
+    /// this fallback.
+    private static var defaultHostname: String {
         #if os(macOS)
         return Host.current().localizedName ?? "Hypo Mac"
         #else
@@ -48,7 +53,8 @@ public final class DeviceIdentity: DeviceIdentityProviding {
         deviceId.uuidString.lowercased()
     }
 
-    public init(userDefaults: UserDefaults = .standard, hostname: String = DeviceIdentity.defaultHostname) {
+    public init(userDefaults: UserDefaults = .standard, hostname: String? = nil) {
+        let hostname = hostname ?? Self.defaultHostname
         // Load or generate device ID (migrate from prefixed format if needed)
         let uuid: UUID
         if let stored = userDefaults.string(forKey: DefaultsKey.deviceId), let parsed = UUID(uuidString: stored) {

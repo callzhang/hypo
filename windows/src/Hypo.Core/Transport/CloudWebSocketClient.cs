@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Hypo.Core.Protocol;
@@ -30,6 +31,9 @@ public sealed class CloudWebSocketClient : ISyncTransport, IDisposable
     private CancellationTokenSource? _pump;
     private TransportState _state = TransportState.Disconnected;
 
+    /// <summary>Set by DisconnectAsync, so a deliberate close is not raced by a reconnect.</summary>
+    private volatile bool _stopped;
+
     public CloudWebSocketClient(RelayOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -51,6 +55,21 @@ public sealed class CloudWebSocketClient : ISyncTransport, IDisposable
             return;
         }
 
+        _stopped = false;
+
+        try
+        {
+            await ConnectCoreAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            SetState(TransportState.Faulted, ex);
+            throw;
+        }
+    }
+
+    private async Task ConnectCoreAsync(CancellationToken ct)
+    {
         SetState(TransportState.Connecting, null);
         _reader.Reset();
 
@@ -58,6 +77,13 @@ public sealed class CloudWebSocketClient : ISyncTransport, IDisposable
         socket.Options.SetRequestHeader("X-Device-Id", _options.DeviceId);
         socket.Options.SetRequestHeader("X-Device-Platform", _options.Platform);
         socket.Options.SetRequestHeader("X-Auth-Token", _options.AuthToken);
+        socket.Options.KeepAliveInterval = _options.KeepAliveInterval;
+        socket.Options.KeepAliveTimeout = _options.KeepAliveTimeout;
+
+        // Without this the handshake status is lost and a 401 is
+        // indistinguishable from the relay being down -- which decides whether
+        // retrying is diligence or abuse.
+        socket.Options.CollectHttpResponseDetails = true;
 
         try
         {
@@ -65,9 +91,13 @@ public sealed class CloudWebSocketClient : ISyncTransport, IDisposable
         }
         catch (Exception ex)
         {
+            var status = socket.HttpStatusCode;
             socket.Dispose();
-            SetState(TransportState.Faulted, ex);
-            throw;
+
+            throw status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+                or HttpStatusCode.BadRequest
+                ? new RelayRejectedException(status, ex)
+                : ex;
         }
 
         _socket = socket;
@@ -78,6 +108,48 @@ public sealed class CloudWebSocketClient : ISyncTransport, IDisposable
         // whole of the handshake.
         SetState(TransportState.Connected, null);
         _ = Task.Run(() => PumpAsync(_pump.Token), CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Reconnects with exponential backoff and jitter after an unexpected drop.
+    ///
+    /// <para>Gives up immediately if the relay <em>rejected</em> us rather than
+    /// went away. A wrong shared secret would otherwise retry forever against a
+    /// service other people depend on, and no amount of waiting turns a 401
+    /// into a 101.</para>
+    /// </summary>
+    private async Task ReconnectAsync()
+    {
+        var delay = _options.ReconnectInitialDelay;
+
+        while (!_stopped)
+        {
+            // Jitter so that every client that lost the same relay does not
+            // come back in step.
+            var jittered = delay * (0.5 + Random.Shared.NextDouble());
+            await Task.Delay(jittered).ConfigureAwait(false);
+
+            if (_stopped)
+            {
+                return;
+            }
+
+            try
+            {
+                await ConnectCoreAsync(CancellationToken.None).ConfigureAwait(false);
+                return;
+            }
+            catch (RelayRejectedException ex)
+            {
+                SetState(TransportState.Faulted, ex);
+                return;
+            }
+            catch (Exception ex)
+            {
+                SetState(TransportState.Faulted, ex);
+                delay = delay * 2 > _options.ReconnectMaxDelay ? _options.ReconnectMaxDelay : delay * 2;
+            }
+        }
     }
 
     public async Task SendAsync(SyncEnvelope envelope, CancellationToken ct = default)
@@ -96,6 +168,8 @@ public sealed class CloudWebSocketClient : ISyncTransport, IDisposable
 
     public async Task DisconnectAsync(CancellationToken ct = default)
     {
+        _stopped = true;
+
         if (_pump is not null)
         {
             await _pump.CancelAsync().ConfigureAwait(false);
@@ -152,10 +226,16 @@ public sealed class CloudWebSocketClient : ISyncTransport, IDisposable
         catch (OperationCanceledException)
         {
             SetState(TransportState.Disconnected, null);
+            return;
         }
         catch (Exception ex)
         {
             SetState(TransportState.Faulted, ex);
+        }
+
+        if (!_stopped)
+        {
+            _ = Task.Run(ReconnectAsync, CancellationToken.None);
         }
     }
 

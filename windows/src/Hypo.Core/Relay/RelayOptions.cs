@@ -34,6 +34,32 @@ public sealed record RelayOptions
 
     public required string Platform { get; init; }
 
+    /// <summary>
+    /// How often the socket emits a keepalive frame.
+    ///
+    /// <para>Fly.io closes idle connections at 900 s
+    /// (<c>http_options.idle_timeout</c> in <c>backend/fly.toml</c>) and the
+    /// relay never initiates -- it answers a Ping with a Pong and nothing
+    /// more. So the client owns liveness. 840 s is what Android uses: far
+    /// enough under the ceiling to survive a slow round trip, and long enough
+    /// that a phone on an idle link is not woken for nothing.</para>
+    /// </summary>
+    public TimeSpan KeepAliveInterval { get; init; } = TimeSpan.FromSeconds(840);
+
+    /// <summary>
+    /// How long to wait for a Pong before treating the connection as dead. This
+    /// is what turns the keepalive from "keep the proxy happy" into "notice when
+    /// the relay has gone", which matters because a silently dead socket looks
+    /// exactly like an idle one.
+    /// </summary>
+    public TimeSpan KeepAliveTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Delay before the first reconnection attempt; doubles from there.</summary>
+    public TimeSpan ReconnectInitialDelay { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>Ceiling for the backoff, so a long outage does not become a long silence.</summary>
+    public TimeSpan ReconnectMaxDelay { get; init; } = TimeSpan.FromSeconds(60);
+
     public string AuthToken => RelayAuthToken.Compute(Secret, DeviceId);
 
     /// <summary>

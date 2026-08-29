@@ -23,8 +23,9 @@ internal sealed class StubRelayServer : IAsyncDisposable
 {
     private readonly WebApplication _app;
     private readonly Channel<byte[]> _received = Channel.CreateUnbounded<byte[]>();
-    private readonly TaskCompletionSource<WebSocket> _connected =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly Channel<WebSocket> _sockets = Channel.CreateUnbounded<WebSocket>();
+    private WebSocket? _current;
+    private int _connections;
 
     private StubRelayServer(WebApplication app, Uri uri)
     {
@@ -33,6 +34,12 @@ internal sealed class StubRelayServer : IAsyncDisposable
     }
 
     public Uri Uri { get; }
+
+    /// <summary>How many upgrade requests have arrived. Reconnection is counted, not inferred.</summary>
+    public int Connections => Volatile.Read(ref _connections);
+
+    /// <summary>When set, every upgrade is refused with this status instead of accepted.</summary>
+    public int? RejectWith { get; set; }
 
     /// <summary>Headers from the upgrade request, once a client has connected.</summary>
     public IHeaderDictionary? Headers { get; private set; }
@@ -52,15 +59,24 @@ internal sealed class StubRelayServer : IAsyncDisposable
         app.UseWebSockets();
         app.Run(async context =>
         {
+            Interlocked.Increment(ref server!._connections);
+            server.Headers = context.Request.Headers;
+
+            if (server.RejectWith is { } status)
+            {
+                context.Response.StatusCode = status;
+                return;
+            }
+
             if (!context.WebSockets.IsWebSocketRequest)
             {
                 context.Response.StatusCode = 400;
                 return;
             }
 
-            server!.Headers = context.Request.Headers;
             using var socket = await context.WebSockets.AcceptWebSocketAsync();
-            server._connected.TrySetResult(socket);
+            server._current = socket;
+            await server._sockets.Writer.WriteAsync(socket);
             await server.ReadLoopAsync(socket, context.RequestAborted);
         });
 
@@ -107,11 +123,22 @@ internal sealed class StubRelayServer : IAsyncDisposable
 
     public async Task SendAsync(byte[] payload, WebSocketMessageType type = WebSocketMessageType.Binary)
     {
-        var socket = await _connected.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var socket = _current ?? await WaitForConnectionAsync();
         await socket.SendAsync(payload, type, endOfMessage: true, CancellationToken.None);
     }
 
-    public Task WaitForConnectionAsync() => _connected.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    /// <summary>Waits for the next upgrade to complete and returns its socket.</summary>
+    public async Task<WebSocket> WaitForConnectionAsync(TimeSpan? within = null)
+    {
+        using var timeout = new CancellationTokenSource(within ?? TimeSpan.FromSeconds(5));
+        return await _sockets.Reader.ReadAsync(timeout.Token);
+    }
+
+    /// <summary>
+    /// Drops the current connection the way a relay restart would: abruptly,
+    /// with no close handshake. A polite close is a different code path.
+    /// </summary>
+    public void DropCurrentConnection() => _current?.Abort();
 
     public async ValueTask DisposeAsync()
     {

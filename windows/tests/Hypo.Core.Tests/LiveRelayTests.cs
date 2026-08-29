@@ -36,6 +36,37 @@ public class LiveRelayTests
         Assert.Equal(TransportState.Connected, client.State);
     }
 
+    /// <summary>
+    /// Holds an idle connection past Fly.io's 900 s ceiling. Enable with
+    /// HYPO_LIVE_RELAY_SOAK=1; it takes sixteen minutes by construction.
+    ///
+    /// The keepalive cannot be unit-tested end to end: ClientWebSocket has no
+    /// manual ping and Kestrel does not surface the ones the framework sends,
+    /// so a stub can only ever confirm that we set a number. Whether the number
+    /// is right is a question only an idle socket and a real proxy can answer.
+    /// </summary>
+    [SkippableFact]
+    public async Task SurvivesLongerThanTheRelayIdleTimeout()
+    {
+        Skip.IfNot(
+            Environment.GetEnvironmentVariable("HYPO_LIVE_RELAY_SOAK") == "1",
+            "Set HYPO_LIVE_RELAY_SOAK=1; this test idles for sixteen minutes.");
+
+        var options = RelayOptions.FromEnvironment(
+            "11111111-2222-3333-4444-555555555555",
+            "windows",
+            searchFrom: AppContext.BaseDirectory);
+
+        await using var client = new CloudWebSocketClient(options);
+        await client.ConnectAsync();
+
+        // Sixteen minutes: past the 900 s ceiling, and past the 840 s keepalive
+        // that is supposed to prevent it.
+        await Task.Delay(TimeSpan.FromMinutes(16));
+
+        Assert.Equal(TransportState.Connected, client.State);
+    }
+
     [SkippableFact]
     public async Task ARejectedTokenFaultsRatherThanHanging()
     {

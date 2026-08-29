@@ -12,15 +12,15 @@
 
 **Prerequisite:** Plan 1, merged. `Hypo.Core` at 78 passing tests.
 
-> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 4.**
-> Tasks 1 to 4 are written to this plan's own standard: failing test, complete
+> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 9.**
+> Tasks 1 to 9 are written to this plan's own standard: failing test, complete
 > implementation, exact commands, expected counts. Tasks 3–16 are currently only
 > scoped, not written. A summarised task is a plan failure, not a shortcut — the
 > whole reason Plan 1's subagents caught a JSON writer that escaped `+`, a
 > converter override that was never invoked, and an associated-data formula that
 > would have broken interoperability with both peer clients is that they were
 > handed exact code to run and could watch it fail. Finish writing them before
-> dispatching anyone past Task 4.
+> dispatching anyone past Task 9.
 
 ---
 
@@ -1054,20 +1054,1100 @@ git commit -m "feat(windows): discover Hypo peers over mDNS"
 
 ---
 
-## Tasks 5 to 16 — still to be written
+## Task 5: Live-network discovery test
 
-These remain scoped but not written. The transport group is de-risked by working spike code that should be lifted into the plan rather than reinvented:
+An opt-in test that browses the real network. It is the regression guard for the
+interoperability the spike proved, and it is skipped by default so CI never
+depends on a network or on a peer being switched on.
 
-**Tasks 6 to 9, the transport.** A second spike verified the whole shape:
-- Kestrel with `builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Any, port))`, `app.UseWebSockets()`, and `ctx.WebSockets.AcceptWebSocketAsync()`.
-- **Dynamic port binding requires `Listen(IPAddress.Loopback, 0)` or `Listen(IPAddress.Any, 0)`; `ListenLocalhost(0)` throws** `InvalidOperationException: Dynamic port binding is not supported when binding to localhost`. This is exactly the ephemeral-port fallback path spec section 7 requires, so the plan must use the working form.
-- The bound port is read back from `IServerAddressesFeature`, which is what discovery must advertise.
-- `ClientWebSocket.Options.SetRequestHeader("X-Device-Id", ...)` works, and a `?device_id=` query string arrives in `Request.Query` while `Request.Path` stays `/`. Sending both costs nothing and matches what the macOS server accepts from either kind of client.
-- A length-prefixed binary frame round-trips with `WebSocketMessageType.Binary` and `endOfMessage: true`.
+**Files:**
+- Test: `windows/tests/Hypo.Core.Tests/LivePeerDiscoveryTests.cs`
+
+- [ ] **Step 1: Write the test**
+
+Create `windows/tests/Hypo.Core.Tests/LivePeerDiscoveryTests.cs`:
+
+```csharp
+using Hypo.Core.Discovery;
+
+namespace Hypo.Core.Tests;
+
+/// <summary>
+/// Requires a real Hypo peer on the same network. Enable with HYPO_LIVE_PEER=1.
+/// </summary>
+public class LivePeerDiscoveryTests
+{
+    private static bool Enabled =>
+        Environment.GetEnvironmentVariable("HYPO_LIVE_PEER") == "1";
+
+    [SkippableFact]
+    public async Task DiscoversAtLeastOneRealPeer()
+    {
+        Skip.IfNot(Enabled, "Set HYPO_LIVE_PEER=1 with a macOS or Android peer on the network.");
+
+        await using var discovery = new MdnsPeerDiscovery();
+        var found = new List<DiscoveredPeer>();
+        discovery.PeerDiscovered += (_, peer) => { lock (found) { found.Add(peer); } };
+
+        await discovery.StartBrowsingAsync();
+        for (var i = 0; i < 3; i++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            discovery.Refresh();
+        }
+
+        DiscoveredPeer[] peers;
+        lock (found) { peers = found.ToArray(); }
+
+        Assert.NotEmpty(peers);
+
+        foreach (var peer in peers)
+        {
+            Assert.EndsWith("._hypo._tcp.local", peer.InstanceName, StringComparison.OrdinalIgnoreCase);
+            Assert.False(string.IsNullOrWhiteSpace(peer.Address));
+            Assert.InRange(peer.Port, 1, 65535);
+            Assert.DoesNotContain("\\0", peer.DisplayName, StringComparison.Ordinal);
+        }
+    }
+
+    [SkippableFact]
+    public async Task RealPeersAdvertisePairingMaterial()
+    {
+        Skip.IfNot(Enabled, "Set HYPO_LIVE_PEER=1 with a macOS or Android peer on the network.");
+
+        await using var discovery = new MdnsPeerDiscovery();
+        await discovery.StartBrowsingAsync();
+        await Task.Delay(TimeSpan.FromSeconds(12));
+
+        var pairable = discovery.KnownPeers
+            .Where(p => p.DeviceId is not null && p.PublicKey is not null)
+            .ToArray();
+
+        Assert.NotEmpty(pairable);
+
+        foreach (var peer in pairable)
+        {
+            Assert.True(Guid.TryParse(peer.DeviceId, out _), $"device_id was '{peer.DeviceId}'");
+            Assert.Equal(peer.DeviceId, peer.DeviceId!.ToLowerInvariant());
+            Assert.Equal(32, peer.PublicKey!.Length);
+            Assert.Equal(32, peer.SigningPublicKey!.Length);
+        }
+    }
+}
+```
+
+- [ ] **Step 2: Add the skippable-test package**
+
+```bash
+cd windows
+dotnet add tests/Hypo.Core.Tests/Hypo.Core.Tests.csproj package Xunit.SkippableFact
+```
+
+- [ ] **Step 3: Confirm it skips by default**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~LivePeerDiscoveryTests`
+
+Expected: 2 skipped, 0 failed. A pass here means the guard is broken and CI has
+been made to depend on a live network.
+
+- [ ] **Step 4: Run it for real**
+
+Run: `cd windows && HYPO_LIVE_PEER=1 dotnet test --filter FullyQualifiedName~LivePeerDiscoveryTests`
+
+Expected: PASS, 2 tests, with at least one macOS or Android peer switched on and
+on the same network. If it fails, that is a genuine interoperability regression
+against the behaviour recorded in spec section 4.2 — report it rather than
+weakening the assertions.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add windows/tests/Hypo.Core.Tests/LivePeerDiscoveryTests.cs windows/tests/Hypo.Core.Tests/Hypo.Core.Tests.csproj
+git commit -m "test(windows): guard live peer discovery behind an opt-in flag"
+```
+
+---
+
+## Task 6: The transport contract
+
+**Files:**
+- Create: `windows/src/Hypo.Core/Transport/ISyncTransport.cs`
+- Create: `windows/src/Hypo.Core/Transport/TransportEvents.cs`
+- Test: `windows/tests/Hypo.Core.Tests/TransportEventsTests.cs`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `windows/tests/Hypo.Core.Tests/TransportEventsTests.cs`:
+
+```csharp
+using Hypo.Core.Protocol;
+using Hypo.Core.Transport;
+
+namespace Hypo.Core.Tests;
+
+public class TransportEventsTests
+{
+    private static SyncEnvelope Envelope() => new()
+    {
+        Id = Guid.NewGuid(),
+        Timestamp = DateTimeOffset.UtcNow,
+        Type = MessageType.Clipboard,
+        Payload = new EnvelopePayload
+        {
+            ContentType = ContentType.Text,
+            Ciphertext = [0x01],
+            DeviceId = "550e8400-e29b-41d4-a716-446655440000",
+            Encryption = new EncryptionMetadata { Nonce = [0xAA], Tag = [0xBB] },
+        },
+    };
+
+    [Fact]
+    public void EnvelopeReceivedCarriesTheSenderAndTheOrigin()
+    {
+        var args = new EnvelopeReceivedEventArgs(Envelope(), "peer-id", TransportOrigin.Lan);
+
+        Assert.Equal("peer-id", args.PeerDeviceId);
+        Assert.Equal(TransportOrigin.Lan, args.Origin);
+        Assert.Equal(MessageType.Clipboard, args.Envelope.Type);
+    }
+
+    [Theory]
+    [InlineData(TransportState.Disconnected)]
+    [InlineData(TransportState.Connecting)]
+    [InlineData(TransportState.Connected)]
+    [InlineData(TransportState.Faulted)]
+    public void StateChangedCarriesTheNewState(TransportState state)
+    {
+        Assert.Equal(state, new TransportStateChangedEventArgs(state, null).State);
+    }
+
+    [Fact]
+    public void AFaultedStateCanCarryTheReason()
+    {
+        var error = new IOException("connection reset");
+
+        var args = new TransportStateChangedEventArgs(TransportState.Faulted, error);
+
+        Assert.Same(error, args.Error);
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~TransportEventsTests`
+
+Expected: FAIL to compile with `CS0246` for `Hypo.Core.Transport`.
+
+- [ ] **Step 3: Write `TransportEvents`**
+
+Create `windows/src/Hypo.Core/Transport/TransportEvents.cs`:
+
+```csharp
+using Hypo.Core.Protocol;
+
+namespace Hypo.Core.Transport;
+
+/// <summary>Which channel a message arrived on. Matches TransportOrigin on macOS.</summary>
+public enum TransportOrigin
+{
+    Lan,
+    Cloud,
+}
+
+public enum TransportState
+{
+    Disconnected,
+    Connecting,
+    Connected,
+    Faulted,
+}
+
+public sealed class EnvelopeReceivedEventArgs(
+    SyncEnvelope envelope,
+    string peerDeviceId,
+    TransportOrigin origin) : EventArgs
+{
+    public SyncEnvelope Envelope { get; } = envelope;
+
+    /// <summary>
+    /// The peer this arrived from, as the transport understands it — from the
+    /// handshake, not from the envelope body. The two can disagree, and a peer
+    /// claiming to be someone else in the body is exactly what the envelope's
+    /// authenticated associated data exists to catch.
+    /// </summary>
+    public string PeerDeviceId { get; } = peerDeviceId;
+
+    public TransportOrigin Origin { get; } = origin;
+}
+
+public sealed class TransportStateChangedEventArgs(TransportState state, Exception? error) : EventArgs
+{
+    public TransportState State { get; } = state;
+
+    public Exception? Error { get; } = error;
+}
+```
+
+- [ ] **Step 4: Write `ISyncTransport`**
+
+Create `windows/src/Hypo.Core/Transport/ISyncTransport.cs`:
+
+```csharp
+using Hypo.Core.Protocol;
+
+namespace Hypo.Core.Transport;
+
+/// <summary>
+/// One channel over which envelopes travel. Plan 2 implements the LAN client and
+/// server; Plan 3 adds the cloud relay and the dual-send transport that fans one
+/// message across both.
+/// </summary>
+public interface ISyncTransport : IAsyncDisposable
+{
+    event EventHandler<EnvelopeReceivedEventArgs>? EnvelopeReceived;
+
+    event EventHandler<TransportStateChangedEventArgs>? StateChanged;
+
+    TransportState State { get; }
+
+    Task ConnectAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Sends one envelope. Callers fanning a message across several transports
+    /// must give each a separately generated nonce: reusing one under a single
+    /// key is catastrophic. See CryptoService.Encrypt's remarks.
+    /// </summary>
+    Task SendAsync(SyncEnvelope envelope, CancellationToken ct = default);
+
+    Task DisconnectAsync(CancellationToken ct = default);
+}
+```
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~TransportEventsTests`
+
+Expected: PASS, 7 tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add windows/src/Hypo.Core/Transport/ windows/tests/Hypo.Core.Tests/TransportEventsTests.cs
+git commit -m "feat(windows): define the sync transport contract"
+```
+
+---
+## Task 7: LAN WebSocket client
+
+Dials a discovered peer. Everything about the wire shape here was verified by a
+spike before this plan was written: a `ws://` scheme because the advertised
+`ws+tls` is not implemented by any client, the device id on both an
+`X-Device-Id` header and a `device_id` query parameter because the macOS server
+accepts either, and length-prefixed binary frames.
+
+**Files:**
+- Create: `windows/src/Hypo.Core/Transport/LanWebSocketClient.cs`
+- Test: `windows/tests/Hypo.Core.Tests/LanWebSocketClientTests.cs`
+
+- [ ] **Step 1: Write the failing test**
+
+These cover URI construction and framing. The socket itself is exercised in
+Task 9, against the real server.
+
+Create `windows/tests/Hypo.Core.Tests/LanWebSocketClientTests.cs`:
+
+```csharp
+using Hypo.Core.Discovery;
+using Hypo.Core.Transport;
+
+namespace Hypo.Core.Tests;
+
+public class LanWebSocketClientTests
+{
+    private const string LocalDeviceId = "550e8400-e29b-41d4-a716-446655440000";
+
+    private static DiscoveredPeer Peer() => DiscoveredPeer.FromTxt(
+        instanceName: "peer._hypo._tcp.local",
+        host: "peer.local",
+        address: "10.0.0.17",
+        port: 7010,
+        txt: new Dictionary<string, string> { ["device_id"] = "bbe296d6-0785-43d2-91b6-b135b72f4c41" });
+
+    [Fact]
+    public void DialsTheAddressWithTheDeviceIdOnTheQueryString()
+    {
+        var uri = LanWebSocketClient.BuildUri(Peer(), LocalDeviceId);
+
+        Assert.Equal("ws", uri.Scheme);
+        Assert.Equal("10.0.0.17", uri.Host);
+        Assert.Equal(7010, uri.Port);
+        Assert.Contains($"device_id={LocalDeviceId}", uri.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NeverDialsWss()
+    {
+        // Peers advertise protocols=ws+tls and none of them implement it.
+        // Honouring that field would make every connection fail.
+        var txt = new Dictionary<string, string> { ["protocols"] = "ws+tls" };
+        var peer = DiscoveredPeer.FromTxt("p._hypo._tcp.local", "h", "10.0.0.1", 7010, txt);
+
+        Assert.Equal("ws", LanWebSocketClient.BuildUri(peer, LocalDeviceId).Scheme);
+    }
+
+    [Fact]
+    public void LowercasesTheLocalDeviceIdOnTheWire()
+    {
+        var uri = LanWebSocketClient.BuildUri(Peer(), LocalDeviceId.ToUpperInvariant());
+
+        Assert.Contains($"device_id={LocalDeviceId}", uri.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartsDisconnected()
+    {
+        using var client = new LanWebSocketClient(Peer(), LocalDeviceId);
+
+        Assert.Equal(TransportState.Disconnected, client.State);
+    }
+
+    [Fact]
+    public async Task SendingBeforeConnectingThrows()
+    {
+        using var client = new LanWebSocketClient(Peer(), LocalDeviceId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => client.SendAsync(TestEnvelopes.Clipboard(LocalDeviceId)));
+    }
+}
+```
+
+Create `windows/tests/Hypo.Core.Tests/TestEnvelopes.cs`, a shared helper the
+transport tests reuse:
+
+```csharp
+using Hypo.Core.Protocol;
+
+namespace Hypo.Core.Tests;
+
+internal static class TestEnvelopes
+{
+    public static SyncEnvelope Clipboard(string deviceId, byte[]? ciphertext = null) => new()
+    {
+        Id = Guid.NewGuid(),
+        Timestamp = DateTimeOffset.Parse("2026-08-29T12:00:00Z"),
+        Type = MessageType.Clipboard,
+        Payload = new EnvelopePayload
+        {
+            ContentType = ContentType.Text,
+            Ciphertext = ciphertext ?? [0x01, 0x02, 0x03],
+            DeviceId = deviceId,
+            DevicePlatform = "windows",
+            Encryption = new EncryptionMetadata { Nonce = new byte[12], Tag = new byte[16] },
+        },
+    };
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~LanWebSocketClientTests`
+
+Expected: FAIL to compile with `CS0246: The type or namespace name 'LanWebSocketClient' could not be found`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `windows/src/Hypo.Core/Transport/LanWebSocketClient.cs`:
+
+```csharp
+using System.Net.WebSockets;
+using Hypo.Core.Discovery;
+using Hypo.Core.Protocol;
+
+namespace Hypo.Core.Transport;
+
+/// <summary>
+/// Outbound LAN connection to a discovered peer. Plain ws:// by design: the
+/// TXT record's "protocols=ws+tls" is advertised by both shipping clients and
+/// implemented by neither, and payload encryption is the security boundary.
+/// </summary>
+public sealed class LanWebSocketClient : ISyncTransport, IDisposable
+{
+    private readonly DiscoveredPeer _peer;
+    private readonly string _localDeviceId;
+    private readonly TransportFrameCodec _codec = new();
+    private readonly FrameReader _reader = new();
+
+    private ClientWebSocket? _socket;
+    private CancellationTokenSource? _pump;
+    private TransportState _state = TransportState.Disconnected;
+
+    public LanWebSocketClient(DiscoveredPeer peer, string localDeviceId)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        ArgumentException.ThrowIfNullOrWhiteSpace(localDeviceId);
+
+        _peer = peer;
+        _localDeviceId = localDeviceId.ToLowerInvariant();
+    }
+
+    public event EventHandler<EnvelopeReceivedEventArgs>? EnvelopeReceived;
+    public event EventHandler<TransportStateChangedEventArgs>? StateChanged;
+
+    public TransportState State => _state;
+
+    public string PeerDeviceId => _peer.DeviceId ?? _peer.InstanceName;
+
+    /// <summary>
+    /// The macOS server reads the device id from an X-Device-Id header or a
+    /// device_id query parameter and accepts either, so both are sent.
+    /// </summary>
+    public static Uri BuildUri(DiscoveredPeer peer, string localDeviceId)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        ArgumentException.ThrowIfNullOrWhiteSpace(localDeviceId);
+
+        return new Uri($"ws://{peer.Address}:{peer.Port}/?device_id={localDeviceId.ToLowerInvariant()}");
+    }
+
+    public async Task ConnectAsync(CancellationToken ct = default)
+    {
+        if (_state is TransportState.Connected or TransportState.Connecting)
+        {
+            return;
+        }
+
+        SetState(TransportState.Connecting, null);
+        _reader.Reset();
+
+        var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("X-Device-Id", _localDeviceId);
+
+        try
+        {
+            await socket.ConnectAsync(BuildUri(_peer, _localDeviceId), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            socket.Dispose();
+            SetState(TransportState.Faulted, ex);
+            throw;
+        }
+
+        _socket = socket;
+        _pump = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        SetState(TransportState.Connected, null);
+        _ = Task.Run(() => PumpAsync(_pump.Token), CancellationToken.None);
+    }
+
+    public async Task SendAsync(SyncEnvelope envelope, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+
+        var socket = _socket;
+        if (socket is null || socket.State != WebSocketState.Open)
+        {
+            throw new InvalidOperationException("The transport is not connected.");
+        }
+
+        var frame = _codec.Encode(envelope);
+        await socket.SendAsync(frame, WebSocketMessageType.Binary, true, ct).ConfigureAwait(false);
+    }
+
+    public async Task DisconnectAsync(CancellationToken ct = default)
+    {
+        if (_pump is not null)
+        {
+            await _pump.CancelAsync().ConfigureAwait(false);
+        }
+
+        var socket = _socket;
+        if (socket is { State: WebSocketState.Open })
+        {
+            try
+            {
+                await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", ct).ConfigureAwait(false);
+            }
+            catch (WebSocketException)
+            {
+                // The peer may have gone already. Closing is best effort.
+            }
+        }
+
+        SetState(TransportState.Disconnected, null);
+    }
+
+    private async Task PumpAsync(CancellationToken ct)
+    {
+        var buffer = new byte[16 * 1024];
+        var socket = _socket!;
+
+        try
+        {
+            while (!ct.IsCancellationRequested && socket.State == WebSocketState.Open)
+            {
+                var result = await socket.ReceiveAsync(buffer, ct).ConfigureAwait(false);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    break;
+                }
+
+                // A WebSocket message boundary is not a frame boundary: FrameReader
+                // owns reassembly across both partial and coalesced reads.
+                foreach (var body in _reader.Append(buffer.AsSpan(0, result.Count)))
+                {
+                    Dispatch(body);
+                }
+            }
+
+            SetState(TransportState.Disconnected, null);
+        }
+        catch (OperationCanceledException)
+        {
+            SetState(TransportState.Disconnected, null);
+        }
+        catch (Exception ex)
+        {
+            SetState(TransportState.Faulted, ex);
+        }
+    }
+
+    private void Dispatch(byte[] body)
+    {
+        SyncEnvelope envelope;
+        try
+        {
+            // Decode expects the length prefix, which FrameReader has stripped.
+            var framed = new byte[4 + body.Length];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(framed, (uint)body.Length);
+            body.CopyTo(framed.AsSpan(4));
+            envelope = _codec.Decode(framed);
+        }
+        catch (Exception ex) when (ex is TransportFrameException or System.Text.Json.JsonException)
+        {
+            // A peer sending malformed protocol data is not a reason to tear the
+            // connection down; drop the message and keep reading.
+            return;
+        }
+
+        EnvelopeReceived?.Invoke(this, new EnvelopeReceivedEventArgs(envelope, PeerDeviceId, TransportOrigin.Lan));
+    }
+
+    private void SetState(TransportState state, Exception? error)
+    {
+        if (_state == state)
+        {
+            return;
+        }
+
+        _state = state;
+        StateChanged?.Invoke(this, new TransportStateChangedEventArgs(state, error));
+    }
+
+    public void Dispose()
+    {
+        _pump?.Dispose();
+        _socket?.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await DisconnectAsync().ConfigureAwait(false);
+        Dispose();
+    }
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~LanWebSocketClientTests`
+
+Expected: PASS, 5 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add windows/src/Hypo.Core/Transport/LanWebSocketClient.cs windows/tests/Hypo.Core.Tests/LanWebSocketClientTests.cs windows/tests/Hypo.Core.Tests/TestEnvelopes.cs
+git commit -m "feat(windows): add the LAN WebSocket client"
+```
+
+---
+
+## Task 8: LAN WebSocket server
+
+Accepts inbound connections from peers. Two details here were established by a
+spike and must not be re-derived: dynamic port binding needs
+`Listen(IPAddress.Any, 0)` because `ListenLocalhost(0)` throws, and the bound
+port has to be read back so discovery advertises the port actually in use.
+
+**Files:**
+- Create: `windows/src/Hypo.Core/Transport/LanWebSocketServer.cs`
+- Test: `windows/tests/Hypo.Core.Tests/LanWebSocketServerTests.cs`
+
+- [ ] **Step 1: Add the hosting package**
+
+```bash
+cd windows
+dotnet add src/Hypo.Core/Hypo.Core.csproj package Microsoft.AspNetCore.App.Ref
+```
+
+If that package is unavailable, add the framework reference to
+`windows/src/Hypo.Core/Hypo.Core.csproj` instead, which is the supported route
+for a library that hosts Kestrel:
+
+```xml
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+```
+
+Run `cd windows && dotnet build` and confirm 0 warnings. In particular confirm
+no `CA1416` appears: a framework reference that dragged in a Windows-only API
+would break the dependency rule that keeps `Hypo.Core` at `net10.0`.
+
+- [ ] **Step 2: Write the failing test**
+
+Create `windows/tests/Hypo.Core.Tests/LanWebSocketServerTests.cs`:
+
+```csharp
+using Hypo.Core.Transport;
+
+namespace Hypo.Core.Tests;
+
+public class LanWebSocketServerTests
+{
+    private const string LocalDeviceId = "550e8400-e29b-41d4-a716-446655440000";
+
+    [Fact]
+    public async Task ReportsThePortItActuallyBound()
+    {
+        // Port 0 asks the OS for a free one. Discovery must advertise what was
+        // bound, not what was requested, or peers dial a port nobody is on.
+        await using var server = new LanWebSocketServer(LocalDeviceId, port: 0);
+
+        await server.StartAsync();
+
+        Assert.InRange(server.BoundPort, 1, 65535);
+    }
+
+    [Fact]
+    public async Task FallsBackToAnEphemeralPortWhenThePreferredOneIsTaken()
+    {
+        await using var first = new LanWebSocketServer(LocalDeviceId, port: 0);
+        await first.StartAsync();
+
+        await using var second = new LanWebSocketServer(LocalDeviceId, port: first.BoundPort);
+        await second.StartAsync();
+
+        Assert.NotEqual(first.BoundPort, second.BoundPort);
+        Assert.InRange(second.BoundPort, 1, 65535);
+    }
+
+    [Fact]
+    public async Task StartingTwiceIsHarmless()
+    {
+        await using var server = new LanWebSocketServer(LocalDeviceId, port: 0);
+
+        await server.StartAsync();
+        var port = server.BoundPort;
+        await server.StartAsync();
+
+        Assert.Equal(port, server.BoundPort);
+    }
+
+    [Fact]
+    public void BoundPortBeforeStartingIsZero()
+    {
+        var server = new LanWebSocketServer(LocalDeviceId, port: 7010);
+
+        Assert.Equal(0, server.BoundPort);
+    }
+}
+```
+
+- [ ] **Step 3: Run to verify it fails**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~LanWebSocketServerTests`
+
+Expected: FAIL to compile with `CS0246: The type or namespace name 'LanWebSocketServer' could not be found`.
+
+- [ ] **Step 4: Write the implementation**
+
+Create `windows/src/Hypo.Core/Transport/LanWebSocketServer.cs`:
+
+```csharp
+using System.Net;
+using System.Net.WebSockets;
+using Hypo.Core.Protocol;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+namespace Hypo.Core.Transport;
+
+/// <summary>
+/// Accepts inbound LAN connections from peers. Plain ws://, matching the
+/// shipping clients; payload encryption is the security boundary.
+/// </summary>
+public sealed class LanWebSocketServer : IAsyncDisposable
+{
+    /// <summary>The port both shipping clients advertise and dial.</summary>
+    public const int DefaultPort = 7010;
+
+    private readonly string _localDeviceId;
+    private readonly int _preferredPort;
+    private readonly TransportFrameCodec _codec = new();
+
+    private WebApplication? _app;
+
+    public LanWebSocketServer(string localDeviceId, int port = DefaultPort)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localDeviceId);
+        ArgumentOutOfRangeException.ThrowIfNegative(port);
+
+        _localDeviceId = localDeviceId.ToLowerInvariant();
+        _preferredPort = port;
+    }
+
+    public event EventHandler<EnvelopeReceivedEventArgs>? EnvelopeReceived;
+
+    /// <summary>
+    /// The port in use, or 0 before starting. Discovery must advertise this
+    /// rather than the preferred port: when 7010 is taken the server falls back
+    /// to an ephemeral one, and a peer dialling the wrong port never connects.
+    /// </summary>
+    public int BoundPort { get; private set; }
+
+    public async Task StartAsync(CancellationToken ct = default)
+    {
+        if (_app is not null)
+        {
+            return;
+        }
+
+        _app = await BuildAsync(_preferredPort, ct).ConfigureAwait(false)
+               ?? await BuildAsync(0, ct).ConfigureAwait(false)
+               ?? throw new IOException("Could not bind a LAN listener on any port.");
+
+        BoundPort = ReadBoundPort(_app);
+    }
+
+    private async Task<WebApplication?> BuildAsync(int port, CancellationToken ct)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+
+        // Any IP, not localhost: peers connect from across the network. And
+        // dynamic binding is only supported on an explicit address —
+        // ListenLocalhost(0) throws "Dynamic port binding is not supported".
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Any, port));
+
+        var app = builder.Build();
+        app.UseWebSockets();
+        app.Use(HandleAsync);
+
+        try
+        {
+            await app.StartAsync(ct).ConfigureAwait(false);
+            return app;
+        }
+        catch (IOException)
+        {
+            // Port in use. The caller retries on 0.
+            await app.DisposeAsync().ConfigureAwait(false);
+            return null;
+        }
+    }
+
+    private async Task HandleAsync(HttpContext context, RequestDelegate next)
+    {
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            return;
+        }
+
+        // Both shipping clients are accommodated: macOS sends a header, Android
+        // is documented in the macOS server as often using the query string.
+        var peerDeviceId = context.Request.Headers["X-Device-Id"].ToString();
+        if (string.IsNullOrWhiteSpace(peerDeviceId))
+        {
+            peerDeviceId = context.Request.Query["device_id"].ToString();
+        }
+
+        using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+        await PumpAsync(socket, peerDeviceId.ToLowerInvariant(), context.RequestAborted).ConfigureAwait(false);
+    }
+
+    private async Task PumpAsync(WebSocket socket, string peerDeviceId, CancellationToken ct)
+    {
+        var reader = new FrameReader();
+        var buffer = new byte[16 * 1024];
+
+        try
+        {
+            while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
+            {
+                var result = await socket.ReceiveAsync(buffer, ct).ConfigureAwait(false);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    break;
+                }
+
+                foreach (var body in reader.Append(buffer.AsSpan(0, result.Count)))
+                {
+                    Dispatch(body, peerDeviceId);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutting down.
+        }
+        catch (WebSocketException)
+        {
+            // The peer vanished. Nothing to recover.
+        }
+        catch (TransportFrameException)
+        {
+            // An oversized length prefix means the stream position is no longer
+            // trustworthy, so this connection cannot continue.
+        }
+    }
+
+    private void Dispatch(byte[] body, string peerDeviceId)
+    {
+        SyncEnvelope envelope;
+        try
+        {
+            var framed = new byte[4 + body.Length];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(framed, (uint)body.Length);
+            body.CopyTo(framed.AsSpan(4));
+            envelope = _codec.Decode(framed);
+        }
+        catch (Exception ex) when (ex is TransportFrameException or System.Text.Json.JsonException)
+        {
+            return;
+        }
+
+        EnvelopeReceived?.Invoke(this, new EnvelopeReceivedEventArgs(envelope, peerDeviceId, TransportOrigin.Lan));
+    }
+
+    private static int ReadBoundPort(WebApplication app)
+    {
+        var addresses = app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()?.Addresses;
+
+        var address = addresses?.FirstOrDefault()
+                      ?? throw new IOException("Kestrel reported no bound address.");
+
+        return new Uri(address).Port;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_app is not null)
+        {
+            await _app.DisposeAsync().ConfigureAwait(false);
+            _app = null;
+        }
+    }
+}
+```
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~LanWebSocketServerTests`
+
+Expected: PASS, 4 tests.
+
+If `FallsBackToAnEphemeralPortWhenThePreferredOneIsTaken` fails because the
+second bind succeeded on the same port, the platform is allowing address reuse.
+Report it rather than deleting the test: on Windows the behaviour differs from
+macOS and Linux, and this fallback is what spec section 7 requires.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add windows/src/Hypo.Core/Transport/LanWebSocketServer.cs windows/tests/Hypo.Core.Tests/LanWebSocketServerTests.cs windows/src/Hypo.Core/Hypo.Core.csproj
+git commit -m "feat(windows): add the LAN WebSocket server"
+```
+
+---
+
+## Task 9: Loopback round trip
+
+The first test that puts the client and the server together. It is the guard
+that catches a framing or dispatch mistake before anyone tries to debug it
+against a real device over a network.
+
+**Files:**
+- Test: `windows/tests/Hypo.Core.Tests/LanLoopbackTests.cs`
+
+- [ ] **Step 1: Write the test**
+
+Create `windows/tests/Hypo.Core.Tests/LanLoopbackTests.cs`:
+
+```csharp
+using Hypo.Core.Discovery;
+using Hypo.Core.Protocol;
+using Hypo.Core.Transport;
+
+namespace Hypo.Core.Tests;
+
+public class LanLoopbackTests
+{
+    private const string ClientId = "550e8400-e29b-41d4-a716-446655440000";
+    private const string ServerId = "bbe296d6-0785-43d2-91b6-b135b72f4c41";
+
+    private static DiscoveredPeer PeerOn(int port) => DiscoveredPeer.FromTxt(
+        "server._hypo._tcp.local",
+        "localhost",
+        "127.0.0.1",
+        port,
+        new Dictionary<string, string> { ["device_id"] = ServerId });
+
+    [Fact]
+    public async Task TheServerReceivesWhatTheClientSends()
+    {
+        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        var received = new TaskCompletionSource<EnvelopeReceivedEventArgs>();
+        server.EnvelopeReceived += (_, e) => received.TrySetResult(e);
+        await server.StartAsync();
+
+        await using var client = new LanWebSocketClient(PeerOn(server.BoundPort), ClientId);
+        await client.ConnectAsync();
+
+        var sent = TestEnvelopes.Clipboard(ClientId, [0xDE, 0xAD, 0xBE, 0xEF]);
+        await client.SendAsync(sent);
+
+        var got = await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(sent.Id, got.Envelope.Id);
+        Assert.Equal([0xDE, 0xAD, 0xBE, 0xEF], got.Envelope.Payload.Ciphertext);
+        Assert.Equal(TransportOrigin.Lan, got.Origin);
+    }
+
+    [Fact]
+    public async Task TheServerLearnsTheClientDeviceIdFromTheHandshake()
+    {
+        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        var received = new TaskCompletionSource<EnvelopeReceivedEventArgs>();
+        server.EnvelopeReceived += (_, e) => received.TrySetResult(e);
+        await server.StartAsync();
+
+        await using var client = new LanWebSocketClient(PeerOn(server.BoundPort), ClientId);
+        await client.ConnectAsync();
+        await client.SendAsync(TestEnvelopes.Clipboard(ClientId));
+
+        var got = await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(ClientId, got.PeerDeviceId);
+    }
+
+    [Fact]
+    public async Task SeveralEnvelopesInOneReadAreAllDelivered()
+    {
+        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        var received = new List<SyncEnvelope>();
+        var done = new TaskCompletionSource();
+        server.EnvelopeReceived += (_, e) =>
+        {
+            lock (received)
+            {
+                received.Add(e.Envelope);
+                if (received.Count == 3) done.TrySetResult();
+            }
+        };
+        await server.StartAsync();
+
+        await using var client = new LanWebSocketClient(PeerOn(server.BoundPort), ClientId);
+        await client.ConnectAsync();
+
+        for (var i = 0; i < 3; i++)
+        {
+            await client.SendAsync(TestEnvelopes.Clipboard(ClientId, [(byte)i]));
+        }
+
+        await done.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        lock (received)
+        {
+            Assert.Equal(3, received.Count);
+            Assert.Equal([0, 1, 2], received.Select(e => e.Payload.Ciphertext[0]));
+        }
+    }
+
+    [Fact]
+    public async Task ConnectingReportsTheStateTransitions()
+    {
+        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        await server.StartAsync();
+
+        await using var client = new LanWebSocketClient(PeerOn(server.BoundPort), ClientId);
+        var states = new List<TransportState>();
+        client.StateChanged += (_, e) => { lock (states) { states.Add(e.State); } };
+
+        await client.ConnectAsync();
+
+        lock (states)
+        {
+            Assert.Equal([TransportState.Connecting, TransportState.Connected], states);
+        }
+    }
+
+    [Fact]
+    public async Task ConnectingToANonListeningPortFaults()
+    {
+        // Port 1 is privileged and nothing listens there in a test run.
+        await using var client = new LanWebSocketClient(PeerOn(1), ClientId);
+        var faulted = new TaskCompletionSource<TransportStateChangedEventArgs>();
+        client.StateChanged += (_, e) => { if (e.State == TransportState.Faulted) faulted.TrySetResult(e); };
+
+        await Assert.ThrowsAnyAsync<Exception>(() => client.ConnectAsync());
+
+        var args = await faulted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.NotNull(args.Error);
+    }
+}
+```
+
+- [ ] **Step 2: Run it**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~LanLoopbackTests`
+
+Expected: PASS, 5 tests.
+
+These bind real sockets on the loopback interface. If a sandbox denies that, the
+tests fail rather than skip on purpose: a transport that cannot be exercised is
+not verified, and pretending otherwise is worse than a red test.
+
+- [ ] **Step 3: Run the whole suite**
+
+Run: `cd windows && dotnet test`
+
+Expected: 0 failures.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add windows/tests/Hypo.Core.Tests/LanLoopbackTests.cs
+git commit -m "test(windows): round-trip an envelope over a loopback LAN socket"
+```
+
+---
+## Tasks 10 to 16 — still to be written
+
+These remain scoped but not written.
 
 Remaining scope:
 
-5. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
+10. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
 11. **`PairingMessages`** — `PairingChallengeMessage` and `PairingAckMessage`, matching `macos/Sources/HypoApp/Pairing/PairingModels.swift` field for field, with `challenge_id` lowercase.
 12. **`PairingSession`** — generates a fresh ephemeral X25519 pair per attempt, sends the challenge, verifies and consumes the ack, derives the shared key. Rejects a replayed `challenge_id` and an expired payload.
 13. **Pairing round-trip test** — two sessions in one process complete a pairing and derive the same key, and a tampered ack is rejected.

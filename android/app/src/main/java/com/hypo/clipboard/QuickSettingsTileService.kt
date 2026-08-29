@@ -15,7 +15,7 @@ class QuickSettingsTileService : TileService() {
         super.onStartListening()
         qsTile?.apply {
             label = getString(R.string.quick_settings_tile_label)
-            icon = Icon.createWithResource(this@QuickSettingsTileService, R.drawable.ic_launcher_foreground)
+            icon = Icon.createWithResource(this@QuickSettingsTileService, R.drawable.ic_quick_settings)
             state = Tile.STATE_INACTIVE
             updateTile()
         }

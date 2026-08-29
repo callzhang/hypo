@@ -9,22 +9,19 @@ import os.log
 public final class StorageManager {
     // Accessed from non-MainActor contexts (e.g., model helpers); file IO here is thread-safe.
     nonisolated public static let shared = StorageManager()
-    
+
     // Use Caches directory so the OS can clean it up if needed, but it persists across reboots
-    private let baseDirectory: URL
+    private let locations: StorageLocations
     private let imagesDirectory: URL
-    
+
     #if canImport(os)
     private let logger = HypoLogger(category: "StorageManager")
     #endif
-    
-    nonisolated private init() {
-        // Base: ~/Library/Caches/com.hypo.clipboard/
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.hypo.clipboard"
-        baseDirectory = caches.appendingPathComponent(bundleID)
-        imagesDirectory = baseDirectory.appendingPathComponent("images")
-        
+
+    nonisolated public init(locations: StorageLocations = CachesStorageLocations()) {
+        self.locations = locations
+        imagesDirectory = locations.imagesDirectory
+
         createDirectoriesIfNeeded()
     }
     

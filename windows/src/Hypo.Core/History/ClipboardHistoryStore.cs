@@ -174,5 +174,19 @@ public sealed class ClipboardHistoryStore : IDisposable
         command.ExecuteNonQuery();
     }
 
-    public void Dispose() => _connection.Dispose();
+    /// <summary>
+    /// Closes the database and releases the file handle.
+    ///
+    /// <para>Clearing the pool is not optional. Dispose alone hands the
+    /// connection back to the pool, which keeps the file open; on Windows the
+    /// file then cannot be deleted, moved or replaced, so anything that closes
+    /// the store to tidy up its file fails with a sharing violation. Unix
+    /// permits deleting an open file, which is why this only ever shows up on
+    /// the platform the client actually ships to.</para>
+    /// </summary>
+    public void Dispose()
+    {
+        SqliteConnection.ClearPool(_connection);
+        _connection.Dispose();
+    }
 }

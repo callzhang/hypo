@@ -18,10 +18,21 @@ public class SyncCoordinatorTests : IDisposable
 
     private readonly string _dir = Directory.CreateTempSubdirectory("hypo-coordinator").FullName;
     private readonly byte[] _key = new byte[32];
+    private readonly List<ClipboardHistoryStore> _stores = [];
 
     public SyncCoordinatorTests() => Random.Shared.NextBytes(_key);
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    public void Dispose()
+    {
+        // Windows will not delete a directory holding an open file, so every
+        // store a test built has to be closed before the temp directory goes.
+        foreach (var store in _stores)
+        {
+            store.Dispose();
+        }
+
+        Directory.Delete(_dir, recursive: true);
+    }
 
     /// <summary>Records what was sent; never receives unless a test says so.</summary>
     private sealed class RecordingTransport : ISyncTransport
@@ -69,6 +80,7 @@ public class SyncCoordinatorTests : IDisposable
         }
 
         var history = new ClipboardHistoryStore(Path.Combine(_dir, $"{Guid.NewGuid():N}.db"));
+        _stores.Add(history);
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
 
         var coordinator = new SyncCoordinator(

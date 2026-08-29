@@ -121,6 +121,25 @@ public class ClipboardHistoryStoreTests : IDisposable
     }
 
     [Fact]
+    public void ReleasesTheFileOnDispose()
+    {
+        // Windows refuses to delete an open file; Unix does not, so this passes
+        // trivially on a Mac and is a real check only in CI. It exists because
+        // Dispose alone returns the connection to the pool and keeps the handle,
+        // which turned seventeen unrelated tests red on the platform the client
+        // actually ships to.
+        var path = Path("released.db");
+        using (var store = new ClipboardHistoryStore(path))
+        {
+            store.Add(Entry("something", DateTimeOffset.UnixEpoch));
+        }
+
+        File.Delete(path);
+
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
     public void RoundTripsTimestampsWithoutLosingTheOffset()
     {
         var at = new DateTimeOffset(2026, 8, 29, 14, 30, 15, TimeSpan.FromHours(8));

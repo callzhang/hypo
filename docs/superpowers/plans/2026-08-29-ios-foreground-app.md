@@ -288,8 +288,40 @@ gh run list --branch feat/ios-app --limit 3
 ## Task 3: StorageLocations 的 iOS 实现
 
 **Files:**
+- Modify: `shared/HypoiOS/Package.swift`
 - Create: `shared/HypoiOS/Sources/HypoiOS/Platform/AppContainerStorageLocations.swift`
 - Create: `shared/HypoiOS/Tests/HypoiOSTests/AppContainerStorageLocationsTests.swift`
+
+- [ ] **Step 0: 给测试目标加上 HypoCore 依赖（先做，否则后面每个测试都会因错误原因失败）**
+
+本任务起，每个测试文件都要 `import HypoCore`（不只是 `@testable import HypoiOS`）。SwiftPM 的 target 只能导入自己 `dependencies` 里声明的模块——`HypoiOSTests → HypoiOS → HypoCore` 这条传递链**不会**让 `HypoCore` 对测试目标可见。
+
+不先补这一条的话，Step 2「确认测试失败」会报 `no such module 'HypoCore'` 而不是预期的 `cannot find 'AppContainerStorageLocations' in scope`——**失败原因不对，那一步就白做了**：TDD 先确认失败的意义在于验证测试确实在测你以为的东西。
+
+把 `HypoiOSTests` 目标的 `dependencies` 改为：
+
+```swift
+        .testTarget(
+            name: "HypoiOSTests",
+            dependencies: [
+                "HypoiOS",
+                .product(name: "HypoCore", package: "HypoCore"),
+                .product(name: "Testing", package: "swift-testing")
+            ],
+            path: "Tests/HypoiOSTests"
+        )
+```
+
+改完先跑一次现有的 smoke test 确认包仍然可解析：
+
+```bash
+cd /Users/derek/Documents/Projects/hypo/.worktrees/ios-hypocore/shared/HypoiOS && \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+xcodebuild test -scheme HypoiOS -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -skipMacroValidation -enableCodeCoverage NO 2>&1 | grep -E "Test run with|error:" | tail -2
+```
+
+期望：1 个测试通过。
 
 - [ ] **Step 1: 写失败测试**
 

@@ -14,6 +14,4 @@ public static class Base64Compat
         var padded = remainder == 0 ? value : value + new string('=', 4 - remainder);
         return Convert.FromBase64String(padded);
     }
-
-    public static string Encode(ReadOnlySpan<byte> value) => Convert.ToBase64String(value);
 }

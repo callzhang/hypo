@@ -303,8 +303,6 @@ public static class Base64Compat
         var padded = remainder == 0 ? value : value + new string('=', 4 - remainder);
         return Convert.FromBase64String(padded);
     }
-
-    public static string Encode(ReadOnlySpan<byte> value) => Convert.ToBase64String(value);
 }
 ```
 
@@ -399,6 +397,13 @@ namespace Hypo.Core.Protocol;
 /// </summary>
 public sealed class Base64ByteArrayConverter : JsonConverter<byte[]>
 {
+    /// <summary>
+    /// Required. For reference types this defaults to false, which means
+    /// System.Text.Json never calls Read on a null token and assigns null
+    /// straight to the property — making the null branch below dead code.
+    /// </summary>
+    public override bool HandleNull => true;
+
     public override byte[] Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType == JsonTokenType.Null)
@@ -416,10 +421,27 @@ public sealed class Base64ByteArrayConverter : JsonConverter<byte[]>
 
     public override void Write(Utf8JsonWriter writer, byte[] value, JsonSerializerOptions options)
     {
-        writer.WriteStringValue(Base64Compat.Encode(value));
+        writer.WriteBase64StringValue(value);
     }
 }
 ```
+
+Two details that are easy to get wrong here, both caught by the tests above:
+
+- Write with `WriteBase64StringValue`, not `WriteStringValue`. The default
+  `System.Text.Json` encoder escapes `+` as `\u002B`, so `WriteStringValue`
+  would emit `3q2\u002B7w==` where macOS and Android emit `3q2+7w==`. Both
+  forms parse identically, so this is not a wire-compatibility break, but it
+  inflates every payload and diverges from what the other two clients produce.
+  `WriteBase64StringValue` writes the base64 alphabet verbatim and is what the
+  built-in `byte[]` converter uses.
+- `HandleNull` must be overridden to `true`, as noted in the code comment. It has
+  one side effect on the write path: a null `byte[]` is routed to `Write` and
+  emits `""` rather than `null`. Every protocol model in this plan is serialised
+  through `ProtocolJson.Options`, whose `WhenWritingNull` drops the property
+  before the converter sees it, so the effect is unreachable today. It would
+  become visible only if a later task added a nullable `byte[]?` field
+  serialised without those options.
 
 - [ ] **Step 4: Run the test to verify it passes**
 

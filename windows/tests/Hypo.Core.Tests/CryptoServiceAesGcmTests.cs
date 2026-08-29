@@ -107,4 +107,27 @@ public class CryptoServiceAesGcmTests
             () => CryptoService.Decrypt(
                 ciphertext, key, nonce, tag, System.Text.Encoding.UTF8.GetBytes("device-b")));
     }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(24)]
+    public void EncryptRejectsKeysThatAreNotTwoHundredFiftySixBits(int keySizeBytes)
+    {
+        Assert.Throws<ArgumentException>(() => CryptoService.Encrypt(
+            plaintext: [0x01, 0x02, 0x03],
+            key: new byte[keySizeBytes],
+            nonce: new byte[CryptoService.NonceSizeBytes],
+            associatedData: default));
+    }
+
+    [Fact]
+    public void DecryptRejectsKeysThatAreNotTwoHundredFiftySixBits()
+    {
+        Assert.Throws<ArgumentException>(() => CryptoService.Decrypt(
+            ciphertext: [0x01],
+            key: new byte[16],
+            nonce: new byte[CryptoService.NonceSizeBytes],
+            tag: new byte[CryptoService.TagSizeBytes],
+            associatedData: default));
+    }
 }

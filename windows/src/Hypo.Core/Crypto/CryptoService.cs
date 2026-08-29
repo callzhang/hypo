@@ -22,12 +22,26 @@ public static class CryptoService
     /// <summary>UTF-8 bytes of "hypo-aes-256-gcm".</summary>
     public static ReadOnlySpan<byte> HkdfInfo => "hypo-aes-256-gcm"u8;
 
+    private static void RequireAesKeySize(ReadOnlySpan<byte> key)
+    {
+        if (key.Length != KeySizeBytes)
+        {
+            throw new ArgumentException(
+                $"The protocol requires a {KeySizeBytes}-byte AES-256 key; got {key.Length}. " +
+                "AesGcm would otherwise silently accept a 16- or 24-byte key and use AES-128 or AES-192, " +
+                "which fails authentication on the peer with no indication of the real cause.",
+                nameof(key));
+        }
+    }
+
     public static (byte[] Ciphertext, byte[] Tag) Encrypt(
         ReadOnlySpan<byte> plaintext,
         ReadOnlySpan<byte> key,
         ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> associatedData)
     {
+        RequireAesKeySize(key);
+
         using var aes = new AesGcm(key, TagSizeBytes);
         var ciphertext = new byte[plaintext.Length];
         var tag = new byte[TagSizeBytes];
@@ -42,6 +56,8 @@ public static class CryptoService
         ReadOnlySpan<byte> tag,
         ReadOnlySpan<byte> associatedData)
     {
+        RequireAesKeySize(key);
+
         using var aes = new AesGcm(key, TagSizeBytes);
         var plaintext = new byte[ciphertext.Length];
         aes.Decrypt(nonce, ciphertext, tag, plaintext, associatedData);

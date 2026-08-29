@@ -11,6 +11,11 @@ public class DnsSdNameTests
     [InlineData("HypoWindowsProbe", "HypoWindowsProbe")]
     [InlineData(@"a\.b", "a.b")]
     [InlineData(@"back\\slash", @"back\slash")]
+    [InlineData(@"Air\0329", "Air 9")]
+    [InlineData(@"Air\03212", "Air 12")]
+    [InlineData(@"caf\233\0329", "café 9")]
+    [InlineData(@"\256\032char", "Ā char")]
+    [InlineData("tab\\009here", "tab\there")]
     public void UnescapesInstanceNames(string wire, string expected)
     {
         Assert.Equal(expected, DnsSdName.Unescape(wire));

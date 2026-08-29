@@ -3,9 +3,14 @@ using Hypo.Core.Protocol;
 namespace Hypo.Core.Transport;
 
 /// <summary>
-/// One channel over which envelopes travel. Plan 2 implements the LAN client and
-/// server; Plan 3 adds the cloud relay and the dual-send transport that fans one
-/// message across both.
+/// One channel over which envelopes travel. Plan 2 implemented the LAN client
+/// and server; Plan 4 adds the cloud relay and <see cref="DualSyncTransport"/>,
+/// which picks between them.
+///
+/// This comment used to say the dual transport "fans one message across both".
+/// It does not: that would deliver the same clipboard item to the peer twice
+/// and leave the peer to sort it out. It prefers the LAN and falls back to the
+/// relay.
 /// </summary>
 public interface ISyncTransport : IAsyncDisposable
 {

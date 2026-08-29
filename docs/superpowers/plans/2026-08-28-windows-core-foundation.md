@@ -59,14 +59,24 @@ Expected: at least one line beginning with `10.`. If not, install the .NET 10 SD
 
 ```bash
 cd windows
-dotnet new sln --name Hypo
+dotnet new sln --name Hypo --format sln
 dotnet new classlib --name Hypo.Core --output src/Hypo.Core --framework net10.0
 dotnet new xunit --name Hypo.Core.Tests --output tests/Hypo.Core.Tests --framework net10.0
 dotnet sln add src/Hypo.Core/Hypo.Core.csproj tests/Hypo.Core.Tests/Hypo.Core.Tests.csproj
 dotnet add tests/Hypo.Core.Tests/Hypo.Core.Tests.csproj reference src/Hypo.Core/Hypo.Core.csproj
 dotnet add src/Hypo.Core/Hypo.Core.csproj package BouncyCastle.Cryptography
 rm -f src/Hypo.Core/Class1.cs
+rm -f tests/Hypo.Core.Tests/UnitTest1.cs
 ```
+
+Two details that bite on SDK 10.0.400:
+
+- `--format sln` is required. `dotnet new sln` now defaults to the newer `.slnx`
+  XML format, which would not produce the `windows/Hypo.sln` this plan and the
+  CI job in Task 17 both reference.
+- The xunit template writes a placeholder `UnitTest1.cs` containing an empty but
+  discoverable `[Fact]`. Left in place it silently adds one to every later test
+  count in this plan, so it is removed here.
 
 - [ ] **Step 3: Set language and analysis options on `Hypo.Core`**
 
@@ -104,7 +114,11 @@ bin/
 obj/
 *.user
 TestResults/
+.vs/
 ```
+
+`.vs/` is not build output — Visual Studio creates it the first time someone
+opens the solution on Windows, which is the normal case from Plan 3 onward.
 
 - [ ] **Step 5: Verify the solution builds**
 

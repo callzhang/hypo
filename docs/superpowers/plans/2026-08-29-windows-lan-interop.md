@@ -177,14 +177,21 @@ public class FrameReaderTests
     }
 
     [Fact]
-    public void ResetDiscardsBufferedBytes()
+    public void ResetDiscardsBufferedBytesAndLeavesTheReaderUsable()
     {
         var reader = new FrameReader();
         reader.Append(Frame("hello").AsSpan(0, 5).ToArray());
+        Assert.Equal(5, reader.Buffered);
 
         reader.Reset();
 
-        Assert.Empty(reader.Append(Frame("x")).Where(f => Encoding.UTF8.GetString(f) != "x"));
+        Assert.Equal(0, reader.Buffered);
+
+        // The discarded prefix must not corrupt what follows: a whole frame
+        // appended after a Reset has to parse cleanly.
+        var completed = reader.Append(Frame("x"));
+        Assert.Single(completed);
+        Assert.Equal("x", Encoding.UTF8.GetString(completed[0]));
     }
 }
 ```
@@ -288,7 +295,15 @@ public sealed class FrameReader
 }
 ```
 
-The ceiling check happens before the completeness check so a hostile prefix is rejected without waiting for bytes that will never come.
+The ceiling check happens before the completeness check so a hostile prefix is
+rejected without waiting for bytes that will never come.
+
+`ResetDiscardsBufferedBytesAndLeavesTheReaderUsable` asserts `Buffered` on both
+sides of the `Reset` deliberately. An earlier draft only filtered the frames
+returned by a follow-up append and asserted the result was empty, which is
+vacuously true whenever the reader yields *nothing* — so any `Reset` that
+cleared the buffer but wedged the reader would have passed. Asserting the
+follow-up frame is `Single` and equal to `"x"` is what closes that.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -331,6 +346,12 @@ public class DnsSdNameTests
     [InlineData("HypoWindowsProbe", "HypoWindowsProbe")]
     [InlineData(@"a\.b", "a.b")]
     [InlineData(@"back\\slash", @"back\slash")]
+    // Measured from Makaretu: a leading zero means exactly three digits.
+    [InlineData(@"Air\0329", "Air 9")]
+    [InlineData(@"Air\03212", "Air 12")]
+    [InlineData(@"caf\233\0329", "café 9")]
+    [InlineData(@"\256\032char", "Ā char")]
+    [InlineData("tab\\009here", "tab\there")]
     public void UnescapesInstanceNames(string wire, string expected)
     {
         Assert.Equal(expected, DnsSdName.Unescape(wire));
@@ -369,7 +390,7 @@ public class DnsSdNameTests
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~DnsSdNameTests`
 
-Expected: FAIL to compile with `CS0246: The type or namespace name 'Hypo.Core.Discovery' could not be found`.
+Expected: FAIL to compile with `CS0234: The type or namespace name 'Discovery' does not exist in the namespace 'Hypo.Core'` — the compiler reports CS0234 rather than CS0246 when the parent namespace already resolves.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -408,15 +429,31 @@ public static class DnsSdName
             }
 
             var digits = 0;
-            while (digits < 4 && i + 1 + digits < value.Length && char.IsAsciiDigit(value[i + 1 + digits]))
+            while (digits < 5 && i + 1 + digits < value.Length && char.IsAsciiDigit(value[i + 1 + digits]))
             {
                 digits++;
             }
 
             if (digits >= 3)
             {
-                sb.Append((char)int.Parse(value.AsSpan(i + 1, digits)));
-                i += digits;
+                // The encoder zero-pads to a minimum of three digits and never
+                // pads wider than the value needs, so a leading zero proves the
+                // escape is exactly three digits and any further digits are
+                // literal text. Without this, "Air 9" arrives as "Air\0329" and
+                // is misread as one code point.
+                var width = value[i + 1] == '0' ? 3 : digits;
+                var parsed = int.Parse(value.AsSpan(i + 1, width));
+
+                // A wider reading that will not fit in a char cannot be what the
+                // encoder meant, so fall back to three digits.
+                if (parsed > char.MaxValue && width > 3)
+                {
+                    width = 3;
+                    parsed = int.Parse(value.AsSpan(i + 1, width));
+                }
+
+                sb.Append((char)parsed);
+                i += width;
             }
             else
             {
@@ -444,13 +481,39 @@ public static class DnsSdName
 }
 ```
 
-Names longer than three digits appear because Bonjour emits the code point rather than a byte for non-ASCII, as in `\8217` for a right single quote — hence accepting up to four digits.
+Escapes wider than three digits appear because the encoder emits a code point
+rather than a byte for non-ASCII, as in `\8217` for a right single quote. The
+width rule was measured against `Makaretu.Dns.Multicast` rather than assumed:
+
+| Input | On the wire |
+|-------|-------------|
+| `Air 9` | `Air\0329` |
+| `Air 12` | `Air\03212` |
+| `café 9` | `caf\233\0329` |
+| `Ā char` | `\256\032char` |
+| tab character | `tab\009here` |
+| `derek’s Mac` | `derek\8217s\032Mac` |
+
+The encoder writes **a minimum of three digits, zero-padded, and never wider
+than the value needs** — 256 gets three digits, 8217 gets four. So a leading
+zero proves the escape is exactly three digits and any digits after it are
+literal text. A naive greedy read turns `Air\0329` into one code point and
+silently corrupts every device name containing a space before a digit.
+
+One ambiguity survives and should not be chased: `\2339` is undecidable, since
+233 followed by "9" and 2339 are both self-consistent under the encoder's rule.
+It needs a non-ASCII character immediately followed by a digit, which is far
+rarer than a space followed by one.
+
+Two other measured behaviours worth knowing: dots inside an instance name are
+**not** escaped, and a literal backslash is **dropped entirely** by the encoder,
+so that character cannot survive a round trip at all.
 
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~DnsSdNameTests`
 
-Expected: PASS, 9 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -669,8 +732,12 @@ public interface IPeerDiscovery : IAsyncDisposable
     /// <summary>Raised when a peer is first seen or its record changes.</summary>
     event EventHandler<DiscoveredPeer>? PeerDiscovered;
 
-    /// <summary>Raised when a peer withdraws its advertisement.</summary>
-    event EventHandler<string>? PeerLost;
+    // Peer loss is deliberately not reported yet. Makaretu surfaces goodbye
+    // packets inconsistently, and a peer that stopped answering is
+    // indistinguishable from one on a flaky network, so eviction needs a
+    // last-seen timestamp rather than an event. Plan 3 adds it, matching what
+    // the macOS client does. Declaring the event now would also trip CS0067
+    // under TreatWarningsAsErrors, since nothing could raise it.
 
     /// <summary>
     /// Advertises this device. The port must be the port actually bound, not the
@@ -885,7 +952,6 @@ public sealed class MdnsPeerDiscovery : IPeerDiscovery
     }
 
     public event EventHandler<DiscoveredPeer>? PeerDiscovered;
-    public event EventHandler<string>? PeerLost;
 
     public IReadOnlyCollection<DiscoveredPeer> KnownPeers
     {
@@ -1016,10 +1082,13 @@ public sealed class MdnsPeerDiscovery : IPeerDiscovery
 }
 ```
 
-`PeerLost` is declared but never raised here. Makaretu surfaces goodbye packets
+There is deliberately no `PeerLost` event. Makaretu surfaces goodbye packets
 inconsistently across platforms, and a peer that stops answering is
-indistinguishable from one on a flaky network. Plan 3 adds staleness eviction
-driven by a last-seen timestamp, which is what the macOS client does.
+indistinguishable from one on a flaky network, so eviction needs a last-seen
+timestamp rather than an event. Plan 3 adds it, matching what the macOS client
+does. Declaring the event now and never raising it would also fail the build:
+`Hypo.Core` sets `TreatWarningsAsErrors`, and an unraised field-like event is
+CS0067.
 
 - [ ] **Step 5: Run to verify it passes**
 
@@ -1145,7 +1214,13 @@ been made to depend on a live network.
 Run: `cd windows && HYPO_LIVE_PEER=1 dotnet test --filter FullyQualifiedName~LivePeerDiscoveryTests`
 
 Expected: PASS, 2 tests, with at least one macOS or Android peer switched on and
-on the same network. If it fails, that is a genuine interoperability regression
+on the same network.
+
+Note what this does and does not prove. A developer box running the macOS client
+advertises to itself, so the test can be satisfied without a second device. That
+still proves interoperability with a shipping implementation, which is the point
+— but it does not exercise a network hop. To prove that, confirm a peer appears
+whose address is not this machine's. If it fails, that is a genuine interoperability regression
 against the behaviour recorded in spec section 4.2 — report it rather than
 weakening the assertions.
 
@@ -2332,7 +2407,7 @@ public static class SigningService
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~SigningServiceTests`
 
-Expected: PASS, 9 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 5: Commit**
 

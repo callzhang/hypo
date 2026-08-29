@@ -50,8 +50,14 @@ public sealed class ClipboardListener : IClipboard, IDisposable
 
     private nint _hwnd;
 
-    /// <summary>Only ever touched on the pump thread, which is what makes it reliable.</summary>
-    private uint _ownSequence;
+    /// <summary>
+    /// Sequence numbers our own writes produced. A short history rather than a
+    /// single value, because Windows does not promise exactly one
+    /// WM_CLIPBOARDUPDATE per change, and a second notification for a write we
+    /// already recognised would otherwise be forwarded as a peer's.
+    /// Only ever touched on the pump thread.
+    /// </summary>
+    private readonly Queue<uint> _ownSequences = new();
 
     private volatile bool _disposed;
 
@@ -99,7 +105,12 @@ public sealed class ClipboardListener : IClipboard, IDisposable
             // Both statements on the pump thread, so the WM_CLIPBOARDUPDATE the
             // write causes is dispatched afterwards, by which time the sequence
             // number it must be compared against is already recorded.
-            _ownSequence = WindowsClipboard.WriteText(text);
+            _ownSequences.Enqueue(WindowsClipboard.WriteText(text));
+            while (_ownSequences.Count > 8)
+            {
+                _ownSequences.Dequeue();
+            }
+
             return null;
         });
     }
@@ -177,7 +188,7 @@ public sealed class ClipboardListener : IClipboard, IDisposable
     private void OnClipboardUpdate()
     {
         // Same thread that performed the write, so this comparison cannot race it.
-        if (NativeMethods.GetClipboardSequenceNumber() == _ownSequence)
+        if (_ownSequences.Contains(NativeMethods.GetClipboardSequenceNumber()))
         {
             // Our own write. Re-publishing it is how two devices end up echoing
             // one item at each other forever.

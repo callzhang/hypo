@@ -82,6 +82,18 @@ public static class WindowsClipboard
 
         var bytes = ClipboardFormats.EncodeUnicodeText(text);
 
+        Write(bytes);
+
+        // Read *after* the session closes. The sequence number advances when the
+        // change is committed at CloseClipboard, so reading it inside the open
+        // session returns the value from before our own write -- which then fails
+        // to match the update we caused, and the echo suppression built on it
+        // silently does nothing.
+        return NativeMethods.GetClipboardSequenceNumber();
+    }
+
+    private static void Write(byte[] bytes)
+    {
         using var _ = Open();
 
         // EmptyClipboard before SetClipboardData. Skipping it leaves the
@@ -134,8 +146,6 @@ public static class WindowsClipboard
                 NativeMethods.GlobalFree(handle);
             }
         }
-
-        return NativeMethods.GetClipboardSequenceNumber();
     }
 
     public static uint SequenceNumber() => NativeMethods.GetClipboardSequenceNumber();

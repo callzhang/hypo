@@ -152,13 +152,30 @@ async Task PairAsync(string? target)
     server.EnvelopeReceived += (_, e) => PrintClipboard(e);
     await server.StartAsync();
 
+    // A signing key we actually keep. Advertising the public half of a key
+    // whose private half was discarded would leave us unable to sign anything
+    // we claim to be able to sign.
+    const string SigningKeyId = "local-signing-key";
+    var signingPrivate = store.Read(SigningKeyId);
+    if (signingPrivate is null)
+    {
+        signingPrivate = SigningService.GeneratePrivateKey();
+        store.Write(SigningKeyId, signingPrivate);
+    }
+
+    var signingPublic = SigningService.DerivePublicKey(signingPrivate);
+    var agreementPublic = session.AgreementPublicKey;
+
     await using var advert = new MdnsPeerDiscovery();
     await advert.AdvertiseAsync(deviceName, server.BoundPort, new Dictionary<string, string>
     {
         ["device_id"] = deviceId,
-        ["pub_key"] = Convert.ToBase64String(session.AgreementPublicKey),
-        ["signing_pub_key"] = Convert.ToBase64String(SigningService.DerivePublicKey(SigningService.GeneratePrivateKey())),
+        ["pub_key"] = Convert.ToBase64String(agreementPublic),
+        ["signing_pub_key"] = Convert.ToBase64String(signingPublic),
         ["version"] = "3.0.0-harness",
+        // SHA-256 of the agreement public key, matching what macOS publishes.
+        ["fingerprint_sha256"] = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(agreementPublic)).ToLowerInvariant(),
     });
 
     Console.WriteLine($"Listening on {server.BoundPort} and advertising as \"{deviceName}\".");

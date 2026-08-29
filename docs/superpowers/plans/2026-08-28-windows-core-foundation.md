@@ -22,6 +22,7 @@
 | `windows/src/Hypo.Core/Hypo.Core.csproj` | `net10.0`, no Windows-specific references |
 | `windows/src/Hypo.Core/Protocol/Base64Compat.cs` | Padding-tolerant base64 decoding (Android emits unpadded base64) |
 | `windows/src/Hypo.Core/Protocol/Base64ByteArrayConverter.cs` | `System.Text.Json` converter applying `Base64Compat` to `byte[]` members |
+| `windows/src/Hypo.Core/Protocol/Iso8601DateTimeOffsetConverter.cs` | Writes timestamps with a `Z` designator, as both existing clients do |
 | `windows/src/Hypo.Core/Protocol/EncryptionMetadata.cs` | `algorithm` / `nonce` / `tag` |
 | `windows/src/Hypo.Core/Protocol/EnvelopePayload.cs` | Envelope payload: content type, ciphertext, device identity, target, encryption |
 | `windows/src/Hypo.Core/Protocol/SyncEnvelope.cs` | The top-level message |
@@ -499,6 +500,7 @@ git commit -m "feat(windows): add padding-tolerant base64 JSON converter"
 
 **Files:**
 - Create: `windows/src/Hypo.Core/Protocol/ProtocolJson.cs`
+- Create: `windows/src/Hypo.Core/Protocol/Iso8601DateTimeOffsetConverter.cs`
 - Test: `windows/tests/Hypo.Core.Tests/ProtocolJsonTests.cs`
 
 - [ ] **Step 1: Write the failing test**
@@ -506,6 +508,7 @@ git commit -m "feat(windows): add padding-tolerant base64 JSON converter"
 Create `windows/tests/Hypo.Core.Tests/ProtocolJsonTests.cs`:
 
 ```csharp
+using System.Globalization;
 using System.Text.Json;
 using Hypo.Core.Protocol;
 
@@ -550,6 +553,28 @@ public class ProtocolJsonTests
     public void SerialisesMessageTypeAsALowercaseString(MessageType value, string expected)
     {
         Assert.Equal($"\"{expected}\"", JsonSerializer.Serialize(value, ProtocolJson.Options));
+    }
+
+    [Fact]
+    public void WritesTimestampsWithAZDesignatorAndNoFractionalSeconds()
+    {
+        var value = DateTimeOffset.Parse("2025-10-03T00:00:00Z", CultureInfo.InvariantCulture);
+        Assert.Equal("\"2025-10-03T00:00:00Z\"", JsonSerializer.Serialize(value, ProtocolJson.Options));
+    }
+
+    [Fact]
+    public void WritesNonUtcTimestampsAsUtc()
+    {
+        var value = DateTimeOffset.Parse("2025-10-03T08:00:00+08:00", CultureInfo.InvariantCulture);
+        Assert.Equal("\"2025-10-03T00:00:00Z\"", JsonSerializer.Serialize(value, ProtocolJson.Options));
+    }
+
+    [Fact]
+    public void ReadsBothZAndNumericOffsetTimestamps()
+    {
+        var withZ = JsonSerializer.Deserialize<DateTimeOffset>("\"2025-10-03T00:00:00Z\"", ProtocolJson.Options);
+        var withOffset = JsonSerializer.Deserialize<DateTimeOffset>("\"2025-10-03T00:00:00+00:00\"", ProtocolJson.Options);
+        Assert.Equal(withZ, withOffset);
     }
 }
 ```
@@ -600,20 +625,59 @@ public static class ProtocolJson
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new Iso8601DateTimeOffsetConverter() },
     };
 }
 ```
+
+Also create `windows/src/Hypo.Core/Protocol/Iso8601DateTimeOffsetConverter.cs`:
+
+```csharp
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace Hypo.Core.Protocol;
+
+/// <summary>
+/// Writes timestamps the way the macOS and Android clients write them: ISO 8601
+/// in UTC with a "Z" designator and no fractional seconds. System.Text.Json's
+/// built-in DateTimeOffset writer emits a numeric offset ("+00:00") instead,
+/// which diverges from tests/transport/frame_vectors.json and from what both
+/// existing clients put on the wire.
+/// </summary>
+public sealed class Iso8601DateTimeOffsetConverter : JsonConverter<DateTimeOffset>
+{
+    private const string Format = "yyyy-MM-dd'T'HH:mm:ss'Z'";
+
+    public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.GetDateTimeOffset();
+
+    public override void Write(Utf8JsonWriter writer, DateTimeOffset value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.ToUniversalTime().ToString(Format, CultureInfo.InvariantCulture));
+}
+```
+
+`macos/Sources/HypoApp/Services/TransportFrameCodec.swift:16` sets
+`encoder.dateEncodingStrategy = .iso8601`, which is `ISO8601DateFormatter` with
+`.withInternetDateTime` — `Z`, no fractional seconds. Kotlin's
+`Instant.toString()` matches. Dropping sub-second precision is therefore
+alignment, not loss: the other two clients already drop it, and the timestamp's
+only protocol role is the five-minute replay window.
+
+Reading stays permissive. `reader.GetDateTimeOffset()` accepts both forms, so a
+peer sending `+00:00` still parses. Only what we emit is constrained.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~ProtocolJsonTests`
 
-Expected: PASS, 9 tests.
+Expected: PASS, 12 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add windows/src/Hypo.Core/Protocol/ProtocolJson.cs windows/tests/Hypo.Core.Tests/ProtocolJsonTests.cs
+git add windows/src/Hypo.Core/Protocol/ProtocolJson.cs windows/src/Hypo.Core/Protocol/Iso8601DateTimeOffsetConverter.cs windows/tests/Hypo.Core.Tests/ProtocolJsonTests.cs
 git commit -m "feat(windows): define protocol enums and shared serializer options"
 ```
 
@@ -800,7 +864,13 @@ public sealed record SyncEnvelope
 }
 ```
 
-`Guid` and `DateTimeOffset` are handled natively by `System.Text.Json`: GUIDs read and write as strings, and `DateTimeOffset` reads and writes ISO 8601. No custom converters are needed.
+`Guid` is handled natively by `System.Text.Json`, reading and writing as a
+string. `DateTimeOffset` is **not** safe to leave to the built-in writer: it
+emits a numeric offset (`2025-10-03T00:00:00+00:00`) where both existing clients
+emit `2025-10-03T00:00:00Z`. Task 5 registers
+`Iso8601DateTimeOffsetConverter` on `ProtocolJson.Options` to correct that, and
+the shared frame vector in Task 8 is what catches it if the registration is ever
+lost.
 
 - [ ] **Step 6: Run the test to verify it passes**
 
@@ -1332,11 +1402,29 @@ public static class CryptoService
     }
 
     /// <summary>
-    /// Builds the associated data used for clipboard payloads: the device id
-    /// concatenated with the ISO 8601 timestamp (protocol section 9.2).
+    /// Builds the associated data for a clipboard payload: the UTF-8 bytes of
+    /// the sender's device id, lowercased.
     /// </summary>
-    public static byte[] BuildAssociatedData(string deviceId, DateTimeOffset timestamp) =>
-        Encoding.UTF8.GetBytes(deviceId + timestamp.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ"));
+    /// <remarks>
+    /// Protocol section 9.2 describes this as "device_id + timestamp", but
+    /// neither shipping client does that. macOS uses
+    /// <c>Data(entry.deviceId.utf8)</c> when encrypting and
+    /// <c>Data(senderId.utf8)</c> when decrypting; Android uses
+    /// <c>normalizedSenderDeviceId.encodeToByteArray()</c>. Including a
+    /// timestamp here would make every message fail authentication against both
+    /// peers. The wire format is defined by the implementations, not the prose.
+    ///
+    /// Lowercasing follows Android, which normalises defensively on both sides.
+    /// macOS instead trusts the wire value, relying on device ids already being
+    /// lowercase UUIDs as protocol v1.1 requires. For any peer that honours that
+    /// requirement the two behaviours are identical, and the defensive form
+    /// fails closed rather than silently mismatching.
+    /// </remarks>
+    public static byte[] BuildAssociatedData(string deviceId)
+    {
+        ArgumentNullException.ThrowIfNull(deviceId);
+        return Encoding.UTF8.GetBytes(deviceId.ToLowerInvariant());
+    }
 }
 ```
 
@@ -2139,7 +2227,7 @@ public class PayloadPipelineTests
         // Outbound: serialise, gzip, encrypt, frame.
         var json = JsonSerializer.SerializeToUtf8Bytes(original, ProtocolJson.Options);
         var compressed = GzipCompressor.Compress(json);
-        var aad = CryptoService.BuildAssociatedData(DeviceId, timestamp);
+        var aad = CryptoService.BuildAssociatedData(DeviceId);
         var (ciphertext, tag) = CryptoService.Encrypt(compressed, key, nonce, aad);
 
         var frame = new TransportFrameCodec().Encode(new SyncEnvelope
@@ -2160,7 +2248,7 @@ public class PayloadPipelineTests
 
         // Inbound: unframe, decrypt, gunzip, deserialise.
         var envelope = new TransportFrameCodec().Decode(frame);
-        var recoveredAad = CryptoService.BuildAssociatedData(envelope.Payload.DeviceId, envelope.Timestamp);
+        var recoveredAad = CryptoService.BuildAssociatedData(envelope.Payload.DeviceId);
         var decrypted = CryptoService.Decrypt(
             envelope.Payload.Ciphertext,
             key,
@@ -2177,19 +2265,20 @@ public class PayloadPipelineTests
     }
 
     [Fact]
-    public void AssociatedDataIsStableAcrossTimestampRepresentations()
+    public void AssociatedDataIgnoresDeviceIdCasing()
     {
-        var utc = DateTimeOffset.Parse("2026-08-28T12:00:00Z");
-        var offset = utc.ToOffset(TimeSpan.FromHours(8));
-
         Assert.Equal(
-            CryptoService.BuildAssociatedData(DeviceId, utc),
-            CryptoService.BuildAssociatedData(DeviceId, offset));
+            CryptoService.BuildAssociatedData(DeviceId),
+            CryptoService.BuildAssociatedData(DeviceId.ToUpperInvariant()));
     }
 }
 ```
 
-The second test matters because associated data is derived from a timestamp: if two clients format the same instant differently, every message fails authentication with no useful error.
+The second test matters because associated data is the one input to AES-GCM
+that is reconstructed independently on each side rather than carried on the
+wire. If two clients derive it differently — a casing difference, a stray
+timestamp — every message fails authentication with no useful error pointing at
+the cause.
 
 - [ ] **Step 2: Run the test**
 
@@ -2201,7 +2290,7 @@ Expected: PASS, 2 tests.
 
 Run: `cd windows && dotnet test`
 
-Expected: PASS, 58 tests, 0 failures.
+Expected: PASS, 61 tests, 0 failures.
 
 - [ ] **Step 4: Commit**
 

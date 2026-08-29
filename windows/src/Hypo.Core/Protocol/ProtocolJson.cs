@@ -33,6 +33,7 @@ public static class ProtocolJson
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        RespectNullableAnnotations = true,
         Converters = { new Iso8601DateTimeOffsetConverter() },
     };
 }

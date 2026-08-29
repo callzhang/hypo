@@ -75,4 +75,13 @@ public class SyncEnvelopeTests
         Assert.Equal(original.Payload.Ciphertext, again.Payload.Ciphertext);
         Assert.Equal(original.Payload.Encryption.Tag, again.Payload.Encryption.Tag);
     }
+
+    [Theory]
+    [InlineData("""{"id":"11111111-1111-1111-1111-111111111111","timestamp":"2025-10-03T00:00:00Z","version":"1.0","type":"clipboard","payload":null}""")]
+    [InlineData("""{"id":"11111111-1111-1111-1111-111111111111","timestamp":"2025-10-03T00:00:00Z","version":"1.0","type":"clipboard","payload":{"content_type":"text","ciphertext":"3q2+7w","device_id":null,"encryption":{"algorithm":"AES-256-GCM","nonce":"qrvM","tag":"EBES"}}}""")]
+    [InlineData("""{"id":"11111111-1111-1111-1111-111111111111","timestamp":"2025-10-03T00:00:00Z","version":"1.0","type":"clipboard","payload":{"content_type":"text","ciphertext":"3q2+7w","device_id":"mac-device","encryption":null}}""")]
+    public void RejectsJsonNullOnRequiredMembers(string json)
+    {
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<SyncEnvelope>(json, ProtocolJson.Options));
+    }
 }

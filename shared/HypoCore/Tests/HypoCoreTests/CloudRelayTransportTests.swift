@@ -49,7 +49,11 @@ struct CloudRelayTransportTests {
         )
 
         try await transport.send(envelope)
-        #expect(stubTask.sentData.count == 1)
+
+        // send() enqueues; a separate processor drains the queue and writes to
+        // the task, so the write is not observable the instant send() returns.
+        let sent = await waitUntil(timeout: .seconds(2)) { stubTask.sentData.count == 1 }
+        #expect(sent)
     }
 
     @Test @MainActor

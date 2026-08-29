@@ -151,6 +151,30 @@ class ClipboardSyncService : Service() {
                 val ackJson = pairingHandshakeManager.handleChallenge(challengeJson, privateKey)
                 
                 if (ackJson != null) {
+                    // Persist the initiator's name alongside the key that
+                    // handleChallenge just saved. ConnectionStatusProber deletes any
+                    // key it finds with no stored name, treating it as an orphan from
+                    // an interrupted pairing — so a responder-side pairing that stores
+                    // only the key is silently forgotten within seconds, leaving us
+                    // unable to encrypt anything back to that peer.
+                    //
+                    // This lives here rather than in PairingHandshakeManager because
+                    // the manager deliberately knows nothing about transport state,
+                    // and this service is where both objects already meet.
+                    runCatching {
+                        val challenge = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                            .decodeFromString(
+                                com.hypo.clipboard.pairing.PairingChallengeMessage.serializer(),
+                                challengeJson
+                            )
+                        transportManager.persistDeviceName(
+                            challenge.initiatorDeviceId,
+                            challenge.initiatorDeviceName
+                        )
+                        Log.d(TAG, "💾 Pairing: Persisted initiator name '${challenge.initiatorDeviceName}' for ${challenge.initiatorDeviceId}")
+                    }.onFailure { e ->
+                        Log.w(TAG, "⚠️ Pairing: Could not persist initiator name; the prober may forget this device", e)
+                    }
                     Log.d(TAG, "✅ Pairing: Challenge handled → ACK generated (${ackJson.length} chars)")
                 } else {
                     Log.e(TAG, "❌ Pairing: Failed to generate ACK from challenge")

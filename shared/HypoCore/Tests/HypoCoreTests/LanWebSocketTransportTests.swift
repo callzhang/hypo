@@ -260,9 +260,13 @@ struct LanWebSocketTransportTests {
         }
 
         try await transport.connect()
-        try await Task.sleep(nanoseconds: 150_000_000)
 
-        let sent = pingSent.withLock { $0 }
+        // Wait for the keepalive timer to fire rather than assuming a flat delay
+        // outlasts it — CI's runner is slower than a local machine, and this test
+        // failed there at 150ms while passing locally.
+        let sent = await waitUntil(timeout: .seconds(3)) {
+            pingSent.withLock { $0 }
+        }
         #expect(sent)
         await transport.disconnect()
     }

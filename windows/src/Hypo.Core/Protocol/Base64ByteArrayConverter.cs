@@ -26,6 +26,14 @@ public sealed class Base64ByteArrayConverter : JsonConverter<byte[]>
             throw new JsonException($"Expected a base64 string but found {reader.TokenType}.");
         }
 
+        // This try/catch is load-bearing, not redundant. System.Text.Json only
+        // auto-wraps FormatException into JsonException when its own reader
+        // methods throw it (Utf8JsonReader.GetDateTimeOffset and friends).
+        // Convert.FromBase64String is user code on this path, and STJ does not
+        // wrap arbitrary exceptions raised by a converter body: removing the
+        // catch was measured to let a bare FormatException escape
+        // JsonSerializer.Deserialize, which is what
+        // ThrowsJsonExceptionOnMalformedBase64 guards against.
         try
         {
             return Base64Compat.Decode(reader.GetString()!);

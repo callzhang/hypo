@@ -359,7 +359,18 @@ class PairingHandshakeManager @Inject constructor(
         }
     }
 
-    suspend fun handleChallenge(challengeJson: String, responderPrivateKey: ByteArray): String? = 
+    /**
+     * Handles an inbound pairing challenge, returning the ack to send back
+     * together with the identity of the peer whose key was just stored.
+     *
+     * The identity is part of the return value rather than being discarded
+     * because the caller must persist the peer's name alongside the key:
+     * ConnectionStatusProber deletes any key it finds without one, treating it
+     * as debris from an interrupted pairing. Returning only the ack is what let
+     * that obligation be forgotten, silently un-pairing every device that
+     * initiated pairing to us.
+     */
+    suspend fun handleChallenge(challengeJson: String, responderPrivateKey: ByteArray): HandledChallenge? = 
         withContext(Dispatchers.Default) {
             runCatching {
                 Log.d(TAG, "handleChallenge: Parsing challenge JSON (${challengeJson.length} chars)")
@@ -423,16 +434,32 @@ class PairingHandshakeManager @Inject constructor(
                 deviceKeyStore.saveKey(migratedDeviceId, sharedKey)
                 Log.d(TAG, "handleChallenge: Saved shared key for device: $migratedDeviceId")
                 
-                // Return ACK as JSON
+                // Return the ACK plus the peer identity the caller must persist.
                 val ackJson = json.encodeToString(ack)
                 Log.d(TAG, "handleChallenge: Generated ACK JSON (${ackJson.length} chars)")
-                ackJson
+                HandledChallenge(
+                    ackJson = ackJson,
+                    peerDeviceId = migratedDeviceId,
+                    peerDeviceName = challenge.initiatorDeviceName
+                )
             }.getOrElse { throwable ->
                 Log.e(TAG, "handleChallenge FAILED: ${throwable.message}", throwable)
                 null
             }
         }
 }
+
+/**
+ * The outcome of handling an inbound pairing challenge: the ack to send back,
+ * and the peer whose shared key was just stored. Callers must persist
+ * [peerDeviceName] against [peerDeviceId], or ConnectionStatusProber will sweep
+ * the key as an orphan within seconds.
+ */
+data class HandledChallenge(
+    val ackJson: String,
+    val peerDeviceId: String,
+    val peerDeviceName: String
+)
 
 class PairingException(message: String) : IllegalStateException(message)
 

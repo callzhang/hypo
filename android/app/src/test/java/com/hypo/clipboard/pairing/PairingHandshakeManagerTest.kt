@@ -153,6 +153,67 @@ class PairingHandshakeManagerTest {
         assertTrue(keyStore.savedKeys.containsKey(macDeviceId))
     }
 
+
+    @Test
+    fun `handleChallenge returns the initiator identity so its name can be persisted`() = runTest {
+        // Regression guard. The responder path had no test at all, which is how
+        // it shipped storing a shared key without ever recording who it belonged
+        // to. ConnectionStatusProber then deleted that key as an orphan, and the
+        // phone silently un-paired every device that initiated pairing to it.
+        val initiatorDeviceId = "550e8400-e29b-41d4-a716-446655440000"
+        val initiatorDeviceName = "Derek's Windows PC"
+
+        val initiatorPrivate = X25519.generatePrivateKey()
+        val initiatorPublic = X25519.publicFromPrivate(initiatorPrivate)
+        val responderPrivate = X25519.generatePrivateKey()
+        val responderPublic = X25519.publicFromPrivate(responderPrivate)
+
+        val crypto = CryptoService()
+        val sharedKey = crypto.deriveKey(initiatorPrivate, responderPublic)
+
+        val challengeSecret = ByteArray(32) { it.toByte() }
+        val challengePayload = PairingChallengePayload(
+            challenge = Base64.getEncoder().encodeToString(challengeSecret),
+            timestamp = clock.instant().toString()
+        )
+        val sealed = crypto.encrypt(
+            plaintext = json.encodeToString(challengePayload).toByteArray(),
+            key = sharedKey,
+            aad = initiatorDeviceId.toByteArray()
+        )
+        val challenge = PairingChallengeMessage(
+            initiatorDeviceId = initiatorDeviceId,
+            initiatorDeviceName = initiatorDeviceName,
+            initiatorPublicKey = Base64.getEncoder().encodeToString(initiatorPublic),
+            nonce = Base64.getEncoder().encodeToString(sealed.nonce),
+            ciphertext = Base64.getEncoder().encodeToString(sealed.ciphertext),
+            tag = Base64.getEncoder().encodeToString(sealed.tag)
+        )
+
+        val manager = PairingHandshakeManager(
+            cryptoService = crypto,
+            deviceKeyStore = keyStore,
+            trustStore = trustStore,
+            identity = identity,
+            clock = clock,
+            json = json
+        )
+
+        val handled = manager.handleChallenge(json.encodeToString(challenge), responderPrivate)
+
+        assertTrue("handleChallenge should succeed", handled != null)
+        handled!!
+
+        // The key is stored...
+        assertTrue(keyStore.savedKeys.containsKey(initiatorDeviceId))
+
+        // ...and the identity needed to keep it comes back with the ack, so the
+        // caller cannot store a key without also being handed the name.
+        assertEquals(initiatorDeviceId, handled.peerDeviceId)
+        assertEquals(initiatorDeviceName, handled.peerDeviceName)
+        assertTrue("ack should be JSON", handled.ackJson.startsWith("{"))
+    }
+
     private fun hash(data: ByteArray): ByteArray {
         val digest = MessageDigest.getInstance("SHA-256")
         return digest.digest(data)

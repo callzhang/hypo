@@ -356,7 +356,12 @@ fi
 
 # Inject RELAY_WS_AUTH_TOKEN from .env if available
 ENV_FILE="$PROJECT_ROOT/.env"
-if [ -f "$ENV_FILE" ]; then
+# Prefer an explicitly supplied environment variable. This keeps isolated
+# worktrees from needing a second copy of the repository's secret-bearing .env.
+AUTH_TOKEN="${RELAY_WS_AUTH_TOKEN:-}"
+if [ -n "$AUTH_TOKEN" ]; then
+    log_info "Using RELAY_WS_AUTH_TOKEN from environment..."
+elif [ -f "$ENV_FILE" ]; then
     # Load .env variables cleanly
     set +e
     while IFS='=' read -r key value || [ -n "$key" ]; do
@@ -376,7 +381,14 @@ if [ -f "$ENV_FILE" ]; then
     if [ -n "$AUTH_TOKEN" ]; then
         log_info "Injecting RELAY_WS_AUTH_TOKEN into Info.plist..."
         if command -v plutil &> /dev/null; then
-            plutil -replace RelayWsAuthToken -string "$AUTH_TOKEN" "$APP_BUNDLE/Contents/Info.plist"
+            # Use `-insert` for a newly-created bundle. Some macOS plutil
+            # versions return success for `-replace` even when the key is
+            # absent, so checking the key explicitly is more reliable.
+            if plutil -extract RelayWsAuthToken raw -o - "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1; then
+                plutil -replace RelayWsAuthToken -string "$AUTH_TOKEN" "$APP_BUNDLE/Contents/Info.plist"
+            else
+                plutil -insert RelayWsAuthToken -string "$AUTH_TOKEN" "$APP_BUNDLE/Contents/Info.plist"
+            fi
         else
             # Fallback for systems without plutil (unlikely on macOS)
             if grep -q "RelayWsAuthToken" "$APP_BUNDLE/Contents/Info.plist"; then

@@ -109,8 +109,10 @@ android {
         // Certificate pinning causes issues when certificates change and is overkill for a relay service
         buildConfigField("String", "RELAY_CERT_FINGERPRINT", "\"\"")
         buildConfigField("String", "RELAY_ENVIRONMENT", "\"production\"")
-        // Inject Auth Token from .env file
-        val relayAuthToken = envProperties.getProperty("RELAY_WS_AUTH_TOKEN", "")
+        // Prefer an explicitly supplied environment variable so isolated
+        // worktrees do not need a second copy of the repository's .env.
+        val relayAuthToken = System.getenv("RELAY_WS_AUTH_TOKEN")
+            ?: envProperties.getProperty("RELAY_WS_AUTH_TOKEN", "")
         buildConfigField("String", "RELAY_WS_AUTH_TOKEN", "\"$relayAuthToken\"")
     }
 

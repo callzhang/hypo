@@ -177,6 +177,22 @@ jobs:
             -skipMacroValidation \
             -enableCodeCoverage NO \
             -parallel-testing-enabled NO
+      - name: Build HypoiOS for iOS Simulator
+        working-directory: shared/HypoiOS
+        run: |
+          xcodebuild build \
+            -scheme HypoiOS \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation
+      - name: Run HypoiOS tests on iOS Simulator
+        working-directory: shared/HypoiOS
+        run: |
+          xcodebuild test \
+            -scheme HypoiOS \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -skipMacroValidation \
+            -enableCodeCoverage NO \
+            -parallel-testing-enabled NO
   windows-tests:
     name: Windows Core Tests
     runs-on: windows-latest

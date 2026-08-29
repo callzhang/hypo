@@ -13,6 +13,7 @@ struct TransportManagerTests {
             lanConfiguration: .init(serviceName: "test", port: 0, version: "1.0", fingerprint: "test", protocols: ["ws"]),
             webSocketServer: webSocketServer,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
         
@@ -34,6 +35,7 @@ struct TransportManagerTests {
             lanConfiguration: .init(serviceName: "initial", port: 0, version: "1.0", fingerprint: "test", protocols: ["ws"]),
             webSocketServer: webSocketServer,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
         
@@ -67,6 +69,7 @@ struct TransportManagerTests {
             webSocketServer: webSocketServer,
             historyStore: store,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
         
@@ -86,6 +89,7 @@ struct TransportManagerTests {
             historyStore: store,
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -114,6 +118,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: notificationController,
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -146,6 +151,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -181,6 +187,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -214,6 +221,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -238,6 +246,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -270,6 +279,7 @@ struct TransportManagerTests {
             ),
             webSocketServer: await makeWebSocketServer(),
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -292,6 +302,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -316,6 +327,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -340,6 +352,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -359,6 +372,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -387,6 +401,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -416,6 +431,7 @@ struct TransportManagerTests {
             webSocketServer: server,
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 
@@ -451,6 +467,7 @@ struct TransportManagerTests {
             historyStore: store,
             defaults: defaults,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
 

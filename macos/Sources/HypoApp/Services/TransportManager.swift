@@ -93,6 +93,7 @@ public final class TransportManager: ObservableObject {
     private let lifecycleObserver: AppLifecycleObserving?
 
     private let notificationController: ClipboardNotificationScheduling
+    private let clipboard: SystemClipboard
 
     public init(
         provider: TransportProvider,
@@ -109,6 +110,7 @@ public final class TransportManager: ObservableObject {
         defaults: UserDefaults = .standard,
         dispatcher: ClipboardEventDispatcher? = nil,
         notificationController: ClipboardNotificationScheduling,
+        clipboard: SystemClipboard,
         lifecycleObserver: AppLifecycleObserving? = nil,
         autoStartLanServices: Bool = true
     ) {
@@ -129,6 +131,7 @@ public final class TransportManager: ObservableObject {
         self.webSocketServer = webSocketServer
         self.dispatcher = dispatcher ?? ClipboardEventDispatcher()
         self.notificationController = notificationController
+        self.clipboard = clipboard
         self.lifecycleObserver = lifecycleObserver
 
         // Configure TempFileManager with the dispatcher
@@ -154,7 +157,7 @@ public final class TransportManager: ObservableObject {
                 syncEngine: syncEngine,
                 historyStore: historyStore,
                 dispatcher: self.dispatcher,
-                clipboard: AppKitClipboard()
+                clipboard: self.clipboard
             )
             
             // Wire handler callbacks for TransportManager internal needs

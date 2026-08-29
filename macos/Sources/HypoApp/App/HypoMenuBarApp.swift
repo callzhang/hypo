@@ -849,6 +849,7 @@ public struct HypoMenuBarApp: App {
                 webSocketServer: server,
                 historyStore: historyStore,
                 notificationController: ClipboardNotificationController.shared,
+                clipboard: AppKitClipboard(),
                 lifecycleObserver: AppKitLifecycleObserver()
             )
             AppContext.shared.transportManager = transportManager

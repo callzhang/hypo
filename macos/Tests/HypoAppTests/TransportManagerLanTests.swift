@@ -25,6 +25,7 @@ struct TransportManagerLanTests {
             ),
             webSocketServer: webSocketServer,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
         defer { Task { await manager.deactivateLanServices() } }
@@ -89,6 +90,7 @@ struct TransportManagerLanTests {
             dateProvider: { clock.now },
             webSocketServer: webSocketServer,
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
         defer { Task { await manager.deactivateLanServices() } }
@@ -125,6 +127,7 @@ struct TransportManagerLanTests {
                 analytics: InMemoryTransportAnalytics(),
                 webSocketServer: makeWebSocketServer(),
                 notificationController: MockNotificationController(),
+                clipboard: RecordingClipboard(),
                 autoStartLanServices: false
             )
         }
@@ -152,6 +155,7 @@ struct TransportManagerLanTests {
                 analytics: analytics,
                 webSocketServer: makeWebSocketServer(),
                 notificationController: MockNotificationController(),
+                clipboard: RecordingClipboard(),
                 autoStartLanServices: false
             )
         }
@@ -190,6 +194,7 @@ struct TransportManagerLanTests {
                 analytics: analytics,
                 webSocketServer: makeWebSocketServer(),
                 notificationController: MockNotificationController(),
+                clipboard: RecordingClipboard(),
                 autoStartLanServices: false
             )
         }
@@ -223,6 +228,7 @@ struct TransportManagerLanTests {
                 analytics: analytics,
                 webSocketServer: makeWebSocketServer(),
                 notificationController: MockNotificationController(),
+                clipboard: RecordingClipboard(),
                 autoStartLanServices: false
             )
         }
@@ -270,6 +276,7 @@ struct TransportManagerLanTests {
                 analytics: InMemoryTransportAnalytics(),
                 webSocketServer: makeWebSocketServer(),
                 notificationController: MockNotificationController(),
+                clipboard: RecordingClipboard(),
                 autoStartLanServices: false
             )
         }
@@ -317,6 +324,7 @@ struct TransportManagerLanTests {
                 analytics: InMemoryTransportAnalytics(),
                 webSocketServer: makeWebSocketServer(),
                 notificationController: MockNotificationController(),
+                clipboard: RecordingClipboard(),
                 autoStartLanServices: false
             )
         }
@@ -356,6 +364,7 @@ struct TransportManagerLanTests {
             ),
             webSocketServer: makeWebSocketServer(),
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
         defer { Task { await manager.deactivateLanServices() } }
@@ -385,6 +394,7 @@ struct TransportManagerLanTests {
             ),
             webSocketServer: makeWebSocketServer(),
             notificationController: MockNotificationController(),
+            clipboard: RecordingClipboard(),
             autoStartLanServices: false
         )
         defer { Task { await manager.deactivateLanServices() } }

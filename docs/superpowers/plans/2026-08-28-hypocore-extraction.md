@@ -36,6 +36,8 @@ cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplicat
 
 **CI 上的权威验证**：Task 1B 新增的 `ios-core-build` job 在 `macos-15` runner 上跑真正的 `xcodebuild`。**每个任务提交后都要推送并确认该 job 通过**，不要攒着一次推。
 
+**跨模块可见性的已知盲区**（Task 3 实测结论）：这个代码库的自定义类型基本已经标好 `public`，Task 3 搬的四个文件里三个完全不用改。唯一漏网的是 **`Int.formattedAsKB`——一个对内置类型的扩展**。审计一个文件的「公开 API 面」时，人和模型都倾向于只看自己定义的 type，扩展在 `Int`/`String`/`Data`/`URL` 等系统类型上的成员最容易漏。**每次搬迁前先 `grep -n "^extension \|^public extension " <file>` 过一遍**，比等编译器报错再回头改快。
+
 **基线**：抽取开始前 `cd macos && swift test` 的结果是 `✔ Test run with 193 tests passed after 5.699 seconds.`（2026-08-28 实测）。任务过程中通过数只应增加，不应减少。
 
 **为什么 package 放在 `shared/HypoCore/` 而不是 `shared/`**：SwiftPM 对本地路径依赖使用目录名作为 package identity。放在 `shared/` 会得到 identity `shared`，产品引用要写成 `.product(name: "HypoCore", package: "shared")`，易错。放在 `shared/HypoCore/` 则 identity 与 package 名一致。第 5 期的 `HypoUI` 将来放 `shared/HypoUI/`。

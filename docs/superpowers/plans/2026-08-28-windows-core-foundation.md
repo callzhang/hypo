@@ -24,9 +24,9 @@
 | `windows/src/Hypo.Core/Protocol/Base64ByteArrayConverter.cs` | `System.Text.Json` converter applying `Base64Compat` to `byte[]` members |
 | `windows/src/Hypo.Core/Protocol/EncryptionMetadata.cs` | `algorithm` / `nonce` / `tag` |
 | `windows/src/Hypo.Core/Protocol/EnvelopePayload.cs` | Envelope payload: content type, ciphertext, device identity, target, encryption |
-| `windows/src/Hypo.Core/Protocol/SyncEnvelope.cs` | Top-level message; `ContentType` and `MessageType` enums |
+| `windows/src/Hypo.Core/Protocol/SyncEnvelope.cs` | The top-level message |
 | `windows/src/Hypo.Core/Protocol/ClipboardPayload.cs` | The plaintext document that lives inside the ciphertext |
-| `windows/src/Hypo.Core/Protocol/ProtocolJson.cs` | The single shared `JsonSerializerOptions` instance |
+| `windows/src/Hypo.Core/Protocol/ProtocolJson.cs` | Shared protocol vocabulary: the `ContentType` and `MessageType` enums with their wire strings, plus the single shared `JsonSerializerOptions` |
 | `windows/src/Hypo.Core/Protocol/TransportFrameCodec.cs` | 4-byte big-endian length prefix framing plus size limits |
 | `windows/src/Hypo.Core/Crypto/CryptoService.cs` | AES-256-GCM, X25519 agreement, HKDF-SHA256 |
 | `windows/src/Hypo.Core/Utils/GzipCompressor.cs` | Gzip container compress and decompress |
@@ -308,6 +308,21 @@ public static class Base64Compat
 
 A remainder of 1 is not valid base64; `Convert.FromBase64String` rejects it after padding, which is the behaviour we want.
 
+Two properties of this implementation are deliberate rather than oversights:
+
+- **Whitespace is not tolerated.** `Convert.FromBase64String` on its own strips
+  embedded whitespace, but computing the remainder over the raw length means a
+  line-wrapped input gets the wrong number of pad characters and is rejected.
+  No client in this repo emits wrapped base64, and being strict with untrusted
+  peer data is the behaviour we want here — such input surfaces as a
+  `JsonException` through the converter in Task 4 and the message is dropped.
+- **Padding allocates.** `value + new string('=', ...)` copies the whole string
+  to append one or two characters. For a 10 MB file payload (~13.3 MB of
+  base64) that is a large-object-heap allocation per inbound message. It is not
+  worth optimising without profiling data, but if the transport work in Plan 2
+  shows it mattering, `Convert.TryFromBase64Chars` over a rented buffer is the
+  route.
+
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~Base64CompatTests`
@@ -373,8 +388,23 @@ public class Base64ByteArrayConverterTests
         Assert.NotNull(holder);
         Assert.Empty(holder.Value);
     }
+
+    [Fact]
+    public void ThrowsJsonExceptionOnMalformedBase64()
+    {
+        var error = Assert.Throws<JsonException>(
+            () => JsonSerializer.Deserialize<Holder>("""{"value":"not base64!"}"""));
+
+        Assert.IsType<FormatException>(error.InnerException);
+    }
 }
 ```
+
+That last test drives the `try`/`catch` in `Read` below. This converter sits on
+the boundary that decodes untrusted peer data — later tasks route ciphertext,
+nonce and tag through it — and callers there catch `JsonException` to mean "the
+peer sent malformed protocol data, drop the message". An unwrapped
+`FormatException` would slip past that handler, and carries no field path.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -416,7 +446,14 @@ public sealed class Base64ByteArrayConverter : JsonConverter<byte[]>
             throw new JsonException($"Expected a base64 string but found {reader.TokenType}.");
         }
 
-        return Base64Compat.Decode(reader.GetString()!);
+        try
+        {
+            return Base64Compat.Decode(reader.GetString()!);
+        }
+        catch (FormatException ex)
+        {
+            throw new JsonException("Expected a valid base64 string.", ex);
+        }
     }
 
     public override void Write(Utf8JsonWriter writer, byte[] value, JsonSerializerOptions options)
@@ -447,7 +484,7 @@ Two details that are easy to get wrong here, both caught by the tests above:
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~Base64ByteArrayConverterTests`
 
-Expected: PASS, 3 tests.
+Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2164,7 +2201,7 @@ Expected: PASS, 2 tests.
 
 Run: `cd windows && dotnet test`
 
-Expected: PASS, 57 tests, 0 failures.
+Expected: PASS, 58 tests, 0 failures.
 
 - [ ] **Step 4: Commit**
 

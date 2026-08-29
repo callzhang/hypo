@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import java.nio.file.Files
 
 class AppModuleTest {
     @Test
@@ -26,5 +27,31 @@ class AppModuleTest {
         val token1 = module.computeWsAuthToken("test-secret", "device-id")
         val token2 = module.computeWsAuthToken("test-secret", "device-id")
         assertEquals(token1, token2)
+    }
+
+    @Test
+    fun `resolveRelayAuthSecret prefers app private file`() {
+        val filesDir = Files.createTempDirectory("hypo-auth").toFile()
+        try {
+            filesDir.resolve("relay_ws_auth_token").writeText(" private-secret\n")
+
+            val secret = AppModule.resolveRelayAuthSecret(filesDir, "build-secret")
+
+            assertEquals("private-secret", secret)
+        } finally {
+            filesDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `resolveRelayAuthSecret falls back when private file missing`() {
+        val filesDir = Files.createTempDirectory("hypo-auth").toFile()
+        try {
+            val secret = AppModule.resolveRelayAuthSecret(filesDir, " build-secret ")
+
+            assertEquals("build-secret", secret)
+        } finally {
+            filesDir.deleteRecursively()
+        }
     }
 }

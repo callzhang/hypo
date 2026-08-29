@@ -45,6 +45,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import java.util.Base64
 import java.time.Clock
+import java.io.File
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import javax.inject.Named
@@ -57,6 +58,15 @@ import kotlinx.serialization.json.Json
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+    private const val RELAY_AUTH_SECRET_FILE = "relay_ws_auth_token"
+
+    internal fun resolveRelayAuthSecret(filesDir: File, buildConfigSecret: String): String {
+        val privateSecret = runCatching {
+            filesDir.resolve(RELAY_AUTH_SECRET_FILE).readText().trim()
+        }.getOrNull()
+        return privateSecret?.takeIf { it.isNotEmpty() } ?: buildConfigSecret.trim()
+    }
+
 
     @Provides
     @Singleton
@@ -148,7 +158,8 @@ object AppModule {
     @Singleton
     @Named("cloud_ws_config")
     fun provideCloudTlsWebSocketConfig(
-        deviceIdentity: DeviceIdentity
+        deviceIdentity: DeviceIdentity,
+        @ApplicationContext context: Context
     ): TlsWebSocketConfig {
         val headers = mutableMapOf(
             "X-Hypo-Client" to BuildConfig.VERSION_NAME,
@@ -157,7 +168,8 @@ object AppModule {
             "X-Device-Platform" to "android"
         )
 
-        val authToken = computeWsAuthToken(BuildConfig.RELAY_WS_AUTH_TOKEN, deviceIdentity.deviceId)
+        val relayAuthSecret = resolveRelayAuthSecret(context.filesDir, BuildConfig.RELAY_WS_AUTH_TOKEN)
+        val authToken = computeWsAuthToken(relayAuthSecret, deviceIdentity.deviceId)
         if (authToken != null) {
             headers["X-Auth-Token"] = authToken
         }

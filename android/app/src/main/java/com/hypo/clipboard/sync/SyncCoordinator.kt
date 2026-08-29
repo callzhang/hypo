@@ -182,6 +182,15 @@ class SyncCoordinator @Inject constructor(
                     }
                     matches
                 } ?: false
+
+                // A received item that already is the latest item is an echo
+                // from another transport (or a sender retry), not a new user
+                // copy. Do not delete/reinsert it: that creates the visible
+                // disappear/reappear loop in the history UI.
+                if (matchesCurrentClipboard && latestEntry != null && event.skipBroadcast) {
+                    android.util.Log.v(TAG, "⏭️ Ignoring repeated remote clipboard content already at top")
+                    continue
+                }
                 
                 val item: ClipboardItem = if (matchesCurrentClipboard && latestEntry != null) {
                     // Remove old item and create new one at top (ensures it's definitely at top)

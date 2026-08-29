@@ -1,6 +1,7 @@
 package com.hypo.clipboard.sync
 
 import com.hypo.clipboard.data.ClipboardRepository
+import com.hypo.clipboard.domain.model.ClipboardItem
 import com.hypo.clipboard.domain.model.ClipboardType
 import androidx.test.core.app.ApplicationProvider
 import io.mockk.Runs
@@ -159,6 +160,51 @@ class SyncCoordinatorTest {
         // Verify NOT broadcasted
         coVerify(exactly = 0) { syncEngine.sendClipboard(any(), any()) }
         
+        coordinator.stop()
+    }
+
+    @Test
+    fun `does not rebuild latest item for repeated remote content`() = runTest {
+        val latest = ClipboardItem(
+            id = "existing",
+            type = ClipboardType.TEXT,
+            content = "From Mac",
+            preview = "From Mac",
+            metadata = emptyMap(),
+            deviceId = "mac-device",
+            deviceName = "Mac",
+            createdAt = Instant.parse("2024-03-21T12:30:45Z"),
+            isPinned = false,
+            isEncrypted = true,
+            transportOrigin = com.hypo.clipboard.domain.model.TransportOrigin.LAN
+        )
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
+        coEvery { repository.getLatestEntry() } returns latest
+        coEvery { repository.findMatchingEntryInHistory(any()) } returns null
+
+        val coordinator = SyncCoordinator(repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+        advanceUntilIdle()
+        coordinator.start(this)
+
+        coordinator.onClipboardEvent(
+            ClipboardEvent(
+                id = "remote-repeat",
+                type = ClipboardType.TEXT,
+                content = "From Mac",
+                preview = "From Mac",
+                metadata = emptyMap(),
+                createdAt = Instant.now(),
+                deviceId = "mac-device",
+                deviceName = "Mac",
+                skipBroadcast = true,
+                isEncrypted = true,
+                transportOrigin = com.hypo.clipboard.domain.model.TransportOrigin.CLOUD
+            )
+        )
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.delete(any()) }
+        coVerify(exactly = 0) { repository.upsert(any()) }
         coordinator.stop()
     }
 

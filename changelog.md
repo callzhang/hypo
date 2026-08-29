@@ -5,6 +5,9 @@ All notable changes to the Hypo project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Cross-Device Clipboard Echo Loop**: Duplicate LAN/cloud deliveries are discarded on Android without replaying history rows, repeated remote content already at the top no longer triggers delete/reinsert flicker, and macOS no longer rebroadcasts identical content when only the pasteboard generation changes.
+- **macOS Isolated Build Relay Auth**: `build-macos.sh` now actually injects `RELAY_WS_AUTH_TOKEN` supplied through the environment, so isolated worktrees can build an authenticated Cloud Relay client without copying `.env` secrets.
+- **Android Private Relay Auth**: Android can load the relay secret from the app-private `files/relay_ws_auth_token` file before falling back to the build-time value, allowing local device deployment without embedding the shared secret in an extractable APK.
 - **Android History UI**: Constrained the top search bar, restored visible cloud status tint, and matched the navigation area to the app background on light themes.
 - **macOS Clipboard Notifications**: Only remote clipboard items from other devices trigger notifications; local macOS copies and remote echo items stay silent.
 - **macOS LAN Discovery Hang**: Eliminated a recursive peer resync path in `LanSyncTransport` that could make the menu bar app stop responding when Bonjour reported the same peer with a changed LAN endpoint.

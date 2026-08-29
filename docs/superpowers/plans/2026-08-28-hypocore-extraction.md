@@ -535,6 +535,45 @@ gh run list --branch feat/ios-hypocore --limit 3
 
 ---
 
+## Task 5B: DeviceIdentity 默认主机名的收尾（批次 2 落地后执行）
+
+Task 4 的质量审查发现 `6d2ddaa` 那个 iOS 兼容修复虽然让构建通过了，但 iOS 分支的取值是坏的。三件事一起改：
+
+**1. `ProcessInfo.processInfo.hostName` 在 iOS 真机上返回 `"localhost"`。** 模拟器是 macOS 进程所以看着正常，真机上 Apple 已锁死 `gethostname()` 一系。而 `"localhost"` 不含 `.local` 子串，初始化器里的清洗逻辑原样放行，它会直接成为用户可见的设备名。
+
+**不要改用 `UIDevice.current.name` 来解决。** iOS 16+ 起它返回的是设备型号名（`"iPhone"`）而非用户起的名字，除非申请 `com.apple.developer.device-information.user-assigned-device-name` entitlement；本项目最低 iOS 17，拿到的就是型号名。更重要的是，**UIKit 不该进 core 模块**——这与剪贴板、生命周期、存储一律走协议注入的整体策略相悖。
+
+**正确做法是让平台层供值**：`DeviceIdentity` 的初始化器本来就接受 `hostname:`，第 2 期的 iOS App 外壳自己持有 UIKit，构造时显式传入即可。core 里的默认值只是最后兜底，不必也不该做到完美。
+
+**2. 改成 `String? = nil`，让 `defaultHostname` 回到 `private`。** 现在为了让 `public init` 的默认参数表达式能引用它，被迫标成了 `public`，白白扩大 API 面：
+
+```swift
+public init(userDefaults: UserDefaults = .standard, hostname: String? = nil) {
+    let hostname = hostname ?? Self.defaultHostname
+    ...
+}
+
+private static var defaultHostname: String { ... }
+```
+
+参数遮蔽后初始化器主体一行都不用改。对调用方源兼容：`DeviceIdentity()` 与 `DeviceIdentity(hostname: "x")` 都照常编译。
+
+**3. 修正误导性的文档注释。** 现在写着「两条路径都可能返回带 `.local` 后缀的名字，下面的初始化器已经处理」——这暗示 iOS 路径没问题，而真正的失效模式（裸 `"localhost"`，根本没有 `.local` 后缀）恰恰是清洗逻辑抓不到的那种。
+
+---
+
+## Task 5C: 目录归属订正与 HypoCoreTests 骨架（批次 2 落地后执行）
+
+同一轮审查提出的两条结构性意见，趁文件还少先做：
+
+**1. `StorageManager.swift` 从 `History/` 移到 `Storage/`。** 它是一个以 UUID 为键的通用文件/blob 缓存，代码里不引用任何 history 相关类型。按当前唯一消费方命名它的归属，夸大了耦合；将来别的功能要用文件缓存时，得伸手进 `History/` 去拿。
+
+**2. 现在就在 `shared/HypoCore/Package.swift` 里立起 `HypoCoreTests` 目标（可以是空的）。** 理由是审查者指出的一个真实机制：`@testable import HypoApp` **无法**触及被再导出的 `HypoCore` 的 internal 符号，所以每当一个类型搬进 core 而它的测试还留在 `HypoAppTests`，就会被迫把构造器之类改成 `public`。批次 1 的 `TokenBucket.init` 就是这么来的。目标先立起来，后续批次的测试可以直接用 `@testable import HypoCore`，不再累积这类"为测试而公开"的扩面。
+
+`DeviceIdentity` 归入 `Models/` 是否合适（它有状态、读写 UserDefaults、做旧格式迁移，更像 service 而非值类型）——**暂不处理**。批次 2 正在把 `ClipboardEntry`、`PairedDevice` 这两个真正的模型搬进 `Models/`，等落地后再一起看更清楚。
+
+---
+
 ## Task 5: 搬迁批次 2（9 个文件）
 
 批次 1 落地后这些文件的前置依赖才齐备。

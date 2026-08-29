@@ -2410,7 +2410,12 @@ Note the top-level `on:` triggers and the indentation style of the existing jobs
 
 - [ ] **Step 2: Add the job**
 
-Add this job under the workflow's `jobs:` key, matching the surrounding indentation:
+Add this job under the workflow's `jobs:` key. Match the file's existing
+conventions rather than the snippet's formatting: the three existing jobs give
+every step a `- name:`, use no blank lines between steps, quote scalars with
+double quotes, put `working-directory` before `run`, and use Title-Case job
+names (`Backend Tests`, `Android Tests`, `macOS Tests`). Name this one
+`Windows Core Tests`.
 
 ```yaml
   windows-tests:
@@ -2497,6 +2502,9 @@ dotnet test
 - `src/Hypo.Core` — protocol models, framing, cryptography, compression. Targets
   `net10.0` with no Windows APIs, which is what keeps the layer testable in
   isolation. Do not add a Windows-specific dependency here.
+- `src/Hypo.Core/Abstractions` — the `ISecretStore` persistence contract. The
+  DPAPI implementation arrives in Plan 3 behind this interface, which is how the
+  core layer stays free of Windows dependencies while still owning key storage.
 - `tests/Hypo.Core.Tests` — xUnit suite. The crypto, framing and gzip tests read
   `tests/crypto_test_vectors.json` and `tests/transport/frame_vectors.json` from
   the repository root, the same fixtures the macOS and Android suites use. If a
@@ -2510,6 +2518,15 @@ dotnet test
 - Compression is a gzip container (RFC 1952), not raw deflate.
 - Device IDs are bare lowercase UUIDs. Platform-prefixed IDs were removed in
   protocol v1.1.
+- `System.Text.Json` writes `DateTimeOffset` with a numeric `+00:00` offset,
+  while both peer clients emit a `Z` designator. Serialise through
+  `ProtocolJson.Options`, which already registers
+  `Iso8601DateTimeOffsetConverter`; the shared frame vector is what catches it
+  if that registration is ever lost.
+- The associated data for AES-GCM is the sender's lowercased device id and
+  nothing else. `docs/protocol.md` §9.2 once said `device_id + timestamp`; no
+  client implements that, and one that did would fail authentication on every
+  message against every peer.
 ```
 
 - [ ] **Step 2: Verify the relative link resolves**

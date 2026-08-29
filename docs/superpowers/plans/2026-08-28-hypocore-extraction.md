@@ -1534,3 +1534,99 @@ git commit -m "chore: ignore HypoCore build artifacts"
 7. `scripts/` 下无任何改动；`.github/workflows/ci.yml` 的改动仅限于：新增 `ios-core-build` job、新增顶层 `concurrency` 块（Task 2 决策 2，`main` 上不生效）。三个既有 job 的 YAML 文本必须逐字节未变
 
 达成后进入第 2 期（iOS 前台版），届时另写一份计划。
+
+---
+
+## 第 1 期完成记录
+
+**验证时间**：2026-08-29，Task 13（终验），worktree `.worktrees/ios-hypocore`，分支 `feat/ios-hypocore`（HEAD `3085647`，领先 `main` 47 个提交，工作区干净）。本节按「完成定义」逐条核实,如实记录——包括两处未达标。
+
+### 最终结构
+
+- **`shared/HypoCore/Sources/HypoCore/`**：46 个源文件（Crypto/Discovery/Files/History/Models/Notifications/Pairing/Platform/Storage/Sync/Transport/Utils 十二个子目录），另有 `Tests/HypoCoreTests/` 21 个测试文件。`Package.swift` 声明 `platforms: [.macOS(.v13), .iOS(.v17)]`。
+- **`macos/Sources/HypoApp/`**：留下 15 个文件，逐一核实过全部使用 AppKit/Carbon/菜单栏专属 API，没有可继续搬迁的候选，除一处例外见下段：
+
+  | 文件 | 留下的理由 |
+  |---|---|
+  | `App/AppContext.swift` | `import AppKit`,应用级上下文对象 |
+  | `App/HistoryPopupPresenter.swift` | `NSPanel`/`NSWindow`/`NSWorkspace`/`NSScreen`,自绘的非抢焦弹窗 |
+  | `App/HypoMenuBarApp.swift` | `@main` 入口,`MenuBarExtra`/`NSApplication`/`NSPasteboard`/`NSWorkspace` |
+  | `App/KeyboardShortcut.swift` | `NSEvent`/Carbon 全局快捷键 |
+  | `App/MenuBarIconRightClickHandler.swift` | `NSViewRepresentable`,`NSStatusItem`/`NSMenu` |
+  | `App/MenuBarRightClickManager.swift` | `NSApplication`/`NSEvent`/`NSMenu` |
+  | `HypoCoreExport.swift` | `@_exported import HypoCore`——app 与测试代码免逐文件 import 的胶水,定义上就不该搬 |
+  | `Pairing/RemotePairingViewModel.swift` | 见下方「值得复核的一处」 |
+  | `Platform/AppKitClipboard.swift` | `SystemClipboard` 协议的 macOS 实现,`NSPasteboard`/`NSImage` |
+  | `Platform/AppKitLifecycleObserver.swift` | `AppLifecycleObserving` 协议的 macOS 实现,`NSApplication` 通知 |
+  | `Services/ClipboardHistoryViewModel.swift` | `NSPasteboard` + SwiftUI,菜单栏历史视图模型 |
+  | `Services/ClipboardMonitor.swift` | `NSPasteboard`/`NSImage`,剪贴板轮询 |
+  | `Services/ClipboardNotificationController.swift` | `NSAlert`/`NSApplication`/`NSWorkspace` |
+  | `Services/MemoryProfiler.swift` | `mach_task`/`task_info`,macOS 进程内存 API |
+  | `Services/SecurityManager.swift` | `NSPasteboard` |
+
+  **值得复核的一处**：`Pairing/RemotePairingViewModel.swift` 整个文件包在 `#if canImport(SwiftUI)` 内,依赖的只是 `ObservableObject`/`@Published`——这两者在 iOS 上同样可用,和 AppKit 无关。它没搬进 HypoCore 更像是「批次划分时归在 macOS 一侧」,而不是真的存在平台耦合。第 2 期若要复用配对 UI 逻辑,这是第一个该看的候选。
+
+### 六个协议接缝
+
+| 协议 | 解耦的东西 |
+|---|---|
+| `SystemClipboard` | 剪贴板读写。此前 `IncomingClipboardHandler` 直接操作 `NSPasteboard`；现在 core 只依赖协议,macOS 侧由 `AppKitClipboard` 实现 |
+| `AppLifecycleObserving` | 应用生命周期事件（前台/后台/退出）。macOS 监听 `NSApplication` 通知,iOS 将监听 `UIApplication` 通知,core 只需三个转换点 |
+| `ClipboardNotificationScheduling` / `ClipboardNotificationHandling` | 系统通知的调度与响应。把 `ClipboardNotificationController` 的可测试部分与 `UserNotifications`/AppKit 交互面剥离 |
+| `RemoteEntryReceiving` | 远端设备同步来的剪贴板条目的接收方。传输层不再需要知道「谁在展示历史」——macOS 是菜单栏视图模型,iOS 会是别的东西 |
+| `StorageLocations` | Blob（图片、接收文件）的写入目录。macOS 用户缓存目录会被系统清理逻辑不同于 iOS,iOS 需要 App Group 容器路径 |
+| `HistoryPersistence` | 历史记录的键值存储后端。macOS 继续用 `UserDefaults`；iOS 三个进程（主 app / 分享扩展 / 通知服务扩展）并发写历史,`UserDefaults` App Group 套件跨进程不可靠,需要文件后端实现 |
+
+### 测试数量
+
+- **基线**（抽取开始前,2026-08-28,`cd macos && swift test`）：193 个测试全绿,5.699 秒。
+- **现状**：`cd macos && swift test` → **56 个测试**,0.375 秒,全绿（本次实测）。`shared/HypoCore` 的测试总数为 **142 个**（本次逐条核实,见下方「未达标项」）。56 + 142 = 198 ≥ 193,通过数只增不减,基线要求满足。
+- **iOS 模拟器**：CI `ios-core-build` job 的 `Run HypoCore tests on iOS Simulator` 步骤在 CI run `33257216710`（对应提交 `f656f8e`,HEAD 之前一个提交,两者之间只差一个纯文档提交 `3085647`）中通过,142 个 HypoCore 测试确认可在 `platform=iOS Simulator,name=iPhone 16` 上执行。该次 CI 四个 job（Backend Tests、Android Tests、macOS Tests、HypoCore iOS Build）全绿。
+
+### 已发现的缺陷
+
+这些缺陷值得记录,因为它们对本地检查是不可见的——本地闸门、`swift build`、甚至肉眼审查都会放行,只有特定条件下才会暴露:
+
+1. **`DeviceIdentity` 里的 `Host.current()`**——macOS 独有的 Foundation 类型（`NSHost` 的 Swift 名）,名字不带 `NS` 前缀,本地可移植性闸门的 grep 抓不到,`swift build`/`swift test` 在 macOS 上也完全放行。**只有 iOS CI 构建才报 `cannot find 'Host' in scope`。**
+2. **`ProcessInfo.processInfo.hostName` 在 iOS 真机上返回 `"localhost"`。** 模拟器是 macOS 进程,表现正常,掩盖了问题；真机上 `gethostname()` 系被 Apple 锁死。`"localhost"` 不含 `.local` 子串,清洗逻辑原样放行,会直接成为用户可见的设备名。iOS App 外壳必须显式传入设备名,不能依赖这个兜底。
+3. **`CloudRelayTransportTests.testSendDelegatesToUnderlyingTransport` 断言了一个 `send()` 从未有过的同步契约**——`send()` 只是把信封入队,真正写入 socket 由另一个 processor 完成,断言「`send()` 返回后数据已写入」全靠调度时机凑巧通过。它在还留在 `HypoAppTests` 时就已经在 CI 上偶发失败过,搬进更小的 `HypoCoreTests` 套件后（调度节奏变了）本地每次必现。两者是同一个缺陷在不同调度下的表现,不是搬迁引入的回归——生产路径本身一直是对的。已在提交 `f656f8e` 修复为等待条件而非假设时机。
+4. **三类跨模块可见性盲区**（Task 3、5、6 各踩中一次）：
+   - **合成的 memberwise init 永远是 internal**,与属性是否 `public` 无关。`swift build` 完全看不到——只有测试代码去构造这个类型时 `swift test` 才会炸。
+   - **扩展在内置类型上**（`Int`、`String`、`Data`、`URL`、`CodingUserInfoKey` 等）。审计一个文件的「公开 API 面」时,人和模型都只看自己定义的 type,扩展在系统类型上的成员不属于任何本地类型,因而被跳过。
+   - **扩展在已迁移类型上,但成员只被留守文件使用**。类型本身是 `public` 不代表扩展成员一起搬,也不代表使用方看得见。
+
+**本次终验新发现的两处（此前的任务记录里没有）：**
+
+5. **`./scripts/build-macos.sh` 与 `./scripts/build-macos.sh release` 均失败,这是本任务最重要的发现。** 报错:
+
+   ```
+   error: the package at '/private/var/.../T/shared/HypoCore' cannot be accessed
+   (/private/var/.../T/shared/HypoCore doesn't exist in file system)
+   ```
+
+   根因：脚本为了让 SwiftPM 避开仓库的 Git 元数据和文件供应器状态,会把 `macos/Package.swift` 和 `macos/Sources` 复制进一个隔离的临时目录（`mktemp -d .../hypo-macos-build.XXXXXX`）再执行 `swift build --package-path`（`build-macos.sh:195-204`）。`macos/Package.swift` 里新增的本地路径依赖 `.package(path: "../shared/HypoCore")` 是相对于 `Package.swift` 所在目录解析的——脚本只复制了 `Package.swift` 本身,没有一并把 `shared/HypoCore` 复制或链接到临时目录的对应相对位置,于是路径解析到一个不存在的地方。**这不是 HypoCore 里的代码缺陷**：直接在原地 `cd macos && swift build --product HypoMenuBar` 完全成功（已验证）。问题是脚本这一步「复制到临时目录再编译」的机制没有跟着新增的本地路径依赖更新。计划里「本地路径依赖会被自动解析,无需改脚本」的假设（Step 2/3 的注记）没有考虑到这一层临时工作区复制逻辑,属于计划本身的疏漏,不是实现疏漏。**第 2 期开工前必须先修好这个脚本**——否则 `./scripts/build-macos.sh` 这个「唯一真正的构建入口」对任何签出这个分支的人都是坏的。可能的修法：脚本里 `cp -R "$MACOS_DIR/Sources"` 之后再 `cp -R "$PROJECT_ROOT/shared" "$TEMP_BUILD_DIR/../shared"`（保持相对层级）,或者把 `.package(path:)` 换成绝对路径不现实,更稳的做法是把 `shared/HypoCore` 也复制进临时工作区的对应相对路径。
+
+6. **`cd shared/HypoCore && swift test`（完成定义第 2 条要求的确切命令）本地不会可靠结束,会挂起。** 复现两次,均卡在同一处：`WebSocketTransportTests` 套件跑完之后,`LanWebSocketServerTests` 套件已经 `started` 但从不报 `passed`/`failed`,进程 CPU 时间不再增长,几分钟内没有任何新日志输出。**逐一定位后确认代码本身没问题**：`swift test --skip LanWebSocketServerTests` 跑剩下的 120 个测试,5.347 秒全绿；`swift test --filter LanWebSocketServerTests` 单独跑该套件的 22 个测试,0.291 秒全绿——120 + 22 = 142,与预期总数吻合。问题只在「全套件一起跑」时出现,大概率是 `LanWebSocketServerTests` 用真实 `NWConnection`/`URLSessionWebSocketTask` 对 `localhost` 建连,与其它同样占用真实 socket 的套件（`WebSocketTransportTests`、`TransportManagerLanTests`、`LanWebSocketTransportTests`）在 Swift Testing 默认的套件间并发下产生资源竞争或死锁,而不是接口/逻辑错误。**CI 不会踩到这个坑**：`ios-core-build` job 在 macOS 上只跑 `swift build`（不跑 `swift test`）,真正的测试只在 `xcodebuild test -destination 'platform=iOS Simulator,...'` 上跑,是完全不同的测试运行器和并发模型。但这意味着**本地 `swift test` 目前不能作为可靠的验证手段**,任何人在本机跑这条计划文档里写明的验证命令都可能卡住,需要单独排查。第 2 期开工前建议给这类真实 socket 测试的 Suite 加 `@Suite(.serialized)`,或找出真正的死锁点。
+
+### 完成定义逐条核对
+
+1. ✅ `cd macos && swift test` 全绿,56 个测试,通过数之和 198 ≥ 193
+2. ❌ **未达标**：`cd shared/HypoCore && swift test` 本地会挂起,见「已发现的缺陷」第 6 条。142 个测试本身全部正确（拆开跑可证明）,但要求的命令原样跑不出结果
+3. ✅ CI `ios-core-build` 的 `Build HypoCore for iOS Simulator` 步骤在 run `33257216710` 中通过
+4. ✅ CI `ios-core-build` 的 `Run HypoCore tests on iOS Simulator` 步骤在同一次 run 中通过,142 个测试
+5. ❌ **未达标**：`./scripts/build-macos.sh` 与 `./scripts/build-macos.sh release` 均失败,见「已发现的缺陷」第 5 条
+6. ✅ `shared/HypoCore/Sources/` 下无裸 `import AppKit`（本地闸门确认无输出）
+7. ✅ `scripts/` 下无任何改动（`git diff main --stat -- scripts/` 无输出）；`.github/workflows/ci.yml` 相对 fork 点（`merge-base` = `3e564f8`）的改动仅限于新增 `ios-core-build` job 与顶层 `concurrency` 块,`backend-tests`/`android-tests`/`macos-tests` 三个既有 job 逐字节未变。**注意**：`main` 在这个分支 fork 之后独立新增了第四个既有 job `windows-tests`（Windows 客户端工作线的一部分,本 worktree 里没有 `windows/` 目录）,所以直接 `git diff main -- .github/workflows/ci.yml` 会显示 `windows-tests` 被替换成了 `ios-core-build`——**这不是本分支的改动,是两条分支各自独立演进的结果**,合并/rebase 到 `main` 时需要手动把 `windows-tests` job 找回来,否则会静默丢失 Windows 的 CI 覆盖。
+
+**结论：7 条完成定义中 5 条达标,2 条（第 2、5 条）未达标。** 未达标的两条都不是 HypoCore 里搬迁代码本身的缺陷——所有 142 + 56 个测试单独验证都是正确的,`swift build`(不通过脚本) 也是成功的——而是「构建脚本的临时工作区复制逻辑」和「本地 `swift test` 的套件间并发」这两处此前从未被计划验证到的机制性问题。**在这两处修复之前,不能说「macOS 客户端的构建、签名、CI 完全未受影响」这个前提成立**：CI 确实没受影响,但本地脚本构建实际上坏了。
+
+### 第 2 期不能忘记的事
+
+- **Keychain 语义两端不同**：`KeychainKeyStore` 对两端构造相同的 `SecItemAdd`/`SecItemCopyMatching` 查询,但 macOS 默认使用旧的文件式 keychain,iOS 只有 data-protection keychain,需要设置 `kSecUseDataProtectionKeychain`；`accessGroup` 在 iOS 上还需要对应的 entitlement 才生效。
+- **Bonjour 需要 Info.plist 权限声明**：`NetService`/`NetServiceBrowser` 在 iOS 编译无碍,但 iOS 14+ 缺少 `NSLocalNetworkUsageDescription` 与 `NSBonjourServices` 会导致发现静默失败。SwiftPM library target 承载不了 Info.plist,这是第 2 期 iOS App 外壳的工作。
+- **`StorageManager` 默认仍指向用户缓存目录**,iOS 系统会在存储压力下清理 Caches,会静默丢失历史图片。`StorageLocations` 协议已就位,但 iOS 侧需要显式注入 App Group 容器路径的实现,现在还没有。
+- **`HistoryStore` 默认仍是 `UserDefaults`**,不会跨 iOS 的多进程（主 app / 分享扩展 / 通知服务扩展）传播。`HistoryPersistence` 协议已就位,但同样需要 iOS 侧的文件后端实现,现在还没有。
+- **`Pairing/RemotePairingViewModel.swift` 值得复核**是否真的需要留在 HypoApp——它只依赖 SwiftUI 的 `ObservableObject`,与 AppKit 无关（见上文「最终结构」）。
+- **`./scripts/build-macos.sh` 需要先修好**（缺陷 5）,否则第 2 期的开发者签出这个分支后连 macOS 客户端都构建不出来。
+- **本地 `swift test` 在 HypoCore 上不可靠**（缺陷 6）,第 2 期写新测试、跑回归时如果整套挂起,先怀疑是这个已知问题,不要误以为是新引入的 bug；同时应该找时间修掉根因（大概率是 `LanWebSocketServerTests` 需要 `.serialized`）。
+- **合并/rebase 到 `main` 时不要静默丢掉 `windows-tests` CI job**——它是在本分支 fork 之后独立加到 `main` 的,当前分支的 `.github/workflows/ci.yml` 里没有它。

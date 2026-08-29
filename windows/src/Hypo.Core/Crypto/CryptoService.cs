@@ -37,6 +37,28 @@ public static class CryptoService
         }
     }
 
+    /// <remarks>
+    /// The nonce is supplied by the caller; this method does not generate one,
+    /// so the uniqueness obligation is the caller's.
+    ///
+    /// <para>The caller must supply a fresh nonce from a cryptographically
+    /// secure source -- <see cref="RandomNumberGenerator.Fill(Span{byte})"/>,
+    /// never <see cref="Random"/>.</para>
+    ///
+    /// <para>A nonce must never be reused under the same key. AES-GCM nonce
+    /// reuse is catastrophic rather than merely weakening: two messages
+    /// encrypted with the same key and nonce leak the XOR of their plaintexts
+    /// and expose the authentication subkey, which lets an attacker forge
+    /// tags.</para>
+    ///
+    /// <para>The dual-transport send path must generate a separate nonce per
+    /// transport rather than reusing one across both. The protocol
+    /// deliberately sends the same message over two transports, so a single
+    /// nonce shared between them would be exactly the reuse described above.
+    /// The macOS client owns generation behind a <c>NonceGenerating</c>
+    /// abstraction so its callers never supply one; this functional API pushes
+    /// the obligation onto the caller instead.</para>
+    /// </remarks>
     public static (byte[] Ciphertext, byte[] Tag) Encrypt(
         ReadOnlySpan<byte> plaintext,
         ReadOnlySpan<byte> key,

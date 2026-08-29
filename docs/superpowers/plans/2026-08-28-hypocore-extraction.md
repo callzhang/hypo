@@ -36,6 +36,10 @@ cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplicat
 
 **CI 上的权威验证**：Task 1B 新增的 `ios-core-build` job 在 `macos-15` runner 上跑真正的 `xcodebuild`。**每个任务提交后都要推送并确认该 job 通过**，不要攒着一次推。
 
+**本地闸门抓不到 macOS-only 的无前缀 Foundation 类型**（Task 4 实测，CI 首次拦下真实缺陷）：`DeviceIdentity.swift:38` 的默认参数用了 `Host.current().localizedName`。`Host` 是 macOS 独有的 Foundation 类型（`NSHost` 的 Swift 名），**名字不带 `NS` 前缀，闸门的 grep 抓不到；在 macOS 上编译测试全过，只有真正用 iOS SDK 编译才报 `cannot find 'Host' in scope`**。
+
+已扫描全代码库，同类 API 只有两处：这一处，以及 `ClipboardNotificationController.swift:412` 的 `NSWorkspace`（留在 HypoApp，不迁移）。**因此后续批次无需再担心此类问题**，但结论要记住：**CI 的 iOS 构建是唯一能发现这类缺陷的环节，绝不能因为本地三道闸门全绿就跳过等待 CI**。
+
 **闸门的两个已知陷阱**（Task 4 实测）：
 
 1. **注释误报**。闸门是纯文本匹配，一句「useful for NSImage/Preview」的文档注释就会让它变红（`StorageManager.swift:82` 即是），而该文件根本没有 `import AppKit`。因此闸门命令已加上 `| grep -vE ':[0-9]+: *(///|//|\*)'` 过滤纯注释行。**会误报的闸门很快就没人看，比没有闸门更危险**——若仍出现命中，先确认是真的代码引用再动手。

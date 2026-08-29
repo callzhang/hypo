@@ -12,7 +12,8 @@ using Hypo.Core.Transport;
 // "send" are one command rather than two.
 //
 //   discover              list peers on this network
-//   pair <device-id>      pair with one, then hold to receive
+//   pair <device-id>      pair with one, then hold to receive. Set
+//                         HYPO_SEND_TEXT to also push one text item.
 //   listen                accept inbound connections and print what arrives
 
 var command = args.Length > 0 ? args[0] : "discover";
@@ -141,8 +142,53 @@ async Task PairAsync(string? target)
 
     store.Write(completed.PeerDeviceId, completed.SharedKey);
     Console.WriteLine($"Paired with {completed.PeerDeviceName} ({completed.PeerDeviceId}).");
+
+    // Sending is folded into "pair" for the same reason pairing is: the shared
+    // key lives in memory and dies with the process, so a separate command
+    // would have nothing to encrypt with.
+    var outbound = Environment.GetEnvironmentVariable("HYPO_SEND_TEXT");
+    if (!string.IsNullOrEmpty(outbound))
+    {
+        await SendClipboardAsync(client, completed.SharedKey, outbound);
+        Console.WriteLine($"Sent {Encoding.UTF8.GetByteCount(outbound)} bytes of text to {completed.PeerDeviceName}.");
+    }
+
     Console.WriteLine("Holding open. Copy something on the peer; Ctrl+C to exit.");
     await Task.Delay(Timeout.Infinite);
+}
+
+async Task SendClipboardAsync(LanWebSocketClient client, byte[] key, string text)
+{
+    var payload = new ClipboardPayload
+    {
+        ContentType = ContentType.Text,
+        Data = Encoding.UTF8.GetBytes(text),
+        Compressed = true,
+    };
+
+    var compressed = Hypo.Core.Utils.GzipCompressor.Compress(
+        JsonSerializer.SerializeToUtf8Bytes(payload, ProtocolJson.Options));
+
+    var nonce = new byte[CryptoService.NonceSizeBytes];
+    System.Security.Cryptography.RandomNumberGenerator.Fill(nonce);
+    var (ciphertext, tag) = CryptoService.Encrypt(
+        compressed, key, nonce, CryptoService.BuildAssociatedData(deviceId));
+
+    await client.SendAsync(new SyncEnvelope
+    {
+        Id = Guid.NewGuid(),
+        Timestamp = DateTimeOffset.UtcNow,
+        Type = MessageType.Clipboard,
+        Payload = new EnvelopePayload
+        {
+            ContentType = ContentType.Text,
+            Ciphertext = ciphertext,
+            DeviceId = deviceId,
+            DevicePlatform = "windows",
+            DeviceName = deviceName,
+            Encryption = new EncryptionMetadata { Nonce = nonce, Tag = tag },
+        },
+    });
 }
 
 async Task ListenAsync()

@@ -3708,6 +3708,142 @@ frame of 2,065,851,240 bytes is already over the ceiling `FrameReader` enforces
 protocol-sniffing rule with its own failure modes, and it belongs in a plan
 rather than in an improvised third framing.
 
+### Task 19 outcome
+
+Attempted 2026-08-29, immediately after Task 19 replaced the opcode split with
+a content check. Same machine, same phone, same session as the two records
+above. **Pairing completed, and a clipboard item crossed from Windows to the
+phone's system clipboard.** Done criterion 3 is met and done criterion 4 is
+half met, blocked by a bug on the Android side rather than by anything in
+`Hypo.Core`.
+
+**The change.** `TransportFrameCodec.LooksLikeLengthPrefix` decides, from the
+ceiling alone, whether leading bytes can be a length prefix; both pumps consult
+it before handing a binary frame to `FrameReader`. A body is at most 20 MB, so
+a big-endian prefix cannot read above `0x01400000`, while JSON opens with `{` —
+`0x7B` — putting any bare JSON body above `0x7B000000`. The ranges cannot
+overlap. Keying on the ceiling rather than on the literal `{` is what keeps the
+rule and the codec from drifting apart. Classification runs only when the
+reader holds nothing buffered: mid-frame continuation bytes are arbitrary and
+must reach the reader untouched.
+
+`windows/tests/Hypo.Core.Tests/BinaryChannelClassificationTests.cs` covers it
+end to end over loopback, including both sides of the boundary — a `0x00`-led
+prefix and a `0x013FFFF0` prefix, 16 bytes under the ceiling, both stay frames.
+Playing the phone's part needs a peer that answers on opcode `0x2`, which
+`LanWebSocketServer` cannot do because it only ever replies with `0x1`, so the
+file carries a small ASP.NET Core stand-in. Suite: 169 total, 167 passing, 2
+skipped.
+
+**Step 1 — discovery, unchanged for a third time.**
+
+```
+Browsing for _hypo._tcp peers for 12s...
+  OPPO PLP110
+    address    10.0.0.17:7010
+    device_id  bbe296d6-0785-43d2-91b6-b135b72f4c41
+    version    1.1.6-debug
+    pub_key    ZuPQTwT2QainOfqI5TikmthXtYGM6ENfrtH3szCnfEo=
+```
+
+Still only the Android client. The macOS peer never appeared and was not
+started; the macOS column of the Task 18 table stays unmeasured.
+
+**Step 2 — pairing completed.** `dotnet run --project tools/Hypo.Harness --
+pair bbe296d6-0785-43d2-91b6-b135b72f4c41`:
+
+```
+Pairing with OPPO PLP110 at 10.0.0.17:7010...
+Paired with OPPO PLP110 (bbe296d6-0785-43d2-91b6-b135b72f4c41).
+Holding open. Copy something on the peer; Ctrl+C to exit.
+```
+
+The ack arrived, `PairingSession.CompleteWithAck` verified its response hash
+against the challenge secret, and both sides derived the same key. Done
+criterion 3 is met. Every failure Task 15 and Task 18 recorded came from the
+receive path dropping a reply the phone had already sent; nothing about the
+challenge, the cryptography or the transport needed to change.
+
+**Step 3 — a clipboard item crossed, and the phone put it on its clipboard.**
+The harness gained an `HYPO_SEND_TEXT` environment variable that pushes one
+text item after pairing. Sending is folded into `pair` for the same reason
+pairing is: the shared key lives in memory and dies with the process, so a
+separate command would have nothing to encrypt with.
+
+```
+Pairing with OPPO PLP110 at 10.0.0.17:7010...
+Paired with OPPO PLP110 (bbe296d6-0785-43d2-91b6-b135b72f4c41).
+Sent 31 bytes of text to OPPO PLP110.
+Holding open. Copy something on the peer; Ctrl+C to exit.
+```
+
+Confirmed from the phone rather than inferred from the absence of an error.
+`adb logcat` on `com.hypo.clipboard`, captured across a cleared buffer:
+
+```
+LanWebSocketServer:      🔔 Connection opened: fcd3840d-... from /10.0.0.252:56450
+LanWebSocketServer:      📥 Binary frame received: 426 bytes
+LanWebSocketServer:      📋 Detected raw pairing challenge
+PairingHandshake:        handleChallenge: Decoded challenge - initiator=Hypo Harness
+PairingHandshake:        handleChallenge: Decrypted challenge payload
+SecureKeyStore:          💾 Saved key for device: 11111111-2222-3333-4444-555555555555
+TransportManager:        📤 Sending pairing ACK to fcd3840d-...
+LanWebSocketServer:      📥 Binary frame received: 538 bytes
+TransportManager:        ✅ Decoded envelope: type=CLIPBOARD, id=e2d69ac3...
+IncomingClipboardHandler: ✅ Decryption successful: contentType=TEXT, dataSize=44
+IncomingClipboardHandler: ✅ [VERIFIED-CONTENT] hash=d548e219... type=TEXT source=Hypo Harness
+                             preview='Hypo harness probe 19 at 112921'
+ClipboardAccessibilityService: ✅ Updated clipboard via Accessibility Service
+```
+
+Two things worth keeping from that trace. The phone logs the challenge as a
+*binary* frame even though the harness sent it as text — its `📋 Detected raw
+pairing challenge` is itself a content sniff, the same decision this task made
+on the Windows side, which is reassurance that the rule is the one the protocol
+actually runs on. And the AES-GCM associated data, the gzip step and the
+`data_base64` field all interoperated on the first attempt; only the framing
+was ever wrong.
+
+**Step 4 — the return direction is blocked on the phone, not on us.** Fourteen
+seconds after saving our key, the phone deletes it:
+
+```
+ConnectionStatusProber: ⚠️ Found orphaned key for device 11111111-2222-3333-4444-555555555555
+                           (no name found). Deleting key to clean up state.
+TransportManager:       🗑️ Forgot paired device: 11111111-2222-3333-4444-555555555555
+```
+
+`android/.../transport/ConnectionStatusProber.kt:275-287` walks every paired
+device id, calls `transportManager.getDeviceName(deviceId)`, and treats a null
+name as an orphaned key left by an interrupted pairing or a migration — then
+heals the state by deleting the key and forgetting the device.
+`PairingHandshakeManager.handleChallenge` reads `challenge.initiatorDeviceName`
+and logs it, but never persists it; the caller saves only the key. So a peer
+that pairs by sending a challenge to the phone is forgotten by the phone's own
+housekeeping a few seconds later, and the phone has no key to encrypt an
+outbound clipboard item to us with.
+
+This is an Android bug that predates this plan, it is not specific to the
+Windows client, and it would equally strand a macOS peer that initiated. Fixing
+it is one line in the responder path — persist the initiator's device name
+beside the key — but it is a change to the user's shipping clipboard
+application, so it is recorded here rather than made.
+
+Done criterion 4 is therefore met in the Windows-to-phone direction and blocked
+in the phone-to-Windows direction by that deletion. No attempt was made to
+force a clipboard copy on the phone: `cmd clipboard set-primary-clip` is not
+implemented on this device, and driving the UI to copy would mean typing into
+the user's phone.
+
+**Where this leaves the plan.** Criteria 1, 2, 3 and 5 are met. Criterion 4 is
+met outbound. The three attempts each narrowed the cause and the narrowing was
+the point: Task 15 found the pairing exchange does not use the envelope at all,
+Task 18 found the opcode does not classify what comes back, Task 19 found the
+content does. Plan 1 carry-forward item 3 — control and error messages have no
+representable payload — is closed for pairing: the answer is that pairing does
+not travel in an envelope, and `WrapControl` should be deleted rather than
+generalised.
+
 ---
 
 ## Task 16: CI

@@ -1606,12 +1606,12 @@ git commit -m "chore: ignore HypoCore build artifacts"
 
    根因：脚本为了让 SwiftPM 避开仓库的 Git 元数据和文件供应器状态,会把 `macos/Package.swift` 和 `macos/Sources` 复制进一个隔离的临时目录（`mktemp -d .../hypo-macos-build.XXXXXX`）再执行 `swift build --package-path`（`build-macos.sh:195-204`）。`macos/Package.swift` 里新增的本地路径依赖 `.package(path: "../shared/HypoCore")` 是相对于 `Package.swift` 所在目录解析的——脚本只复制了 `Package.swift` 本身,没有一并把 `shared/HypoCore` 复制或链接到临时目录的对应相对位置,于是路径解析到一个不存在的地方。**这不是 HypoCore 里的代码缺陷**：直接在原地 `cd macos && swift build --product HypoMenuBar` 完全成功（已验证）。问题是脚本这一步「复制到临时目录再编译」的机制没有跟着新增的本地路径依赖更新。计划里「本地路径依赖会被自动解析,无需改脚本」的假设（Step 2/3 的注记）没有考虑到这一层临时工作区复制逻辑,属于计划本身的疏漏,不是实现疏漏。**第 2 期开工前必须先修好这个脚本**——否则 `./scripts/build-macos.sh` 这个「唯一真正的构建入口」对任何签出这个分支的人都是坏的。可能的修法：脚本里 `cp -R "$MACOS_DIR/Sources"` 之后再 `cp -R "$PROJECT_ROOT/shared" "$TEMP_BUILD_DIR/../shared"`（保持相对层级）,或者把 `.package(path:)` 换成绝对路径不现实,更稳的做法是把 `shared/HypoCore` 也复制进临时工作区的对应相对路径。
 
-6. **`cd shared/HypoCore && swift test`（完成定义第 2 条要求的确切命令）本地不会可靠结束,会挂起。** 复现两次,均卡在同一处：`WebSocketTransportTests` 套件跑完之后,`LanWebSocketServerTests` 套件已经 `started` 但从不报 `passed`/`failed`,进程 CPU 时间不再增长,几分钟内没有任何新日志输出。**逐一定位后确认代码本身没问题**：`swift test --skip LanWebSocketServerTests` 跑剩下的 120 个测试,5.347 秒全绿；`swift test --filter LanWebSocketServerTests` 单独跑该套件的 22 个测试,0.291 秒全绿——120 + 22 = 142,与预期总数吻合。问题只在「全套件一起跑」时出现,大概率是 `LanWebSocketServerTests` 用真实 `NWConnection`/`URLSessionWebSocketTask` 对 `localhost` 建连,与其它同样占用真实 socket 的套件（`WebSocketTransportTests`、`TransportManagerLanTests`、`LanWebSocketTransportTests`）在 Swift Testing 默认的套件间并发下产生资源竞争或死锁,而不是接口/逻辑错误。**CI 不会踩到这个坑**：`ios-core-build` job 在 macOS 上只跑 `swift build`（不跑 `swift test`）,真正的测试只在 `xcodebuild test -destination 'platform=iOS Simulator,...'` 上跑,是完全不同的测试运行器和并发模型。但这意味着**本地 `swift test` 目前不能作为可靠的验证手段**,任何人在本机跑这条计划文档里写明的验证命令都可能卡住,需要单独排查。第 2 期开工前建议给这类真实 socket 测试的 Suite 加 `@Suite(.serialized)`,或找出真正的死锁点。
+6. **`cd shared/HypoCore && swift test` 会挂起——根因是同时有 Hypo.app 在运行,不是测试本身的问题。** 验收时报告为「测试基础设施不可靠,建议加 `@Suite(.serialized)`」,那个结论是错的,已实测推翻。真实因果：`./scripts/build-macos.sh` **会安装并启动 `/Applications/Hypo.app`**,运行中的实例持有 LAN WebSocket 监听端口并在做 Bonjour 广播,于是 `LanWebSocketServerTests` 里那些绑定真实 `NWListener`、对 localhost 建连的测试永远等不到结果。验收 agent 的检查 1（跑构建脚本）自己启动了 App,检查 4（跑测试)就被自己搞挂了。**实测三段闭环**：App 运行中 → 等 120 秒无任何结果;`osascript -e 'quit app "Hypo"'` 停掉后 → 142 个测试 5.344 秒全绿;再启动 App 重跑 → 再次挂死。**因此不要给这些套件加 `.serialized`**——并行不是原因,串行同样会挂。**正确做法是跑 socket 相关测试前先确认没有 Hypo 实例在运行**,或用 `./scripts/build-macos.sh --no-launch` 构建（见下）。CI 不受影响:runner 上没有 App 在跑。
 
 ### 完成定义逐条核对
 
 1. ✅ `cd macos && swift test` 全绿,56 个测试,通过数之和 198 ≥ 193
-2. ❌ **未达标**：`cd shared/HypoCore && swift test` 本地会挂起,见「已发现的缺陷」第 6 条。142 个测试本身全部正确（拆开跑可证明）,但要求的命令原样跑不出结果
+2. ✅ **达标**（验收时误判为未达标）：`cd shared/HypoCore && swift test` 在没有 Hypo.app 运行时 142 个测试 5.344 秒全绿。验收当时挂起是因为同一次验收的检查 1 启动了 App,见「已发现的缺陷」第 6 条
 3. ✅ CI `ios-core-build` 的 `Build HypoCore for iOS Simulator` 步骤在 run `33257216710` 中通过
 4. ✅ CI `ios-core-build` 的 `Run HypoCore tests on iOS Simulator` 步骤在同一次 run 中通过,142 个测试
 5. ❌ **未达标**：`./scripts/build-macos.sh` 与 `./scripts/build-macos.sh release` 均失败,见「已发现的缺陷」第 5 条
@@ -1628,5 +1628,5 @@ git commit -m "chore: ignore HypoCore build artifacts"
 - **`HistoryStore` 默认仍是 `UserDefaults`**,不会跨 iOS 的多进程（主 app / 分享扩展 / 通知服务扩展）传播。`HistoryPersistence` 协议已就位,但同样需要 iOS 侧的文件后端实现,现在还没有。
 - **`Pairing/RemotePairingViewModel.swift` 值得复核**是否真的需要留在 HypoApp——它只依赖 SwiftUI 的 `ObservableObject`,与 AppKit 无关（见上文「最终结构」）。
 - **`./scripts/build-macos.sh` 需要先修好**（缺陷 5）,否则第 2 期的开发者签出这个分支后连 macOS 客户端都构建不出来。
-- **本地 `swift test` 在 HypoCore 上不可靠**（缺陷 6）,第 2 期写新测试、跑回归时如果整套挂起,先怀疑是这个已知问题,不要误以为是新引入的 bug；同时应该找时间修掉根因（大概率是 `LanWebSocketServerTests` 需要 `.serialized`）。
+- **跑 HypoCore 测试前先确认没有 Hypo.app 在运行**（缺陷 6）。整套挂起时第一件事是 `pgrep -f HypoMenuBar`,而不是怀疑测试代码。`./scripts/build-macos.sh` 默认会启动 App,用 `--no-launch` 可以只构建不启动。
 - **合并/rebase 到 `main` 时不要静默丢掉 `windows-tests` CI job**——它是在本分支 fork 之后独立加到 `main` 的,当前分支的 `.github/workflows/ci.yml` 里没有它。

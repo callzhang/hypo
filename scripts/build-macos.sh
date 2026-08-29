@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build and relaunch macOS Hypo app
 # Always builds the app to ensure latest code changes are included
-# Usage: ./scripts/build-macos.sh [clean] [release]
+# Usage: ./scripts/build-macos.sh [clean] [release] [--no-launch]
 
 set -e
 
@@ -64,6 +64,7 @@ log_success() {
 # Parse arguments
 CLEAN_BUILD=false
 BUILD_CONFIG="debug"  # default: debug build
+LAUNCH_APP=true       # --no-launch skips installing over a running instance
 
 for arg in "$@"; do
     case "$arg" in
@@ -73,9 +74,12 @@ for arg in "$@"; do
         release)
             BUILD_CONFIG="release"
             ;;
+        --no-launch)
+            LAUNCH_APP=false
+            ;;
         *)
             log_warn "Unknown argument: $arg"
-            log_info "Usage: $0 [clean] [release]"
+            log_info "Usage: $0 [clean] [release] [--no-launch]"
             log_info "Default: debug build"
             ;;
     esac
@@ -524,6 +528,13 @@ fi
 # Note: HistoryPopupPresenter may still write to /tmp/hypo_debug.log for legacy debug purposes
 
 # Launch the app
+if [ "$LAUNCH_APP" = false ]; then
+    log_info "Skipping launch (--no-launch)"
+    log_success "Build complete!"
+    log_info "App bundle: $APP_BUNDLE"
+    exit 0
+fi
+
 log_info "Launching app from /Applications..."
 open "$APP_BUNDLE"
 

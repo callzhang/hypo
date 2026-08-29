@@ -37,6 +37,9 @@ switch (command)
     case "listen":
         await ListenAsync();
         break;
+    case "cloud":
+        await CloudAsync(args.ElementAtOrDefault(1), args.ElementAtOrDefault(2));
+        break;
     default:
         Console.WriteLine("usage: discover | pair <device-id> | listen");
         break;
@@ -267,6 +270,76 @@ async Task ListenAsync()
     await WaitForShutdownAsync();
 }
 
+/// <summary>
+/// Connects to the relay and prints what arrives, the way `listen` does for
+/// the LAN. No mDNS is started at all -- which is the point: if this receives
+/// a message, it did not come over the LAN.
+///
+/// Usage: cloud [peer-device-id] [text-to-send]
+/// </summary>
+async Task CloudAsync(string? peerDeviceId, string? textToSend)
+{
+    var options = Hypo.Core.Relay.RelayOptions.FromEnvironment(
+        deviceId, "windows", searchFrom: AppContext.BaseDirectory);
+
+    await using var client = new CloudWebSocketClient(options);
+    client.EnvelopeReceived += (_, e) => PrintClipboard(e);
+    client.RelayErrorReceived += (_, e) =>
+        Console.WriteLine(
+            $"[relay] {e.Error.Code}: {e.Error.Message} " +
+            $"(connected: {string.Join(", ", e.Error.ConnectedDevices)})");
+    client.StateChanged += (_, e) => Console.WriteLine($"[relay] {e.State}{(e.Error is null ? "" : $": {e.Error.Message}")}");
+
+    await client.ConnectAsync();
+    Console.WriteLine($"Connected to {options.Endpoint} as {deviceId}. No mDNS started.");
+
+    if (peerDeviceId is not null && textToSend is not null)
+    {
+        var key = store.Read(peerDeviceId)
+                  ?? throw new InvalidOperationException(
+                      $"No key for {peerDeviceId}. Pair over the LAN first; the session key works on both transports.");
+
+        var payload = new ClipboardPayload
+        {
+            ContentType = ContentType.Text,
+            Data = Encoding.UTF8.GetBytes(textToSend),
+            Compressed = true,
+        };
+
+        var compressed = Hypo.Core.Utils.GzipCompressor.Compress(
+            JsonSerializer.SerializeToUtf8Bytes(payload, ProtocolJson.Options));
+
+        var nonce = new byte[CryptoService.NonceSizeBytes];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(nonce);
+        var (ciphertext, tag) = CryptoService.Encrypt(
+            compressed, key, nonce, CryptoService.BuildAssociatedData(deviceId));
+
+        await client.SendAsync(new SyncEnvelope
+        {
+            Id = Guid.NewGuid(),
+            Timestamp = DateTimeOffset.UtcNow,
+            Type = MessageType.Clipboard,
+            Payload = new EnvelopePayload
+            {
+                ContentType = ContentType.Text,
+                Ciphertext = ciphertext,
+                DeviceId = deviceId,
+                DevicePlatform = "windows",
+                DeviceName = deviceName,
+                // Addressed rather than broadcast, so an offline peer produces
+                // a visible error instead of silence.
+                Target = peerDeviceId,
+                Encryption = new EncryptionMetadata { Nonce = nonce, Tag = tag },
+            },
+        });
+
+        Console.WriteLine($"Sent {Encoding.UTF8.GetByteCount(textToSend)} bytes to {peerDeviceId}.");
+    }
+
+    Console.WriteLine("Ctrl+C to exit.");
+    await WaitForShutdownAsync();
+}
+
 void PrintClipboard(EnvelopeReceivedEventArgs e)
 {
     var key = store.Read(e.PeerDeviceId);
@@ -288,7 +361,12 @@ void PrintClipboard(EnvelopeReceivedEventArgs e)
         var payload = JsonSerializer.Deserialize<ClipboardPayload>(
             Hypo.Core.Utils.GzipCompressor.Decompress(plaintext), ProtocolJson.Options)!;
 
-        Console.WriteLine($"[{e.Origin}] {payload.ContentType}: {Preview(payload)}");
+        // The id and sender are printed because a duplicate is only diagnosable
+        // with them: same id means one message on two paths, different ids mean
+        // two messages, and dedup can only help with the first.
+        Console.WriteLine(
+            $"[{e.Origin}] {payload.ContentType} id={e.Envelope.Id} " +
+            $"from={e.Envelope.Payload.DeviceName ?? e.Envelope.Payload.DeviceId}: {Preview(payload)}");
     }
     catch (Exception ex)
     {

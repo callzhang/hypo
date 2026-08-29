@@ -1,6 +1,6 @@
 # Windows Client — Plan 4: Cloud Relay Transport Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Sync clipboard between Windows and a real phone when they are not on
 the same network, through the deployed relay at `wss://hypo.fly.dev/ws`, and
@@ -93,7 +93,7 @@ need no cloud-specific work.
 - Create: `windows/src/Hypo.Core/Relay/RelayAuthToken.cs`
 - Create: `windows/tests/Hypo.Core.Tests/RelayAuthTokenTests.cs`
 
-- [ ] **Step 1: Write the failing tests first**
+- [x] **Step 1: Write the failing tests first**
 
 Three properties, and the third is the one that actually bites:
 
@@ -107,13 +107,13 @@ Three properties, and the third is the one that actually bites:
    uppercase string authenticates fine on macOS (which lowercases early) and
    fails on any path that does not.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 A static class with one method. It takes the secret as a `string` and the
 device id as a `string`, lowercases the id with `ToLowerInvariant()`, and
 returns the base64 of `HMACSHA256.HashData(secretBytes, idBytes)`.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 `cd windows && dotnet test` — all green.
 
@@ -131,7 +131,7 @@ blindly, because the Windows client will eventually be an MSIX that strangers
 install, and a baked-in shared secret in a public artifact is a secret only
 until someone unzips it.
 
-- [ ] **Step 1: Decide and write down the reasoning**
+- [x] **Step 1: Decide and write down the reasoning**
 
 For now the harness and tests need the secret and the shipping app does not
 exist yet, so read it from the `HYPO_RELAY_AUTH_TOKEN` environment variable and
@@ -140,14 +140,14 @@ the class doc comment that this is a development affordance and that shipping
 an MSIX with an embedded shared relay secret is an open question for the
 packaging plan — do not let it be discovered later as an accident.
 
-- [ ] **Step 2: Tests**
+- [x] **Step 2: Tests**
 
 Missing secret produces a clear, actionable error rather than a null reference
 or an empty-string HMAC. An empty-string secret is treated as missing: the
 relay's own `verify_ws_auth` rejects an empty `RELAY_WS_AUTH_TOKEN`, so
 accepting one here would only move the failure somewhere less legible.
 
-- [ ] **Step 3: Verify** — `dotnet test`, and confirm nothing you added prints
+- [x] **Step 3: Verify** — `dotnet test`, and confirm nothing you added prints
       the secret. Grep your own diff for it.
 
 ---
@@ -158,7 +158,7 @@ accepting one here would only move the failure somewhere less legible.
 - Create: `windows/src/Hypo.Core/Transport/CloudWebSocketClient.cs`
 - Create: `windows/tests/Hypo.Core.Tests/CloudWebSocketClientTests.cs`
 
-- [ ] **Step 1: Tests against a local stub, not the live relay**
+- [x] **Step 1: Tests against a local stub, not the live relay**
 
 Stand up a `LanWebSocketServer`-style stub, or a bare `HttpListener`
 WebSocket, on localhost and point the client at it. Assert:
@@ -173,7 +173,7 @@ WebSocket, on localhost and point the client at it. Assert:
    and does not throw. Use the exact JSON recorded above, `connected_devices`
    and all. This is the case that will happen in production on day one.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 Mirror `LanWebSocketClient`: `ClientWebSocket`, `Options.SetRequestHeader` for
 the three headers, the shared `TransportFrameCodec` and `FrameReader`, the same
@@ -190,7 +190,7 @@ here, unlike the LAN. Take it from `payload.device_id` and say so in a comment:
 the value is *unauthenticated* until the AAD check passes during decryption,
 which is precisely the check that makes trusting it safe.
 
-- [ ] **Step 3: Verify** — `dotnet test`.
+- [x] **Step 3: Verify** — `dotnet test`.
 
 ---
 
@@ -200,7 +200,7 @@ which is precisely the check that makes trusting it safe.
 - Modify: `windows/src/Hypo.Core/Transport/CloudWebSocketClient.cs`
 - Create: `windows/tests/Hypo.Core.Tests/CloudKeepaliveTests.cs`
 
-- [ ] **Step 1: Keepalive**
+- [x] **Step 1: Keepalive**
 
 Fly.io closes idle connections at 900 s and the relay never pings first. Send a
 WebSocket ping every 840 s, matching Android. Make the interval injectable so
@@ -208,7 +208,7 @@ the test does not take fourteen minutes; drive it from an injected interval,
 and assert a ping is actually observed by the stub server rather than sleeping
 and hoping.
 
-- [ ] **Step 2: Reconnect with backoff**
+- [x] **Step 2: Reconnect with backoff**
 
 On an unexpected close, reconnect with exponential backoff and jitter, capped
 at a minute. Two things the test must pin: the backoff does not busy-loop when
@@ -216,7 +216,7 @@ the relay refuses the connection outright (a 401 from a bad secret will retry
 forever otherwise, hammering a shared service), and an explicit
 `DisconnectAsync` stops reconnection rather than racing it.
 
-- [ ] **Step 3: Verify** — `dotnet test`.
+- [x] **Step 3: Verify** — `dotnet test`.
 
 ---
 
@@ -226,14 +226,14 @@ forever otherwise, hammering a shared service), and an explicit
 - Create: `windows/src/Hypo.Core/Transport/DualSyncTransport.cs`
 - Create: `windows/tests/Hypo.Core.Tests/DualSyncTransportTests.cs`
 
-- [ ] **Step 1: Decide the policy before writing it**
+- [x] **Step 1: Decide the policy before writing it**
 
 LAN is preferred when a peer is discoverable and connected: it is faster, it
 does not leave the building, and it works when the relay is down. Cloud is the
 fallback. State the rule in the class doc comment so the next reader does not
 have to infer it from control flow.
 
-- [ ] **Step 2: Tests**
+- [x] **Step 2: Tests**
 
 1. With both transports connected, a send goes over LAN only.
 2. With LAN disconnected, the same send goes over cloud.
@@ -251,7 +251,7 @@ have to infer it from control flow.
    *encrypts twice*, the two nonces must differ. Write the test that fails if
    someone later reuses one.
 
-- [ ] **Step 3: Implement, then verify** — `dotnet test`.
+- [x] **Step 3: Implement, then verify** — `dotnet test`.
 
 ---
 
@@ -263,20 +263,20 @@ The milestone. Everything before this is unverified in the way that matters.
 - Modify: `windows/tools/Hypo.Harness/Program.cs` (add a `cloud` command)
 - Modify: this plan (record the outcome)
 
-- [ ] **Step 1: Add the harness command**
+- [x] **Step 1: Add the harness command**
 
 `cloud` connects to the relay with the stored device id and prints anything it
 receives, exactly as `listen` does for the LAN. It should reuse the persisted
 key store, so a peer paired over the LAN in Plan 3 is already usable here.
 
-- [ ] **Step 2: Prove the LAN is genuinely out of the picture**
+- [x] **Step 2: Prove the LAN is genuinely out of the picture**
 
 Otherwise a passing test proves nothing about the cloud. Either put the phone
 on cellular with Wi-Fi off, or run `cloud` without ever starting mDNS. State in
 the outcome which one you did — "it worked" without saying how the LAN was
 excluded is not evidence.
 
-- [ ] **Step 3: Both directions**
+- [x] **Step 3: Both directions**
 
 Windows to phone: send from the harness, confirm the phone applies it. The
 phone's clipboard is not passively monitored on Android 10+, so to send *from*
@@ -292,14 +292,68 @@ Quote the whole `am` invocation for the device shell — unquoted, `am` splits o
 spaces and silently takes a later word as the package name, which looks like
 success and delivers a truncated string.
 
-- [ ] **Step 4: Watch for the echo**
+- [x] **Step 4: Watch for the echo**
 
 The account may have a Mac on the relay too. A message you send can come back
 to the phone attributed to that Mac a few seconds later, which reads like your
 own message arriving twice. Check `device_id` in the log line, not the text.
 
-- [ ] **Step 5: Record the outcome**
+- [x] **Step 5: Record the outcome**
 
 Add a "Task 6 outcome" section: what ran, how the LAN was excluded, what
 arrived in each direction, and anything this plan asserted that turned out to
 be wrong.
+
+### Task 6 outcome — clipboard over the relay, both directions
+
+Verified on 2026-08-29 against the deployed relay and the OPPO test phone.
+
+**How the LAN was excluded.** The harness's `cloud` command starts no mDNS at
+all — no browse, no advertisement — so there is no LAN path for the phone to
+discover or connect to. Saying "it worked" without saying how the LAN was
+excluded would not have been evidence, and this is the cheaper of the two
+options in Step 2.
+
+Windows to phone: `cloud <peer-id> "<text>"` sent an addressed message; the
+phone's system `ClipboardService` granted `com.hypo.clipboard` clipboard access
+at the same second, which is the write landing.
+
+Phone to Windows, the milestone:
+
+```
+Connected to wss://hypo.fly.dev/ws as 11111111-…-555555555555. No mDNS started.
+[Cloud] Text id=f9bbf9c8-… from=OPPO PLP110: duplicate probe with ids visible
+```
+
+**Keepalive, proven rather than asserted.** `SurvivesLongerThanTheRelayIdleTimeout`
+held an idle connection for sixteen minutes — past Fly.io's 900 s ceiling — and
+it was still `Connected`. That is the only test that can answer the question;
+a stub can confirm we set a number, not that the number is right.
+
+#### Two things worth carrying forward
+
+**The phone sends the same clipboard item twice over the relay, with different
+envelope ids.** Both copies are *addressed to us*, not broadcast: a second
+listener under an unpaired device id received nothing at all, which rules out
+the broadcast path. Same content, same sender, two ids.
+
+The consequence for us is specific. `DualSyncTransport` dedups by envelope id,
+which is exactly right for the case it was built for — one message arriving on
+both the LAN and the relay — and useless here, because these are two messages.
+Suppressing them needs a hash of the *decrypted* content, which the transport
+cannot compute: it sees ciphertext, and two encryptions of the same plaintext
+under different nonces share no bytes. So content-level dedup belongs above the
+transport, after decryption, which is where Android does it too — its logs
+carry a `hash=` on every accepted item.
+
+Plan 3 saw one copy per LAN copy, so this is not the general case; it appears
+when the phone has no LAN route to the peer. The root cause is on the Android
+side and out of scope here.
+
+**Where the phone's logs went.** The Hypo tags this plan's Step 4 suggests
+grepping for — `IncomingClipboardHandler`, `ClipboardSyncService` — stopped
+appearing partway through, after the app restarted under a new pid. Chasing
+them cost real time and produced a wrong conclusion twice: that messages were
+not arriving, when they were. The system's own `ClipboardService` lines
+(`clipboardAccessAllowed … callingPackage=com.hypo.clipboard`) come from a
+different process and kept working throughout. Prefer them.

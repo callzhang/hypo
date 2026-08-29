@@ -193,14 +193,22 @@ fi
 # repository Git metadata and file-provider state, both of which can block builds.
 log_info "Preparing isolated SwiftPM workspace..."
 TEMP_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hypo-macos-build.XXXXXX")"
-mkdir -p "$TEMP_BUILD_DIR"
-cp "$MACOS_DIR/Package.swift" "$TEMP_BUILD_DIR/Package.swift"
-perl -0pi -e 's/,\n\s*\.testTarget\(\n.*?\n\s*\)//s' "$TEMP_BUILD_DIR/Package.swift"
+# The macOS package depends on ../shared/HypoCore by relative path, so the
+# temp workspace has to mirror the repository's two-level layout rather than
+# being a flat copy of macos/ alone.
+mkdir -p "$TEMP_BUILD_DIR/macos" "$TEMP_BUILD_DIR/shared"
+cp "$MACOS_DIR/Package.swift" "$TEMP_BUILD_DIR/macos/Package.swift"
+perl -0pi -e 's/,\n\s*\.testTarget\(\n.*?\n\s*\)//s' "$TEMP_BUILD_DIR/macos/Package.swift"
 if [ -f "$MACOS_DIR/Package.resolved" ]; then
-    cp "$MACOS_DIR/Package.resolved" "$TEMP_BUILD_DIR/Package.resolved"
+    cp "$MACOS_DIR/Package.resolved" "$TEMP_BUILD_DIR/macos/Package.resolved"
 fi
-cp -R "$MACOS_DIR/Sources" "$TEMP_BUILD_DIR/Sources"
-BUILD_PACKAGE_DIR="$TEMP_BUILD_DIR"
+cp -R "$MACOS_DIR/Sources" "$TEMP_BUILD_DIR/macos/Sources"
+cp -R "$PROJECT_ROOT/shared/HypoCore" "$TEMP_BUILD_DIR/shared/HypoCore"
+# Drop the shared package's build artefacts and test target: the app build
+# needs neither, and copying .build would be slow and can carry stale state.
+rm -rf "$TEMP_BUILD_DIR/shared/HypoCore/.build" "$TEMP_BUILD_DIR/shared/HypoCore/Tests"
+perl -0pi -e 's/,\n\s*\.testTarget\(\n.*?\n\s*\)//s' "$TEMP_BUILD_DIR/shared/HypoCore/Package.swift"
+BUILD_PACKAGE_DIR="$TEMP_BUILD_DIR/macos"
 cd "$BUILD_PACKAGE_DIR"
 
 # Always build - force rebuild by touching Package.swift to ensure SPM rebuilds

@@ -12,16 +12,6 @@
 
 **Prerequisite:** Plan 1, merged. `Hypo.Core` at 78 passing tests.
 
-> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 13.**
-> Tasks 1 to 13 are written to this plan's own standard: failing test, complete
-> implementation, exact commands, expected counts. Tasks 3–16 are currently only
-> scoped, not written. A summarised task is a plan failure, not a shortcut — the
-> whole reason Plan 1's subagents caught a JSON writer that escaped `+`, a
-> converter override that was never invoked, and an associated-data formula that
-> would have broken interoperability with both peer clients is that they were
-> handed exact code to run and could watch it fail. Finish writing them before
-> dispatching anyone past Task 13.
-
 ---
 
 ## What this plan is NOT
@@ -3087,20 +3077,381 @@ git commit -m "test(windows): pair over the wire format and use the derived key"
 ```
 
 ---
-## Tasks 14 to 16 — still to be written
+## Task 14: The console harness
 
-These remain scoped but not written.
+Everything before this is a library nobody can run. The harness is what turns it
+into something that can be pointed at a real phone.
 
-Remaining scope:
+**Files:**
+- Create: `windows/tools/Hypo.Harness/Hypo.Harness.csproj`
+- Create: `windows/tools/Hypo.Harness/Program.cs`
+- Modify: `windows/Hypo.sln`
 
-14. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
-11. **`PairingMessages`** — `PairingChallengeMessage` and `PairingAckMessage`, matching `macos/Sources/HypoApp/Pairing/PairingModels.swift` field for field, with `challenge_id` lowercase.
-12. **`PairingSession`** — generates a fresh ephemeral X25519 pair per attempt, sends the challenge, verifies and consumes the ack, derives the shared key. Rejects a replayed `challenge_id` and an expired payload.
-13. **Pairing round-trip test** — two sessions in one process complete a pairing and derive the same key, and a tampered ack is rejected.
-14. **`Hypo.Harness` console tool** — `discover`, `pair <device-id>`, `send <text>`, `listen`. Persists pairings through `InMemorySecretStore` for now; Plan 4 swaps in DPAPI.
-15. **Live interop run** — pair the harness with a real macOS or Android device and exchange a clipboard item in both directions. Record the outcome in the plan.
-16. **CI** — extend the `windows-tests` job to run the new suites, keeping the live-peer tests opt-in so CI stays hermetic.
+- [ ] **Step 1: Create the project**
 
+```bash
+cd windows
+dotnet new console --name Hypo.Harness --output tools/Hypo.Harness --framework net10.0
+dotnet sln add tools/Hypo.Harness/Hypo.Harness.csproj
+dotnet add tools/Hypo.Harness/Hypo.Harness.csproj reference src/Hypo.Core/Hypo.Core.csproj
+```
+
+- [ ] **Step 2: Write the harness**
+
+Replace `windows/tools/Hypo.Harness/Program.cs`:
+
+```csharp
+using System.Text;
+using System.Text.Json;
+using Hypo.Core.Abstractions;
+using Hypo.Core.Crypto;
+using Hypo.Core.Discovery;
+using Hypo.Core.Pairing;
+using Hypo.Core.Protocol;
+using Hypo.Core.Transport;
+
+// A development harness for exercising Hypo.Core against a real peer. Not a
+// product: keys live in memory and vanish on exit, which is why "pair" and
+// "send" are one command rather than two.
+//
+//   discover              list peers on this network
+//   pair <device-id>      pair with one, then hold to receive
+//   listen                accept inbound connections and print what arrives
+
+var command = args.Length > 0 ? args[0] : "discover";
+var deviceId = Environment.GetEnvironmentVariable("HYPO_DEVICE_ID")
+               ?? "11111111-2222-3333-4444-555555555555";
+var deviceName = Environment.GetEnvironmentVariable("HYPO_DEVICE_NAME") ?? "Hypo Harness";
+var store = new InMemorySecretStore();
+
+switch (command)
+{
+    case "discover":
+        await DiscoverAsync();
+        break;
+    case "pair":
+        await PairAsync(args.ElementAtOrDefault(1));
+        break;
+    case "listen":
+        await ListenAsync();
+        break;
+    default:
+        Console.WriteLine("usage: discover | pair <device-id> | listen");
+        break;
+}
+
+async Task<IReadOnlyCollection<DiscoveredPeer>> BrowseAsync(TimeSpan window)
+{
+    await using var discovery = new MdnsPeerDiscovery();
+    await discovery.StartBrowsingAsync();
+
+    var deadline = DateTimeOffset.UtcNow + window;
+    while (DateTimeOffset.UtcNow < deadline)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        discovery.Refresh();
+    }
+
+    return discovery.KnownPeers;
+}
+
+async Task DiscoverAsync()
+{
+    Console.WriteLine("Browsing for _hypo._tcp peers for 12s...");
+    foreach (var peer in await BrowseAsync(TimeSpan.FromSeconds(12)))
+    {
+        Console.WriteLine($"  {peer.DisplayName}");
+        Console.WriteLine($"    address    {peer.Address}:{peer.Port}");
+        Console.WriteLine($"    device_id  {peer.DeviceId ?? "(not advertised)"}");
+        Console.WriteLine($"    version    {peer.Version ?? "(not advertised)"}");
+        Console.WriteLine($"    pub_key    {(peer.PublicKey is null ? "(none)" : Convert.ToBase64String(peer.PublicKey))}");
+    }
+}
+
+async Task PairAsync(string? target)
+{
+    if (string.IsNullOrWhiteSpace(target))
+    {
+        Console.WriteLine("usage: pair <device-id>");
+        return;
+    }
+
+    var peer = (await BrowseAsync(TimeSpan.FromSeconds(12)))
+        .FirstOrDefault(p => string.Equals(p.DeviceId, target, StringComparison.OrdinalIgnoreCase));
+
+    if (peer is null)
+    {
+        Console.WriteLine($"No peer advertising device_id {target}. Run 'discover' first.");
+        return;
+    }
+
+    if (peer.PublicKey is null)
+    {
+        Console.WriteLine($"{peer.DisplayName} advertises no pub_key, so it cannot be paired with over the LAN.");
+        return;
+    }
+
+    Console.WriteLine($"Pairing with {peer.DisplayName} at {peer.Address}:{peer.Port}...");
+
+    var session = PairingSession.StartInitiator(deviceId, deviceName);
+    var challenge = session.CreateChallenge(peer.PublicKey);
+
+    await using var client = new LanWebSocketClient(peer, deviceId);
+    var ackReceived = new TaskCompletionSource<PairingAckMessage>();
+
+    client.EnvelopeReceived += (_, e) =>
+    {
+        var ack = TryReadAck(e.Envelope);
+        if (ack is not null)
+        {
+            ackReceived.TrySetResult(ack);
+        }
+        else
+        {
+            PrintClipboard(e);
+        }
+    };
+
+    await client.ConnectAsync();
+    await client.SendAsync(WrapControl(challenge));
+
+    var ack = await ackReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
+    var completed = session.CompleteWithAck(ack, peer.PublicKey);
+
+    if (completed is null)
+    {
+        Console.WriteLine("Pairing failed: the ack did not verify.");
+        return;
+    }
+
+    store.Write(completed.PeerDeviceId, completed.SharedKey);
+    Console.WriteLine($"Paired with {completed.PeerDeviceName} ({completed.PeerDeviceId}).");
+    Console.WriteLine("Holding open. Copy something on the peer; Ctrl+C to exit.");
+    await Task.Delay(Timeout.Infinite);
+}
+
+async Task ListenAsync()
+{
+    await using var server = new LanWebSocketServer(deviceId);
+    server.EnvelopeReceived += (_, e) => PrintClipboard(e);
+    await server.StartAsync();
+
+    await using var discovery = new MdnsPeerDiscovery();
+    var signing = SigningService.GeneratePrivateKey();
+    var agreement = new byte[CryptoService.X25519KeySizeBytes];
+    System.Security.Cryptography.RandomNumberGenerator.Fill(agreement);
+    var agreementPublic = CryptoService.DerivePublicKey(agreement);
+
+    await discovery.AdvertiseAsync(deviceName, server.BoundPort, new Dictionary<string, string>
+    {
+        ["device_id"] = deviceId,
+        ["pub_key"] = Convert.ToBase64String(agreementPublic),
+        ["signing_pub_key"] = Convert.ToBase64String(SigningService.DerivePublicKey(signing)),
+        ["version"] = "2.0.0-harness",
+        // The fingerprint is the SHA-256 of the agreement key, matching macOS.
+        ["fingerprint_sha256"] = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(agreementPublic)).ToLowerInvariant(),
+    });
+
+    Console.WriteLine($"Listening on port {server.BoundPort}, advertising as \"{deviceName}\".");
+    Console.WriteLine("Ctrl+C to exit.");
+    await Task.Delay(Timeout.Infinite);
+}
+
+void PrintClipboard(EnvelopeReceivedEventArgs e)
+{
+    var key = store.Read(e.PeerDeviceId);
+    if (key is null)
+    {
+        Console.WriteLine($"[{e.Origin}] {e.PeerDeviceId}: no key for this peer; pair first.");
+        return;
+    }
+
+    try
+    {
+        var plaintext = CryptoService.Decrypt(
+            e.Envelope.Payload.Ciphertext,
+            key,
+            e.Envelope.Payload.Encryption.Nonce,
+            e.Envelope.Payload.Encryption.Tag,
+            CryptoService.BuildAssociatedData(e.Envelope.Payload.DeviceId));
+
+        var payload = JsonSerializer.Deserialize<ClipboardPayload>(
+            Hypo.Core.Utils.GzipCompressor.Decompress(plaintext), ProtocolJson.Options)!;
+
+        Console.WriteLine($"[{e.Origin}] {payload.ContentType}: {Preview(payload)}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[{e.Origin}] could not decrypt from {e.PeerDeviceId}: {ex.GetType().Name}");
+    }
+}
+
+static string Preview(ClipboardPayload payload) =>
+    payload.ContentType is ContentType.Text or ContentType.Link
+        ? Encoding.UTF8.GetString(payload.Data)
+        : $"{payload.Data.Length} bytes";
+
+static SyncEnvelope WrapControl(PairingChallengeMessage challenge) => new()
+{
+    Id = Guid.NewGuid(),
+    Timestamp = DateTimeOffset.UtcNow,
+    Type = MessageType.Control,
+    Payload = new EnvelopePayload
+    {
+        ContentType = ContentType.Text,
+        Ciphertext = JsonSerializer.SerializeToUtf8Bytes(challenge, ProtocolJson.Options),
+        DeviceId = challenge.InitiatorDeviceId,
+        DevicePlatform = "windows",
+        Encryption = new EncryptionMetadata { Nonce = [], Tag = [] },
+    },
+};
+
+static PairingAckMessage? TryReadAck(SyncEnvelope envelope)
+{
+    if (envelope.Type != MessageType.Control)
+    {
+        return null;
+    }
+
+    try
+    {
+        return JsonSerializer.Deserialize<PairingAckMessage>(
+            envelope.Payload.Ciphertext, ProtocolJson.Options);
+    }
+    catch (JsonException)
+    {
+        return null;
+    }
+}
+```
+
+**A limitation to be honest about.** `WrapControl` puts the pairing challenge in
+an envelope whose payload is shaped for clipboard traffic, with an empty nonce
+and tag. That is not what the shipping clients do — it is a stand-in, and it
+works only because `EnvelopePayload` currently has no discriminated shape for
+control messages. That gap is carry-forward item 3 from Plan 1, and Task 15 is
+where it will either prove adequate against a real peer or prove that item has
+to be closed first. Do not let this pattern leak out of the harness.
+
+- [ ] **Step 3: Build**
+
+Run: `cd windows && dotnet build`
+
+Expected: `Build succeeded` with 0 warnings.
+
+- [ ] **Step 4: Discover real peers**
+
+Run: `cd windows && dotnet run --project tools/Hypo.Harness -- discover`
+
+Expected: at least one peer with an address, a `device_id` and a `pub_key`, with
+its name shown unescaped. If names appear as `derek\032MacBook`, Task 2's
+unescaping is not being applied on this path.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add windows/tools/ windows/Hypo.sln
+git commit -m "feat(windows): add a console harness for real-peer testing"
+```
+
+---
+
+## Task 15: Interoperate with a real device
+
+The point of the whole plan. Everything up to here was verified against fixtures
+and loopback; this is the first contact with a shipping client.
+
+**Files:**
+- Modify: `docs/superpowers/plans/2026-08-29-windows-lan-interop.md` (record the outcome)
+
+- [ ] **Step 1: Confirm a peer is visible**
+
+Run: `cd windows && dotnet run --project tools/Hypo.Harness -- discover`
+
+Note the `device_id` of a macOS or Android peer.
+
+- [ ] **Step 2: Attempt a pairing**
+
+Run: `cd windows && dotnet run --project tools/Hypo.Harness -- pair <device-id>`
+
+**This step is expected to be where reality pushes back.** Record what actually
+happens, in the plan, whichever way it goes:
+
+- **It pairs.** Copy something on the peer and confirm the harness prints it.
+  Then send from the harness and confirm it lands on the peer. Record both.
+- **The peer ignores the challenge.** Most likely cause: the shipping clients do
+  not accept a pairing challenge wrapped the way `WrapControl` wraps it, or they
+  expect it on a different channel entirely. This is carry-forward item 3 from
+  Plan 1 — control messages have no representable payload — arriving as a
+  concrete blocker. Capture the peer's logs if reachable, and write down what it
+  expected.
+- **It connects but nothing arrives.** Check whether the peer dialled back rather
+  than replying on the same socket. The macOS client maintains outbound
+  connections to discovered peers, so it may be waiting for the harness to be
+  advertising and listening. Try `listen` in a second terminal.
+
+- [ ] **Step 3: Record the outcome**
+
+Add a section to this plan titled "Task 15 outcome" stating what happened, with
+the commands run and the observed behaviour. A failed interop attempt that is
+written down is worth more than a successful one that is not, because the next
+plan is shaped by it.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/superpowers/plans/2026-08-29-windows-lan-interop.md
+git commit -m "docs: record the first real-peer interoperability attempt"
+```
+
+---
+
+## Task 16: CI
+
+**Files:**
+- Modify: `.github/workflows/ci.yml`
+
+- [ ] **Step 1: Confirm the live tests skip**
+
+Run: `cd windows && dotnet test`
+
+Expected: the two `LivePeerDiscoveryTests` reported as skipped, everything else
+passing. CI must not depend on a network or on someone's phone being on.
+
+- [ ] **Step 2: Confirm the harness builds in Release**
+
+Run: `cd windows && dotnet build --configuration Release`
+
+Expected: `Build succeeded`, 0 warnings. The existing `windows-tests` job builds
+the whole solution, so a harness that only compiles in Debug would break CI.
+
+- [ ] **Step 3: Check whether the job needs changing**
+
+Run: `grep -A 20 "windows-tests:" .github/workflows/ci.yml`
+
+The job already runs `dotnet restore`, `dotnet build` and `dotnet test` across
+the solution from `windows/`, so the new projects and suites are picked up with
+no change. **If that is what you find, change nothing and say so** — an edit that
+does nothing is worse than no edit.
+
+If the job pins individual project paths rather than the solution, widen it to
+the solution.
+
+- [ ] **Step 4: Verify the YAML still parses**
+
+Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml')); print('valid')"`
+
+Expected: `valid`
+
+- [ ] **Step 5: Commit, if anything changed**
+
+```bash
+git add .github/workflows/ci.yml
+git commit -m "ci: cover the Plan 2 suites on Windows"
+```
+
+---
 ## Done criteria
 
 1. `cd windows && dotnet test` passes with zero failures and zero warnings.

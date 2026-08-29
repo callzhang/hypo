@@ -847,7 +847,8 @@ public struct HypoMenuBarApp: App {
             transportManager = TransportManager(
                 provider: provider,
                 webSocketServer: server,
-                historyStore: historyStore
+                historyStore: historyStore,
+                notificationController: ClipboardNotificationController.shared
             )
             AppContext.shared.transportManager = transportManager
             logger.info("🆕 [HypoMenuBarApp] Created new TransportManager")

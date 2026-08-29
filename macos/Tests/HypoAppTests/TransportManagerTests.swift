@@ -12,6 +12,7 @@ struct TransportManagerTests {
             publisher: publisher,
             lanConfiguration: .init(serviceName: "test", port: 0, version: "1.0", fingerprint: "test", protocols: ["ws"]),
             webSocketServer: webSocketServer,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
         
@@ -32,6 +33,7 @@ struct TransportManagerTests {
             publisher: publisher,
             lanConfiguration: .init(serviceName: "initial", port: 0, version: "1.0", fingerprint: "test", protocols: ["ws"]),
             webSocketServer: webSocketServer,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
         
@@ -64,6 +66,7 @@ struct TransportManagerTests {
             lanConfiguration: .init(serviceName: "test", port: 0, version: "1.0", fingerprint: "test", protocols: ["ws"]),
             webSocketServer: webSocketServer,
             historyStore: store,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
         
@@ -82,6 +85,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             historyStore: store,
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -141,6 +145,7 @@ struct TransportManagerTests {
             provider: MockTransportProvider(),
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -175,6 +180,7 @@ struct TransportManagerTests {
             provider: MockTransportProvider(),
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -207,6 +213,7 @@ struct TransportManagerTests {
             provider: MockTransportProvider(),
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -230,6 +237,7 @@ struct TransportManagerTests {
             provider: MockTransportProvider(),
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -261,6 +269,7 @@ struct TransportManagerTests {
                 protocols: ["ws"]
             ),
             webSocketServer: await makeWebSocketServer(),
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -282,6 +291,7 @@ struct TransportManagerTests {
             provider: MockTransportProvider(),
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -305,6 +315,7 @@ struct TransportManagerTests {
             dateProvider: { now },
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -328,6 +339,7 @@ struct TransportManagerTests {
             lanConfiguration: config,
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -346,6 +358,7 @@ struct TransportManagerTests {
             provider: MockTransportProvider(),
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -373,6 +386,7 @@ struct TransportManagerTests {
             provider: MockTransportProvider(),
             webSocketServer: await makeWebSocketServer(),
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -401,6 +415,7 @@ struct TransportManagerTests {
             provider: MockTransportProvider(),
             webSocketServer: server,
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 
@@ -435,6 +450,7 @@ struct TransportManagerTests {
             webSocketServer: await makeWebSocketServer(),
             historyStore: store,
             defaults: defaults,
+            notificationController: MockNotificationController(),
             autoStartLanServices: false
         )
 

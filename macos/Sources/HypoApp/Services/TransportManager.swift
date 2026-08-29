@@ -113,7 +113,7 @@ public final class TransportManager: ObservableObject {
         historyStore: HistoryStore? = nil,
         defaults: UserDefaults = .standard,
         dispatcher: ClipboardEventDispatcher? = nil,
-        notificationController: ClipboardNotificationScheduling = ClipboardNotificationController.shared,
+        notificationController: ClipboardNotificationScheduling,
         autoStartLanServices: Bool = true
     ) {
         self.defaults = defaults

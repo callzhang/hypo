@@ -473,6 +473,13 @@ Two details that are easy to get wrong here, both caught by the tests above:
   inflates every payload and diverges from what the other two clients produce.
   `WriteBase64StringValue` writes the base64 alphabet verbatim and is what the
   built-in `byte[]` converter uses.
+- The `try`/`catch` is load-bearing, not defence in depth. It was measured:
+  removing it lets a bare `FormatException` escape `JsonSerializer.Deserialize`
+  entirely. `System.Text.Json` auto-wraps `FormatException` only when its own
+  reader methods raise it (`Utf8JsonReader.GetDateTimeOffset` and friends);
+  `Convert.FromBase64String` is user code on this path and is not wrapped.
+  Keep the comment that records this — a reviewer previously concluded the
+  guard was redundant after testing the reader path instead.
 - `HandleNull` must be overridden to `true`, as noted in the code comment. It has
   one side effect on the write path: a null `byte[]` is routed to `Write` and
   emits `""` rather than `null`. Every protocol model in this plan is serialised
@@ -566,6 +573,13 @@ public class ProtocolJsonTests
     public void WritesNonUtcTimestampsAsUtc()
     {
         var value = DateTimeOffset.Parse("2025-10-03T08:00:00+08:00", CultureInfo.InvariantCulture);
+        Assert.Equal("\"2025-10-03T00:00:00Z\"", JsonSerializer.Serialize(value, ProtocolJson.Options));
+    }
+
+    [Fact]
+    public void TruncatesSubSecondPrecisionRatherThanRounding()
+    {
+        var value = DateTimeOffset.Parse("2025-10-03T00:00:00.999Z", CultureInfo.InvariantCulture);
         Assert.Equal("\"2025-10-03T00:00:00Z\"", JsonSerializer.Serialize(value, ProtocolJson.Options));
     }
 
@@ -672,7 +686,7 @@ peer sending `+00:00` still parses. Only what we emit is constrained.
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~ProtocolJsonTests`
 
-Expected: PASS, 12 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1115,6 +1129,30 @@ public class TransportFrameCodecTests
     }
 
     [Fact]
+    public void ThrowsWhenTheLengthPrefixExceedsTheCeiling()
+    {
+        var codec = new TransportFrameCodec();
+        var frame = new byte[8];
+        BinaryPrimitives.WriteUInt32BigEndian(
+            frame.AsSpan(0, 4), (uint)TransportFrameCodec.DefaultMaxPayloadBytes + 1);
+
+        var error = Assert.Throws<TransportFrameException>(() => codec.Decode(frame));
+
+        Assert.Equal(TransportFrameError.PayloadTooLarge, error.Error);
+    }
+
+    [Fact]
+    public void ThrowsWhenTheLengthPrefixIsUIntMaxValue()
+    {
+        var codec = new TransportFrameCodec();
+        var frame = new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0x01 };
+
+        var error = Assert.Throws<TransportFrameException>(() => codec.Decode(frame));
+
+        Assert.Equal(TransportFrameError.PayloadTooLarge, error.Error);
+    }
+
+    [Fact]
     public void ThrowsWhenTheEncodedBodyExceedsTheConfiguredCeiling()
     {
         var codec = new TransportFrameCodec(maxPayloadBytes: 1);
@@ -1224,13 +1262,19 @@ public sealed class TransportFrameCodec
 }
 ```
 
-The declared-length check runs before the body-length check so an attacker-supplied huge prefix is rejected without allocating.
+The declared-length check runs before the body-length check so an
+attacker-supplied huge prefix is rejected without allocating. The two tests
+above cover that branch directly: a peer controls the prefix, and later plans
+put a real socket behind this. The `uint.MaxValue` case also protects the
+`(int)declaredLength` cast — the comparison promotes both operands to `long`,
+so there is no wraparound, and the cast is unreachable except when already
+bounded by an `int`.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~TransportFrameCodecTests`
 
-Expected: PASS, 6 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2327,7 +2371,7 @@ Expected: PASS, 2 tests.
 
 Run: `cd windows && dotnet test`
 
-Expected: PASS, 63 tests, 0 failures.
+Expected: PASS, 66 tests, 0 failures.
 
 - [ ] **Step 4: Commit**
 

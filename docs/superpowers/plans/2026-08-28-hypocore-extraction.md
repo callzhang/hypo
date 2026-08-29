@@ -266,7 +266,15 @@ gh run view --log-failed
 
 1. **`ios-core-build` 里的 `Build HypoCore for macOS` 步骤要不要留？** 本任务之后 `macos/Package.swift` 会依赖 HypoCore，`macos-tests` job 会自动连带构建它，那一步就与之重复了。两个选择：留着当作「HypoCore 自身构建失败」的隔离信号（红灯归因更清晰），或删掉省一个 macOS runner 的时间。做出选择并在提交信息里写明理由。
 
-2. **要不要锁定 Xcode 版本？** `runs-on: macos-15` 用的是镜像默认 Xcode（当前 16.4，随附 iPhoneSimulator18.5.sdk）。后面还有约 13 次推送，GitHub 若中途升级默认 Xcode，会产生与本次搬迁内容无关的失败，排查成本高。可用 `maxim-lobanov/setup-xcode@v1` 锁定。注意既有的 `macos-tests` 也没锁——若要锁，两个 job 应一致处理。
+2. **要不要加 workflow 级并发取消？** Task 1B 的实现者拒绝把它折进那个提交，理由成立并已采纳：`ci.yml` 的 `push` 触发器是 `branches: ["**"]`，包含 `main`，所以 `cancel-in-progress: true` 会让 `main` 上连续推送时前一次 CI 被杀掉而非跑完——这超出了"优化特性分支反馈延迟"的本意；且顶层块虽不改三个既有 job 的 YAML 文本，却改变它们的运行时行为，而 Task 17 专门要验收这三个 job 未被修改。已确认无跨 workflow 风险（`backend-deploy.yml`、`release.yml` 是独立 workflow，并发组按 workflow 隔离；无任何 `needs:`/`workflow_run` 依赖 `ci.yml`）。若决定加，**作为独立提交**，并同步把 Task 17 的验收口径写清楚：
+
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+3. **要不要锁定 Xcode 版本？** `runs-on: macos-15` 用的是镜像默认 Xcode（当前 16.4，随附 iPhoneSimulator18.5.sdk）。后面还有约 13 次推送，GitHub 若中途升级默认 Xcode，会产生与本次搬迁内容无关的失败，排查成本高。可用 `maxim-lobanov/setup-xcode@v1` 锁定。注意既有的 `macos-tests` 也没锁——若要锁，两个 job 应一致处理。
 
 
 

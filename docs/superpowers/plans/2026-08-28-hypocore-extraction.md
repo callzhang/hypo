@@ -114,14 +114,14 @@ cd shared/HypoCore && grep -rn "NSHomeDirectory\|homeDirectoryForCurrentUser\|/U
 | 路径 | 职责 |
 |---|---|
 | `shared/HypoCore/Package.swift` | package 定义，双平台声明 |
-| `shared/HypoCore/Sources/HypoCore/Platform/ClipboardWriting.swift` | 剪贴板写入协议 |
+| `shared/HypoCore/Sources/HypoCore/Platform/SystemClipboard.swift` | 剪贴板写入协议 |
 | `shared/HypoCore/Sources/HypoCore/Platform/AppLifecycleObserving.swift` | 应用生命周期观察协议 |
 | `shared/HypoCore/Sources/HypoCore/Platform/HistoryPersistence.swift` | 历史持久化协议 |
 | `shared/HypoCore/Sources/HypoCore/Platform/StorageLocations.swift` | 存储目录协议 |
 | `shared/HypoCore/Sources/HypoCore/Notifications/ClipboardNotificationScheduling.swift` | 从具体控制器中提取的协议声明 |
 | `shared/HypoCore/Tests/HypoCoreTests/` | Task 15 迁入的 core 测试 |
 | `macos/Sources/HypoApp/HypoCoreExport.swift` | `@_exported import HypoCore`，使 app 与测试代码无需逐文件加 import |
-| `macos/Sources/HypoApp/Platform/AppKitClipboardWriter.swift` | `ClipboardWriting` 的 macOS 实现 |
+| `macos/Sources/HypoApp/Platform/AppKitClipboardWriter.swift` | `SystemClipboard` 的 macOS 实现 |
 | `macos/Sources/HypoApp/Platform/AppKitLifecycleObserver.swift` | `AppLifecycleObserving` 的 macOS 实现 |
 | `macos/Sources/HypoApp/Services/ClipboardHistoryViewModel.swift` | 从 `HistoryStore.swift` 拆出的 macOS UI 层 |
 
@@ -141,7 +141,7 @@ cd shared/HypoCore && grep -rn "NSHomeDirectory\|homeDirectoryForCurrentUser\|/U
 
 ### 关于 `ClipboardMonitoring` 协议
 
-spec §4.2 列了 4 个平台适配协议，本计划只建 3 个（`ClipboardWriting`、`AppLifecycleObserving`、`StorageLocations`、`HistoryPersistence` 中的后三个加第一个，共 4 个文件），**唯独不建 `ClipboardMonitoring`**。
+spec §4.2 列了 4 个平台适配协议，本计划只建 3 个（`SystemClipboard`、`AppLifecycleObserving`、`StorageLocations`、`HistoryPersistence` 中的后三个加第一个，共 4 个文件），**唯独不建 `ClipboardMonitoring`**。
 
 原因：它唯一的消费方 `ClipboardMonitor.swift` 第 1 期不迁入 `HypoCore`（见下方「留在 HypoApp」），`HypoCore` 里没有任何代码需要这个抽象。第 1 期就定义一个无人使用的协议属于为想象中的需求写代码。它在第 2 期随 iOS 的剪贴板采集路径一起建立——那时才知道 iOS 侧真正需要什么形状（iOS 没有轮询，采集由分享扩展、`UIPasteControl`、App Intents 三个入口驱动，与 macOS 的 `changeCount` 轮询不是同一个接口）。
 
@@ -755,7 +755,7 @@ PRE_PUSH_ANDROID=0 PRE_PUSH_BACKEND=0 git push
 **Files:**
 - Create: `shared/HypoCore/Sources/HypoCore/Notifications/ClipboardNotificationScheduling.swift`
 - Create: `shared/HypoCore/Sources/HypoCore/Platform/AppLifecycleObserving.swift`
-- Create: `shared/HypoCore/Sources/HypoCore/Platform/ClipboardWriting.swift`
+- Create: `shared/HypoCore/Sources/HypoCore/Platform/SystemClipboard.swift`
 - Create: `macos/Sources/HypoApp/Platform/AppKitLifecycleObserver.swift`
 - Create: `macos/Sources/HypoApp/Platform/AppKitClipboardWriter.swift`
 - Modify: `macos/Sources/HypoApp/Services/ClipboardNotificationController.swift`、`TransportManager.swift`、`IncomingClipboardHandler.swift`、`App/AppContext.swift`
@@ -917,9 +917,17 @@ public final class AppKitLifecycleObserver: AppLifecycleObserving {
 
 在 `TransportManager.swift` 中：删除文件末尾 `#if canImport(AppKit) private final class ApplicationLifecycleObserver { ... } #endif` 整段；把持有它的属性改为 `private let lifecycleObserver: AppLifecycleObserving?`；构造处改为调用注入实例的 `start(onActivate:onDeactivate:onTerminate:)`，三个闭包体保持原样。初始化器增加 `lifecycleObserver: AppLifecycleObserving? = nil,`，并在 `AppContext.swift` 构造点传入 `AppKitLifecycleObserver()`。
 
-### 9.3 `ClipboardWriting`
+### 9.3 `SystemClipboard`（原计划称 `ClipboardWriting`，已改名）
 
-创建 `shared/HypoCore/Sources/HypoCore/Platform/ClipboardWriting.swift`：
+**改名理由**：协议同时包含读操作（`currentText()`、`containsImage()`、`changeCount`），叫 `Writing` 会误导后来的读者。它尚无任何实现，改名零成本。
+
+**实测补充的两个成员**（计划初稿遗漏，照初稿实现会编译不过）：
+
+- **`changeCount`** —— `IncomingClipboardHandler.swift:90,92` 在写入剪贴板前后各取一次，把新值交给 `dispatcher.notifyClipboardApplied(changeCount:)`，好让 `ClipboardMonitor` 不把我们自己的写入误判成用户的新复制。**这是去重逻辑的一环，漏掉会导致同步回环。**
+- **`imagePixelSize(from:)`** —— `IncomingClipboardHandler.swift:270` 用 `NSImage(data:)` 取图片尺寸存进历史元数据。这是图像解码而非剪贴板操作，但同样是平台能力，放进同一个协议以免再开第四个。
+
+
+创建 `shared/HypoCore/Sources/HypoCore/Platform/SystemClipboard.swift`：
 
 ```swift
 import Foundation
@@ -929,7 +937,10 @@ import Foundation
 /// Covers exactly what IncomingClipboardHandler used to do directly against
 /// NSPasteboard: compare against current contents, then apply the payload.
 @MainActor
-public protocol ClipboardWriting: AnyObject {
+public protocol SystemClipboard: AnyObject {
+    /// Monotonic counter the platform bumps on every clipboard change.
+    /// Used to tell our own writes apart from the user's copies.
+    var changeCount: Int { get }
     func clear()
     func writeText(_ text: String)
     /// Returns false when the data cannot be decoded as an image on this platform.
@@ -937,11 +948,14 @@ public protocol ClipboardWriting: AnyObject {
     func writeFileURL(_ url: URL)
     func currentText() -> String?
     func containsImage() -> Bool
+    /// Pixel dimensions of encoded image data, for history metadata.
+    /// Returns nil when the data is not a decodable image on this platform.
+    func imagePixelSize(from data: Data) -> (width: Int, height: Int)?
 }
 
 /// Test double recording every write.
 @MainActor
-public final class RecordingClipboardWriter: ClipboardWriting {
+public final class RecordingClipboardWriter: SystemClipboard {
     public private(set) var writtenTexts: [String] = []
     public private(set) var writtenImageData: [Data] = []
     public private(set) var writtenFileURLs: [URL] = []
@@ -986,7 +1000,7 @@ import AppKit
 
 /// macOS implementation of ClipboardWriting, backed by NSPasteboard.
 @MainActor
-public final class AppKitClipboardWriter: ClipboardWriting {
+public final class AppKitClipboardWriter: SystemClipboard {
     #if canImport(AppKit)
     private let pasteboard: NSPasteboard
 
@@ -1026,7 +1040,7 @@ public final class AppKitClipboardWriter: ClipboardWriting {
 }
 ```
 
-在 `IncomingClipboardHandler.swift` 中：删除第 2 行的裸 `import AppKit`；把 `private let pasteboard: NSPasteboard` 改为 `private let clipboard: ClipboardWriting`；初始化器参数 `pasteboard: NSPasteboard = .general` 改为 `clipboard: ClipboardWriting`（无默认值）。
+在 `IncomingClipboardHandler.swift` 中：删除第 2 行的裸 `import AppKit`；把 `private let pasteboard: NSPasteboard` 改为 `private let clipboard: SystemClipboard`；初始化器参数 `pasteboard: NSPasteboard = .general` 改为 `clipboard: SystemClipboard`（无默认值）。
 
 `matchesCurrentClipboard` 中：`.text` 与 `.link` 分支改用 `clipboard.currentText()`；`.image` 分支改用 `clipboard.containsImage()`（原逻辑在有图时仍返回 `false`，保持不变）。
 

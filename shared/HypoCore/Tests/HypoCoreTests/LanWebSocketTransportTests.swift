@@ -3,8 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 import Testing
-@_spi(Testing) @testable import HypoApp
-@testable import HypoCore
+@_spi(Testing) @testable import HypoCore
 
 struct LanWebSocketTransportTests {
     @Test

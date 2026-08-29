@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import HypoApp
+@testable import HypoCore
 #if canImport(CryptoKit)
 import CryptoKit
 #else

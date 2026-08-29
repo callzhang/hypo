@@ -3,7 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 import Testing
-@testable import HypoApp
+@testable import HypoCore
 
 struct TransportFrameCodecTests {
     @Test
@@ -36,9 +36,10 @@ struct TransportFrameCodecTests {
         let fileURL = URL(fileURLWithPath: #filePath)
         let repoRoot = fileURL
             .deletingLastPathComponent() // TransportFrameCodecTests.swift
-            .deletingLastPathComponent() // HypoAppTests
+            .deletingLastPathComponent() // HypoCoreTests
             .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // macos
+            .deletingLastPathComponent() // HypoCore
+            .deletingLastPathComponent() // shared
         let vectorsURL = repoRoot.appendingPathComponent("tests/transport/frame_vectors.json")
         let data = try Data(contentsOf: vectorsURL)
         let json = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]]

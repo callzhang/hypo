@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import HypoApp
+@testable import HypoCore
 
 struct TransportManagerLanTests {
     @Test @MainActor

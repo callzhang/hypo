@@ -5,7 +5,7 @@ import CryptoKit
 #else
 import Crypto
 #endif
-@testable import HypoApp
+@testable import HypoCore
 
 struct CryptoServiceTests {
     @Test

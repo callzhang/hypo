@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import HypoApp
+@testable import HypoCore
 
 @MainActor
 struct ClipboardEventDispatcherTests {

@@ -1,7 +1,7 @@
 import Foundation
 import Network
 import Testing
-@testable import HypoApp
+@testable import HypoCore
 
 /// Tests for thread-safe buffer operations in LanWebSocketServer
 /// Validates Fix 3: Buffer snapshot + NSLock protection against concurrent access

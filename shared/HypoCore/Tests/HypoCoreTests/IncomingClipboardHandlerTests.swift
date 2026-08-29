@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import CryptoKit
-@testable import HypoApp
+@testable import HypoCore
 
 @MainActor
 struct IncomingClipboardHandlerTests {

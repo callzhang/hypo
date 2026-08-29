@@ -1,7 +1,7 @@
 #if canImport(Darwin)
 import Foundation
 import Testing
-@testable import HypoApp
+@testable import HypoCore
 
 @MainActor
 struct BonjourPublisherTests {

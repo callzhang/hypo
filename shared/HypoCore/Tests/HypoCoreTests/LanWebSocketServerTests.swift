@@ -3,7 +3,7 @@ import Network
 import CryptoKit
 import Testing
 import os
-@testable import HypoApp
+@testable import HypoCore
 
 @MainActor
 @Suite

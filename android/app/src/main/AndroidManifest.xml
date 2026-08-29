@@ -74,7 +74,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Quick Settings tile for opening Hypo from the notification shade. -->
+        <!-- Quick Settings tile for toggling the background clipboard sync service. -->
         <service
             android:name=".QuickSettingsTileService"
             android:exported="true"

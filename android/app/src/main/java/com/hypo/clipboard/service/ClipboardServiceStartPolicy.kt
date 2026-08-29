@@ -11,7 +11,8 @@ enum class ClipboardServiceStartReason {
     BOOT_COMPLETED,
     PACKAGE_REPLACED,
     KEEP_ALIVE_WORKER,
-    SERVICE_DESTROYED
+    SERVICE_DESTROYED,
+    QUICK_SETTINGS
 }
 
 object ClipboardServiceStartPolicy {

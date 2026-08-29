@@ -262,6 +262,14 @@ gh run view --log-failed
 
 ## Task 2: 接通依赖管道（零文件迁移）
 
+**本任务需顺带做两个 CI 决策**（Task 1B 的代码质量审查提出，当时判定推迟到此处更合适）：
+
+1. **`ios-core-build` 里的 `Build HypoCore for macOS` 步骤要不要留？** 本任务之后 `macos/Package.swift` 会依赖 HypoCore，`macos-tests` job 会自动连带构建它，那一步就与之重复了。两个选择：留着当作「HypoCore 自身构建失败」的隔离信号（红灯归因更清晰），或删掉省一个 macOS runner 的时间。做出选择并在提交信息里写明理由。
+
+2. **要不要锁定 Xcode 版本？** `runs-on: macos-15` 用的是镜像默认 Xcode（当前 16.4，随附 iPhoneSimulator18.5.sdk）。后面还有约 13 次推送，GitHub 若中途升级默认 Xcode，会产生与本次搬迁内容无关的失败，排查成本高。可用 `maxim-lobanov/setup-xcode@v1` 锁定。注意既有的 `macos-tests` 也没锁——若要锁，两个 job 应一致处理。
+
+
+
 先只接线不搬文件，确认依赖、再导出、测试三条链路都通，再开始搬迁。
 
 **Files:**

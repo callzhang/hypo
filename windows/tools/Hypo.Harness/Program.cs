@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Hypo.Core.Abstractions;
@@ -190,7 +191,7 @@ async Task PairAsync(string? target)
         Console.WriteLine($"Sent {Encoding.UTF8.GetByteCount(outbound)} bytes of text to {completed.PeerDeviceName}.");
     }
 
-    await Task.Delay(Timeout.Infinite);
+    await WaitForShutdownAsync();
 }
 
 async Task SendClipboardAsync(LanWebSocketClient client, byte[] key, string text)
@@ -252,7 +253,7 @@ async Task ListenAsync()
 
     Console.WriteLine($"Listening on port {server.BoundPort}, advertising as \"{deviceName}\".");
     Console.WriteLine("Ctrl+C to exit.");
-    await Task.Delay(Timeout.Infinite);
+    await WaitForShutdownAsync();
 }
 
 void PrintClipboard(EnvelopeReceivedEventArgs e)
@@ -282,6 +283,39 @@ void PrintClipboard(EnvelopeReceivedEventArgs e)
     {
         Console.WriteLine($"[{e.Origin}] could not decrypt from {e.PeerDeviceId}: {ex.GetType().Name}");
     }
+}
+
+/// <summary>
+/// Blocks until the process is asked to stop, then returns so the caller's
+/// `await using` scopes unwind and the mDNS advertiser is disposed.
+///
+/// Task.Delay(Timeout.Infinite) never returns, so nothing was ever disposed and
+/// every run left a stale record behind — a peer that resolves one gets a dead
+/// port and an obsolete key, and the symptom is silence, which is
+/// indistinguishable from the bug you would then go hunting for.
+///
+/// PosixSignalRegistration rather than Console.CancelKeyPress alone:
+/// CancelKeyPress does not fire for a process with no controlling terminal,
+/// which is exactly how this gets run from a script.
+/// </summary>
+static Task WaitForShutdownAsync()
+{
+    var stopping = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    void Stop(PosixSignalContext context)
+    {
+        context.Cancel = true;   // shut down cleanly instead of dying here
+        stopping.TrySetResult();
+    }
+
+    var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, Stop);
+    var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, Stop);
+
+    return stopping.Task.ContinueWith(_ =>
+    {
+        sigint.Dispose();
+        sigterm.Dispose();
+    }, TaskScheduler.Default);
 }
 
 static string Preview(ClipboardPayload payload) =>

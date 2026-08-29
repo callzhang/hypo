@@ -12,15 +12,15 @@
 
 **Prerequisite:** Plan 1, merged. `Hypo.Core` at 78 passing tests.
 
-> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 2.**
-> Tasks 1 and 2 are written to this plan's own standard: failing test, complete
+> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 3.**
+> Tasks 1 to 3 are written to this plan's own standard: failing test, complete
 > implementation, exact commands, expected counts. Tasks 3–16 are currently only
 > scoped, not written. A summarised task is a plan failure, not a shortcut — the
 > whole reason Plan 1's subagents caught a JSON writer that escaped `+`, a
 > converter override that was never invoked, and an associated-data formula that
 > would have broken interoperability with both peer clients is that they were
 > handed exact code to run and could watch it fail. Finish writing them before
-> dispatching anyone past Task 2.
+> dispatching anyone past Task 3.
 
 ---
 
@@ -471,18 +471,261 @@ git commit -m "feat(windows): unescape DNS-SD instance names"
 
 ---
 
-## Remaining tasks
+## Task 3: The peer record and the discovery contract
 
-The rest of this plan is written task-by-task in the same shape as Tasks 1 and 2 — failing test, exact implementation, exact commands and expected counts. They are:
+**Files:**
+- Create: `windows/src/Hypo.Core/Discovery/DiscoveredPeer.cs`
+- Create: `windows/src/Hypo.Core/Discovery/IPeerDiscovery.cs`
+- Test: `windows/tests/Hypo.Core.Tests/DiscoveredPeerTests.cs`
 
-3. **`DiscoveredPeer` and `IPeerDiscovery`** — the peer record and the publish/browse contract, with the TXT keys measured in spec §4.2 as typed properties.
-4. **`MdnsPeerDiscovery`** — the `Makaretu.Dns.Multicast` implementation, filtering by service type (the spike found `ServiceInstanceDiscovered` fires for every service on the network) and resolving SRV, A and TXT into a `DiscoveredPeer`.
-5. **Discovery integration test against a live peer** — an explicitly opt-in test, skipped unless `HYPO_LIVE_PEER=1`, that browses for 15 seconds and asserts at least one `_hypo._tcp` peer with a parseable `device_id` and `pub_key`. This is the regression guard for the interop the spike proved.
-6. **`ISyncTransport` and `TransportEvents`** — connect, send, receive, disconnect, plus state-change and envelope-received events.
-7. **`LanWebSocketClient`** — dials `ws://host:port/?device_id=<id>` and sets `X-Device-Id`, because the macOS server accepts either and sending both costs nothing. Framed send and receive over `FrameReader`.
-8. **`LanWebSocketServer`** — Kestrel, accepting peer connections, extracting the device id from header or query, and surfacing received envelopes. Falls back to an ephemeral port when 7010 is taken, and reports the bound port so discovery advertises the real one (spec §7).
-9. **Loopback transport test** — client and server in one process, exchanging a framed envelope both ways.
-10. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
+- [ ] **Step 1: Write the failing test**
+
+Create `windows/tests/Hypo.Core.Tests/DiscoveredPeerTests.cs`:
+
+```csharp
+using Hypo.Core.Discovery;
+
+namespace Hypo.Core.Tests;
+
+public class DiscoveredPeerTests
+{
+    // Exactly what a live macOS peer advertised, measured on a real network.
+    private static readonly Dictionary<string, string> MacOsTxt = new()
+    {
+        ["signing_pub_key"] = "S4ItgzBJTsac1lN8T05Zpk7ZvudGjYKycnOTEheTzsg=",
+        ["device_id"] = "007e4a95-0e1a-4b10-91fa-87942efaa68e",
+        ["pub_key"] = "0KWinOak3zMKXjQg4K1f7TWdypF0oDb32e5fOnzjuX4=",
+        ["version"] = "1.1.6",
+        ["fingerprint_sha256"] = "259a3c4c3f4d1288fb15def2db2655aeac4bbe0575d8b756c053d4d369a76b34",
+        ["protocols"] = "ws+tls",
+    };
+
+    private static DiscoveredPeer MacOsPeer() => DiscoveredPeer.FromTxt(
+        instanceName: @"derek\8217sMacBookAir(2)._hypo._tcp.local",
+        host: "4efa9cc4-2ea7-468c-9b64-7087849da0b4.local",
+        address: "10.0.0.252",
+        port: 7010,
+        txt: MacOsTxt);
+
+    [Fact]
+    public void ExposesTheUnescapedDisplayName()
+    {
+        Assert.Equal("derek’s MacBook Air (2)", MacOsPeer().DisplayName);
+    }
+
+    [Fact]
+    public void ParsesTheTypedTxtProperties()
+    {
+        var peer = MacOsPeer();
+
+        Assert.Equal("007e4a95-0e1a-4b10-91fa-87942efaa68e", peer.DeviceId);
+        Assert.Equal(32, peer.PublicKey!.Length);
+        Assert.Equal(32, peer.SigningPublicKey!.Length);
+        Assert.Equal("1.1.6", peer.Version);
+    }
+
+    [Fact]
+    public void LowercasesTheDeviceId()
+    {
+        var txt = new Dictionary<string, string>(MacOsTxt)
+        {
+            ["device_id"] = "007E4A95-0E1A-4B10-91FA-87942EFAA68E",
+        };
+
+        var peer = DiscoveredPeer.FromTxt("x._hypo._tcp.local", "h", "1.2.3.4", 7010, txt);
+
+        Assert.Equal("007e4a95-0e1a-4b10-91fa-87942efaa68e", peer.DeviceId);
+    }
+
+    [Fact]
+    public void IgnoresTheAdvertisedProtocolsField()
+    {
+        // Both shipping clients announce ws+tls and neither implements TLS.
+        // Honouring it would make every connection fail, so it is not surfaced
+        // as anything a caller can act on.
+        Assert.Null(typeof(DiscoveredPeer).GetProperty("Protocols"));
+        Assert.Equal("ws+tls", MacOsPeer().Txt["protocols"]);
+    }
+
+    [Fact]
+    public void ToleratesAPeerAdvertisingNoPairingKeys()
+    {
+        var peer = DiscoveredPeer.FromTxt(
+            "x._hypo._tcp.local", "h", "1.2.3.4", 7010, new Dictionary<string, string>());
+
+        Assert.Null(peer.DeviceId);
+        Assert.Null(peer.PublicKey);
+        Assert.Null(peer.SigningPublicKey);
+        Assert.Equal("x", peer.DisplayName);
+    }
+
+    [Fact]
+    public void ToleratesAMalformedKey()
+    {
+        var txt = new Dictionary<string, string> { ["pub_key"] = "not base64!" };
+
+        var peer = DiscoveredPeer.FromTxt("x._hypo._tcp.local", "h", "1.2.3.4", 7010, txt);
+
+        Assert.Null(peer.PublicKey);
+    }
+
+    [Fact]
+    public void BuildsTheWebSocketUriFromTheAddressNotTheHostname()
+    {
+        // The macOS peer advertises its device UUID as a .local hostname, which
+        // needs mDNS resolution to reach. The A record is already in hand.
+        Assert.Equal("ws://10.0.0.252:7010/", MacOsPeer().WebSocketUri.ToString());
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~DiscoveredPeerTests`
+
+Expected: FAIL to compile with `CS0246: The type or namespace name 'DiscoveredPeer' could not be found`.
+
+- [ ] **Step 3: Write `DiscoveredPeer`**
+
+Create `windows/src/Hypo.Core/Discovery/DiscoveredPeer.cs`:
+
+```csharp
+using Hypo.Core.Protocol;
+
+namespace Hypo.Core.Discovery;
+
+/// <summary>
+/// A peer found over mDNS. The TXT schema was measured against live macOS and
+/// Android clients; see the design spec section 4.2.
+/// </summary>
+public sealed record DiscoveredPeer
+{
+    public const string ServiceType = "_hypo._tcp.local";
+
+    public required string InstanceName { get; init; }
+    public required string DisplayName { get; init; }
+    public required string Host { get; init; }
+    public required string Address { get; init; }
+    public required int Port { get; init; }
+    public required IReadOnlyDictionary<string, string> Txt { get; init; }
+
+    public string? DeviceId { get; init; }
+    public byte[]? PublicKey { get; init; }
+    public byte[]? SigningPublicKey { get; init; }
+    public string? Version { get; init; }
+
+    /// <summary>
+    /// Built from the A record rather than the advertised hostname, which on
+    /// macOS is a .local name that would need resolving again. Always ws://:
+    /// the advertised "protocols=ws+tls" is not implemented by any client.
+    /// </summary>
+    public Uri WebSocketUri => new($"ws://{Address}:{Port}/");
+
+    public static DiscoveredPeer FromTxt(
+        string instanceName,
+        string host,
+        string address,
+        int port,
+        IReadOnlyDictionary<string, string> txt)
+    {
+        ArgumentNullException.ThrowIfNull(txt);
+
+        return new DiscoveredPeer
+        {
+            InstanceName = instanceName,
+            DisplayName = DnsSdName.InstanceLabel(instanceName, ServiceType),
+            Host = host,
+            Address = address,
+            Port = port,
+            Txt = txt,
+            DeviceId = txt.TryGetValue("device_id", out var id) ? id.ToLowerInvariant() : null,
+            PublicKey = TryKey(txt, "pub_key"),
+            SigningPublicKey = TryKey(txt, "signing_pub_key"),
+            Version = txt.GetValueOrDefault("version"),
+        };
+    }
+
+    private static byte[]? TryKey(IReadOnlyDictionary<string, string> txt, string key)
+    {
+        if (!txt.TryGetValue(key, out var value))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Base64Compat.Decode(value);
+        }
+        catch (FormatException)
+        {
+            // A peer advertising a malformed key is not a reason to hide it from
+            // the device list; pairing will fail later with a clearer message.
+            return null;
+        }
+    }
+}
+```
+
+- [ ] **Step 4: Write `IPeerDiscovery`**
+
+Create `windows/src/Hypo.Core/Discovery/IPeerDiscovery.cs`:
+
+```csharp
+namespace Hypo.Core.Discovery;
+
+/// <summary>Publishes this device and watches for peers on the local network.</summary>
+public interface IPeerDiscovery : IAsyncDisposable
+{
+    /// <summary>Raised when a peer is first seen or its record changes.</summary>
+    event EventHandler<DiscoveredPeer>? PeerDiscovered;
+
+    /// <summary>Raised when a peer withdraws its advertisement.</summary>
+    event EventHandler<string>? PeerLost;
+
+    /// <summary>
+    /// Advertises this device. The port must be the port actually bound, not the
+    /// configured one — the server falls back to an ephemeral port when 7010 is
+    /// taken, and a peer that dials the wrong port simply never connects.
+    /// </summary>
+    Task AdvertiseAsync(string deviceName, int port, IReadOnlyDictionary<string, string> txt, CancellationToken ct = default);
+
+    Task StartBrowsingAsync(CancellationToken ct = default);
+
+    IReadOnlyCollection<DiscoveredPeer> KnownPeers { get; }
+}
+```
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~DiscoveredPeerTests`
+
+Expected: PASS, 7 tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add windows/src/Hypo.Core/Discovery/DiscoveredPeer.cs windows/src/Hypo.Core/Discovery/IPeerDiscovery.cs windows/tests/Hypo.Core.Tests/DiscoveredPeerTests.cs
+git commit -m "feat(windows): model a discovered LAN peer"
+```
+
+---
+
+## Tasks 4 to 16 — still to be written
+
+These remain scoped but not written. Two of them are now de-risked by working spike code that should be lifted into the plan rather than reinvented:
+
+**Task 4, `MdnsPeerDiscovery`.** The spike at `scratchpad/mdns-spike/Program.cs` is working, verified code: it browses `_hypo._tcp`, filters by service type (necessary — `ServiceInstanceDiscovered` fires for every service on the network), and correlates SRV, A and TXT records into a peer. Advertising is `ServiceProfile` plus `ServiceDiscovery.Advertise` and `Announce`, with `MulticastService.Start()` before announcing. Note the API split the spike found: `AnswerReceived` lives on `MulticastService`, not `ServiceDiscovery`, so the two must be constructed separately and the service passed in.
+
+**Tasks 6 to 9, the transport.** A second spike verified the whole shape:
+- Kestrel with `builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Any, port))`, `app.UseWebSockets()`, and `ctx.WebSockets.AcceptWebSocketAsync()`.
+- **Dynamic port binding requires `Listen(IPAddress.Loopback, 0)` or `Listen(IPAddress.Any, 0)`; `ListenLocalhost(0)` throws** `InvalidOperationException: Dynamic port binding is not supported when binding to localhost`. This is exactly the ephemeral-port fallback path spec section 7 requires, so the plan must use the working form.
+- The bound port is read back from `IServerAddressesFeature`, which is what discovery must advertise.
+- `ClientWebSocket.Options.SetRequestHeader("X-Device-Id", ...)` works, and a `?device_id=` query string arrives in `Request.Query` while `Request.Path` stays `/`. Sending both costs nothing and matches what the macOS server accepts from either kind of client.
+- A length-prefixed binary frame round-trips with `WebSocketMessageType.Binary` and `endOfMessage: true`.
+
+Remaining scope:
+
+4. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
 11. **`PairingMessages`** — `PairingChallengeMessage` and `PairingAckMessage`, matching `macos/Sources/HypoApp/Pairing/PairingModels.swift` field for field, with `challenge_id` lowercase.
 12. **`PairingSession`** — generates a fresh ephemeral X25519 pair per attempt, sends the challenge, verifies and consumes the ack, derives the shared key. Rejects a replayed `challenge_id` and an expired payload.
 13. **Pairing round-trip test** — two sessions in one process complete a pairing and derive the same key, and a tampered ack is rejected.

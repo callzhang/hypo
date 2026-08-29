@@ -87,6 +87,10 @@ cd shared/HypoCore && grep -rn "NSHomeDirectory\|homeDirectoryForCurrentUser\|/U
 
 **因此留在 HypoApp 的文件永远不需要新增 `import HypoCore`**，无论它们引用的类型搬走了多少。直接反证：批次 1–3 共搬了 24 个文件，零个消费方文件需要加 import。若有人提出「某文件在依赖搬走后需要显式 import」，那是误解——真正会断的是**可见性**（internal 符号跨模块不可见），不是 import。
 
+**代码库已有为测试暴露 API 的正规机制：`@_spi(Testing) public`**。`LanWebSocketTransport.swift` 等文件里有 8 个 `_testing_*` 钩子如此声明，测试侧以 `@_spi(Testing) @testable import HypoCore` 导入。这不是残留装饰——去掉限定符会报 `inaccessible due to @_spi protection level`。
+
+因此跨模块暴露测试所需符号有两条正路：`@testable`（无需改源码，适合已有的 internal 符号）与 `@_spi(Testing) public`（需改源码，但意图显式且不污染真正的公开 API）。**第 2 期为 iOS 写新测试时，优先用 `@_spi(Testing) public`**——它把"这是给测试的"这件事写在了声明上。
+
 **`@testable import HypoCore` 可从 `HypoAppTests` 触及 HypoCore 的 internal 符号**（Task 10 实测确认）。SwiftPM 在 debug 下对所有 target 启用 `-enable-testing`，因此测试目标可以 `@testable` 导入其依赖链上的任意模块，而不只是直接被测模块。
 
 这条实测结论解决了 Task 10 的最后一个障碍。搬迁后有 8 个 internal 符号（`WebSocketTransport.handleOpen`/`QueuedMessage`/`messageQueue`/`inFlightMessages`、`CloudRelayTransport.handleOpen`/`underlying`、`LanWebSocketTransport.handleOpen`、`LanSyncTransport.normalizedPeers`）被留在 `HypoAppTests` 的测试触及。三条路：

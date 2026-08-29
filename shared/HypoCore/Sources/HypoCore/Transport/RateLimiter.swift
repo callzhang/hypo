@@ -8,7 +8,7 @@ public final class TokenBucket: @unchecked Sendable {
     private var lastRefill: TimeInterval
     private let lock = OSAllocatedUnfairLock()
 
-    init(capacity: Int, refillInterval: TimeInterval) {
+    public init(capacity: Int, refillInterval: TimeInterval) {
         precondition(capacity > 0, "Capacity must be positive")
         precondition(refillInterval > 0, "Refill interval must be positive")
         self.capacity = Double(capacity)
@@ -17,7 +17,7 @@ public final class TokenBucket: @unchecked Sendable {
         self.lastRefill = Date().timeIntervalSince1970
     }
 
-    func consume() -> Bool {
+    public func consume() -> Bool {
         lock.withLock {
             refillTokensLocked(currentTime: Date().timeIntervalSince1970)
             guard tokens >= 1 else { return false }

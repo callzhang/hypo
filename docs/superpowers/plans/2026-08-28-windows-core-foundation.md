@@ -1347,8 +1347,11 @@ public class CryptoServiceAesGcmTests
     {
         var key = new byte[32];
         var nonce = new byte[12];
-        Random.Shared.NextBytes(key);
-        Random.Shared.NextBytes(nonce);
+        // A CSPRNG, not Random: CryptoService.Encrypt's remarks require a fresh
+        // nonce from a secure source and no reuse under one key, and this test is
+        // the shape Plan 2 will copy when it builds the send path.
+        RandomNumberGenerator.Fill(key);
+        RandomNumberGenerator.Fill(nonce);
         var plaintext = System.Text.Encoding.UTF8.GetBytes("clipboard contents");
         var aad = System.Text.Encoding.UTF8.GetBytes("device-id|2026-08-28T00:00:00Z");
 
@@ -2252,7 +2255,14 @@ public sealed class InMemorySecretStore : ISecretStore
 }
 ```
 
-Both `Read` and `Write` copy, so a caller mutating its array cannot reach into the store and vice versa.
+Both `Read` and `Write` copy, so a caller mutating its array cannot reach into
+the store and vice versa.
+
+Note for Plan 3: this implementation does not zero a replaced or deleted value,
+so old key bytes linger in the managed heap until collection. That is acceptable
+for a development and test store, but the DPAPI implementation should not
+inherit it — `CryptoService.DeriveKey` already shows the pattern with
+`CryptographicOperations.ZeroMemory`.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
@@ -2281,6 +2291,7 @@ Every stage now exists. This test wires them in the order the real client will: 
 Create `windows/tests/Hypo.Core.Tests/PayloadPipelineTests.cs`:
 
 ```csharp
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Hypo.Core.Crypto;

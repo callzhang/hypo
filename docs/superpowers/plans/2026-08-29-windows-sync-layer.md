@@ -81,8 +81,11 @@ measurement: Plan 4's two copies arrived within the same second.
 3. Different content inside the window yields two.
 4. An injected clock drives the window. A test that sleeps is a test that is
    slow and flaky; the behaviour under test is the rule, not the wait.
-5. The cache is bounded, and eviction is by age rather than only by count, so a
-   burst cannot push out an entry the window still covers.
+5. The cache is bounded, and eviction is by age. A count cap is a backstop
+   only: it *can* discard an entry the window still covers, so set it far above
+   any realistic burst and write a test that documents that trade rather than
+   one that pretends it does not exist. The real bound is arrival rate times the
+   window, which is a few thousand entries even at implausible rates.
 
 - [ ] **Step 3: Implement, then verify** — `dotnet test`.
 

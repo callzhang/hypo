@@ -18,14 +18,14 @@ public struct CompressionUtils {
             return data
         }
         
-        // Use deflate with gzip window bits to produce raw deflate (not zlib-wrapped)
+        // Use deflate with gzip window bits to produce a complete gzip container (RFC 1952)
         var stream = z_stream()
         stream.zalloc = nil
         stream.zfree = nil
         stream.opaque = nil
         
         // Initialize deflate with gzip format (MAX_WBITS + 16)
-        // This produces raw deflate without zlib wrapper
+        // This produces a complete gzip container, not raw deflate (which would be -MAX_WBITS)
         let windowBits = MAX_WBITS + 16  // +16 for gzip format
         let status = deflateInit2_(
             &stream,

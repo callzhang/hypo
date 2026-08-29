@@ -262,23 +262,25 @@ gh run view --log-failed
 
 ## Task 2: 接通依赖管道（零文件迁移）
 
-**本任务需顺带做两个 CI 决策**（Task 1B 的代码质量审查提出，当时判定推迟到此处更合适）：
+**本任务附带三个已定的 CI 决策**（由 Task 1B 的质量审查提出，理由已记录，实现时照做即可）：
 
-1. **`ios-core-build` 里的 `Build HypoCore for macOS` 步骤要不要留？** 本任务之后 `macos/Package.swift` 会依赖 HypoCore，`macos-tests` job 会自动连带构建它，那一步就与之重复了。两个选择：留着当作「HypoCore 自身构建失败」的隔离信号（红灯归因更清晰），或删掉省一个 macOS runner 的时间。做出选择并在提交信息里写明理由。
+1. **保留 `ios-core-build` 里的 `Build HypoCore for macOS` 步骤。** 本任务之后 `macos-tests` 会连带构建 HypoCore，二者确实重复，但该步骤与 iOS 构建同在一个 job 内，不额外占用 runner，且 `swift build` 一个小包只需数秒。保留的价值是归因清晰：这一步红了就是「HypoCore 自身构建不过」，而不是「macOS App 哪里坏了」。在 15 个搬迁任务期间这个区分值这点开销。Task 17 复核时再评估是否撤除。
 
-2. **要不要加 workflow 级并发取消？** Task 1B 的实现者拒绝把它折进那个提交，理由成立并已采纳：`ci.yml` 的 `push` 触发器是 `branches: ["**"]`，包含 `main`，所以 `cancel-in-progress: true` 会让 `main` 上连续推送时前一次 CI 被杀掉而非跑完——这超出了"优化特性分支反馈延迟"的本意；且顶层块虽不改三个既有 job 的 YAML 文本，却改变它们的运行时行为，而 Task 17 专门要验收这三个 job 未被修改。已确认无跨 workflow 风险（`backend-deploy.yml`、`release.yml` 是独立 workflow，并发组按 workflow 隔离；无任何 `needs:`/`workflow_run` 依赖 `ci.yml`）。若决定加，**作为独立提交**，并同步把 Task 17 的验收口径写清楚：
+2. **加 workflow 级并发取消，但在 `main` 上不生效，且作为独立提交。** Task 1B 的实现者拒绝把它折进那个提交，两条理由均成立：`ci.yml` 的 `push` 触发器是 `branches: ["**"]`，包含 `main`，无条件的 `cancel-in-progress: true` 会让 `main` 上连续推送时前一次 CI 被杀掉；且顶层块虽不改三个既有 job 的 YAML 文本，却改变其运行时行为，而 Task 17 要验收那三个 job 未被修改。已确认无跨 workflow 风险（`backend-deploy.yml`、`release.yml` 是独立 workflow，并发组按 workflow 自动隔离；无任何 `needs:`/`workflow_run` 依赖 `ci.yml`）。
 
-```yaml
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-```
+   用表达式把 `main` 排除掉，反对意见即消解——特性分支上取消陈旧运行，`main` 上行为与今天完全一致：
 
-3. **要不要锁定 Xcode 版本？** `runs-on: macos-15` 用的是镜像默认 Xcode（当前 16.4，随附 iPhoneSimulator18.5.sdk）。后面还有约 13 次推送，GitHub 若中途升级默认 Xcode，会产生与本次搬迁内容无关的失败，排查成本高。可用 `maxim-lobanov/setup-xcode@v1` 锁定。注意既有的 `macos-tests` 也没锁——若要锁，两个 job 应一致处理。
+   ```yaml
+   concurrency:
+     group: ${{ github.workflow }}-${{ github.ref }}
+     cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+   ```
 
+   放在 `on:` 块之后、`jobs:` 之前，列 0 缩进。**必须单独提交**（`ci: cancel superseded runs on feature branches`），不要与本任务的依赖接线混在一起。Task 17 的验收口径已相应放宽（见该任务）。
 
+3. **不锁定 Xcode 版本。** `runs-on: macos-15` 用镜像默认 Xcode（当前 16.4，随附 iPhoneSimulator18.5.sdk）。风险确实存在——GitHub 中途升级默认 Xcode 会产生与搬迁内容无关的失败。但既有的 `macos-tests` 同样没锁，只锁新 job 会造成两个 job 行为不一致，反而更难排查；且第 1 期预计在较短周期内完成。维持现状，若真的遇到 Xcode 漂移再一次性给两个 job 都锁上。
 
-先只接线不搬文件，确认依赖、再导出、测试三条链路都通，再开始搬迁。
+**已验证的事实**：`macos-15` runner 上可用的 iPhone 模拟器机型包括 `iPhone 16`、`iPhone 16 Plus`、`iPhone 16 Pro`、`iPhone 16 Pro Max`、`iPhone 16e`，以及 11~15 各代（CI run 33234196993 实测）。因此 Task 16 硬编码的 `name=iPhone 16` 可用，无需回退方案。
 
 **Files:**
 - Modify: `macos/Package.swift`
@@ -1787,6 +1789,6 @@ git commit -m "chore: ignore HypoCore build artifacts"
 4. CI 的 `ios-core-build` job 中 `Run HypoCore tests on iOS Simulator` 步骤成功
 5. `./scripts/build-macos.sh` 与 `./scripts/build-macos.sh release` 均成功
 6. `shared/HypoCore/Sources/` 下无裸 `import AppKit`
-7. `scripts/` 下无任何改动；`.github/workflows/ci.yml` 仅新增 `ios-core-build` job，三个既有 job 未被修改
+7. `scripts/` 下无任何改动；`.github/workflows/ci.yml` 的改动仅限于：新增 `ios-core-build` job、新增顶层 `concurrency` 块（Task 2 决策 2，`main` 上不生效）。三个既有 job 的 YAML 文本必须逐字节未变
 
 达成后进入第 2 期（iOS 前台版），届时另写一份计划。

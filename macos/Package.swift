@@ -18,12 +18,14 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-testing.git", from: "0.5.0")
+        .package(url: "https://github.com/apple/swift-testing.git", from: "0.5.0"),
+        .package(path: "../shared/HypoCore")
     ],
     targets: [
         .target(
             name: "HypoApp",
             dependencies: [
+                .product(name: "HypoCore", package: "HypoCore")
             ],
             path: "Sources/HypoApp",
             swiftSettings: [

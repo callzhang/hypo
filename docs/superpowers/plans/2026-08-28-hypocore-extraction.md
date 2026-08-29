@@ -87,6 +87,16 @@ cd shared/HypoCore && grep -rn "NSHomeDirectory\|homeDirectoryForCurrentUser\|/U
 
 **因此留在 HypoApp 的文件永远不需要新增 `import HypoCore`**，无论它们引用的类型搬走了多少。直接反证：批次 1–3 共搬了 24 个文件，零个消费方文件需要加 import。若有人提出「某文件在依赖搬走后需要显式 import」，那是误解——真正会断的是**可见性**（internal 符号跨模块不可见），不是 import。
 
+**`@testable import HypoCore` 可从 `HypoAppTests` 触及 HypoCore 的 internal 符号**（Task 10 实测确认）。SwiftPM 在 debug 下对所有 target 启用 `-enable-testing`，因此测试目标可以 `@testable` 导入其依赖链上的任意模块，而不只是直接被测模块。
+
+这条实测结论解决了 Task 10 的最后一个障碍。搬迁后有 8 个 internal 符号（`WebSocketTransport.handleOpen`/`QueuedMessage`/`messageQueue`/`inFlightMessages`、`CloudRelayTransport.handleOpen`/`underlying`、`LanWebSocketTransport.handleOpen`、`LanSyncTransport.normalizedPeers`）被留在 `HypoAppTests` 的测试触及。三条路：
+
+1. 改成 `public` —— **错**。这些是实现细节，为测试而公开会永久污染 API 面。
+2. 把四个测试文件移进 `HypoCoreTests` —— 正确但代价大：`MutableClock` 被 3 个留守测试使用，`TestSupport.swift` 的内容被 10 个文件使用，都要跨模块复制。
+3. **给那四个测试文件各加一行 `@testable import HypoCore`** —— 四行解决，零 API 污染，零文件搬迁。已采用。
+
+**因此 Task 12 的目的变了**：不再是「让测试能编译」，而是「让 core 的测试能在 iOS 模拟器上运行」——即 spec §10 要求的跨平台一致性验证。搬迁测试文件仍然值得做，但理由是覆盖面而非编译需要。
+
 **跨模块可见性的三类盲区**（Task 3、5、6 各栽一次，按隐蔽程度排序）：
 
 1. **合成的 memberwise init 永远是 internal**，与属性访问级别无关。Task 6 的 `PairingChallengePayload` 所有存储属性都是 `public`，却没有显式 `public init`，而 `PairingSessionTests.swift`（留在 `HypoAppTests`）直接构造它。**`swift build` 完全看不到——只有 `swift test` 会炸**，因为只有测试代码构造它。搬迁前对每个 `public struct` 确认：它有显式 `public init` 吗？如果没有，谁在构造它？

@@ -1393,7 +1393,7 @@ public interface ISyncTransport : IAsyncDisposable
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~TransportEventsTests`
 
-Expected: PASS, 7 tests.
+Expected: PASS, 6 tests — two facts plus a four-case theory.
 
 - [ ] **Step 6: Commit**
 
@@ -1750,22 +1750,20 @@ port has to be read back so discovery advertises the port actually in use.
 - Create: `windows/src/Hypo.Core/Transport/LanWebSocketServer.cs`
 - Test: `windows/tests/Hypo.Core.Tests/LanWebSocketServerTests.cs`
 
-- [ ] **Step 1: Add the hosting package**
+- [ ] **Step 1: Add the framework reference**
 
-```bash
-cd windows
-dotnet add src/Hypo.Core/Hypo.Core.csproj package Microsoft.AspNetCore.App.Ref
-```
-
-If that package is unavailable, add the framework reference to
-`windows/src/Hypo.Core/Hypo.Core.csproj` instead, which is the supported route
-for a library that hosts Kestrel:
+Add this to `windows/src/Hypo.Core/Hypo.Core.csproj`:
 
 ```xml
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 ```
+
+Do **not** try `dotnet add package Microsoft.AspNetCore.App.Ref`. It fails with
+`NU1213: package type DotnetPlatform is incompatible with this project` — that
+package is not consumable this way. A framework reference is the supported route
+for a library that hosts Kestrel.
 
 Run `cd windows && dotnet build` and confirm 0 warnings. In particular confirm
 no `CA1416` appears: a framework reference that dragged in a Windows-only API
@@ -1782,14 +1780,12 @@ namespace Hypo.Core.Tests;
 
 public class LanWebSocketServerTests
 {
-    private const string LocalDeviceId = "550e8400-e29b-41d4-a716-446655440000";
-
     [Fact]
     public async Task ReportsThePortItActuallyBound()
     {
         // Port 0 asks the OS for a free one. Discovery must advertise what was
         // bound, not what was requested, or peers dial a port nobody is on.
-        await using var server = new LanWebSocketServer(LocalDeviceId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
 
         await server.StartAsync();
 
@@ -1799,10 +1795,10 @@ public class LanWebSocketServerTests
     [Fact]
     public async Task FallsBackToAnEphemeralPortWhenThePreferredOneIsTaken()
     {
-        await using var first = new LanWebSocketServer(LocalDeviceId, port: 0);
+        await using var first = new LanWebSocketServer(port: 0);
         await first.StartAsync();
 
-        await using var second = new LanWebSocketServer(LocalDeviceId, port: first.BoundPort);
+        await using var second = new LanWebSocketServer(port: first.BoundPort);
         await second.StartAsync();
 
         Assert.NotEqual(first.BoundPort, second.BoundPort);
@@ -1812,7 +1808,7 @@ public class LanWebSocketServerTests
     [Fact]
     public async Task StartingTwiceIsHarmless()
     {
-        await using var server = new LanWebSocketServer(LocalDeviceId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
 
         await server.StartAsync();
         var port = server.BoundPort;
@@ -1824,7 +1820,7 @@ public class LanWebSocketServerTests
     [Fact]
     public void BoundPortBeforeStartingIsZero()
     {
-        var server = new LanWebSocketServer(LocalDeviceId, port: 7010);
+        var server = new LanWebSocketServer(port: 7010);
 
         Assert.Equal(0, server.BoundPort);
     }
@@ -1864,18 +1860,17 @@ public sealed class LanWebSocketServer : IAsyncDisposable
     /// <summary>The port both shipping clients advertise and dial.</summary>
     public const int DefaultPort = 7010;
 
-    private readonly string _localDeviceId;
+    // No local device id here on purpose: the server only ever needs the
+    // *peer's* id, which it learns from the handshake. The macOS server behaves
+    // the same way — a client learns our identity from mDNS, not from us.
     private readonly int _preferredPort;
     private readonly TransportFrameCodec _codec = new();
 
     private WebApplication? _app;
 
-    public LanWebSocketServer(string localDeviceId, int port = DefaultPort)
+    public LanWebSocketServer(int port = DefaultPort)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(localDeviceId);
         ArgumentOutOfRangeException.ThrowIfNegative(port);
-
-        _localDeviceId = localDeviceId.ToLowerInvariant();
         _preferredPort = port;
     }
 
@@ -1924,6 +1919,11 @@ public sealed class LanWebSocketServer : IAsyncDisposable
         catch (IOException)
         {
             // Port in use. The caller retries on 0.
+            //
+            // Measured on macOS. Windows is the platform this fallback actually
+            // ships for and its exception type here is unverified — confirm it
+            // on the first Windows CI run, because a fallback that catches the
+            // wrong type is a fallback that does not exist.
             await app.DisposeAsync().ConfigureAwait(false);
             return null;
         }
@@ -2080,7 +2080,7 @@ public class LanLoopbackTests
     [Fact]
     public async Task TheServerReceivesWhatTheClientSends()
     {
-        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
         var received = new TaskCompletionSource<EnvelopeReceivedEventArgs>();
         server.EnvelopeReceived += (_, e) => received.TrySetResult(e);
         await server.StartAsync();
@@ -2101,7 +2101,7 @@ public class LanLoopbackTests
     [Fact]
     public async Task TheServerLearnsTheClientDeviceIdFromTheHandshake()
     {
-        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
         var received = new TaskCompletionSource<EnvelopeReceivedEventArgs>();
         server.EnvelopeReceived += (_, e) => received.TrySetResult(e);
         await server.StartAsync();
@@ -2118,7 +2118,7 @@ public class LanLoopbackTests
     [Fact]
     public async Task SeveralEnvelopesInOneReadAreAllDelivered()
     {
-        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
         var received = new List<SyncEnvelope>();
         var done = new TaskCompletionSource();
         server.EnvelopeReceived += (_, e) =>
@@ -2151,7 +2151,7 @@ public class LanLoopbackTests
     [Fact]
     public async Task ConnectingReportsTheStateTransitions()
     {
-        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
         await server.StartAsync();
 
         await using var client = new LanWebSocketClient(PeerOn(server.BoundPort), ClientId);
@@ -3307,7 +3307,7 @@ async Task PairAsync(string? target)
 
 async Task ListenAsync()
 {
-    await using var server = new LanWebSocketServer(deviceId);
+    await using var server = new LanWebSocketServer();
     server.EnvelopeReceived += (_, e) => PrintClipboard(e);
     await server.StartAsync();
 

@@ -8,19 +8,22 @@ using Hypo.Core.Protocol;
 using Hypo.Core.Transport;
 
 // A development harness for exercising Hypo.Core against a real peer. Not a
-// product: keys live in memory and vanish on exit, which is why "pair" and
-// "send" are one command rather than two.
+// product: keys are written unencrypted under HYPO_STORE_DIR.
 //
 //   discover              list peers on this network
-//   pair <device-id>      pair with one, then hold to receive. Set
-//                         HYPO_SEND_TEXT to also push one text item.
+//   pair <device-id>      pair with one, then advertise and hold to receive.
+//                         Set HYPO_SEND_TEXT to also push one text item.
 //   listen                accept inbound connections and print what arrives
 
 var command = args.Length > 0 ? args[0] : "discover";
 var deviceId = Environment.GetEnvironmentVariable("HYPO_DEVICE_ID")
                ?? "11111111-2222-3333-4444-555555555555";
 var deviceName = Environment.GetEnvironmentVariable("HYPO_DEVICE_NAME") ?? "Hypo Harness";
-var store = new InMemorySecretStore();
+
+// Keys must outlive the process: we pair in one run and may receive in the next.
+var storeDir = Environment.GetEnvironmentVariable("HYPO_STORE_DIR")
+               ?? Path.Combine(Path.GetTempPath(), "hypo-harness-keys");
+var store = new FileSecretStore(storeDir);
 
 switch (command)
 {
@@ -143,9 +146,26 @@ async Task PairAsync(string? target)
     store.Write(completed.PeerDeviceId, completed.SharedKey);
     Console.WriteLine($"Paired with {completed.PeerDeviceName} ({completed.PeerDeviceId}).");
 
-    // Sending is folded into "pair" for the same reason pairing is: the shared
-    // key lives in memory and dies with the process, so a separate command
-    // would have nothing to encrypt with.
+    // Stay discoverable. The peer dials devices it has paired with and can see;
+    // being paired is not enough on its own.
+    await using var server = new LanWebSocketServer();
+    server.EnvelopeReceived += (_, e) => PrintClipboard(e);
+    await server.StartAsync();
+
+    await using var advert = new MdnsPeerDiscovery();
+    await advert.AdvertiseAsync(deviceName, server.BoundPort, new Dictionary<string, string>
+    {
+        ["device_id"] = deviceId,
+        ["pub_key"] = Convert.ToBase64String(session.AgreementPublicKey),
+        ["signing_pub_key"] = Convert.ToBase64String(SigningService.DerivePublicKey(SigningService.GeneratePrivateKey())),
+        ["version"] = "3.0.0-harness",
+    });
+
+    Console.WriteLine($"Listening on {server.BoundPort} and advertising as \"{deviceName}\".");
+    Console.WriteLine("Copy something on the peer; Ctrl+C to exit.");
+
+    // Sending is folded into "pair" because the outbound direction needs a live
+    // connection to the peer, which this command already holds.
     var outbound = Environment.GetEnvironmentVariable("HYPO_SEND_TEXT");
     if (!string.IsNullOrEmpty(outbound))
     {
@@ -153,7 +173,6 @@ async Task PairAsync(string? target)
         Console.WriteLine($"Sent {Encoding.UTF8.GetByteCount(outbound)} bytes of text to {completed.PeerDeviceName}.");
     }
 
-    Console.WriteLine("Holding open. Copy something on the peer; Ctrl+C to exit.");
     await Task.Delay(Timeout.Infinite);
 }
 

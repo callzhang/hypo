@@ -199,6 +199,57 @@ The Windows client should **receive** plain-text messages but never **send**
 them. Nothing in the product requires it, and a send path that can silently skip
 encryption is a liability.
 
+### 3.2.2 The pairing channel is not framed
+
+Measured against a shipping Android client and confirmed in both clients' source.
+This is the single most consequential thing Plan 2 discovered, and nothing in
+`docs/protocol.md` says it.
+
+**Clipboard traffic and pairing traffic use different framings on the same
+socket.**
+
+| | Clipboard | Pairing |
+|---|---|---|
+| WebSocket opcode | `0x2` binary | `0x1` text |
+| Length prefix | 4-byte big-endian | **none** |
+| Body | `SyncEnvelope` JSON | bare `PairingChallengeMessage` / `PairingAckMessage` JSON |
+
+`macos/Sources/HypoApp/Services/LanWebSocketServer.swift` has two send paths for
+exactly this: clipboard data goes through `sendFrame(payload:opcode: 0x2)` after
+length-prefixing, while the pairing ack goes through
+`sendFrame(payload:opcode: 0x1)` with the raw JSON body.
+
+Two consequences a client must handle, both of which broke the first Windows
+interop attempt:
+
+1. **A challenge must be sent as a bare `PairingChallengeMessage`, never wrapped
+   in a `SyncEnvelope`.** Both peers classify inbound messages by looking for
+   `initiator_device_id` and `initiator_pub_key` — macOS parses the payload as
+   JSON and tests the top-level keys (`LanWebSocketServer.swift:1021`), Android
+   does a literal substring match on the frame body
+   (`LanWebSocketServer.kt:88`). Wrapping the challenge so those fields end up
+   base64-encoded inside `payload.ciphertext` hides them from both, and the
+   message is silently handled as clipboard data instead. The peer does not
+   error; it simply never replies.
+
+2. **A receiver must not feed the pairing reply to a length-prefix reader.** The
+   ack arrives as raw JSON, so a frame reader interprets `{"ch` as a big-endian
+   length of 2,065,851,240, exceeds any sane ceiling and faults the connection.
+   The Windows client hit exactly this: even a correctly shaped challenge would
+   have torn down the transport on the reply.
+
+The practical shape for a client is to treat a WebSocket **text** frame as
+pairing traffic to be parsed directly, and a **binary** frame as length-prefixed
+clipboard traffic. That is what the opcodes are already carrying.
+
+**What did interoperate, first try.** Once the framing was bypassed, a bare-JSON
+challenge from `Hypo.Core` was accepted by a live Android peer and its ack
+verified in under a second. That exercised the X25519 agreement over the
+advertised `pub_key`, the HKDF salt and info, AES-256-GCM, the device-id
+associated data, snake_case field names, lowercase challenge ids, and the
+response-hash check. The cryptography and the message models are correct; only
+the transport shape was wrong.
+
 ### 3.3 Transport selection
 
 `TransportManager` preserves macOS behaviour: LAN and cloud connect

@@ -19,7 +19,7 @@ public class LanLoopbackTests
     [Fact]
     public async Task TheServerReceivesWhatTheClientSends()
     {
-        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
         var received = new TaskCompletionSource<EnvelopeReceivedEventArgs>();
         server.EnvelopeReceived += (_, e) => received.TrySetResult(e);
         await server.StartAsync();
@@ -40,7 +40,7 @@ public class LanLoopbackTests
     [Fact]
     public async Task TheServerLearnsTheClientDeviceIdFromTheHandshake()
     {
-        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
         var received = new TaskCompletionSource<EnvelopeReceivedEventArgs>();
         server.EnvelopeReceived += (_, e) => received.TrySetResult(e);
         await server.StartAsync();
@@ -57,7 +57,7 @@ public class LanLoopbackTests
     [Fact]
     public async Task SeveralEnvelopesInOneReadAreAllDelivered()
     {
-        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
         var received = new List<SyncEnvelope>();
         var done = new TaskCompletionSource();
         server.EnvelopeReceived += (_, e) =>
@@ -90,7 +90,7 @@ public class LanLoopbackTests
     [Fact]
     public async Task ConnectingReportsTheStateTransitions()
     {
-        await using var server = new LanWebSocketServer(ServerId, port: 0);
+        await using var server = new LanWebSocketServer(port: 0);
         await server.StartAsync();
 
         await using var client = new LanWebSocketClient(PeerOn(server.BoundPort), ClientId);

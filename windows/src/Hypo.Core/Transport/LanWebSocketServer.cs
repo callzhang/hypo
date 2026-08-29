@@ -20,18 +20,15 @@ public sealed class LanWebSocketServer : IAsyncDisposable
     /// <summary>The port both shipping clients advertise and dial.</summary>
     public const int DefaultPort = 7010;
 
-    private readonly string _localDeviceId;
     private readonly int _preferredPort;
     private readonly TransportFrameCodec _codec = new();
 
     private WebApplication? _app;
 
-    public LanWebSocketServer(string localDeviceId, int port = DefaultPort)
+    public LanWebSocketServer(int port = DefaultPort)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(localDeviceId);
         ArgumentOutOfRangeException.ThrowIfNegative(port);
 
-        _localDeviceId = localDeviceId.ToLowerInvariant();
         _preferredPort = port;
     }
 

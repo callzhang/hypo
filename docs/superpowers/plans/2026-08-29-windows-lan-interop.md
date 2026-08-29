@@ -295,7 +295,15 @@ public sealed class FrameReader
 }
 ```
 
-The ceiling check happens before the completeness check so a hostile prefix is rejected without waiting for bytes that will never come.
+The ceiling check happens before the completeness check so a hostile prefix is
+rejected without waiting for bytes that will never come.
+
+`ResetDiscardsBufferedBytesAndLeavesTheReaderUsable` asserts `Buffered` on both
+sides of the `Reset` deliberately. An earlier draft only filtered the frames
+returned by a follow-up append and asserted the result was empty, which is
+vacuously true whenever the reader yields *nothing* — so any `Reset` that
+cleared the buffer but wedged the reader would have passed. Asserting the
+follow-up frame is `Single` and equal to `"x"` is what closes that.
 
 - [ ] **Step 4: Run to verify it passes**
 

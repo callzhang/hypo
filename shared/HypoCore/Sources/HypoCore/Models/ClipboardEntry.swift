@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-extension CodingUserInfoKey {
+public extension CodingUserInfoKey {
     static let skipLargeData = CodingUserInfoKey(rawValue: "skipLargeData")!
 }
 

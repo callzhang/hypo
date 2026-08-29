@@ -42,7 +42,11 @@ cd macos && swift test 2>&1 | tail -20
 **本地可移植性闸门**（每个搬迁任务都要跑）：
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ | grep -vE ':[0-9]+: *(///|//|\*)' ; echo "exit=$?"
+cd shared/HypoCore && find Sources -name '*.swift' | while read f; do awk -v F="$f" '
+  /^[[:space:]]*#if canImport\(AppKit\)/ { d++; next }
+  d>0 && /^[[:space:]]*#endif/ { d--; next }
+  d==0 { print F":"FNR": "$0 }
+' "$f"; done | grep -E "import AppKit|NSPasteboard|NSImage|NSApplication|NSWorkspace|NSStatusItem|NSColor|NSEvent|NSWindow|NSMenu|NSAlert|NSViewController|NSCursor" | grep -vE ': *(///|//|\*)' ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。这不能证明 iOS 构建成功，但能在本地立刻抓住最可能的破坏源——把 macOS 专有类型带进了 core。
@@ -52,6 +56,14 @@ cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplicat
 **本地闸门抓不到 macOS-only 的无前缀 Foundation 类型**（Task 4 实测，CI 首次拦下真实缺陷）：`DeviceIdentity.swift:38` 的默认参数用了 `Host.current().localizedName`。`Host` 是 macOS 独有的 Foundation 类型（`NSHost` 的 Swift 名），**名字不带 `NS` 前缀，闸门的 grep 抓不到；在 macOS 上编译测试全过，只有真正用 iOS SDK 编译才报 `cannot find 'Host' in scope`**。
 
 已扫描全代码库，同类 API 只有两处：这一处，以及 `ClipboardNotificationController.swift:412` 的 `NSWorkspace`（留在 HypoApp，不迁移）。**因此后续批次无需再担心此类问题**，但结论要记住：**CI 的 iOS 构建是唯一能发现这类缺陷的环节，绝不能因为本地三道闸门全绿就跳过等待 CI**。
+
+**闸门必须理解条件编译**（Task 5 实测）：`TempFileManager.swift` 里有 `import AppKit`、`NSPasteboard` 属性和一个 AppKit 专用初始化器，但**全部包在 `#if canImport(AppKit)` 内**——`AppKit` 在 iOS 上不存在，整段编译不进去，代码完全正确。旧闸门只过滤注释行，于是报了三条误报。
+
+上面的闸门命令已改为先用 awk 剥离 `#if canImport(AppKit) ... #endif` 块再匹配。实测：旧写法报 3 条，新写法干净退出。
+
+两点局限，使用时心里有数：块内的 `#else` 分支（即非 AppKit 路径）也会被一并跳过——按定义那里不会有 AppKit 符号，可接受；嵌套的 `#if` 会让深度计数提前归零——本代码库暂无此情况，若将来出现，闸门可能漏报，届时以 CI 的 iOS 构建为准。
+
+**闸门是线索来源，不是判决**。命中不等于有错，先看是否落在守卫块内；干净也不等于安全（`Host` 那次就是干净的）。唯一的权威结论来自 CI 的 `ios-core-build`。
 
 **闸门的两个已知陷阱**（Task 4 实测）：
 
@@ -418,7 +430,11 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ | grep -vE ':[0-9]+: *(///|//|\*)' ; echo "exit=$?"
+cd shared/HypoCore && find Sources -name '*.swift' | while read f; do awk -v F="$f" '
+  /^[[:space:]]*#if canImport\(AppKit\)/ { d++; next }
+  d>0 && /^[[:space:]]*#endif/ { d--; next }
+  d==0 { print F":"FNR": "$0 }
+' "$f"; done | grep -E "import AppKit|NSPasteboard|NSImage|NSApplication|NSWorkspace|NSStatusItem|NSColor|NSEvent|NSWindow|NSMenu|NSAlert|NSViewController|NSCursor" | grep -vE ': *(///|//|\*)' ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -485,7 +501,7 @@ cd macos && swift build 2>&1 | tail -20
 
 - [ ] **Step 3: 补可见性**
 
-编译若报某符号不可见，为其加 `public`。**先主动查扩展**（Task 3 的教训，唯一漏网的是 `Int.formattedAsKB`）：
+编译若报某符号不可见，为其加 `public`。**先主动查扩展，并逐个确认成员可见性**（Task 3 与 Task 5 各栽了一次）。仅仅把扩展列出来是不够的——Task 5 的实现者跑了这条 grep，输出里**确实有** `extension CodingUserInfoKey`，但没有逐个检查其成员，结果 `skipLargeData` 仍是靠编译器报错才发现。命令只负责找出扩展，**判断成员是否需要 `public` 是人的工作**：
 
 ```bash
 cd shared/HypoCore && grep -n "^extension \|^public extension " Sources/HypoCore/**/*.swift
@@ -504,7 +520,11 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 5: 可移植性闸门**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ | grep -vE ':[0-9]+: *(///|//|\*)' ; echo "exit=$?"
+cd shared/HypoCore && find Sources -name '*.swift' | while read f; do awk -v F="$f" '
+  /^[[:space:]]*#if canImport\(AppKit\)/ { d++; next }
+  d>0 && /^[[:space:]]*#endif/ { d--; next }
+  d==0 { print F":"FNR": "$0 }
+' "$f"; done | grep -E "import AppKit|NSPasteboard|NSImage|NSApplication|NSWorkspace|NSStatusItem|NSColor|NSEvent|NSWindow|NSMenu|NSAlert|NSViewController|NSCursor" | grep -vE ': *(///|//|\*)' ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。

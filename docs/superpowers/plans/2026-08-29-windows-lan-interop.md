@@ -3480,6 +3480,137 @@ git add docs/superpowers/plans/2026-08-29-windows-lan-interop.md
 git commit -m "docs: record the first real-peer interoperability attempt"
 ```
 
+### Task 15 outcome
+
+Attempted 2026-08-29 from the macOS development machine (10.0.0.252) against the
+peers advertising on the same /24.
+
+**Which peers were reachable.** Only the Android client. `dns-sd -B _hypo._tcp
+local` listed `OPPO PLP110` on every sweep across the whole session; the macOS
+client never appeared, and `nc -z 10.0.0.252 7010` was refused throughout — it
+was being rebuilt while this task ran. So everything below was observed against
+Android. The macOS statements are read off `macos/Sources/HypoApp/Services/
+LanWebSocketServer.swift`, not measured, and are flagged as such.
+
+An earlier batch recorded that `nc -z 10.0.0.17 7010` failed while mDNS
+resolution of the same phone succeeded. That is no longer true: the Android
+listener answered on every attempt today. The phone was not the problem.
+
+**Step 1 — discovery works.** `cd windows && dotnet run --project
+tools/Hypo.Harness -- discover`:
+
+```
+Browsing for _hypo._tcp peers for 12s...
+  OPPO PLP110
+    address    10.0.0.17:7010
+    device_id  bbe296d6-0785-43d2-91b6-b135b72f4c41
+    version    1.1.6-debug
+    pub_key    ZuPQTwT2QainOfqI5TikmthXtYGM6ENfrtH3szCnfEo=
+```
+
+The name is unescaped — the space is a real space, not `OPPO\032PLP110` — so
+Task 2's `DnsSdName` decoding is applied on this path. Done criterion 2 is met.
+
+**Step 2 — pairing failed. The peer ignored the challenge.** `dotnet run
+--project tools/Hypo.Harness -- pair bbe296d6-0785-43d2-91b6-b135b72f4c41`:
+
+```
+Pairing with OPPO PLP110 at 10.0.0.17:7010...
+Unhandled exception. System.TimeoutException: The operation has timed out.
+   at Program...<PairAsync>... Program.cs:line 115
+```
+
+Line 115 is the 30-second `ackReceived.Task.WaitAsync`. `ConnectAsync` and
+`SendAsync` both returned without throwing, so TCP connected, the WebSocket
+upgrade was accepted, and 436 bytes went out. The phone simply never answered on
+that socket. This is the second of the three outcomes anticipated above.
+
+**Why: a pairing challenge does not travel inside an envelope.** Android's
+`LanWebSocketServer.onMessage(conn, bytes)` decides whether a frame is a pairing
+challenge by looking for the literal substrings `"initiator_device_id"` and
+`"initiator_pub_key"` in the frame body, first inside a 4-byte length-prefixed
+slice and then in the raw bytes. `WrapControl` base64-encodes the challenge into
+`payload.ciphertext`, so neither substring appears anywhere in the JSON that goes
+on the wire. The frame falls through to `onClipboardData`, where there is no key
+for an unknown device, and nothing is sent back. Silence is the correct
+behaviour for the shape we sent.
+
+macOS would reject it too, by a different route. Its `detectMessageType` runs
+`JSONSerialization` over the whole message and classifies on top-level keys: an
+envelope has a `type` field, so it is classified `.clipboard` and never reaches
+`handlePairingMessage`. Neither client has any notion of a control envelope.
+
+**Confirmed, not inferred.** A throwaway probe (scratch only, not committed)
+reused `Hypo.Core`'s `PairingSession` but put the challenge on the wire as a
+bare `PairingChallengeMessage` JSON instead of an envelope. Against the same
+phone, twice — once with the 4-byte length prefix and once without — the reply
+came back within a second and verified:
+
+```
+sending prefixed frame, 436 bytes
+<-- Binary 374 bytes eom=True
+    text: {"challenge_id":"7128b52c-...","responder_device_id":"bbe296d6-0785-43d2-91b6-b135b72f4c41",
+           "responder_device_name":"OPPO PLP110","nonce":"tkta7pjyQfMRXw3A","ciphertext":"rTAxqO+Q...",
+           "tag":"9O0mMuPYh9SoYsJarKvBYA=="}
+    PAIRED with OPPO PLP110 (bbe296d6-0785-43d2-91b6-b135b72f4c41)
+```
+
+So the cryptography interoperates exactly. X25519 agreement over the advertised
+`pub_key`, the HKDF salt and info strings, AES-256-GCM, the device-id associated
+data, the snake_case field names, the lowercase challenge-id encoding and
+`CompleteWithAck`'s response-hash check were all verified end to end against a
+shipping client on the first try. What does not interoperate is the framing
+around them.
+
+**The two gaps, precisely.**
+
+1. *Challenge shape.* It must be a bare `PairingChallengeMessage`, not a
+   `SyncEnvelope`. Android accepts it either length-prefixed or raw; macOS
+   parses the entire message as JSON, so only raw works there. The one shape
+   both accept is an unprefixed `PairingChallengeMessage` in a single WebSocket
+   frame.
+
+2. *Ack shape, which is the worse of the two.* Both clients reply with raw JSON
+   and no length prefix — Android's `sendPairingAck` sends the ack bytes
+   directly, macOS sends them as a text frame (opcode `0x1`). `LanWebSocketClient`
+   feeds every inbound frame to `FrameReader`, which reads the ack's first four
+   bytes `{"ch` as a big-endian length of 2,065,851,240, over the 20,971,520-byte
+   ceiling, and throws `TransportFrameException(PayloadTooLarge)`. `PumpAsync`'s
+   general `catch` turns that into `TransportState.Faulted`. A correctly shaped
+   challenge would therefore still have destroyed the connection on the reply.
+   The pairing exchange is not framed traffic and cannot be read by the framed
+   reader.
+
+**The inbound path was exercised too.** `dotnet run --project tools/Hypo.Harness
+-- listen` bound 7010 and advertised; `dns-sd -B` then listed `Hypo Harness`
+alongside the phone, and `dns-sd -L "Hypo Harness"` resolved it with the full TXT
+set:
+
+```
+Hypo\032Harness._hypo._tcp.local. can be reached at Hypo\032Harness.hypo.local.:7010
+ txtvers=1 device_id=11111111-2222-3333-4444-555555555555 pub_key=d6k2BnV0rKXUcv0HoJBlR93qN6CJUfPTM8sfoPRF2ko=
+ signing_pub_key=zoV1+DaNSdOTZBP8OX1WMVaXLqPd0CZfdT9V8nnVOwQ= version=2.0.0-harness
+ fingerprint_sha256=c0320ed50c2a1fa157cd74168efebe4de1fbe390509efa6886b1e504bd5bafa6
+```
+
+No peer dialled in over 75 seconds, which is expected: the phone opens outbound
+connections only to devices it has already paired with, and pairing is what
+failed.
+
+**Where this leaves the plan.** Done criterion 2 is met. Criteria 3 and 4 are
+not: no pairing completed through `Hypo.Core`'s own transport, so no clipboard
+payload crossed in either direction. Criteria 1 and 5 are covered by Task 16.
+
+Plan 1 carry-forward item 3 — control and error messages have no representable
+payload — is now a measured blocker rather than a known gap, and it is bigger
+than it looked. It is not only that `EnvelopePayload` cannot express a control
+message; it is that on both shipping clients the pairing exchange does not use
+the envelope or the length-prefixed framing at all. Closing it means giving the
+LAN transport a second, unframed channel for pairing JSON, or teaching the
+receive path to recognise a bare pairing message before handing bytes to
+`FrameReader`. That is the first thing Plan 3 has to design, and `WrapControl`
+should be deleted rather than generalised.
+
 ---
 
 ## Task 16: CI

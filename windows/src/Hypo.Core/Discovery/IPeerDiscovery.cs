@@ -6,8 +6,11 @@ public interface IPeerDiscovery : IAsyncDisposable
     /// <summary>Raised when a peer is first seen or its record changes.</summary>
     event EventHandler<DiscoveredPeer>? PeerDiscovered;
 
-    /// <summary>Raised when a peer withdraws its advertisement.</summary>
-    event EventHandler<string>? PeerLost;
+    // Peer loss is deliberately not reported yet. Makaretu surfaces goodbye
+    // packets inconsistently, and a peer that stopped answering is
+    // indistinguishable from one on a flaky network, so eviction needs a
+    // last-seen timestamp rather than an event. Plan 3 adds it, matching what
+    // the macOS client does.
 
     /// <summary>
     /// Advertises this device. The port must be the port actually bound, not the

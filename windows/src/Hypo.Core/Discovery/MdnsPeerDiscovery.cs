@@ -66,14 +66,6 @@ public sealed class MdnsPeerDiscovery : IPeerDiscovery
 
     public event EventHandler<DiscoveredPeer>? PeerDiscovered;
 
-    // PeerLost is required by IPeerDiscovery but deliberately never raised here:
-    // Makaretu surfaces goodbye packets inconsistently across platforms, so
-    // staleness eviction is deferred to Plan 3. CS0067 (event never used) is an
-    // error under this project's TreatWarningsAsErrors until then.
-#pragma warning disable CS0067
-    public event EventHandler<string>? PeerLost;
-#pragma warning restore CS0067
-
     public IReadOnlyCollection<DiscoveredPeer> KnownPeers
     {
         get { lock (_gate) { return _peers.Values.ToArray(); } }

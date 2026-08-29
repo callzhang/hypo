@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Hypo.Core.Protocol;
 using Hypo.Core.Utils;
@@ -23,5 +25,31 @@ public class GzipVectorTests
         var plaintext = Field("plaintext_base64");
 
         Assert.Equal(plaintext, GzipCompressor.Decompress(GzipCompressor.Compress(plaintext)));
+    }
+
+    [Fact]
+    public void TheSharedPlaintextIsAValidClipboardPayload()
+    {
+        var plaintext = GzipCompressor.Decompress(Field("compressed_base64"));
+
+        var payload = JsonSerializer.Deserialize<ClipboardPayload>(plaintext, ProtocolJson.Options);
+
+        Assert.NotNull(payload);
+        Assert.Equal(ContentType.Text, payload.ContentType);
+        Assert.True(payload.Compressed);
+        Assert.Equal("Hello, Hypo!", Encoding.UTF8.GetString(payload.Data));
+    }
+
+    [Fact]
+    public void ClipboardPayloadReEncodesToTheSharedPlaintext()
+    {
+        var plaintext = GzipCompressor.Decompress(Field("compressed_base64"));
+        var payload = JsonSerializer.Deserialize<ClipboardPayload>(plaintext, ProtocolJson.Options)!;
+
+        var reEncoded = JsonSerializer.SerializeToUtf8Bytes(payload, ProtocolJson.Options);
+
+        Assert.True(JsonNode.DeepEquals(
+            JsonNode.Parse(Encoding.UTF8.GetString(plaintext)),
+            JsonNode.Parse(Encoding.UTF8.GetString(reEncoded))));
     }
 }

@@ -1327,6 +1327,28 @@ public class CryptoServiceAesGcmTests
     }
 
     [Fact]
+    public void BuildsAssociatedDataFromTheLowercasedDeviceId()
+    {
+        const string deviceId = "550E8400-E29B-41D4-A716-446655440000";
+
+        Assert.Equal(
+            System.Text.Encoding.UTF8.GetBytes(deviceId.ToLowerInvariant()),
+            CryptoService.BuildAssociatedData(deviceId));
+    }
+
+    [Fact]
+    public void AssociatedDataCarriesNothingButTheDeviceId()
+    {
+        // Guards the correction in section 4.1: protocol section 9.2 once
+        // described this as device_id + timestamp. Neither shipping client does
+        // that, and a client that did would fail authentication on every
+        // message against every peer.
+        const string deviceId = "550e8400-e29b-41d4-a716-446655440000";
+
+        Assert.Equal(deviceId.Length, CryptoService.BuildAssociatedData(deviceId).Length);
+    }
+
+    [Fact]
     public void RejectsMismatchedAssociatedData()
     {
         var key = new byte[32];
@@ -1434,7 +1456,7 @@ Associated data is a `ReadOnlySpan<byte>`, so callers with no associated data pa
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~CryptoServiceAesGcmTests`
 
-Expected: PASS, 5 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1817,7 +1839,7 @@ Expected: PASS, 2 tests.
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~CryptoService`
 
-Expected: PASS, 10 tests. This confirms the edit did not corrupt the sections the crypto tests read.
+Expected: PASS, 12 tests. This confirms the edit did not corrupt the sections the crypto tests read.
 
 - [ ] **Step 6: Commit**
 
@@ -1834,7 +1856,13 @@ A vector that only one client reads proves nothing. This task makes the macOS su
 
 Adding a top-level key to the fixture is safe for both existing suites: Swift's `JSONDecoder` ignores keys absent from `CodingKeys`, and the Android suite constructs its decoder with `Json { ignoreUnknownKeys = true }`. Neither breaks if this task and Task 14 are deferred.
 
-**Requires:** macOS with a Swift toolchain. If the executing engineer is on Windows, skip this task and Task 14, hand them to someone with the toolchains, and note the deferral in the pull request. No later task depends on them.
+**Requires:** macOS with a Swift toolchain. If the executing engineer is on
+Windows, skip this task and Task 14, hand them to someone with the toolchains,
+and note the deferral in the pull request. No later task depends on them.
+
+Both toolchains are available on the machine this plan was written for, so the
+gzip vector can be verified across all three clients rather than two — which is
+the whole point of adding it.
 
 **Files:**
 - Modify: `macos/Tests/HypoAppTests/CryptoServiceTests.swift`
@@ -1933,7 +1961,16 @@ git commit -m "test(macos): verify the shared gzip interoperability vector"
 
 ## Task 14: Back-fill the gzip vector into the Android suite
 
-**Requires:** a JDK and the Android SDK, with `JAVA_HOME` and `ANDROID_SDK_ROOT` set. See the deferral note in Task 13.
+**Requires:** a JDK and the Android SDK. Both are present on this machine but
+not on the default paths, so export them first:
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+export ANDROID_SDK_ROOT=/Users/derek/Documents/Projects/hypo/.android-sdk
+```
+
+`/usr/libexec/java_home` does not find this JDK, which is why it can look absent.
+The SDK is the repository-scoped one that `AGENTS.md` asks builds to prefer.
 
 **Files:**
 - Modify: `android/app/src/test/java/com/hypo/clipboard/crypto/CryptoServiceTest.kt`
@@ -2290,7 +2327,7 @@ Expected: PASS, 2 tests.
 
 Run: `cd windows && dotnet test`
 
-Expected: PASS, 61 tests, 0 failures.
+Expected: PASS, 63 tests, 0 failures.
 
 - [ ] **Step 4: Commit**
 

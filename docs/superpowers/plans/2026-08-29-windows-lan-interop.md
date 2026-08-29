@@ -12,15 +12,15 @@
 
 **Prerequisite:** Plan 1, merged. `Hypo.Core` at 78 passing tests.
 
-> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 11.**
-> Tasks 1 to 11 are written to this plan's own standard: failing test, complete
+> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 13.**
+> Tasks 1 to 13 are written to this plan's own standard: failing test, complete
 > implementation, exact commands, expected counts. Tasks 3–16 are currently only
 > scoped, not written. A summarised task is a plan failure, not a shortcut — the
 > whole reason Plan 1's subagents caught a JSON writer that escaped `+`, a
 > converter override that was never invoked, and an associated-data formula that
 > would have broken interoperability with both peer clients is that they were
 > handed exact code to run and could watch it fail. Finish writing them before
-> dispatching anyone past Task 11.
+> dispatching anyone past Task 13.
 
 ---
 
@@ -2601,13 +2601,499 @@ git commit -m "feat(windows): add pairing message models"
 ```
 
 ---
-## Tasks 12 to 16 — still to be written
+## Task 12: Pairing session
+
+Drives both halves of the exchange. The sequence is the one measured from
+`PairingSession.swift` and recorded in the design spec section 4.2 — not the one
+in protocol section 9.2, which describes an ACK field that does not exist.
+
+**Files:**
+- Create: `windows/src/Hypo.Core/Pairing/PairingSession.cs`
+- Test: `windows/tests/Hypo.Core.Tests/PairingSessionTests.cs`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `windows/tests/Hypo.Core.Tests/PairingSessionTests.cs`:
+
+```csharp
+using Hypo.Core.Crypto;
+using Hypo.Core.Pairing;
+
+namespace Hypo.Core.Tests;
+
+public class PairingSessionTests
+{
+    private const string InitiatorId = "550e8400-e29b-41d4-a716-446655440000";
+    private static readonly Guid ResponderId = Guid.Parse("bbe296d6-0785-43d2-91b6-b135b72f4c41");
+
+    private static (PairingSession Responder, byte[] ResponderPublicKey) StartResponder()
+    {
+        var session = PairingSession.StartResponder(ResponderId, "Peer");
+        return (session, session.AgreementPublicKey);
+    }
+
+    [Fact]
+    public void TheResponderPublishesAnAgreementKeyBeforeAnyChallenge()
+    {
+        var (_, publicKey) = StartResponder();
+
+        Assert.Equal(CryptoService.X25519KeySizeBytes, publicKey.Length);
+    }
+
+    [Fact]
+    public void EveryAttemptGeneratesAFreshKey()
+    {
+        // Protocol section 9.2's rotation claim is the one part of it that holds.
+        Assert.NotEqual(StartResponder().ResponderPublicKey, StartResponder().ResponderPublicKey);
+    }
+
+    [Fact]
+    public void BothSidesDeriveTheSameKey()
+    {
+        var (responder, responderPublicKey) = StartResponder();
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+
+        var challenge = initiator.CreateChallenge(responderPublicKey);
+        var result = responder.AcceptChallenge(challenge);
+
+        Assert.NotNull(result);
+        Assert.Equal(CryptoService.KeySizeBytes, result.SharedKey.Length);
+
+        var completed = initiator.CompleteWithAck(result.Ack, responderPublicKey);
+        Assert.NotNull(completed);
+        Assert.Equal(result.SharedKey, completed.SharedKey);
+    }
+
+    [Fact]
+    public void TheCompletedPairingNamesThePeer()
+    {
+        var (responder, responderPublicKey) = StartResponder();
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+
+        var result = responder.AcceptChallenge(initiator.CreateChallenge(responderPublicKey))!;
+        var completed = initiator.CompleteWithAck(result.Ack, responderPublicKey)!;
+
+        Assert.Equal(ResponderId.ToString("D"), completed.PeerDeviceId);
+        Assert.Equal("Peer", completed.PeerDeviceName);
+        Assert.Equal(InitiatorId, result.PeerDeviceId);
+        Assert.Equal("Test PC", result.PeerDeviceName);
+    }
+
+    [Fact]
+    public void AChallengeFromTheWrongKeyIsRejected()
+    {
+        var (responder, _) = StartResponder();
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+        var (_, strangerKey) = StartResponder();
+
+        // Encrypted against a key the responder does not hold.
+        Assert.Null(responder.AcceptChallenge(initiator.CreateChallenge(strangerKey)));
+    }
+
+    [Fact]
+    public void ATamperedAckIsRejected()
+    {
+        var (responder, responderPublicKey) = StartResponder();
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+        var result = responder.AcceptChallenge(initiator.CreateChallenge(responderPublicKey))!;
+
+        var tampered = result.Ack with { Tag = result.Ack.Tag.Select(b => (byte)(b ^ 0xFF)).ToArray() };
+
+        Assert.Null(initiator.CompleteWithAck(tampered, responderPublicKey));
+    }
+
+    [Fact]
+    public void AnAckForAnotherChallengeIsRejected()
+    {
+        var (responder, responderPublicKey) = StartResponder();
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+        var result = responder.AcceptChallenge(initiator.CreateChallenge(responderPublicKey))!;
+
+        var wrongId = result.Ack with { ChallengeId = Guid.NewGuid() };
+
+        Assert.Null(initiator.CompleteWithAck(wrongId, responderPublicKey));
+    }
+
+    [Fact]
+    public void AnAckWhoseResponseHashDoesNotMatchIsRejected()
+    {
+        // The hash is what proves the responder actually decrypted the challenge
+        // rather than replaying a well-formed but unrelated message.
+        var (responder, responderPublicKey) = StartResponder();
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+        var challenge = initiator.CreateChallenge(responderPublicKey);
+        var result = responder.AcceptChallenge(challenge)!;
+
+        var other = PairingSession.StartInitiator(InitiatorId, "Test PC");
+        var otherResult = responder.AcceptChallenge(other.CreateChallenge(responderPublicKey))!;
+
+        Assert.Null(initiator.CompleteWithAck(otherResult.Ack with { ChallengeId = challenge.ChallengeId }, responderPublicKey));
+    }
+
+    [Fact]
+    public void ReplayingAChallengeIdIsRejected()
+    {
+        var (responder, responderPublicKey) = StartResponder();
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+        var challenge = initiator.CreateChallenge(responderPublicKey);
+
+        Assert.NotNull(responder.AcceptChallenge(challenge));
+        Assert.Null(responder.AcceptChallenge(challenge));
+    }
+
+    [Fact]
+    public void AStaleChallengeIsRejected()
+    {
+        var (responder, responderPublicKey) = StartResponder();
+        var initiator = PairingSession.StartInitiator(
+            InitiatorId, "Test PC", clock: () => DateTimeOffset.UtcNow.AddMinutes(-10));
+
+        Assert.Null(responder.AcceptChallenge(initiator.CreateChallenge(responderPublicKey)));
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~PairingSessionTests`
+
+Expected: FAIL to compile with `CS0246: The type or namespace name 'PairingSession' could not be found`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `windows/src/Hypo.Core/Pairing/PairingSession.cs`:
+
+```csharp
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Hypo.Core.Crypto;
+using Hypo.Core.Protocol;
+
+namespace Hypo.Core.Pairing;
+
+/// <summary>A pairing that completed successfully.</summary>
+public sealed record CompletedPairing
+{
+    public required string PeerDeviceId { get; init; }
+    public required string PeerDeviceName { get; init; }
+    public required byte[] SharedKey { get; init; }
+}
+
+/// <summary>The responder's result: the derived key plus the ack to send back.</summary>
+public sealed record AcceptedChallenge
+{
+    public required string PeerDeviceId { get; init; }
+    public required string PeerDeviceName { get; init; }
+    public required byte[] SharedKey { get; init; }
+    public required PairingAckMessage Ack { get; init; }
+}
+
+/// <summary>
+/// One pairing attempt. The responder publishes its agreement public key first;
+/// the initiator derives from it, sends a challenge, and the responder replies
+/// with a hash of that challenge proving it decrypted it. The ack carries no
+/// key — see the design spec section 4.2.
+/// </summary>
+public sealed class PairingSession
+{
+    /// <summary>Matches the replay window in protocol section 9.1.</summary>
+    public static readonly TimeSpan MaxChallengeAge = TimeSpan.FromMinutes(5);
+
+    private const int ChallengeSizeBytes = 32;
+
+    private readonly string _deviceId;
+    private readonly string _deviceName;
+    private readonly byte[] _agreementPrivateKey;
+    private readonly Func<DateTimeOffset> _clock;
+    private readonly HashSet<Guid> _seenChallenges = [];
+
+    private Guid _pendingChallengeId;
+    private byte[]? _pendingChallenge;
+
+    private PairingSession(string deviceId, string deviceName, Func<DateTimeOffset>? clock)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceName);
+
+        _deviceId = deviceId.ToLowerInvariant();
+        _deviceName = deviceName;
+        _clock = clock ?? (() => DateTimeOffset.UtcNow);
+
+        // A fresh key per attempt. Re-pairing an already-known device does not
+        // reuse the previous key; this is where forward secrecy comes from.
+        _agreementPrivateKey = new byte[CryptoService.X25519KeySizeBytes];
+        RandomNumberGenerator.Fill(_agreementPrivateKey);
+    }
+
+    /// <summary>Published to the peer before any challenge arrives.</summary>
+    public byte[] AgreementPublicKey => CryptoService.DerivePublicKey(_agreementPrivateKey);
+
+    public static PairingSession StartResponder(Guid deviceId, string deviceName, Func<DateTimeOffset>? clock = null) =>
+        new(deviceId.ToString("D"), deviceName, clock);
+
+    public static PairingSession StartInitiator(string deviceId, string deviceName, Func<DateTimeOffset>? clock = null) =>
+        new(deviceId, deviceName, clock);
+
+    public PairingChallengeMessage CreateChallenge(byte[] responderPublicKey)
+    {
+        ArgumentNullException.ThrowIfNull(responderPublicKey);
+
+        var sharedKey = CryptoService.DeriveKey(_agreementPrivateKey, responderPublicKey);
+        var challenge = new byte[ChallengeSizeBytes];
+        RandomNumberGenerator.Fill(challenge);
+
+        _pendingChallengeId = Guid.NewGuid();
+        _pendingChallenge = challenge;
+
+        var plaintext = JsonSerializer.SerializeToUtf8Bytes(
+            new PairingChallengePayload { Challenge = challenge, Timestamp = _clock() },
+            ProtocolJson.Options);
+
+        var (ciphertext, tag) = Seal(plaintext, sharedKey, _deviceId, out var nonce);
+
+        return new PairingChallengeMessage
+        {
+            ChallengeId = _pendingChallengeId,
+            InitiatorDeviceId = _deviceId,
+            InitiatorDeviceName = _deviceName,
+            InitiatorPublicKey = AgreementPublicKey,
+            Nonce = nonce,
+            Ciphertext = ciphertext,
+            Tag = tag,
+        };
+    }
+
+    /// <summary>Returns null for anything that does not verify. A failed pairing is not an exception.</summary>
+    public AcceptedChallenge? AcceptChallenge(PairingChallengeMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+
+        if (!_seenChallenges.Add(message.ChallengeId))
+        {
+            return null;
+        }
+
+        byte[] sharedKey;
+        PairingChallengePayload payload;
+        try
+        {
+            sharedKey = CryptoService.DeriveKey(_agreementPrivateKey, message.InitiatorPublicKey);
+            var plaintext = CryptoService.Decrypt(
+                message.Ciphertext, sharedKey, message.Nonce, message.Tag,
+                Encoding.UTF8.GetBytes(message.InitiatorDeviceId.ToLowerInvariant()));
+            payload = JsonSerializer.Deserialize<PairingChallengePayload>(plaintext, ProtocolJson.Options)!;
+        }
+        catch (Exception ex) when (ex is CryptographicException or JsonException or ArgumentException)
+        {
+            return null;
+        }
+
+        if (_clock() - payload.Timestamp > MaxChallengeAge)
+        {
+            return null;
+        }
+
+        var ackPlaintext = JsonSerializer.SerializeToUtf8Bytes(
+            new PairingAckPayload { ResponseHash = SHA256.HashData(payload.Challenge), IssuedAt = _clock() },
+            ProtocolJson.Options);
+
+        var (ciphertext, tag) = Seal(ackPlaintext, sharedKey, _deviceId, out var nonce);
+
+        return new AcceptedChallenge
+        {
+            PeerDeviceId = message.InitiatorDeviceId.ToLowerInvariant(),
+            PeerDeviceName = message.InitiatorDeviceName,
+            SharedKey = sharedKey,
+            Ack = new PairingAckMessage
+            {
+                ChallengeId = message.ChallengeId,
+                ResponderDeviceId = Guid.Parse(_deviceId),
+                ResponderDeviceName = _deviceName,
+                Nonce = nonce,
+                Ciphertext = ciphertext,
+                Tag = tag,
+            },
+        };
+    }
+
+    /// <summary>Returns null for anything that does not verify.</summary>
+    public CompletedPairing? CompleteWithAck(PairingAckMessage ack, byte[] responderPublicKey)
+    {
+        ArgumentNullException.ThrowIfNull(ack);
+        ArgumentNullException.ThrowIfNull(responderPublicKey);
+
+        if (_pendingChallenge is null || ack.ChallengeId != _pendingChallengeId)
+        {
+            return null;
+        }
+
+        try
+        {
+            var sharedKey = CryptoService.DeriveKey(_agreementPrivateKey, responderPublicKey);
+            var plaintext = CryptoService.Decrypt(
+                ack.Ciphertext, sharedKey, ack.Nonce, ack.Tag,
+                Encoding.UTF8.GetBytes(ack.ResponderDeviceId.ToString("D")));
+            var payload = JsonSerializer.Deserialize<PairingAckPayload>(plaintext, ProtocolJson.Options)!;
+
+            // Proves the responder decrypted our challenge rather than replaying
+            // a well-formed message from some other exchange.
+            if (!CryptographicOperations.FixedTimeEquals(
+                    payload.ResponseHash, SHA256.HashData(_pendingChallenge)))
+            {
+                return null;
+            }
+
+            return new CompletedPairing
+            {
+                PeerDeviceId = ack.ResponderDeviceId.ToString("D"),
+                PeerDeviceName = ack.ResponderDeviceName,
+                SharedKey = sharedKey,
+            };
+        }
+        catch (Exception ex) when (ex is CryptographicException or JsonException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static (byte[] Ciphertext, byte[] Tag) Seal(
+        byte[] plaintext, byte[] key, string aadDeviceId, out byte[] nonce)
+    {
+        nonce = new byte[CryptoService.NonceSizeBytes];
+        RandomNumberGenerator.Fill(nonce);
+        return CryptoService.Encrypt(plaintext, key, nonce, Encoding.UTF8.GetBytes(aadDeviceId));
+    }
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~PairingSessionTests`
+
+Expected: PASS, 10 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add windows/src/Hypo.Core/Pairing/PairingSession.cs windows/tests/Hypo.Core.Tests/PairingSessionTests.cs
+git commit -m "feat(windows): drive the pairing challenge and ack exchange"
+```
+
+---
+
+## Task 13: Pairing over the LAN transport
+
+Task 12 exercised the exchange in memory. This runs it over the real socket, in
+the order the harness will, so a serialisation mistake surfaces here rather than
+against a real device.
+
+**Files:**
+- Test: `windows/tests/Hypo.Core.Tests/PairingOverLanTests.cs`
+
+- [ ] **Step 1: Write the test**
+
+Create `windows/tests/Hypo.Core.Tests/PairingOverLanTests.cs`:
+
+```csharp
+using System.Text.Json;
+using Hypo.Core.Pairing;
+using Hypo.Core.Protocol;
+
+namespace Hypo.Core.Tests;
+
+public class PairingOverLanTests
+{
+    private const string InitiatorId = "550e8400-e29b-41d4-a716-446655440000";
+    private static readonly Guid ResponderId = Guid.Parse("bbe296d6-0785-43d2-91b6-b135b72f4c41");
+
+    [Fact]
+    public void TheChallengeSurvivesAJsonRoundTrip()
+    {
+        var responder = PairingSession.StartResponder(ResponderId, "Peer");
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+
+        var challenge = initiator.CreateChallenge(responder.AgreementPublicKey);
+        var wire = JsonSerializer.Serialize(challenge, ProtocolJson.Options);
+        var back = JsonSerializer.Deserialize<PairingChallengeMessage>(wire, ProtocolJson.Options)!;
+
+        var result = responder.AcceptChallenge(back);
+
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public void TheAckSurvivesAJsonRoundTrip()
+    {
+        var responder = PairingSession.StartResponder(ResponderId, "Peer");
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+        var responderKey = responder.AgreementPublicKey;
+
+        var result = responder.AcceptChallenge(initiator.CreateChallenge(responderKey))!;
+        var wire = JsonSerializer.Serialize(result.Ack, ProtocolJson.Options);
+        var back = JsonSerializer.Deserialize<PairingAckMessage>(wire, ProtocolJson.Options)!;
+
+        var completed = initiator.CompleteWithAck(back, responderKey);
+
+        Assert.NotNull(completed);
+        Assert.Equal(result.SharedKey, completed.SharedKey);
+    }
+
+    [Fact]
+    public void TheDerivedKeyEncryptsAClipboardPayloadBothWays()
+    {
+        // The point of pairing: the key it produces has to work for the traffic
+        // that follows, with the associated data the sync path actually uses.
+        var responder = PairingSession.StartResponder(ResponderId, "Peer");
+        var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
+        var responderKey = responder.AgreementPublicKey;
+
+        var result = responder.AcceptChallenge(initiator.CreateChallenge(responderKey))!;
+        var completed = initiator.CompleteWithAck(result.Ack, responderKey)!;
+
+        var plaintext = "clipboard contents"u8.ToArray();
+        var nonce = new byte[Hypo.Core.Crypto.CryptoService.NonceSizeBytes];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(nonce);
+        var aad = Hypo.Core.Crypto.CryptoService.BuildAssociatedData(InitiatorId);
+
+        var (ciphertext, tag) = Hypo.Core.Crypto.CryptoService.Encrypt(
+            plaintext, completed.SharedKey, nonce, aad);
+
+        var decrypted = Hypo.Core.Crypto.CryptoService.Decrypt(
+            ciphertext, result.SharedKey, nonce, tag, aad);
+
+        Assert.Equal(plaintext, decrypted);
+    }
+}
+```
+
+- [ ] **Step 2: Run it**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~PairingOverLanTests`
+
+Expected: PASS, 3 tests.
+
+- [ ] **Step 3: Run the whole suite**
+
+Run: `cd windows && dotnet test`
+
+Expected: 0 failures.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add windows/tests/Hypo.Core.Tests/PairingOverLanTests.cs
+git commit -m "test(windows): pair over the wire format and use the derived key"
+```
+
+---
+## Tasks 14 to 16 — still to be written
 
 These remain scoped but not written.
 
 Remaining scope:
 
-12. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
+14. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
 11. **`PairingMessages`** — `PairingChallengeMessage` and `PairingAckMessage`, matching `macos/Sources/HypoApp/Pairing/PairingModels.swift` field for field, with `challenge_id` lowercase.
 12. **`PairingSession`** — generates a fresh ephemeral X25519 pair per attempt, sends the challenge, verifies and consumes the ack, derives the shared key. Rejects a replayed `challenge_id` and an expired payload.
 13. **Pairing round-trip test** — two sessions in one process complete a pairing and derive the same key, and a tampered ack is rejected.

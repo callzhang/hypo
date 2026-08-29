@@ -14,11 +14,19 @@
 
 ## 环境前提（开工前逐条确认）
 
-本机 `xcode-select` 仍指向 Command Line Tools，**所有 iOS 命令必须前置环境变量**：
+本机 `xcode-select` 仍指向 Command Line Tools，**所有 iOS 命令必须前置环境变量**——但**只能内联，绝不能 `export`**：
 
 ```bash
+# 正确：只影响这一条命令
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild ...
+
+# 错误：会污染整个 shell
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 ```
+
+**为什么这条很重要**（Task 1 实测踩过）：`DEVELOPER_DIR` 不只影响 `xcodebuild`，它同时把 `swift test` 使用的工具链从 Command Line Tools 换成 Xcode 26.6。两者的测试运行器不同——Xcode 走 `swiftpm-testing-helper --testing-library swift-testing`。同一条 `cd macos && swift test`，不设该变量时 56 个测试通过，设了之后整个套件在跑第一个测试前就崩溃。
+
+（该崩溃的根因是 `ClipboardNotificationController` 的测试守卫只识别 XCTest，已在 `8cf0ada` 修复，现在两种工具链都正常。但**内联而非 export** 仍是应当遵守的习惯——工具链切换会带来其它难以预料的差异。）
 
 确认工具链：
 

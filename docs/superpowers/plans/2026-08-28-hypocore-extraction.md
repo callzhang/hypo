@@ -1663,7 +1663,22 @@ for f in CryptoServiceTests.swift TransportFrameCodecTests.swift TokenBucketTest
 done
 ```
 
-**留在 `HypoAppTests` 的**：`ClipboardMonitorTests.swift`、`ShortcutConfigurationTests.swift`、`HistoryStoreTests.swift`、`IncomingClipboardHandlerTests.swift`、`ClipboardEventDispatcherTests.swift`、`TransportManagerTests.swift`、`TransportManagerLanTests.swift`、`MockSupport.swift`、`TestSupport.swift`，以及本计划新增的 5 个测试文件。它们或依赖 macOS 类型，或依赖共享测试辅助代码。
+**留在 `HypoAppTests` 的**：`ClipboardMonitorTests.swift`、`ShortcutConfigurationTests.swift`、`HistoryStoreTests.swift`、`IncomingClipboardHandlerTests.swift`、`ClipboardEventDispatcherTests.swift`、`TransportManagerTests.swift`、`TransportManagerLanTests.swift`、`MockSupport.swift`，以及本计划新增的 5 个测试文件。
+
+**已实测的辅助类型依赖**（Task 2 的代码质量审查逐文件清点，不必重新推导）——14 个待迁文件中有 8 个引用了辅助类型：
+
+| 待迁测试文件 | 依赖的辅助类型 | 定义位置 |
+|---|---|---|
+| `WebSocketTransportTests` | `StubSession`、`StubWebSocketTask`、`FlakyWebSocketTask`、`RecordingMetricsRecorder`、`MutableClock`、`Locked` | `MockSupport.swift:237/252/417/586/613`、`TestSupport.swift:46` |
+| `CloudRelayTransportTests` | `StubSession`、`StubWebSocketTask`、`Locked` | 同上 |
+| `LanWebSocketTransportTests` | `StubSession`、`StubWebSocketTask`、`FlakyWebSocketTask`、`RecordingMetricsRecorder`、`Locked` | 同上 |
+| `LanWebSocketServerTests` | `UnfairLock` | `MockSupport.swift:8` |
+| `LanWebSocketServerBufferTests` | `Locked` | `TestSupport.swift:46` |
+| `BonjourBrowserTests` | `MockBonjourDriver`、`MutableClock` | `MockSupport.swift:39/613` |
+| `BonjourPublisherTests` | `Locked` | `TestSupport.swift:46` |
+| `PairingSessionTests` | `MutableClock`、`Locked` | `MockSupport.swift:613`、`TestSupport.swift:46` |
+
+**因此把 `TestSupport.swift` 整体迁入 `HypoCoreTests`**，不要按类型逐个复制——该文件只 import `Foundation`、`Testing`、`os`，零 macOS 依赖，其中 `Locked` 被 6 个待迁文件引用。`MockSupport.swift` 留在 `HypoAppTests`（`TransportManagerTests` 等仍需要它），把上表中被待迁文件引用的类型复制进新建的 `shared/HypoCore/Tests/HypoCoreTests/CoreTestSupport.swift`。
 
 - [ ] **Step 3: 修正被移动测试的 import**
 

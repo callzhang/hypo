@@ -25,8 +25,18 @@ public sealed class FileSecretStore : ISecretStore
         return File.Exists(path) ? File.ReadAllBytes(path) : null;
     }
 
-    public void Write(string key, ReadOnlySpan<byte> value) =>
-        File.WriteAllBytes(PathFor(key), value);
+    public void Write(string key, ReadOnlySpan<byte> value)
+    {
+        var path = PathFor(key);
+        File.WriteAllBytes(path, value);
+
+        // Plaintext is the documented tradeoff for a development store;
+        // world-readable plaintext is not, and costs nothing to avoid.
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
 
     public bool Delete(string key)
     {

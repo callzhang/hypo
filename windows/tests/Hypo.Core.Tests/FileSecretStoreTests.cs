@@ -84,6 +84,25 @@ public class FileSecretStoreTests : IDisposable
     }
 
     [Fact]
+    public void WritesKeysReadableOnlyByTheOwner()
+    {
+        // Plaintext is the documented tradeoff for a development store.
+        // World-readable plaintext is not.
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var store = new FileSecretStore(_dir);
+
+        store.Write("device-key", [0x01]);
+
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            File.GetUnixFileMode(Path.Combine(_dir, "device-key")));
+    }
+
+    [Fact]
     public void AcceptsARealDeviceId()
     {
         var store = new FileSecretStore(_dir);

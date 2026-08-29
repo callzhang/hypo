@@ -1883,7 +1883,7 @@ Expected: PASS, 2 tests.
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~CryptoService`
 
-Expected: PASS, 12 tests. This confirms the edit did not corrupt the sections the crypto tests read.
+Expected: PASS, 19 tests. This confirms the edit did not corrupt the sections the crypto tests read. (The count grew past the fixture work itself because the AES and X25519 length guards added seven tests to those same classes.)
 
 - [ ] **Step 6: Commit**
 
@@ -1970,15 +1970,19 @@ Add this test inside `struct CryptoServiceTests` (the type declared near the top
         let vectors = try loadCryptoVectors()
         let gzip = try #require(vectors.gzip)
 
-        let decompressed = try Compression.decompress(gzip.compressed)
+        let decompressed = try CompressionUtils.decompress(gzip.compressed)
         #expect(decompressed == gzip.plaintext)
 
-        let roundTripped = try Compression.decompress(Compression.compress(gzip.plaintext))
+        let roundTripped = try CompressionUtils.decompress(CompressionUtils.compress(gzip.plaintext))
         #expect(roundTripped == gzip.plaintext)
     }
 ```
 
-`Compression.compress(_:)` and `Compression.decompress(_:)` are the entry points declared in `macos/Sources/HypoApp/Utils/Compression.swift`; both are `throws` and take and return `Data`.
+The entry points are `CompressionUtils.compress(_:)` and
+`CompressionUtils.decompress(_:)`, both `throws`, both `Data` in and out. Note
+the type is `CompressionUtils`, not `Compression`: the file is named
+`Compression.swift`, but `Compression` is the Apple framework module it imports,
+so writing `Compression.compress` resolves against the framework and fails.
 
 - [ ] **Step 4: Run the test**
 
@@ -2371,7 +2375,7 @@ Expected: PASS, 2 tests.
 
 Run: `cd windows && dotnet test`
 
-Expected: PASS, 66 tests, 0 failures.
+Expected: PASS, 73 tests, 0 failures.
 
 - [ ] **Step 4: Commit**
 

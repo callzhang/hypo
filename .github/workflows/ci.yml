@@ -175,7 +175,8 @@ jobs:
             -scheme HypoCore \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -skipMacroValidation \
-            -enableCodeCoverage NO
+            -enableCodeCoverage NO \
+            -parallel-testing-enabled NO
   windows-tests:
     name: Windows Core Tests
     runs-on: windows-latest

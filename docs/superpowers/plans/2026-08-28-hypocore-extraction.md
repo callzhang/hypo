@@ -1581,7 +1581,17 @@ git commit -m "chore: ignore HypoCore build artifacts"
 
 - **基线**（抽取开始前,2026-08-28,`cd macos && swift test`）：193 个测试全绿,5.699 秒。
 - **现状**：`cd macos && swift test` → **56 个测试**,0.375 秒,全绿（本次实测）。`shared/HypoCore` 的测试总数为 **142 个**（本次逐条核实,见下方「未达标项」）。56 + 142 = 198 ≥ 193,通过数只增不减,基线要求满足。
-- **iOS 模拟器**：CI `ios-core-build` job 的 `Run HypoCore tests on iOS Simulator` 步骤在 CI run `33257216710`（对应提交 `f656f8e`,HEAD 之前一个提交,两者之间只差一个纯文档提交 `3085647`）中通过,142 个 HypoCore 测试确认可在 `platform=iOS Simulator,name=iPhone 16` 上执行。该次 CI 四个 job（Backend Tests、Android Tests、macOS Tests、HypoCore iOS Build）全绿。
+- **iOS 模拟器：实际跑 116 个,不是 142。** 这个数字后来被订正过,原因值得记住。
+
+  CI 的 `ios-core-build` 在 run `33257216710` 中报告 142 个测试在 `iPhone 16` / iOS 18.5 上通过,当时据此写下「142 个测试在 iOS 上执行」。装上 Xcode 26.6 后在本地 iOS 26.5 模拟器上重跑,**18 个测试失败**——错误是 `nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed`：iOS 26.5 的 XCTest bundle 没有 app host、没有 `NSLocalNetworkUsageDescription`,**根本无法创建 `NWListener`**。iOS 18.5 不强制这条,所以 CI 一直是绿的。
+
+  关键在于那 16 个 `LanWebSocketServerTests` **测的是 iOS 永远不会执行的路径**——第 1 期就定了 iOS 只做 LAN 客户端、不做监听端。它们在 iOS 18.5 上通过不代表任何有意义的事,只是旧系统宽容。
+
+  订正后：`LanWebSocketServerTests` 整套件限定 macOS;`TransportManagerLanTests` 中**只有真正调用 `start(port:)` 的 2 个测试**限定 macOS（`makeWebSocketServer()` 仅构造对象,`NWListener` 要到 `ensureLanDiscoveryActive()` 才创建,其余测试继续在 iOS 跑,覆盖 LAN 客户端拨号与 fallback 这些 iOS 真会走的路径）。
+
+  **实测结果：macOS 56 + 142,iOS 116,全绿。** 116 才是诚实的 iOS 覆盖数。
+
+- **本地与 CI 的 SDK 差异**：本机 Xcode 26.6 / iOS 26.5 / iPhone 17 系列;CI `macos-15` runner 是 Xcode 16.4 / iOS 18.5 / iPhone 16。**差一个大版本,且本机没有 iPhone 16 机型**——CI 里 `-destination 'platform=iOS Simulator,name=iPhone 16'` 那行不能照抄到本地,本地要用 `name=iPhone 17`。另外本机 `xcode-select` 仍指向 Command Line Tools,所有 iOS 命令需前置 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`。
 
 ### 已发现的缺陷
 
@@ -1613,7 +1623,7 @@ git commit -m "chore: ignore HypoCore build artifacts"
 1. ✅ `cd macos && swift test` 全绿,56 个测试,通过数之和 198 ≥ 193
 2. ✅ **达标**（验收时误判为未达标）：`cd shared/HypoCore && swift test` 在没有 Hypo.app 运行时 142 个测试 5.344 秒全绿。验收当时挂起是因为同一次验收的检查 1 启动了 App,见「已发现的缺陷」第 6 条
 3. ✅ CI `ios-core-build` 的 `Build HypoCore for iOS Simulator` 步骤在 run `33257216710` 中通过
-4. ✅ CI `ios-core-build` 的 `Run HypoCore tests on iOS Simulator` 步骤在同一次 run 中通过,142 个测试
+4. ✅ CI `ios-core-build` 的 `Run HypoCore tests on iOS Simulator` 步骤通过。**注意数字已订正为 116**（见「现状」一节）——CI 当时报告的 142 包含了 iOS 永不执行的 LAN 服务端测试,它们仅因 iOS 18.5 宽容而通过
 5. ❌ **未达标**：`./scripts/build-macos.sh` 与 `./scripts/build-macos.sh release` 均失败,见「已发现的缺陷」第 5 条
 6. ✅ `shared/HypoCore/Sources/` 下无裸 `import AppKit`（本地闸门确认无输出）
 7. ✅ `scripts/` 下无任何改动（`git diff main --stat -- scripts/` 无输出）；`.github/workflows/ci.yml` 相对 fork 点（`merge-base` = `3e564f8`）的改动仅限于新增 `ios-core-build` job 与顶层 `concurrency` 块,`backend-tests`/`android-tests`/`macos-tests` 三个既有 job 逐字节未变。**注意**：`main` 在这个分支 fork 之后独立新增了第四个既有 job `windows-tests`（Windows 客户端工作线的一部分,本 worktree 里没有 `windows/` 目录）,所以直接 `git diff main -- .github/workflows/ci.yml` 会显示 `windows-tests` 被替换成了 `ios-core-build`——**这不是本分支的改动,是两条分支各自独立演进的结果**,合并/rebase 到 `main` 时需要手动把 `windows-tests` job 找回来,否则会静默丢失 Windows 的 CI 覆盖。

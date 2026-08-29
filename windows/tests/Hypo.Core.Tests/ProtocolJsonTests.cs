@@ -66,4 +66,11 @@ public class ProtocolJsonTests
         var withOffset = JsonSerializer.Deserialize<DateTimeOffset>("\"2025-10-03T00:00:00+00:00\"", ProtocolJson.Options);
         Assert.Equal(withZ, withOffset);
     }
+
+    [Fact]
+    public void TruncatesSubSecondPrecisionRatherThanRounding()
+    {
+        var value = DateTimeOffset.Parse("2025-10-03T00:00:00.999Z", CultureInfo.InvariantCulture);
+        Assert.Equal("\"2025-10-03T00:00:00Z\"", JsonSerializer.Serialize(value, ProtocolJson.Options));
+    }
 }

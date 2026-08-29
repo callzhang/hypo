@@ -2559,3 +2559,65 @@ Plan 1 is complete when all of the following hold:
 `Hypo.Core` can now produce and consume protocol messages, but nothing sends them. Plan 2 adds `ISyncTransport`, the LAN WebSocket server and client, `CloudRelayTransport`, `DualSyncTransport`, `TransportManager`, mDNS publish and browse, `PairingSession`, `PairingRelayClient` and the SQLite `HistoryStore`, and delivers a console harness that pairs with a real macOS or Android device.
 
 Spec section 11 flags mDNS interoperability with macOS Bonjour and Android NSD as the highest-risk dependency in the whole project. Plan 2 should spike it first, before building anything on top of it.
+
+### Carried forward from Plan 1
+
+These were found while building and reviewing Plan 1 and deliberately left
+undone. They are recorded here because Plan 2's author reads the branch, not the
+review threads.
+
+1. **Streaming and partial frames.** `TransportFrameCodec.Decode` takes one
+   complete frame and returns no consumed count; when the buffer holds more, the
+   remainder is silently ignored. A TCP reader needs framing state and a
+   `TryDecode(ReadOnlySequence<byte>, out SyncEnvelope, out long consumed)`
+   shape. The naive "buffer everything, then call Decode" that the current API
+   invites will drop pipelined frames.
+
+2. **Nonce generation ownership.** `CryptoService.Encrypt` takes a caller-supplied
+   nonce; its `<remarks>` state the contract. `DualSyncTransport` must generate a
+   *distinct* nonce per transport for the same message id — reuse under one key
+   is catastrophic and silent. macOS puts this behind a `NonceGenerating`
+   abstraction so callers never see a nonce; consider the same seam before four
+   call sites exist.
+
+3. **Control and error messages have no representable payload.**
+   `MessageType.Control` and `.Error` exist, but `EnvelopePayload` requires
+   `ContentType`, `Ciphertext`, `DeviceId` and `Encryption` — the clipboard
+   shape. Protocol section 4 messages (handshake, ping, pong, disconnect, error)
+   carry `action`, `code`, `session_id` instead. A discriminated payload is
+   needed.
+
+4. **Plain-text mode is unimplemented.** See spec section 3.2.1. An empty nonce
+   or tag means the ciphertext is gzipped but unencrypted. Both shipping clients
+   support it; `Hypo.Core`'s models represent it fine, but the inbound branch
+   does not exist. Receive it; never send it.
+
+5. **X25519 low-order points throw `InvalidOperationException`, not
+   `ArgumentException`.** BouncyCastle does reject all-zero and order-8 peer
+   keys, so the check exists — but `DeriveKey` documents only its
+   `ArgumentException` length guards. Pairing code that catches
+   `ArgumentException` for a malformed peer key will miss this and crash the
+   session on hostile input.
+
+6. **Unknown `MessageType` values drop the whole frame.** A `type` the client
+   does not know throws `JsonException` at deserialization. Decide whether
+   ignoring such frames is preferable once a transport exists.
+
+7. **Ed25519 pairing signatures are unimplemented.** Spec section 4.1 lists them;
+   `PairingPayload` verification needs BouncyCastle's `Ed25519Signer`.
+
+8. **`ISecretStore` has no consumer yet**, so its shape is unvalidated. Plan 2's
+   paired-device list will likely want enumeration, and `Read` returns a
+   `byte[]` with no zeroing story.
+
+9. **Gzip decompression has no output ceiling** — in any of the three clients.
+   100 MB of zeros compresses to about 100 KB, so a 20 MB frame can expand to
+   gigabytes. Not a Plan 1 regression; worth a bounded decompressor once a
+   socket is behind it.
+
+10. **`RespectNullableAnnotations` does not cover `byte[]` members.** It rejects
+    JSON null on required *reference* members, but `Base64ByteArrayConverter`
+    opts into `HandleNull`, so `nonce`, `tag` and `ciphertext` decode an explicit
+    null to `[]` rather than throwing. For nonce and tag that is correct — it is
+    how plain-text mode is signalled. For `ciphertext` it means an empty
+    ciphertext reaches the decrypt step rather than failing at parse time.

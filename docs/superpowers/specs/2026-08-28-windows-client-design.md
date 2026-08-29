@@ -167,6 +167,8 @@ TransportFrameCodec.Decode
 deduplicate by message id (LAN and cloud each deliver a copy; first wins)
   ▼
 IncomingClipboardHandler
+  │ 0. if nonce or tag is empty -> plain-text mode: skip decryption,
+  │    the ciphertext field is gzipped but unencrypted (see below)
   │ 1. AES-256-GCM decrypt and verify tag
   │ 2. gunzip (on failure, treat as uncompressed — legacy compatibility)
   │ 3. discard if timestamp older than 5 minutes (replay protection)
@@ -175,6 +177,27 @@ IncomingClipboardHandler
   ├─► write to system clipboard, then record the new sequence number
   └─► toast notification with content preview
 ```
+
+### 3.2.1 Plain-text mode
+
+Both shipping clients support an unencrypted mode, and the Windows client must
+implement the receive side of it or messages from a peer in that mode fail with
+no useful diagnosis.
+
+An **empty `nonce` or empty `tag`** is the signal. The `ciphertext` field then
+holds the gzipped `ClipboardPayload` JSON with no encryption applied — it is
+still compressed, so the gunzip step is unchanged. macOS detects it as
+`envelope.payload.encryption.nonce.isEmpty || ...tag.isEmpty`
+(`SyncEngine.swift`), and Android does the same.
+
+`Hypo.Core`'s models already represent this correctly: `Base64ByteArrayConverter`
+decodes both an absent-but-null and an empty-string field to a zero-length
+array, so an empty nonce arrives as `[]` rather than throwing. What is missing
+is the branch in the inbound handler, which is Plan 2's work.
+
+The Windows client should **receive** plain-text messages but never **send**
+them. Nothing in the product requires it, and a send path that can silently skip
+encryption is a liability.
 
 ### 3.3 Transport selection
 

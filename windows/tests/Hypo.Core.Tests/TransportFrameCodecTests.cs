@@ -95,4 +95,28 @@ public class TransportFrameCodecTests
 
         Assert.Equal(TransportFrameError.PayloadTooLarge, error.Error);
     }
+
+    [Fact]
+    public void ThrowsWhenTheLengthPrefixExceedsTheCeiling()
+    {
+        var codec = new TransportFrameCodec();
+        var frame = new byte[8];
+        BinaryPrimitives.WriteUInt32BigEndian(
+            frame.AsSpan(0, 4), (uint)TransportFrameCodec.DefaultMaxPayloadBytes + 1);
+
+        var error = Assert.Throws<TransportFrameException>(() => codec.Decode(frame));
+
+        Assert.Equal(TransportFrameError.PayloadTooLarge, error.Error);
+    }
+
+    [Fact]
+    public void ThrowsWhenTheLengthPrefixIsUIntMaxValue()
+    {
+        var codec = new TransportFrameCodec();
+        var frame = new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0x01 };
+
+        var error = Assert.Throws<TransportFrameException>(() => codec.Decode(frame));
+
+        Assert.Equal(TransportFrameError.PayloadTooLarge, error.Error);
+    }
 }

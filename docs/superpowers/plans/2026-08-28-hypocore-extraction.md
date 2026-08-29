@@ -29,12 +29,18 @@ cd macos && swift test 2>&1 | tail -20
 **本地可移植性闸门**（每个搬迁任务都要跑）：
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ | grep -vE ':[0-9]+: *(///|//|\*)' ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。这不能证明 iOS 构建成功，但能在本地立刻抓住最可能的破坏源——把 macOS 专有类型带进了 core。
 
 **CI 上的权威验证**：Task 1B 新增的 `ios-core-build` job 在 `macos-15` runner 上跑真正的 `xcodebuild`。**每个任务提交后都要推送并确认该 job 通过**，不要攒着一次推。
+
+**闸门的两个已知陷阱**（Task 4 实测）：
+
+1. **注释误报**。闸门是纯文本匹配，一句「useful for NSImage/Preview」的文档注释就会让它变红（`StorageManager.swift:82` 即是），而该文件根本没有 `import AppKit`。因此闸门命令已加上 `| grep -vE ':[0-9]+: *(///|//|\*)'` 过滤纯注释行。**会误报的闸门很快就没人看，比没有闸门更危险**——若仍出现命中，先确认是真的代码引用再动手。
+
+2. **`swift build` 通过不等于没问题**。Task 4 需要改 `public` 的两个符号里，`TokenBucket.consume()` 被 app 代码引用（build 阶段就报错），但 `TokenBucket.init` 只被**测试代码**直接构造（`TokenBucketTests.swift`、`ClipboardMonitorTests.swift` 共 26 处），**只有 `swift test` 会暴露**。搬迁后必须跑完整测试套件，不能停在 build 成功。
 
 **闸门与 CI 覆盖不到什么**（Task 3 质量审查结论，务必先读再动 Task 5/6/10）：
 
@@ -395,7 +401,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ | grep -vE ':[0-9]+: *(///|//|\*)' ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -481,7 +487,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 5: 可移植性闸门**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ | grep -vE ':[0-9]+: *(///|//|\*)' ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。

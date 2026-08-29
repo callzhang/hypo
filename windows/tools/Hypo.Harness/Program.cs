@@ -235,7 +235,18 @@ async Task ListenAsync()
     await server.StartAsync();
 
     await using var discovery = new MdnsPeerDiscovery();
-    var signing = SigningService.GeneratePrivateKey();
+
+    // The same persisted key `pair` uses. Generating a throwaway one here
+    // advertises a signing public key whose private half is discarded when the
+    // process exits -- we would be claiming an identity we cannot sign for, and
+    // it would differ on every run.
+    var signing = store.Read("local-signing-key");
+    if (signing is null)
+    {
+        signing = SigningService.GeneratePrivateKey();
+        store.Write("local-signing-key", signing);
+    }
+
     var agreement = new byte[CryptoService.X25519KeySizeBytes];
     System.Security.Cryptography.RandomNumberGenerator.Fill(agreement);
     var agreementPublic = CryptoService.DerivePublicKey(agreement);

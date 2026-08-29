@@ -35,4 +35,13 @@ public class Base64ByteArrayConverterTests
         Assert.NotNull(holder);
         Assert.Empty(holder.Value);
     }
+
+    [Fact]
+    public void ThrowsJsonExceptionOnMalformedBase64()
+    {
+        var error = Assert.Throws<JsonException>(
+            () => JsonSerializer.Deserialize<Holder>("""{"value":"not base64!"}"""));
+
+        Assert.IsType<FormatException>(error.InnerException);
+    }
 }

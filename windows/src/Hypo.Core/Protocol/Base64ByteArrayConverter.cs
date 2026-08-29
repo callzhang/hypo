@@ -26,7 +26,18 @@ public sealed class Base64ByteArrayConverter : JsonConverter<byte[]>
             throw new JsonException($"Expected a base64 string but found {reader.TokenType}.");
         }
 
-        return Base64Compat.Decode(reader.GetString()!);
+        try
+        {
+            return Base64Compat.Decode(reader.GetString()!);
+        }
+        catch (FormatException ex)
+        {
+            // This converter decodes untrusted peer data, and callers at the
+            // deserialization boundary catch JsonException to drop a malformed
+            // message. A raw FormatException would slip past those handlers.
+            // System.Text.Json fills in Path and LineNumber on the way out.
+            throw new JsonException("Expected a valid base64 string.", ex);
+        }
     }
 
     public override void Write(Utf8JsonWriter writer, byte[] value, JsonSerializerOptions options)

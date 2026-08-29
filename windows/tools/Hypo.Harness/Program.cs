@@ -123,8 +123,11 @@ async Task PairAsync(string? target)
     }
     catch (TimeoutException)
     {
+        Console.WriteLine("No pairing reply within 30s.");
         Console.WriteLine(
-            "No pairing reply within 30s. The peer accepted the connection but did not answer.");
+            "That is all this says: the connection was accepted and no parseable ack arrived. "
+            + "Whether the peer never answered or answered in a shape we dropped needs a probe "
+            + "that logs raw inbound frames.");
         return;
     }
 

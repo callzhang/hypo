@@ -162,6 +162,20 @@ public sealed class LanWebSocketClient : ISyncTransport, IDisposable
                     continue;
                 }
 
+                // The binary channel carries both kinds of traffic, so the
+                // opcode alone cannot route it: Android answers a pairing
+                // challenge with bare JSON on opcode 0x2. Classify by content,
+                // and only at a frame boundary — mid-frame continuation bytes
+                // are arbitrary and belong to the reader untouched.
+                if (_reader.Buffered == 0
+                    && !TransportFrameCodec.LooksLikeLengthPrefix(buffer.AsSpan(0, result.Count)))
+                {
+                    var ack = System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    PairingMessageReceived?.Invoke(
+                        this, new PairingMessageReceivedEventArgs(ack, PeerDeviceId));
+                    continue;
+                }
+
                 // Clipboard traffic: a WebSocket message boundary is not a frame
                 // boundary, so FrameReader owns reassembly.
                 foreach (var body in _reader.Append(buffer.AsSpan(0, result.Count)))

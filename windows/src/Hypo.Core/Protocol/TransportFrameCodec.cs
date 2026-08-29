@@ -34,6 +34,41 @@ public sealed class TransportFrameCodec
         _maxPayloadBytes = maxPayloadBytes;
     }
 
+    /// <summary>
+    /// Whether these leading bytes can begin a length prefix under the ceiling,
+    /// which is what tells clipboard traffic from pairing traffic on the binary
+    /// channel. The two share opcode 0x2: Android replies to a challenge with
+    /// bare JSON via Java-WebSocket's send(byte[]), and has no text-send path.
+    /// <para>
+    /// The test is exact rather than a heuristic. A body may be at most
+    /// <paramref name="maxPayloadBytes"/>, so a big-endian prefix cannot read
+    /// higher than that, while JSON opens with '{' — 0x7B — putting any bare
+    /// JSON body above 0x7B000000. The two ranges cannot overlap while the
+    /// ceiling stays below that, which the 20 MB default does by two orders of
+    /// magnitude. Keying on the ceiling rather than on the literal '{' is what
+    /// stops the rule and the codec drifting apart.
+    /// </para>
+    /// </summary>
+    /// <returns>
+    /// True for anything that could still be a frame, including an empty span:
+    /// nothing rules it out, and an empty frame is a harmless no-op to the
+    /// reader where an empty pairing message is not.
+    /// </returns>
+    public static bool LooksLikeLengthPrefix(
+        ReadOnlySpan<byte> bytes, int maxPayloadBytes = DefaultMaxPayloadBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPayloadBytes);
+
+        if (bytes.Length >= LengthPrefixBytes)
+        {
+            return BinaryPrimitives.ReadUInt32BigEndian(bytes[..LengthPrefixBytes]) <= (uint)maxPayloadBytes;
+        }
+
+        // A partial prefix: the most significant byte is all there is, and all
+        // the discriminator needs, since it alone separates 0x01 from 0x7B.
+        return bytes.IsEmpty || bytes[0] <= (byte)((uint)maxPayloadBytes >> 24);
+    }
+
     public byte[] Encode(SyncEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);

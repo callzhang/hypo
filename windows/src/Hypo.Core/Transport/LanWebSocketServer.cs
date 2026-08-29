@@ -153,6 +153,19 @@ public sealed class LanWebSocketServer : IAsyncDisposable
                     continue;
                 }
 
+                // Binary is not a channel, it is two: a length-prefixed
+                // envelope, or the bare-JSON pairing ack Android sends because
+                // Java-WebSocket has no text-send path. Only classify at a
+                // frame boundary; mid-frame bytes are arbitrary.
+                if (reader.Buffered == 0
+                    && !TransportFrameCodec.LooksLikeLengthPrefix(buffer.AsSpan(0, result.Count)))
+                {
+                    var ack = System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    PairingMessageReceived?.Invoke(
+                        this, new PairingMessageReceivedEventArgs(ack, connectionId));
+                    continue;
+                }
+
                 foreach (var body in reader.Append(buffer.AsSpan(0, result.Count)))
                 {
                     Dispatch(body, peerDeviceId);

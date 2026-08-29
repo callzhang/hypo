@@ -12,15 +12,15 @@
 
 **Prerequisite:** Plan 1, merged. `Hypo.Core` at 78 passing tests.
 
-> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 9.**
-> Tasks 1 to 9 are written to this plan's own standard: failing test, complete
+> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 11.**
+> Tasks 1 to 11 are written to this plan's own standard: failing test, complete
 > implementation, exact commands, expected counts. Tasks 3–16 are currently only
 > scoped, not written. A summarised task is a plan failure, not a shortcut — the
 > whole reason Plan 1's subagents caught a JSON writer that escaped `+`, a
 > converter override that was never invoked, and an associated-data formula that
 > would have broken interoperability with both peer clients is that they were
 > handed exact code to run and could watch it fail. Finish writing them before
-> dispatching anyone past Task 9.
+> dispatching anyone past Task 11.
 
 ---
 
@@ -2141,13 +2141,473 @@ git commit -m "test(windows): round-trip an envelope over a loopback LAN socket"
 ```
 
 ---
-## Tasks 10 to 16 — still to be written
+## Task 10: Ed25519 signing
+
+The one unimplemented row of spec section 4.1. `PairingPayload` is Ed25519
+signed, and the signing public key is what peers advertise as `signing_pub_key`.
+
+**Files:**
+- Create: `windows/src/Hypo.Core/Crypto/SigningService.cs`
+- Test: `windows/tests/Hypo.Core.Tests/SigningServiceTests.cs`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `windows/tests/Hypo.Core.Tests/SigningServiceTests.cs`:
+
+```csharp
+using Hypo.Core.Crypto;
+
+namespace Hypo.Core.Tests;
+
+public class SigningServiceTests
+{
+    private static (byte[] Private, byte[] Public) Key()
+    {
+        var priv = SigningService.GeneratePrivateKey();
+        return (priv, SigningService.DerivePublicKey(priv));
+    }
+
+    [Fact]
+    public void GeneratesKeysOfTheRightLength()
+    {
+        var (priv, pub) = Key();
+
+        Assert.Equal(SigningService.KeySizeBytes, priv.Length);
+        Assert.Equal(SigningService.KeySizeBytes, pub.Length);
+    }
+
+    [Fact]
+    public void VerifiesWhatItSigned()
+    {
+        var (priv, pub) = Key();
+        var message = "the payload"u8.ToArray();
+
+        var signature = SigningService.Sign(message, priv);
+
+        Assert.Equal(SigningService.SignatureSizeBytes, signature.Length);
+        Assert.True(SigningService.Verify(message, signature, pub));
+    }
+
+    [Fact]
+    public void RejectsATamperedMessage()
+    {
+        var (priv, pub) = Key();
+        var signature = SigningService.Sign("the payload"u8.ToArray(), priv);
+
+        Assert.False(SigningService.Verify("the paylaod"u8.ToArray(), signature, pub));
+    }
+
+    [Fact]
+    public void RejectsATamperedSignature()
+    {
+        var (priv, pub) = Key();
+        var message = "the payload"u8.ToArray();
+        var signature = SigningService.Sign(message, priv);
+        signature[0] ^= 0xFF;
+
+        Assert.False(SigningService.Verify(message, signature, pub));
+    }
+
+    [Fact]
+    public void RejectsAnotherPartysKey()
+    {
+        var (priv, _) = Key();
+        var (_, otherPub) = Key();
+        var message = "the payload"u8.ToArray();
+
+        Assert.False(SigningService.Verify(message, SigningService.Sign(message, priv), otherPub));
+    }
+
+    [Fact]
+    public void VerifyReturnsFalseRatherThanThrowingOnAMalformedSignature()
+    {
+        // Signatures arrive from peers. A malformed one is untrusted input, not
+        // a programming error, and callers should get a bool rather than an
+        // exception they have to remember to catch.
+        var (_, pub) = Key();
+
+        Assert.False(SigningService.Verify("x"u8.ToArray(), [0x01, 0x02], pub));
+    }
+
+    [Theory]
+    [InlineData(31)]
+    [InlineData(33)]
+    public void NamesTheOffendingArgumentOnAWrongLengthKey(int length)
+    {
+        var error = Assert.Throws<ArgumentException>(
+            () => SigningService.Sign("x"u8.ToArray(), new byte[length]));
+
+        Assert.Equal("privateKey", error.ParamName);
+    }
+
+    [Fact]
+    public void VerifyRejectsAWrongLengthPublicKeyWithoutThrowing()
+    {
+        Assert.False(SigningService.Verify("x"u8.ToArray(), new byte[64], new byte[31]));
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~SigningServiceTests`
+
+Expected: FAIL to compile with `CS0246: The type or namespace name 'SigningService' could not be found`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `windows/src/Hypo.Core/Crypto/SigningService.cs`:
+
+```csharp
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Crypto.Signers;
+
+namespace Hypo.Core.Crypto;
+
+/// <summary>
+/// Ed25519 signing for pairing payloads. Peers advertise the public half as
+/// signing_pub_key; see the design spec section 4.2. Matches
+/// Curve25519.Signing on macOS.
+/// </summary>
+public static class SigningService
+{
+    public const int KeySizeBytes = 32;
+    public const int SignatureSizeBytes = 64;
+
+    public static byte[] GeneratePrivateKey()
+    {
+        var seed = new byte[KeySizeBytes];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(seed);
+        return seed;
+    }
+
+    public static byte[] DerivePublicKey(byte[] privateKey)
+    {
+        RequireKeySize(privateKey, nameof(privateKey));
+        return new Ed25519PrivateKeyParameters(privateKey).GeneratePublicKey().GetEncoded();
+    }
+
+    public static byte[] Sign(byte[] message, byte[] privateKey)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        RequireKeySize(privateKey, nameof(privateKey));
+
+        var signer = new Ed25519Signer();
+        signer.Init(true, new Ed25519PrivateKeyParameters(privateKey));
+        signer.BlockUpdate(message, 0, message.Length);
+        return signer.GenerateSignature();
+    }
+
+    /// <summary>
+    /// Returns false rather than throwing for anything malformed. Signatures and
+    /// keys here arrive from peers, so a bad one is untrusted input rather than
+    /// a bug, and a bool is harder for a caller to ignore than an exception.
+    /// </summary>
+    public static bool Verify(byte[] message, byte[] signature, byte[] publicKey)
+    {
+        if (message is null || signature is null || publicKey is null ||
+            publicKey.Length != KeySizeBytes ||
+            signature.Length != SignatureSizeBytes)
+        {
+            return false;
+        }
+
+        try
+        {
+            var verifier = new Ed25519Signer();
+            verifier.Init(false, new Ed25519PublicKeyParameters(publicKey));
+            verifier.BlockUpdate(message, 0, message.Length);
+            return verifier.VerifySignature(signature);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static void RequireKeySize(byte[] key, string paramName)
+    {
+        ArgumentNullException.ThrowIfNull(key, paramName);
+
+        if (key.Length != KeySizeBytes)
+        {
+            throw new ArgumentException(
+                $"An Ed25519 key is {KeySizeBytes} bytes; got {key.Length}.", paramName);
+        }
+    }
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~SigningServiceTests`
+
+Expected: PASS, 9 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add windows/src/Hypo.Core/Crypto/SigningService.cs windows/tests/Hypo.Core.Tests/SigningServiceTests.cs
+git commit -m "feat(windows): add Ed25519 signing for pairing payloads"
+```
+
+---
+
+## Task 11: Pairing message models
+
+Field names mirror `macos/Sources/HypoApp/Pairing/PairingModels.swift`. Note
+what is **not** here: the ACK carries no responder public key. Protocol section
+9.2 says it does; the shipping implementation disagrees, and the design spec
+section 4.2 records why.
+
+**Files:**
+- Create: `windows/src/Hypo.Core/Pairing/PairingMessages.cs`
+- Test: `windows/tests/Hypo.Core.Tests/PairingMessagesTests.cs`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `windows/tests/Hypo.Core.Tests/PairingMessagesTests.cs`:
+
+```csharp
+using System.Text.Json;
+using Hypo.Core.Pairing;
+using Hypo.Core.Protocol;
+
+namespace Hypo.Core.Tests;
+
+public class PairingMessagesTests
+{
+    private const string ChallengeJson = """
+    {
+      "challenge_id": "11111111-1111-1111-1111-111111111111",
+      "initiator_device_id": "550e8400-e29b-41d4-a716-446655440000",
+      "initiator_device_name": "Test PC",
+      "initiator_pub_key": "0KWinOak3zMKXjQg4K1f7TWdypF0oDb32e5fOnzjuX4=",
+      "nonce": "qrvM",
+      "ciphertext": "3q2+7w",
+      "tag": "EBES"
+    }
+    """;
+
+    [Fact]
+    public void DeserialisesAChallenge()
+    {
+        var message = JsonSerializer.Deserialize<PairingChallengeMessage>(ChallengeJson, ProtocolJson.Options)!;
+
+        Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), message.ChallengeId);
+        Assert.Equal("550e8400-e29b-41d4-a716-446655440000", message.InitiatorDeviceId);
+        Assert.Equal("Test PC", message.InitiatorDeviceName);
+        Assert.Equal(32, message.InitiatorPublicKey.Length);
+        Assert.Equal(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }, message.Ciphertext);
+    }
+
+    [Fact]
+    public void WritesTheChallengeIdInLowercase()
+    {
+        // Android generates lowercase challenge ids and compares them as
+        // strings; the macOS models carry explicit comments about this.
+        var message = new PairingChallengeMessage
+        {
+            ChallengeId = Guid.Parse("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"),
+            InitiatorDeviceId = "550e8400-e29b-41d4-a716-446655440000",
+            InitiatorDeviceName = "Test PC",
+            InitiatorPublicKey = new byte[32],
+            Nonce = new byte[12],
+            Ciphertext = [0x01],
+            Tag = new byte[16],
+        };
+
+        var json = JsonSerializer.Serialize(message, ProtocolJson.Options);
+
+        Assert.Contains("\"challenge_id\":\"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheAckCarriesNoResponderPublicKey()
+    {
+        // Protocol section 9.2 claims otherwise. The shipping ACK has six
+        // fields and none of them is a key; the responder publishes its key
+        // before the challenge instead. A client waiting for one here waits
+        // forever.
+        Assert.Null(typeof(PairingAckMessage).GetProperty("ResponderPublicKey"));
+
+        var json = JsonSerializer.Serialize(
+            new PairingAckMessage
+            {
+                ChallengeId = Guid.NewGuid(),
+                ResponderDeviceId = Guid.NewGuid(),
+                ResponderDeviceName = "Peer",
+                Nonce = new byte[12],
+                Ciphertext = [0x01],
+                Tag = new byte[16],
+            },
+            ProtocolJson.Options);
+
+        Assert.DoesNotContain("pub_key", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RoundTripsTheChallengePayload()
+    {
+        var payload = new PairingChallengePayload
+        {
+            Challenge = [0x01, 0x02, 0x03],
+            Timestamp = DateTimeOffset.Parse("2026-08-29T12:00:00Z"),
+        };
+
+        var json = JsonSerializer.Serialize(payload, ProtocolJson.Options);
+        var back = JsonSerializer.Deserialize<PairingChallengePayload>(json, ProtocolJson.Options)!;
+
+        Assert.Equal(payload.Challenge, back.Challenge);
+        Assert.Equal(payload.Timestamp, back.Timestamp);
+        Assert.Contains("\"timestamp\":\"2026-08-29T12:00:00Z\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheAckPayloadUsesSnakeCaseFieldNames()
+    {
+        var payload = new PairingAckPayload
+        {
+            ResponseHash = new byte[32],
+            IssuedAt = DateTimeOffset.Parse("2026-08-29T12:00:00Z"),
+        };
+
+        var json = JsonSerializer.Serialize(payload, ProtocolJson.Options);
+
+        Assert.Contains("response_hash", json, StringComparison.Ordinal);
+        Assert.Contains("issued_at", json, StringComparison.Ordinal);
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~PairingMessagesTests`
+
+Expected: FAIL to compile with `CS0246: The type or namespace name 'Hypo.Core.Pairing' could not be found`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `windows/src/Hypo.Core/Pairing/PairingMessages.cs`:
+
+```csharp
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Hypo.Core.Protocol;
+
+namespace Hypo.Core.Pairing;
+
+/// <summary>
+/// Serialises a Guid in lowercase. Android generates lowercase challenge ids and
+/// compares them as strings, so a client that wrote them uppercase would fail
+/// every match.
+/// </summary>
+public sealed class LowercaseGuidConverter : JsonConverter<Guid>
+{
+    public override Guid Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        Guid.Parse(reader.GetString()!);
+
+    public override void Write(Utf8JsonWriter writer, Guid value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.ToString("D").ToLowerInvariant());
+}
+
+/// <summary>Initiator to responder. Mirrors PairingChallengeMessage on macOS.</summary>
+public sealed record PairingChallengeMessage
+{
+    [JsonConverter(typeof(LowercaseGuidConverter))]
+    public required Guid ChallengeId { get; init; }
+
+    public required string InitiatorDeviceId { get; init; }
+
+    public required string InitiatorDeviceName { get; init; }
+
+    [JsonPropertyName("initiator_pub_key")]
+    [JsonConverter(typeof(Base64ByteArrayConverter))]
+    public required byte[] InitiatorPublicKey { get; init; }
+
+    [JsonConverter(typeof(Base64ByteArrayConverter))]
+    public required byte[] Nonce { get; init; }
+
+    [JsonConverter(typeof(Base64ByteArrayConverter))]
+    public required byte[] Ciphertext { get; init; }
+
+    [JsonConverter(typeof(Base64ByteArrayConverter))]
+    public required byte[] Tag { get; init; }
+}
+
+/// <summary>
+/// Responder to initiator. Deliberately carries no key: the responder published
+/// its agreement public key before the challenge arrived. See the design spec
+/// section 4.2.
+/// </summary>
+public sealed record PairingAckMessage
+{
+    [JsonConverter(typeof(LowercaseGuidConverter))]
+    public required Guid ChallengeId { get; init; }
+
+    [JsonConverter(typeof(LowercaseGuidConverter))]
+    public required Guid ResponderDeviceId { get; init; }
+
+    public required string ResponderDeviceName { get; init; }
+
+    [JsonConverter(typeof(Base64ByteArrayConverter))]
+    public required byte[] Nonce { get; init; }
+
+    [JsonConverter(typeof(Base64ByteArrayConverter))]
+    public required byte[] Ciphertext { get; init; }
+
+    [JsonConverter(typeof(Base64ByteArrayConverter))]
+    public required byte[] Tag { get; init; }
+}
+
+/// <summary>The plaintext inside a challenge's ciphertext.</summary>
+public sealed record PairingChallengePayload
+{
+    [JsonConverter(typeof(Base64ByteArrayConverter))]
+    public required byte[] Challenge { get; init; }
+
+    public required DateTimeOffset Timestamp { get; init; }
+}
+
+/// <summary>The plaintext inside an ack's ciphertext.</summary>
+public sealed record PairingAckPayload
+{
+    [JsonPropertyName("response_hash")]
+    [JsonConverter(typeof(Base64ByteArrayConverter))]
+    public required byte[] ResponseHash { get; init; }
+
+    [JsonPropertyName("issued_at")]
+    public required DateTimeOffset IssuedAt { get; init; }
+}
+```
+
+`InitiatorPublicKey` and the two payload types need explicit `JsonPropertyName`
+attributes because the snake-case policy would otherwise produce
+`initiator_public_key`, `response_hash` is already correct by policy but is
+pinned anyway, and `issued_at` likewise — being explicit here costs nothing and
+the cost of being wrong is a pairing that fails with no diagnosis.
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~PairingMessagesTests`
+
+Expected: PASS, 5 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add windows/src/Hypo.Core/Pairing/PairingMessages.cs windows/tests/Hypo.Core.Tests/PairingMessagesTests.cs
+git commit -m "feat(windows): add pairing message models"
+```
+
+---
+## Tasks 12 to 16 — still to be written
 
 These remain scoped but not written.
 
 Remaining scope:
 
-10. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
+12. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
 11. **`PairingMessages`** — `PairingChallengeMessage` and `PairingAckMessage`, matching `macos/Sources/HypoApp/Pairing/PairingModels.swift` field for field, with `challenge_id` lowercase.
 12. **`PairingSession`** — generates a fresh ephemeral X25519 pair per attempt, sends the challenge, verifies and consumes the ack, derives the shared key. Rejects a replayed `challenge_id` and an expired payload.
 13. **Pairing round-trip test** — two sessions in one process complete a pairing and derive the same key, and a tampered ack is rejected.

@@ -41,3 +41,18 @@ public sealed class TransportStateChangedEventArgs(TransportState state, Excepti
 
     public Exception? Error { get; } = error;
 }
+
+/// <summary>
+/// A pairing message, which travels as an unframed WebSocket text frame rather
+/// than the length-prefixed binary frames clipboard traffic uses. See the design
+/// spec section 3.2.1 — this asymmetry is what the shipping clients do, and it
+/// is not documented in the protocol spec.
+/// </summary>
+public sealed class PairingMessageReceivedEventArgs(string json, string connectionId) : EventArgs
+{
+    /// <summary>The raw JSON body. Callers parse it as a challenge or an ack.</summary>
+    public string Json { get; } = json;
+
+    /// <summary>Identifies the connection, so a server can reply on the same one.</summary>
+    public string ConnectionId { get; } = connectionId;
+}

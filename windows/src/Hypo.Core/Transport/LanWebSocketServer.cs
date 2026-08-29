@@ -22,6 +22,7 @@ public sealed class LanWebSocketServer : IAsyncDisposable
 
     private readonly int _preferredPort;
     private readonly TransportFrameCodec _codec = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, WebSocket> _connections = new();
 
     private WebApplication? _app;
 
@@ -33,6 +34,8 @@ public sealed class LanWebSocketServer : IAsyncDisposable
     }
 
     public event EventHandler<EnvelopeReceivedEventArgs>? EnvelopeReceived;
+
+    public event EventHandler<PairingMessageReceivedEventArgs>? PairingMessageReceived;
 
     /// <summary>
     /// The port in use, or 0 before starting. Discovery must advertise this
@@ -98,11 +101,36 @@ public sealed class LanWebSocketServer : IAsyncDisposable
             peerDeviceId = context.Request.Query["device_id"].ToString();
         }
 
+        var connectionId = Guid.NewGuid().ToString("D");
         using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
-        await PumpAsync(socket, peerDeviceId.ToLowerInvariant(), context.RequestAborted).ConfigureAwait(false);
+        _connections[connectionId] = socket;
+        try
+        {
+            await PumpAsync(socket, peerDeviceId.ToLowerInvariant(), connectionId, context.RequestAborted)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _connections.TryRemove(connectionId, out _);
+        }
     }
 
-    private async Task PumpAsync(WebSocket socket, string peerDeviceId, CancellationToken ct)
+    /// <summary>Replies on one connection with bare JSON in a text frame.</summary>
+    public async Task SendPairingAsync(string connectionId, string json, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+
+        if (!_connections.TryGetValue(connectionId, out var socket) || socket.State != WebSocketState.Open)
+        {
+            throw new InvalidOperationException($"No open connection {connectionId}.");
+        }
+
+        await socket.SendAsync(
+            System.Text.Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+    }
+
+    private async Task PumpAsync(WebSocket socket, string peerDeviceId, string connectionId, CancellationToken ct)
     {
         var reader = new FrameReader();
         var buffer = new byte[16 * 1024];
@@ -115,6 +143,14 @@ public sealed class LanWebSocketServer : IAsyncDisposable
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
                     break;
+                }
+
+                if (result.MessageType == WebSocketMessageType.Text)
+                {
+                    var json = System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    PairingMessageReceived?.Invoke(
+                        this, new PairingMessageReceivedEventArgs(json, connectionId));
+                    continue;
                 }
 
                 foreach (var body in reader.Append(buffer.AsSpan(0, result.Count)))

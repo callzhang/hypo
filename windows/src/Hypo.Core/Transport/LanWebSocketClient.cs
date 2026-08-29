@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.Text.Json;
 using Hypo.Core.Discovery;
 using Hypo.Core.Protocol;
 
@@ -30,6 +31,7 @@ public sealed class LanWebSocketClient : ISyncTransport, IDisposable
     }
 
     public event EventHandler<EnvelopeReceivedEventArgs>? EnvelopeReceived;
+    public event EventHandler<PairingMessageReceivedEventArgs>? PairingMessageReceived;
     public event EventHandler<TransportStateChangedEventArgs>? StateChanged;
 
     public TransportState State => _state;
@@ -92,6 +94,26 @@ public sealed class LanWebSocketClient : ISyncTransport, IDisposable
         await socket.SendAsync(frame, WebSocketMessageType.Binary, true, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Sends a pairing message as bare JSON in a text frame. Deliberately not
+    /// wrapped in a SyncEnvelope and deliberately not length-prefixed: both
+    /// peers detect a challenge by looking for initiator_device_id and
+    /// initiator_pub_key in the body, and wrapping buries those inside base64.
+    /// </summary>
+    public async Task SendPairingAsync(object message, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+
+        var socket = _socket;
+        if (socket is null || socket.State != WebSocketState.Open)
+        {
+            throw new InvalidOperationException("The transport is not connected.");
+        }
+
+        var json = JsonSerializer.SerializeToUtf8Bytes(message, message.GetType(), ProtocolJson.Options);
+        await socket.SendAsync(json, WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+    }
+
     public async Task DisconnectAsync(CancellationToken ct = default)
     {
         if (_pump is not null)
@@ -130,8 +152,18 @@ public sealed class LanWebSocketClient : ISyncTransport, IDisposable
                     break;
                 }
 
-                // A WebSocket message boundary is not a frame boundary: FrameReader
-                // owns reassembly across both partial and coalesced reads.
+                if (result.MessageType == WebSocketMessageType.Text)
+                {
+                    // Pairing traffic: bare JSON, no length prefix. Feeding this
+                    // to FrameReader reads '{"ch' as a 2 GB length and faults.
+                    var json = System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    PairingMessageReceived?.Invoke(
+                        this, new PairingMessageReceivedEventArgs(json, PeerDeviceId));
+                    continue;
+                }
+
+                // Clipboard traffic: a WebSocket message boundary is not a frame
+                // boundary, so FrameReader owns reassembly.
                 foreach (var body in _reader.Append(buffer.AsSpan(0, result.Count)))
                 {
                     Dispatch(body);

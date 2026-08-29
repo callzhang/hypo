@@ -69,6 +69,23 @@ Every one of these was measured against the shipping clients rather than taken f
 | `challenge_id` is lowercase; device ids are bare lowercase UUIDs | `docs/protocol.md`, Plan 1 §4.4 |
 | Keys rotate on every pairing, including re-pairing | `docs/protocol.md` §9.2 |
 
+## A note on the predicted compiler diagnostics
+
+Each task names the compiler error its failing step should produce. Those
+predictions are frequently wrong about the *code*, never about the *state*. The
+rule, worked out while executing this plan:
+
+- `CS0234` when the **namespace** is the first missing segment
+- `CS0246` when only the **type** is missing
+- `CS0103` when the type is missing but the name sits in a context a `using` has
+  already resolved
+
+Which one appears depends on how much of the path earlier tasks have brought
+into existence, so the same task yields different codes at different points in
+the sequence. Treat any of the three as the expected failure. Report the
+discrepancy; do not treat it as a failure to reproduce, and do not go looking
+for a second defect.
+
 ---
 
 ## Task 1: Streaming frame reader

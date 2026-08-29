@@ -501,7 +501,7 @@ public class DiscoveredPeerTests
     };
 
     private static DiscoveredPeer MacOsPeer() => DiscoveredPeer.FromTxt(
-        instanceName: @"derek\8217sMacBookAir(2)._hypo._tcp.local",
+        instanceName: @"derek\8217s\032MacBook\032Air\032(2)._hypo._tcp.local",
         host: "4efa9cc4-2ea7-468c-9b64-7087849da0b4.local",
         address: "10.0.0.252",
         port: 7010,

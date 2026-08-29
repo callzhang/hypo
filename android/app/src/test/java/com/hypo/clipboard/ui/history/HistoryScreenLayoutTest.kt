@@ -19,6 +19,7 @@ class HistoryScreenLayoutTest {
     @Test
     fun `history top bar is compact and has no title`() {
         assertEquals(48, historySearchBarHeightDp)
+        assertEquals(240, historySearchBarMaxWidthDp)
         assertEquals(false, historyShowsTitle)
     }
 }

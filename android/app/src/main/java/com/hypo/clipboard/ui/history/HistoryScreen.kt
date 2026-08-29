@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
@@ -93,6 +94,7 @@ import com.hypo.clipboard.util.formattedAsKB
 import com.hypo.clipboard.domain.model.TransportOrigin
 import com.hypo.clipboard.transport.ConnectionState
 import com.hypo.clipboard.ui.components.ConnectionStatusIcon
+import com.hypo.clipboard.ui.components.connectionStatusIconTint
 import com.hypo.clipboard.util.TempFileManager
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -153,23 +155,32 @@ fun HistoryScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SearchBar(
-                query = query,
-                onQueryChange = onQueryChange,
-                onSearch = { searchActive = false },
-                active = searchActive,
-                onActiveChange = { searchActive = it },
-                placeholder = { Text(text = stringResource(id = R.string.history_search_hint)) },
-                leadingIcon = { Icon(imageVector = Icons.Filled.Search, contentDescription = null) },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(historySearchBarHeightDp.dp),
-                colors = SearchBarDefaults.colors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) { }
+            Box(modifier = Modifier.weight(1f)) {
+                SearchBar(
+                    query = query,
+                    onQueryChange = onQueryChange,
+                    onSearch = { searchActive = false },
+                    active = searchActive,
+                    onActiveChange = { searchActive = it },
+                    placeholder = { Text(text = stringResource(id = R.string.history_search_hint)) },
+                    leadingIcon = { Icon(imageVector = Icons.Filled.Search, contentDescription = null) },
+                    modifier = Modifier
+                        .widthIn(max = historySearchBarMaxWidthDp.dp)
+                        .height(historySearchBarHeightDp.dp),
+                    colors = SearchBarDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) { }
+            }
             IconButton(onClick = {}) {
-                ConnectionStatusIcon(connectionState = connectionState)
+                ConnectionStatusIcon(
+                    connectionState = connectionState,
+                    tint = connectionStatusIconTint(
+                        connectionState = connectionState,
+                        defaultTint = null,
+                        cloudTint = MaterialTheme.colorScheme.primary
+                    )
+                )
             }
             IconButton(onClick = onOpenSettings) {
                 Icon(
@@ -260,6 +271,7 @@ internal fun historyTopBarActions(): List<HistoryTopBarAction> = listOf(
 )
 
 internal const val historySearchBarHeightDp: Int = 48
+internal const val historySearchBarMaxWidthDp: Int = 240
 internal const val historyShowsTitle: Boolean = false
 
 @Composable

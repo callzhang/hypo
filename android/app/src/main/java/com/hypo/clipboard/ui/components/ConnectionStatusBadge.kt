@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.hypo.clipboard.R
@@ -43,15 +44,25 @@ fun ConnectionStatusBadge(connectionState: ConnectionState, modifier: Modifier =
 }
 
 @Composable
-fun ConnectionStatusIcon(connectionState: ConnectionState, modifier: Modifier = Modifier) {
+fun ConnectionStatusIcon(
+    connectionState: ConnectionState,
+    modifier: Modifier = Modifier,
+    tint: Color? = null
+) {
     val visuals = statusVisuals(connectionState)
     Icon(
         imageVector = visuals.icon,
         contentDescription = stringResource(id = visuals.textRes),
-        tint = visuals.contentColor,
+        tint = tint ?: visuals.contentColor,
         modifier = modifier
     )
 }
+
+internal fun connectionStatusIconTint(
+    connectionState: ConnectionState,
+    defaultTint: Color?,
+    cloudTint: Color
+): Color? = if (connectionState == ConnectionState.ConnectedCloud) cloudTint else defaultTint
 
 @Composable
 private fun statusVisuals(connectionState: ConnectionState): StatusVisuals = when (connectionState) {

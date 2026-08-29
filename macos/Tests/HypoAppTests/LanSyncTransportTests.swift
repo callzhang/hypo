@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import HypoApp
+@testable import HypoCore
 
 struct LanSyncTransportTests {
     @Test @MainActor

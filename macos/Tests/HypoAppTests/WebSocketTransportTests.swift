@@ -4,6 +4,7 @@ import FoundationNetworking
 #endif
 import Testing
 @_spi(Testing) @testable import HypoApp
+@testable import HypoCore
 
 struct WebSocketTransportTests {
     @Test

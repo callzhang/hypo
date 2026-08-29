@@ -14,6 +14,9 @@ let package = Package(
             targets: ["HypoCore"]
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-testing.git", from: "0.5.0")
+    ],
     targets: [
         .target(
             name: "HypoCore",
@@ -21,6 +24,14 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("z")
             ]
+        ),
+        .testTarget(
+            name: "HypoCoreTests",
+            dependencies: [
+                "HypoCore",
+                .product(name: "Testing", package: "swift-testing")
+            ],
+            path: "Tests/HypoCoreTests"
         )
     ]
 )

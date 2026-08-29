@@ -1,5 +1,5 @@
 import Testing
-@testable import HypoApp
+@testable import HypoCore
 
 struct TokenBucketTests {
     @Test

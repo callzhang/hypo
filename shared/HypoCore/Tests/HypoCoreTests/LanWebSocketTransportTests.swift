@@ -225,11 +225,13 @@ struct LanWebSocketTransportTests {
         }
 
         try await transport.connect()
-        
-        // Wait for keepalive interval
-        try await Task.sleep(for: .milliseconds(200))
-        
-        let sent = pingSent.withLock { $0 }
+
+        // Wait for the keepalive timer to fire and send a ping, rather than assuming
+        // it has happened after a fixed sleep — on a slower simulator (e.g. iOS 26.5's
+        // iPhone 17) a flat delay can elapse before the timer fires.
+        let sent = await waitUntil(timeout: .seconds(2)) {
+            pingSent.withLock { $0 }
+        }
         #expect(sent)
         await transport.disconnect()
     }

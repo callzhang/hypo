@@ -5,6 +5,20 @@ import Testing
 import os
 @testable import HypoCore
 
+// This entire suite is scoped to macOS. Every test here calls `LanWebSocketServer.start(port:)`,
+// which binds a real `NWListener` — but phase 1 decided iOS is a LAN *client* only, never a
+// listener: iOS suspends background processes, so a listening socket would make the device
+// appear to flap on and off to peers. iOS never runs `LanWebSocketServer`, so these tests
+// exercise a path iOS will never take in production.
+//
+// It also isn't just an unrepresentative test: on iOS 26.5+, an XCTest bundle has no app host
+// and no NSLocalNetworkUsageDescription, so it cannot create an NWListener at all
+// (`nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed`). Under the
+// parallel test runner this doesn't just fail the tests that bind a listener — the socket-layer
+// contention it creates can stall unrelated tests running at the same time. iOS 18.5 (CI's
+// simulator) did not enforce this, which is how this went unnoticed until Xcode 26.6 / iOS 26.5
+// was installed locally.
+#if os(macOS)
 @MainActor
 @Suite
 struct LanWebSocketServerTests {
@@ -979,3 +993,4 @@ private func makeWebSocketFrame(payload: Data, opcode: UInt8, isFinal: Bool) -> 
     frame.append(payload)
     return frame
 }
+#endif

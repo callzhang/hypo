@@ -3,6 +3,20 @@ import Testing
 @testable import HypoCore
 
 struct TransportManagerLanTests {
+    // The four tests below call `manager.ensureLanDiscoveryActive()`, which drives
+    // `TransportManager.activateLanServices()` to call `webSocketServer.start(port:)` —
+    // i.e. they bind a real `NWListener`, same as `LanWebSocketServerTests`. iOS never runs
+    // the LAN server (phase 1 scoped iOS to a LAN *client*, never a listener), and an iOS
+    // XCTest bundle cannot bind a listener without an app host and a local-network usage
+    // description (`nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID
+    // failed`). iOS 18.5 (CI's simulator) did not enforce this.
+    //
+    // The other tests in this file also call `makeWebSocketServer()`, but that only
+    // constructs a `LanWebSocketServer` — the `NWListener` isn't created until `.start(port:)`
+    // runs, which only happens via `ensureLanDiscoveryActive()`. Those tests never trigger it,
+    // so they exercise real iOS-relevant behavior (LAN client dialing, fallback, connection
+    // supervision) and stay enabled on iOS.
+    #if os(macOS)
     @Test @MainActor
     func testDiscoveryEventsUpdateStateAndDiagnostics() async throws {
         let driver = MockBonjourDriver()
@@ -118,6 +132,7 @@ struct TransportManagerLanTests {
 
         await manager.suspendLanDiscovery()
     }
+    #endif
 
     @Test
     func testConnectPrefersLan() async {
@@ -349,6 +364,9 @@ struct TransportManagerLanTests {
         #expect(state == .disconnected)
     }
 
+    // Both tests below call `ensureLanDiscoveryActive()`, which binds a real `NWListener`
+    // via `webSocketServer.start(port:)` — same rationale as the block gated above.
+    #if os(macOS)
     @Test @MainActor
     func testUpdateLocalAdvertisementRestartsOnPortChange() async throws {
         let publisher = MockBonjourPublisher()
@@ -405,4 +423,5 @@ struct TransportManagerLanTests {
         #expect(publisher.metadataUpdates.count == 1)
         #expect(publisher.currentConfiguration?.fingerprint == "fp-3")
     }
+    #endif
 }

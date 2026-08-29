@@ -145,3 +145,11 @@ jobs:
       - name: Build HypoCore for macOS
         working-directory: shared/HypoCore
         run: swift build
+      - name: Run HypoCore tests on iOS Simulator
+        working-directory: shared/HypoCore
+        run: |
+          xcodebuild test \
+            -scheme HypoCore \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -skipMacroValidation \
+            -enableCodeCoverage NO

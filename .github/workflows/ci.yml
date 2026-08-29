@@ -127,8 +127,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Show available iOS SDKs
-        run: xcodebuild -showsdks | grep -i ios
+      - name: Show available iOS SDKs and simulators
+        run: |
+          xcodebuild -showsdks | grep -i ios || true
+          xcrun simctl list devicetypes | grep -i iphone || true
       - name: Build HypoCore for iOS Simulator
         working-directory: shared/HypoCore
         run: |

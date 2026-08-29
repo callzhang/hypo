@@ -1,0 +1,1606 @@
+# iOS 前台版客户端实现计划（第 2 期）
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 做出可在 iOS 模拟器运行、与 macOS 客户端真实双向同步剪贴板的 iOS App：配对、LAN + 云双通道、历史列表、`UIPasteControl` 发送。
+
+**Architecture:** 第 1 期已把 45 个文件抽进 `shared/HypoCore`（macOS 与 iOS 共用），并留下六个平台协议接缝。本期不改 HypoCore 的任何逻辑，只做三件事——为六个接缝写 iOS 实现、建 `ios/Hypo.xcodeproj` 应用外壳、写 SwiftUI 界面。macOS 端全程不受影响。
+
+**Tech Stack:** Swift 6 / SwiftUI / UIKit（仅 `UIPasteboard`、`UIPasteControl`、`UIApplication`）/ SwiftPM 本地依赖 / Xcode 26.6，iOS 部署目标 17.0
+
+**参考:** `docs/superpowers/specs/2026-08-28-ios-app-design.md`（§4.4 工程构成、§5 前台传输、§7 数据、§8 错误处理、§9 第 2 期）
+
+---
+
+## 环境前提（开工前逐条确认）
+
+本机 `xcode-select` 仍指向 Command Line Tools，**所有 iOS 命令必须前置环境变量**：
+
+```bash
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+```
+
+确认工具链：
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -version
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl list devices available | grep iPhone
+```
+
+期望：Xcode 26.6；有 iPhone 17 系列机型。**本机没有 iPhone 16**——CI 里写的是 `name=iPhone 16`，本地必须用 `name=iPhone 17`，照抄 CI 命令会报找不到设备。
+
+**跑 Swift 测试前先确认没有 Hypo.app 在运行**：
+
+```bash
+pgrep -f HypoMenuBar && osascript -e 'quit app "Hypo"' || echo "未运行"
+```
+
+运行中的实例持有 LAN WebSocket 端口，会让 socket 测试无限挂起。`./scripts/build-macos.sh --no-launch` 可只构建不启动。
+
+**基线**（每个任务后都不应下降）：
+
+```bash
+cd macos && swift test              # 56
+cd shared/HypoCore && swift test    # 143
+```
+
+---
+
+## 已知的坑（每一条都会真实咬人）
+
+| 坑 | 后果 | 本计划在哪处理 |
+|---|---|---|
+| `ProcessInfo.processInfo.hostName` 在 iOS 真机返回 `"localhost"` | 设备名显示为 localhost | Task 4：App 显式传 `hostname:` |
+| `StorageLocations` 默认写 Caches | iOS 存储紧张时图片被系统清除 | Task 3：注入 App 容器目录 |
+| Bonjour 缺 Info.plist 键 | 发现静默失效，无任何报错 | Task 2：写入两个键；Task 9：UI 显式呈现权限状态 |
+| iOS 16+ 读剪贴板弹授权窗 | 每次发送都打断用户 | Task 8：只用 `UIPasteControl` |
+| `TransportManager` 要求非可选 `webSocketServer` | iOS 不跑服务端却必须传 | Task 6：构造但**永不** `start(port:)` |
+| `LanWebSocketServer.start(port:)` 在 iOS 测试环境无法绑定 | `NWListener` 创建失败 | 全期不调用 |
+| CI 模拟器执行器饥饿 | 定时器测试偶发失败 | CI 已加 `-parallel-testing-enabled NO` |
+
+---
+
+## 文件结构
+
+### 新建：iOS 平台实现（SwiftPM target，CI 可编译验证）
+
+放在 `shared/HypoiOS/`，独立 SwiftPM package，`platforms: [.iOS(.v17)]`，依赖 `HypoCore`。**这样绝大部分 iOS 代码不依赖 xcodeproj 即可被 CI 构建**，与第 1 期同样的策略。
+
+| 文件 | 职责 |
+|---|---|
+| `Sources/HypoiOS/Platform/UIKitClipboard.swift` | `SystemClipboard` 的 `UIPasteboard` 实现 |
+| `Sources/HypoiOS/Platform/UIKitLifecycleObserver.swift` | `AppLifecycleObserving` 的 `UIApplication` 实现 |
+| `Sources/HypoiOS/Platform/AppContainerStorageLocations.swift` | `StorageLocations` 指向 App 容器的 Application Support |
+| `Sources/HypoiOS/Notifications/UserNotificationScheduler.swift` | `ClipboardNotificationScheduling` 的 `UNUserNotificationCenter` 实现 |
+| `Sources/HypoiOS/App/HypoiOSContext.swift` | 组装 `TransportManager` 及全部依赖的唯一入口 |
+| `Sources/HypoiOS/ViewModels/HistoryListViewModel.swift` | 历史列表状态 + `RemoteEntryReceiving` 实现 |
+| `Sources/HypoiOS/Views/HistoryListView.swift` | 历史列表界面 |
+| `Sources/HypoiOS/Views/PairingView.swift` | 配对界面 |
+| `Sources/HypoiOS/Views/SettingsView.swift` | 设置与权限状态 |
+| `Sources/HypoiOS/Views/RootView.swift` | TabView 外壳 |
+| `Tests/HypoiOSTests/` | 上述实现的测试 |
+
+### 新建：应用外壳（必须有 Xcode）
+
+| 文件 | 职责 |
+|---|---|
+| `ios/Hypo.xcodeproj` | iOS app target，依赖本地 package |
+| `ios/Hypo/HypoApp.swift` | `@main`，创建 `HypoiOSContext` |
+| `ios/Hypo/Info.plist` | 本地网络与 Bonjour 声明 |
+
+### 修改
+
+| 文件 | 改动 |
+|---|---|
+| `.github/workflows/ci.yml` | 新增 `ios-app-build` job |
+
+---
+
+## Task 1: 建立 HypoiOS package 骨架
+
+**Files:**
+- Create: `shared/HypoiOS/Package.swift`
+- Create: `shared/HypoiOS/Sources/HypoiOS/HypoiOS.swift`
+- Create: `shared/HypoiOS/Tests/HypoiOSTests/PackageSmokeTests.swift`
+
+- [ ] **Step 1: 建目录与 package 定义**
+
+```bash
+cd /Users/derek/Documents/Projects/hypo/.worktrees/ios-hypocore
+mkdir -p shared/HypoiOS/Sources/HypoiOS shared/HypoiOS/Tests/HypoiOSTests
+```
+
+写入 `shared/HypoiOS/Package.swift`：
+
+```swift
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "HypoiOS",
+    defaultLocalization: "en",
+    platforms: [
+        .iOS(.v17)
+    ],
+    products: [
+        .library(
+            name: "HypoiOS",
+            targets: ["HypoiOS"]
+        )
+    ],
+    dependencies: [
+        .package(path: "../HypoCore"),
+        .package(url: "https://github.com/apple/swift-testing.git", from: "0.5.0")
+    ],
+    targets: [
+        .target(
+            name: "HypoiOS",
+            dependencies: [
+                .product(name: "HypoCore", package: "HypoCore")
+            ],
+            path: "Sources/HypoiOS"
+        ),
+        .testTarget(
+            name: "HypoiOSTests",
+            dependencies: [
+                "HypoiOS",
+                .product(name: "Testing", package: "swift-testing")
+            ],
+            path: "Tests/HypoiOSTests"
+        )
+    ]
+)
+```
+
+**注意 `platforms` 只写 iOS。** 这个 package 不为 macOS 构建——它引用 `UIKit`，macOS 上不存在。因此本地 `swift build` 会失败，验证只能通过 `xcodebuild -destination 'generic/platform=iOS Simulator'`。
+
+- [ ] **Step 2: 写占位类型与一个真实测试**
+
+`shared/HypoiOS/Sources/HypoiOS/HypoiOS.swift`：
+
+```swift
+import Foundation
+import HypoCore
+
+/// Marker confirming HypoiOS can see HypoCore's public API.
+/// Deleted once the real platform implementations land.
+public enum HypoiOS {
+    public static let maxAttachmentBytes = SizeConstants.maxAttachmentBytes
+}
+```
+
+（第 1 期的 `HypoCore` 占位 enum 已被删除，所以这里用 `SizeConstants` —— 已实测确认它是 public 且值为 `10 * 1024 * 1024`。）
+
+`shared/HypoiOS/Tests/HypoiOSTests/PackageSmokeTests.swift`：
+
+```swift
+import Foundation
+import Testing
+@testable import HypoiOS
+
+@Suite("HypoiOS package wiring")
+struct PackageSmokeTests {
+    @Test("HypoiOS can read a HypoCore constant")
+    func readsCoreConstant() {
+        #expect(HypoiOS.maxAttachmentBytes == 10 * 1024 * 1024)
+    }
+}
+```
+
+- [ ] **Step 3: 为 iOS 构建**
+
+```bash
+cd shared/HypoiOS && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild build -scheme HypoiOS -destination 'generic/platform=iOS Simulator' -skipMacroValidation 2>&1 | tail -5
+```
+
+期望：`BUILD SUCCEEDED`。
+
+- [ ] **Step 4: 在模拟器上跑测试**
+
+```bash
+cd shared/HypoiOS && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild test -scheme HypoiOS -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -skipMacroValidation -enableCodeCoverage NO 2>&1 | grep -E "Test run with|TEST" | tail -3
+```
+
+期望：1 个测试通过，`TEST SUCCEEDED`。
+
+- [ ] **Step 5: 确认 macOS 侧未受影响**
+
+```bash
+cd macos && swift test 2>&1 | grep "Test run with" | tail -1
+cd shared/HypoCore && swift test 2>&1 | grep "Test run with" | tail -1
+```
+
+期望：56 与 143，一个不少。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add shared/HypoiOS
+git commit -m "build(ios): add the HypoiOS package skeleton"
+```
+
+---
+
+## Task 2: CI 构建 HypoiOS
+
+在写任何实现之前先建好验证通路——第 1 期的教训是本地检查不足以发现 iOS 问题。
+
+**Files:**
+- Modify: `.github/workflows/ci.yml`
+
+- [ ] **Step 1: 在 ios-core-build job 末尾追加两步**
+
+```yaml
+      - name: Build HypoiOS for iOS Simulator
+        working-directory: shared/HypoiOS
+        run: |
+          xcodebuild build \
+            -scheme HypoiOS \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation
+      - name: Run HypoiOS tests on iOS Simulator
+        working-directory: shared/HypoiOS
+        run: |
+          xcodebuild test \
+            -scheme HypoiOS \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -skipMacroValidation \
+            -enableCodeCoverage NO \
+            -parallel-testing-enabled NO
+```
+
+**保留 `name=iPhone 16`**：CI runner 是 Xcode 16.4，有该机型；本地没有。**保留 `-parallel-testing-enabled NO`**：CI 模拟器上并行会导致定时器测试因执行器饥饿而假失败，第 1 期已实测确认。
+
+不要改动其它四个 job。
+
+- [ ] **Step 2: 校验 YAML**
+
+```bash
+python3 -c "import yaml; d=yaml.safe_load(open('.github/workflows/ci.yml')); print(sorted(d['jobs'].keys()))"
+```
+
+期望：`['android-tests', 'backend-tests', 'ios-core-build', 'macos-tests', 'windows-tests']`
+
+- [ ] **Step 3: 提交并推送，确认 CI 通过**
+
+```bash
+git add .github/workflows/ci.yml
+git commit -m "ci: build and test HypoiOS on the iOS simulator"
+PRE_PUSH_ANDROID=0 git push -u origin feat/ios-app
+gh run list --branch feat/ios-app --limit 3
+```
+
+等 `HypoCore iOS Build` job 变绿再进入 Task 3。**这条通路不通，后面每个任务的 iOS 验证都是空的。**
+
+---
+
+## Task 3: StorageLocations 的 iOS 实现
+
+**Files:**
+- Create: `shared/HypoiOS/Sources/HypoiOS/Platform/AppContainerStorageLocations.swift`
+- Create: `shared/HypoiOS/Tests/HypoiOSTests/AppContainerStorageLocationsTests.swift`
+
+- [ ] **Step 1: 写失败测试**
+
+```swift
+import Foundation
+import Testing
+import HypoCore
+@testable import HypoiOS
+
+@Suite("AppContainerStorageLocations")
+struct AppContainerStorageLocationsTests {
+    @Test("images directory sits under Application Support, not Caches")
+    func usesApplicationSupport() {
+        let locations = AppContainerStorageLocations()
+        let path = locations.imagesDirectory.path
+
+        #expect(path.contains("Application Support"))
+        #expect(!path.contains("Caches"))
+    }
+
+    @Test("images directory is created on demand")
+    func createsDirectory() throws {
+        let locations = AppContainerStorageLocations()
+
+        try FileManager.default.createDirectory(
+            at: locations.imagesDirectory,
+            withIntermediateDirectories: true
+        )
+
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(
+            atPath: locations.imagesDirectory.path,
+            isDirectory: &isDirectory
+        )
+        #expect(exists)
+        #expect(isDirectory.boolValue)
+    }
+}
+```
+
+- [ ] **Step 2: 确认失败**
+
+```bash
+cd shared/HypoiOS && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild test -scheme HypoiOS -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -skipMacroValidation 2>&1 | grep -E "error:|cannot find" | head -3
+```
+
+期望：`cannot find 'AppContainerStorageLocations' in scope`。
+
+- [ ] **Step 3: 实现**
+
+```swift
+import Foundation
+import HypoCore
+
+/// Where the iOS app stores clipboard images and received files.
+///
+/// macOS uses the user caches directory, but iOS evicts Caches under storage
+/// pressure, which would silently drop images out of history. Application
+/// Support inside the app container is not evicted.
+///
+/// Phase 3 adds a share extension and a notification service extension, at
+/// which point this must point at the App Group container instead so all
+/// three processes see the same files. That needs a paid developer account,
+/// so it is deliberately out of scope here.
+public struct AppContainerStorageLocations: StorageLocations {
+    private let root: URL
+
+    public init() {
+        let support = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
+        self.root = support.appendingPathComponent("com.hypo.clipboard")
+    }
+
+    public var imagesDirectory: URL {
+        root.appendingPathComponent("images")
+    }
+}
+```
+
+- [ ] **Step 4: 确认通过**
+
+同 Step 2 的命令，期望 3 个测试通过（含 Task 1 的 smoke test）。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add shared/HypoiOS
+git commit -m "feat(ios): store blobs in Application Support, not Caches"
+```
+
+---
+
+## Task 4: SystemClipboard 的 iOS 实现
+
+这是第 2 期最容易出隐性错误的一处：协议有 9 个成员，其中 `changeCount` 关系到同步去重，漏掉不会编译报错但会造成复制一次同步两轮。
+
+**Files:**
+- Create: `shared/HypoiOS/Sources/HypoiOS/Platform/UIKitClipboard.swift`
+- Create: `shared/HypoiOS/Tests/HypoiOSTests/UIKitClipboardTests.swift`
+
+- [ ] **Step 1: 写失败测试**
+
+```swift
+import Foundation
+import UIKit
+import Testing
+import HypoCore
+@testable import HypoiOS
+
+@Suite("UIKitClipboard", .serialized)
+struct UIKitClipboardTests {
+    @Test("writeText then currentText round-trips")
+    @MainActor
+    func textRoundTrips() {
+        let clipboard = UIKitClipboard()
+
+        clipboard.clear()
+        clipboard.writeText("hello from test")
+
+        #expect(clipboard.currentText() == "hello from test")
+    }
+
+    @Test("changeCount increases after a write")
+    @MainActor
+    func changeCountAdvances() {
+        let clipboard = UIKitClipboard()
+        let before = clipboard.changeCount
+
+        clipboard.writeText("bump")
+
+        #expect(clipboard.changeCount > before)
+    }
+
+    @Test("imagePixelSize returns nil for non-image data")
+    @MainActor
+    func pixelSizeNilForGarbage() {
+        let clipboard = UIKitClipboard()
+
+        #expect(clipboard.imagePixelSize(from: Data([0x00, 0x01, 0x02])) == nil)
+    }
+
+    @Test("imagePixelSize reports the dimensions of a real image")
+    @MainActor
+    func pixelSizeForRealImage() throws {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 7, height: 3))
+        let png = renderer.pngData { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 7, height: 3))
+        }
+        let clipboard = UIKitClipboard()
+
+        let size = clipboard.imagePixelSize(from: png)
+
+        #expect(size?.width == 7)
+        #expect(size?.height == 3)
+    }
+
+    @Test("containsImage is false after writing text")
+    @MainActor
+    func containsImageFalseForText() {
+        let clipboard = UIKitClipboard()
+
+        clipboard.clear()
+        clipboard.writeText("not an image")
+
+        #expect(clipboard.containsImage() == false)
+    }
+}
+```
+
+`.serialized` 是必要的：这些测试都操作同一个系统剪贴板，并行执行会互相覆盖。
+
+- [ ] **Step 2: 确认失败**
+
+```bash
+cd shared/HypoiOS && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild test -scheme HypoiOS -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -skipMacroValidation 2>&1 | grep -E "cannot find" | head -2
+```
+
+期望：`cannot find 'UIKitClipboard' in scope`。
+
+- [ ] **Step 3: 实现**
+
+```swift
+import Foundation
+import UIKit
+import HypoCore
+
+/// iOS implementation of SystemClipboard, backed by UIPasteboard.
+///
+/// Note on reading: `currentText()` and `containsImage()` touch the general
+/// pasteboard, which on iOS 16+ shows the system paste prompt when the
+/// content was not written by this app. The app therefore never calls them
+/// speculatively — sending is driven by UIPasteControl, which grants access
+/// without a prompt. They exist because IncomingClipboardHandler compares
+/// against current contents before applying a payload, and at that point the
+/// app has just written the content itself.
+@MainActor
+public final class UIKitClipboard: SystemClipboard {
+    private let pasteboard: UIPasteboard
+
+    public init(pasteboard: UIPasteboard = .general) {
+        self.pasteboard = pasteboard
+    }
+
+    public var changeCount: Int {
+        pasteboard.changeCount
+    }
+
+    public func clear() {
+        pasteboard.items = []
+    }
+
+    public func writeText(_ text: String) {
+        pasteboard.string = text
+    }
+
+    public func writeImageData(_ data: Data) -> Bool {
+        guard let image = UIImage(data: data) else { return false }
+        pasteboard.image = image
+        return true
+    }
+
+    public func writeFileURL(_ url: URL) {
+        pasteboard.url = url
+    }
+
+    public func currentText() -> String? {
+        pasteboard.string
+    }
+
+    public func containsImage() -> Bool {
+        pasteboard.hasImages
+    }
+
+    public func imagePixelSize(from data: Data) -> (width: Int, height: Int)? {
+        guard let image = UIImage(data: data) else { return nil }
+        let size = image.size
+        let scale = image.scale
+        return (width: Int(size.width * scale), height: Int(size.height * scale))
+    }
+}
+```
+
+**关于 `imagePixelSize` 的 scale**：`UIImage.size` 是点而非像素，PNG 解码出来的 `scale` 通常为 1，但不保证。乘以 `scale` 才是真实像素数，与 macOS 的 `NSImage.size`（已是像素）语义对齐。
+
+- [ ] **Step 4: 确认通过**
+
+期望 8 个测试通过。**若 `pixelSizeForRealImage` 失败**，先打印实际返回值再判断是 scale 处理错了还是渲染器产出的尺寸不同——不要直接改断言迁就实现。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add shared/HypoiOS
+git commit -m "feat(ios): implement SystemClipboard over UIPasteboard"
+```
+
+---
+
+## Task 5: AppLifecycleObserving 与通知的 iOS 实现
+
+**Files:**
+- Create: `shared/HypoiOS/Sources/HypoiOS/Platform/UIKitLifecycleObserver.swift`
+- Create: `shared/HypoiOS/Sources/HypoiOS/Notifications/UserNotificationScheduler.swift`
+- Create: `shared/HypoiOS/Tests/HypoiOSTests/UIKitLifecycleObserverTests.swift`
+
+- [ ] **Step 1: 写失败测试**
+
+```swift
+import Foundation
+import UIKit
+import Testing
+import HypoCore
+@testable import HypoiOS
+
+@Suite("UIKitLifecycleObserver")
+struct UIKitLifecycleObserverTests {
+    @Test("posting the foreground notification fires onActivate")
+    @MainActor
+    func activateFires() async {
+        let observer = UIKitLifecycleObserver()
+        let activated = Locked(false)
+
+        observer.start(
+            onActivate: { activated.withLock { $0 = true } },
+            onDeactivate: {},
+            onTerminate: {}
+        )
+        NotificationCenter.default.post(
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+
+        let fired = await waitUntil(timeout: .seconds(2)) { activated.withLock { $0 } }
+        #expect(fired)
+        observer.stop()
+    }
+
+    @Test("stop removes the observers")
+    @MainActor
+    func stopDetaches() async {
+        let observer = UIKitLifecycleObserver()
+        let count = Locked(0)
+
+        observer.start(
+            onActivate: { count.withLock { $0 += 1 } },
+            onDeactivate: {},
+            onTerminate: {}
+        )
+        observer.stop()
+        NotificationCenter.default.post(
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        try? await Task.sleep(for: .milliseconds(200))
+
+        #expect(count.withLock { $0 } == 0)
+    }
+}
+```
+
+这两个测试需要 `Locked` 和 `waitUntil`，它们定义在 `HypoCore` 的测试目标里，**HypoiOSTests 看不到**。在 `shared/HypoiOS/Tests/HypoiOSTests/TestSupport.swift` 里各写一份：
+
+```swift
+import Foundation
+import Testing
+
+final class Locked<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func withLock<T>(_ body: (inout Value) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&value)
+    }
+}
+
+@discardableResult
+func waitUntil(
+    timeout: Duration = .seconds(1),
+    pollInterval: Duration = .milliseconds(10),
+    _ condition: @escaping @Sendable () async -> Bool
+) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while clock.now < deadline {
+        if await condition() { return true }
+        try? await clock.sleep(for: pollInterval)
+    }
+    return await condition()
+}
+```
+
+- [ ] **Step 2: 确认失败**，期望 `cannot find 'UIKitLifecycleObserver' in scope`。
+
+- [ ] **Step 3: 实现生命周期观察者**
+
+```swift
+import Foundation
+import UIKit
+import HypoCore
+
+/// iOS implementation of AppLifecycleObserving.
+///
+/// macOS listens to NSApplication notifications; the iOS equivalents are
+/// didBecomeActive, willResignActive and willTerminate. Note that on iOS
+/// willTerminate is not guaranteed — the system can kill a suspended app
+/// without delivering it — so nothing that must happen should depend on it.
+public final class UIKitLifecycleObserver: AppLifecycleObserving {
+    private var tokens: [NSObjectProtocol] = []
+
+    public init() {}
+
+    public func start(
+        onActivate: @escaping @Sendable () -> Void,
+        onDeactivate: @escaping @Sendable () -> Void,
+        onTerminate: @escaping @Sendable () -> Void
+    ) {
+        let center = NotificationCenter.default
+        tokens.append(center.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in onActivate() })
+        tokens.append(center.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in onDeactivate() })
+        tokens.append(center.addObserver(
+            forName: UIApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in onTerminate() })
+    }
+
+    public func stop() {
+        let center = NotificationCenter.default
+        tokens.forEach { center.removeObserver($0) }
+        tokens.removeAll()
+    }
+
+    deinit {
+        stop()
+    }
+}
+```
+
+- [ ] **Step 4: 实现通知调度器**
+
+`shared/HypoiOS/Sources/HypoiOS/Notifications/UserNotificationScheduler.swift`：
+
+```swift
+import Foundation
+import UserNotifications
+import HypoCore
+
+/// iOS implementation of ClipboardNotificationScheduling.
+///
+/// Phase 2 only posts local notifications while the app is running. Phase 4
+/// adds APNs-driven delivery through a notification service extension, which
+/// needs a paid developer account.
+public final class UserNotificationScheduler: ClipboardNotificationScheduling, @unchecked Sendable {
+    private let center: UNUserNotificationCenter
+    private weak var handler: ClipboardNotificationHandling?
+
+    public init(center: UNUserNotificationCenter = .current()) {
+        self.center = center
+    }
+
+    public func configure(handler: ClipboardNotificationHandling) {
+        self.handler = handler
+    }
+
+    public func requestAuthorizationIfNeeded() {
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    public func deliverNotification(for entry: ClipboardEntry) {
+        let content = UNMutableNotificationContent()
+        content.title = "Clipboard received"
+        content.body = entry.previewDescription
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: entry.id.uuidString,
+            content: content,
+            trigger: nil
+        )
+        center.add(request, withCompletionHandler: nil)
+    }
+
+    public func deliverStatusNotification(deviceId: String, title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+
+        let request = UNNotificationRequest(
+            identifier: "status-\(deviceId)",
+            content: content,
+            trigger: nil
+        )
+        center.add(request, withCompletionHandler: nil)
+    }
+}
+```
+
+（`previewDescription` 是 `ClipboardEntry` 上唯一 public 的摘要属性，已实测确认；同名的 `previewText` 是 internal，跨模块取不到。）
+
+- [ ] **Step 5: 确认全部通过并提交**
+
+```bash
+git add shared/HypoiOS
+git commit -m "feat(ios): implement lifecycle observation and local notifications"
+```
+
+---
+
+## Task 6: 组装上下文
+
+把六个接缝接到 `TransportManager` 上。这是第 2 期的接线中枢。
+
+**Files:**
+- Create: `shared/HypoiOS/Sources/HypoiOS/App/HypoiOSContext.swift`
+- Create: `shared/HypoiOS/Tests/HypoiOSTests/HypoiOSContextTests.swift`
+
+- [ ] **Step 1: 先读 TransportManager 的初始化器**
+
+```bash
+sed -n "$(grep -n 'public init(' ../HypoCore/Sources/HypoCore/Transport/TransportManager.swift | head -1 | cut -d: -f1),+20p" ../HypoCore/Sources/HypoCore/Transport/TransportManager.swift
+```
+
+**必填参数**（无默认值）：`provider`、`webSocketServer`、`notificationController`、`clipboard`。其余有默认值。
+
+**`webSocketServer` 是非可选的，但 iOS 绝不能启动它。** 第 1 期定的设计是 iOS 只做 LAN 发起端：iOS 会挂起后台进程，监听端口会让对端看到设备频繁上下线。已实测确认 `LanWebSocketServer` 的构造不创建 `NWListener`——只有 `start(port:)` 会。所以构造它、传进去、**永远不调用 `start(port:)`**。
+
+- [ ] **Step 2: 写失败测试**
+
+```swift
+import Foundation
+import Testing
+import HypoCore
+@testable import HypoiOS
+
+@Suite("HypoiOSContext")
+struct HypoiOSContextTests {
+    @Test("context builds without starting a LAN listener")
+    @MainActor
+    func buildsWithoutListening() async {
+        let context = HypoiOSContext()
+
+        #expect(context.transportManager != nil)
+        #expect(context.webSocketServer.listeningPort == nil)
+    }
+
+    @Test("storage is the app container, not caches")
+    @MainActor
+    func usesAppContainerStorage() {
+        let context = HypoiOSContext()
+
+        #expect(context.storageLocations.imagesDirectory.path.contains("Application Support"))
+    }
+}
+```
+
+（`listeningPort` 实测是 `public var listeningPort: NWEndpoint.Port? { listener?.port }` —— 未调用 `start(port:)` 时 `listener` 为 nil，所以返回 nil。这个断言直接证明"没有在监听"。）
+
+- [ ] **Step 3: 确认失败**，期望 `cannot find 'HypoiOSContext' in scope`。
+
+- [ ] **Step 4: 实现**
+
+```swift
+import Foundation
+import UIKit
+import HypoCore
+
+/// Builds and owns the iOS app's object graph.
+///
+/// This is the one place that knows how HypoCore's platform seams are filled
+/// on iOS. Everything else takes what it needs from here.
+@MainActor
+public final class HypoiOSContext {
+    public let identity: DeviceIdentity
+    public let storageLocations: StorageLocations
+    public let clipboard: UIKitClipboard
+    public let lifecycleObserver: UIKitLifecycleObserver
+    public let notificationScheduler: UserNotificationScheduler
+    public let webSocketServer: LanWebSocketServer
+    public let transportManager: TransportManager
+
+    public init() {
+        // iOS returns "localhost" from ProcessInfo.processInfo.hostName on
+        // device, so the core's fallback is useless here. Supply the device's
+        // own name explicitly instead.
+        self.identity = DeviceIdentity(hostname: UIDevice.current.name)
+
+        self.storageLocations = AppContainerStorageLocations()
+        self.clipboard = UIKitClipboard()
+        self.lifecycleObserver = UIKitLifecycleObserver()
+        self.notificationScheduler = UserNotificationScheduler()
+
+        // Constructed because TransportManager requires it, never started:
+        // iOS is a LAN client only. Constructing does not bind a listener.
+        self.webSocketServer = LanWebSocketServer(localDeviceId: identity.deviceIdString)
+
+        let provider = DefaultTransportProvider(server: webSocketServer)
+
+        self.transportManager = TransportManager(
+            provider: provider,
+            webSocketServer: webSocketServer,
+            notificationController: notificationScheduler,
+            clipboard: clipboard,
+            lifecycleObserver: lifecycleObserver
+        )
+    }
+}
+```
+
+（实测签名是 `init(localDeviceId: String? = nil, heartbeatInterval: TimeInterval = 60, enableHeartbeat: Bool = true)` —— **没有 `port:` 参数**，端口是 `start(port:)` 时才指定的，这也正是构造不会绑定监听器的原因。）
+
+- [ ] **Step 5: 确认通过并提交**
+
+```bash
+git add shared/HypoiOS
+git commit -m "feat(ios): assemble the iOS object graph"
+```
+
+---
+
+## Task 7: 历史列表 ViewModel
+
+**Files:**
+- Create: `shared/HypoiOS/Sources/HypoiOS/ViewModels/HistoryListViewModel.swift`
+- Create: `shared/HypoiOS/Tests/HypoiOSTests/HistoryListViewModelTests.swift`
+
+- [ ] **Step 1: 写失败测试**
+
+```swift
+import Foundation
+import Testing
+import HypoCore
+@testable import HypoiOS
+
+@Suite("HistoryListViewModel")
+struct HistoryListViewModelTests {
+    private func makeEntry(_ text: String) -> ClipboardEntry {
+        ClipboardEntry(
+            deviceId: "test-device",
+            originDeviceName: "Test",
+            content: .text(text),
+            transportOrigin: .lan
+        )
+    }
+
+    @Test("loading reflects what the store holds")
+    @MainActor
+    func loadsFromStore() async {
+        let store = HistoryStore(persistence: InMemoryHistoryPersistence())
+        _ = await store.insert(makeEntry("first"))
+        let viewModel = HistoryListViewModel(store: store)
+
+        await viewModel.load()
+
+        #expect(viewModel.entries.count == 1)
+    }
+
+    @Test("search filters by content")
+    @MainActor
+    func searchFilters() async {
+        let store = HistoryStore(persistence: InMemoryHistoryPersistence())
+        _ = await store.insert(makeEntry("alpha"))
+        _ = await store.insert(makeEntry("beta"))
+        let viewModel = HistoryListViewModel(store: store)
+        await viewModel.load()
+
+        viewModel.searchText = "alph"
+
+        #expect(viewModel.visibleEntries.count == 1)
+    }
+
+    @Test("an incoming remote entry lands in the list")
+    @MainActor
+    func remoteEntryArrives() async {
+        let store = HistoryStore(persistence: InMemoryHistoryPersistence())
+        let viewModel = HistoryListViewModel(store: store)
+        let entry = makeEntry("from mac")
+        _ = await store.insert(entry)
+
+        await viewModel.handleIncomingRemoteEntry(entry, duplicate: nil)
+
+        #expect(viewModel.entries.contains { $0.id == entry.id })
+    }
+}
+```
+
+**实测确认过的签名**（照抄即可，不要改）：
+
+```swift
+public init(
+    id: UUID = UUID(),
+    timestamp: Date = Date(),
+    deviceId: String,
+    originPlatform: DevicePlatform? = nil,
+    originDeviceName: String? = nil,
+    content: ClipboardContent,
+    isPinned: Bool = false,
+    isEncrypted: Bool = false,
+    transportOrigin: TransportOrigin? = nil
+)
+```
+
+注意**没有 `deviceName:` 参数**，是 `originDeviceName:`；`content:` 排在 `deviceId:` 之后。`TransportOrigin` 只有 `.lan` 和 `.cloud` 两个成员。
+
+- [ ] **Step 2: 确认失败**，期望 `cannot find 'HistoryListViewModel' in scope`。
+
+- [ ] **Step 3: 实现**
+
+```swift
+import Foundation
+import Combine
+import HypoCore
+
+/// Backs the history list and receives entries arriving from paired devices.
+@MainActor
+public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving {
+    @Published public private(set) var entries: [ClipboardEntry] = []
+    @Published public var searchText: String = ""
+
+    private let store: HistoryStore
+
+    public init(store: HistoryStore) {
+        self.store = store
+    }
+
+    public var visibleEntries: [ClipboardEntry] {
+        guard !searchText.isEmpty else { return entries }
+        let needle = searchText.lowercased()
+        return entries.filter { $0.previewDescription.lowercased().contains(needle) }
+    }
+
+    public func load() async {
+        entries = await store.all()
+    }
+
+    public func handleIncomingRemoteEntry(_ entry: ClipboardEntry, duplicate: ClipboardEntry?) async {
+        entries = await store.all()
+    }
+
+    public func remove(id: UUID) async {
+        await store.remove(id: id)
+        entries = await store.all()
+    }
+
+    public func togglePin(id: UUID) async {
+        entries = await store.togglePin(id: id)
+    }
+
+    public func clearAll() async {
+        await store.clear()
+        entries = await store.all()
+    }
+}
+```
+
+`visibleEntries` 用 `previewDescription` 过滤——实测确认这是 `ClipboardEntry` 上唯一 public 的摘要属性（`previewText` 是 internal，跨模块不可见）。
+
+- [ ] **Step 4: 确认通过并提交**
+
+```bash
+git add shared/HypoiOS
+git commit -m "feat(ios): add the history list view model"
+```
+
+---
+
+## Task 8: 界面
+
+四个视图。**本任务不写测试**——SwiftUI 视图的单元测试价值低于成本，验证方式是 Task 10 在模拟器里实际运行并肉眼确认。
+
+**Files:**
+- Create: `shared/HypoiOS/Sources/HypoiOS/Views/HistoryListView.swift`
+- Create: `shared/HypoiOS/Sources/HypoiOS/Views/PairingView.swift`
+- Create: `shared/HypoiOS/Sources/HypoiOS/Views/SettingsView.swift`
+- Create: `shared/HypoiOS/Sources/HypoiOS/Views/RootView.swift`
+
+- [ ] **Step 1: 历史列表**
+
+```swift
+import SwiftUI
+import HypoCore
+
+public struct HistoryListView: View {
+    @ObservedObject private var viewModel: HistoryListViewModel
+
+    public init(viewModel: HistoryListViewModel) {
+        self.viewModel = viewModel
+    }
+
+    public var body: some View {
+        NavigationStack {
+            List {
+                ForEach(viewModel.visibleEntries, id: \.id) { entry in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(entry.previewDescription)
+                            .lineLimit(2)
+                        Text(entry.originDeviceName ?? entry.deviceId)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .swipeActions {
+                        Button("Delete", role: .destructive) {
+                            Task { await viewModel.remove(id: entry.id) }
+                        }
+                        Button("Pin") {
+                            Task { await viewModel.togglePin(id: entry.id) }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $viewModel.searchText)
+            .navigationTitle("History")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Clear") {
+                        Task { await viewModel.clearAll() }
+                    }
+                }
+            }
+            .task { await viewModel.load() }
+        }
+    }
+}
+```
+
+- [ ] **Step 2: 配对界面**
+
+```swift
+import SwiftUI
+import HypoCore
+
+public struct PairingView: View {
+    @ObservedObject private var viewModel: RemotePairingViewModel
+    private let relayHint: URL?
+
+    public init(viewModel: RemotePairingViewModel, relayHint: URL?) {
+        self.viewModel = viewModel
+        self.relayHint = relayHint
+    }
+
+    public var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Text(viewModel.statusMessage)
+                    .multilineTextAlignment(.center)
+
+                if case let .displaying(code, _) = viewModel.state {
+                    Text(code)
+                        .font(.system(size: 44, weight: .bold, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+
+                if let countdown = viewModel.countdownText {
+                    Text(countdown)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("Request pairing code") {
+                    viewModel.start(service: "_hypo._tcp.", port: 0, relayHint: relayHint)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Reset") { viewModel.reset() }
+                    .buttonStyle(.bordered)
+            }
+            .padding()
+            .navigationTitle("Pair a device")
+        }
+    }
+}
+```
+
+**`start(service:port:relayHint:)` 的 `port` 传 0**：iOS 不监听，没有端口可宣告。实测确认 `PairingSession` 只把 port 原样存进配对载荷转发给对端，不做非零校验（`PairingSession.swift:40,55,125`），所以传 0 是安全的——对端拿到 0 就知道这台设备不接受入站连接。
+
+- [ ] **Step 3: 设置界面**
+
+必须显式呈现两个权限状态。**本地网络权限被拒后 Bonjour 会静默失效且无任何报错**，不显示的话用户只会觉得 LAN 莫名其妙不工作。
+
+```swift
+import SwiftUI
+import UIKit
+import UserNotifications
+import HypoCore
+
+public struct SettingsView: View {
+    @State private var notificationStatus: String = "Checking…"
+
+    private let deviceName: String
+    private let deviceId: String
+
+    public init(deviceName: String, deviceId: String) {
+        self.deviceName = deviceName
+        self.deviceId = deviceId
+    }
+
+    public var body: some View {
+        NavigationStack {
+            List {
+                Section("This device") {
+                    LabeledContent("Name", value: deviceName)
+                    LabeledContent("ID", value: String(deviceId.prefix(8)))
+                }
+
+                Section("Permissions") {
+                    LabeledContent("Notifications", value: notificationStatus)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Local network")
+                        Text("If LAN sync never connects, iOS may have denied local network access. Grant it in Settings › Privacy & Security › Local Network.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+            .task {
+                let settings = await UNUserNotificationCenter.current().notificationSettings()
+                notificationStatus = switch settings.authorizationStatus {
+                case .authorized, .provisional, .ephemeral: "Granted"
+                case .denied: "Denied — background delivery will not work"
+                case .notDetermined: "Not requested"
+                @unknown default: "Unknown"
+                }
+            }
+        }
+    }
+}
+```
+
+**iOS 无法查询本地网络权限状态**——系统没有提供 API。所以这里只能给出说明文字和跳转入口，不能显示实际状态。这是平台限制，不是偷懒。
+
+- [ ] **Step 4: 根视图与发送按钮**
+
+```swift
+import SwiftUI
+import UIKit
+import HypoCore
+
+public struct RootView: View {
+    private let context: HypoiOSContext
+    @StateObject private var historyViewModel: HistoryListViewModel
+    @StateObject private var pairingViewModel: RemotePairingViewModel
+
+    public init(context: HypoiOSContext, historyStore: HistoryStore) {
+        self.context = context
+        _historyViewModel = StateObject(wrappedValue: HistoryListViewModel(store: historyStore))
+        _pairingViewModel = StateObject(wrappedValue: RemotePairingViewModel(
+            identity: context.identity
+        ))
+    }
+
+    public var body: some View {
+        TabView {
+            HistoryListView(viewModel: historyViewModel)
+                .tabItem { Label("History", systemImage: "list.bullet") }
+
+            PairingView(viewModel: pairingViewModel, relayHint: nil)
+                .tabItem { Label("Pair", systemImage: "link") }
+
+            SettingsView(
+                deviceName: context.identity.deviceName,
+                deviceId: context.identity.deviceIdString
+            )
+            .tabItem { Label("Settings", systemImage: "gear") }
+        }
+    }
+}
+```
+
+发送按钮用 `UIPasteControl`，它是 iOS 上**唯一不弹授权窗**的读剪贴板方式。SwiftUI 没有原生封装，需要 `UIViewRepresentable`：
+
+```swift
+import SwiftUI
+import UIKit
+
+/// The system paste button. Tapping it grants this app one-shot access to the
+/// pasteboard without the "allow paste?" prompt that a programmatic read
+/// triggers on iOS 16 and later.
+public struct PasteButton: UIViewRepresentable {
+    private let onPaste: (String) -> Void
+
+    public init(onPaste: @escaping (String) -> Void) {
+        self.onPaste = onPaste
+    }
+
+    public func makeUIView(context: Context) -> UIPasteControl {
+        let configuration = UIPasteControl.Configuration()
+        configuration.displayMode = .labelOnly
+        let control = UIPasteControl(configuration: configuration)
+        control.target = context.coordinator
+        return control
+    }
+
+    public func updateUIView(_ uiView: UIPasteControl, context: Context) {}
+
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(onPaste: onPaste)
+    }
+
+    public final class Coordinator: NSObject, UIPasteConfigurationSupporting {
+        private let onPaste: (String) -> Void
+
+        init(onPaste: @escaping (String) -> Void) {
+            self.onPaste = onPaste
+            super.init()
+            pasteConfiguration = UIPasteConfiguration(
+                forAccepting: NSString.self
+            )
+        }
+
+        public override func paste(itemProviders: [NSItemProvider]) {
+            for provider in itemProviders {
+                _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                    guard let string = object as? String else { return }
+                    Task { @MainActor in self.onPaste(string) }
+                }
+            }
+        }
+    }
+}
+```
+
+把它加进 `HistoryListView` 的工具栏：
+
+```swift
+                ToolbarItem(placement: .topBarLeading) {
+                    PasteButton { text in
+                        Task { await viewModel.sendText(text) }
+                    }
+                }
+```
+
+并在 `HistoryListViewModel` 上补一个发送方法——它需要 `SyncEngine`，所以 ViewModel 的初始化器要多接一个参数：
+
+```swift
+    public func sendText(_ text: String) async {
+        // Deliberately inert until Task 9 wires the SyncEngine. Task 8 exists
+        // to get the UI on screen and tappable; sending needs a paired peer,
+        // which the UI cannot provide on its own.
+    }
+```
+
+**这个空实现只允许存在到 Task 9。** 若 Task 9 结束后它还在，说明发送根本没接上——Task 10 Step 5 的第 7 条会当场发现。
+
+- [ ] **Step 5: 构建确认并提交**
+
+```bash
+cd shared/HypoiOS && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild build -scheme HypoiOS -destination 'generic/platform=iOS Simulator' -skipMacroValidation 2>&1 | tail -3
+git add shared/HypoiOS
+git commit -m "feat(ios): add history, pairing and settings screens"
+```
+
+---
+
+## Task 9: 接上真实发送与接收
+
+**Files:**
+- Modify: `shared/HypoiOS/Sources/HypoiOS/ViewModels/HistoryListViewModel.swift`
+- Modify: `shared/HypoiOS/Sources/HypoiOS/App/HypoiOSContext.swift`
+- Create: `shared/HypoiOS/Tests/HypoiOSTests/SendPathTests.swift`
+
+- [ ] **Step 1: 把 ViewModel 接到发送路径**
+
+**发送不经过 `TransportManager`。** 实测确认它没有 `send` 或 `broadcast` 方法——它只提供 `loadTransport()`。真实路径是构造 `SyncEngine` 再 `transmit`，macOS 侧在 `ClipboardHistoryViewModel.swift:625-660` 就是这么做的。
+
+`HistoryListViewModel` 的初始化器改为：
+
+```swift
+    private let transportManager: TransportManager?
+    private let identity: DeviceIdentityProviding?
+
+    public init(
+        store: HistoryStore,
+        transportManager: TransportManager? = nil,
+        identity: DeviceIdentityProviding? = nil
+    ) {
+        self.store = store
+        self.transportManager = transportManager
+        self.identity = identity
+    }
+```
+
+`sendText` 按 macOS 的流程实现：
+
+```swift
+    public func sendText(_ text: String) async {
+        guard let transportManager, let identity else { return }
+
+        let entry = ClipboardEntry(
+            deviceId: identity.deviceIdString,
+            originPlatform: identity.platform,
+            originDeviceName: identity.deviceName,
+            content: .text(text),
+            transportOrigin: .lan
+        )
+
+        let transport = transportManager.loadTransport()
+        let keyProvider = KeychainDeviceKeyProvider()
+        let cryptoService = CryptoService()
+
+        // DualSyncTransport builds separate envelopes for LAN and cloud, each
+        // with its own nonce, so it needs the crypto service and key provider.
+        if let dualTransport = transport as? DualSyncTransport {
+            dualTransport.configure(cryptoService: cryptoService, keyProvider: keyProvider)
+        }
+
+        let syncEngine = SyncEngine(
+            transport: transport,
+            cryptoService: cryptoService,
+            keyProvider: keyProvider,
+            localDeviceId: identity.deviceIdString,
+            localPlatform: identity.platform
+        )
+        await syncEngine.establishConnection()
+
+        let payload = ClipboardPayload(
+            contentType: .text,
+            data: Data(text.utf8),
+            metadata: nil
+        )
+
+        // Sending is per-target: there is no broadcast. Try every paired
+        // device, best effort — one failure must not stop the others.
+        for device in transportManager.pairedDevices {
+            do {
+                try await syncEngine.transmit(
+                    entry: entry,
+                    payload: payload,
+                    targetDeviceId: device.id
+                )
+                transportManager.updatePairedDeviceLastSeen(device.id, lastSeen: Date())
+            } catch {
+                continue
+            }
+        }
+
+        _ = await store.insert(entry)
+        entries = await store.all()
+    }
+```
+
+**在写之前先核对两处签名**，因为它们决定这段代码能否编译：
+
+```bash
+grep -n "public init(" ../HypoCore/Sources/HypoCore/Sync/SyncEngine.swift | head -2
+sed -n "$(grep -n 'public init(' ../HypoCore/Sources/HypoCore/Sync/SyncEngine.swift | head -1 | cut -d: -f1),+8p" ../HypoCore/Sources/HypoCore/Sync/SyncEngine.swift
+grep -n "public init(" ../HypoCore/Sources/HypoCore/Models/ClipboardEntry.swift | sed -n '2p'
+grep -rn "struct ClipboardPayload" -A 8 ../HypoCore/Sources/HypoCore/ | head -12
+```
+
+macOS 的调用点是 `macos/Sources/HypoApp/Services/ClipboardHistoryViewModel.swift:625-660`，可以直接对照。若 `ClipboardPayload` 的构造或 `contentType` 枚举名与上面不同，以真实代码为准并在报告里贴出差异。
+
+- [ ] **Step 2: 在上下文里接线**
+
+`HypoiOSContext` 增加 `historyStore` 与 `historyViewModel`，并把 ViewModel 注册为接收方：
+
+```swift
+    public let historyStore: HistoryStore
+    public private(set) var historyViewModel: HistoryListViewModel!
+
+    // 在 init 末尾：
+    self.historyStore = HistoryStore()
+    let viewModel = HistoryListViewModel(store: historyStore, transportManager: transportManager)
+    self.historyViewModel = viewModel
+    transportManager.setHistoryViewModel(viewModel)
+    notificationScheduler.requestAuthorizationIfNeeded()
+```
+
+`setHistoryViewModel` 接受 `any RemoteEntryReceiving`，`HistoryListViewModel` 已实现该协议。
+
+- [ ] **Step 3: 写测试证明发送路径被调用**
+
+```swift
+import Foundation
+import Testing
+import HypoCore
+@testable import HypoiOS
+
+@Suite("Send path")
+struct SendPathTests {
+    @Test("sendText with no transport does not crash and leaves the list unchanged")
+    @MainActor
+    func sendWithoutTransportIsSafe() async {
+        let store = HistoryStore(persistence: InMemoryHistoryPersistence())
+        let viewModel = HistoryListViewModel(store: store)
+
+        await viewModel.sendText("no transport attached")
+
+        #expect(viewModel.entries.isEmpty)
+    }
+}
+```
+
+这个测试覆盖的是"没有传输时不崩"，真实发送要到 Task 10 在模拟器里对着 Mac 验证——单元测试无法验证跨设备同步。
+
+- [ ] **Step 4: 确认通过并提交**
+
+```bash
+git add shared/HypoiOS
+git commit -m "feat(ios): wire sending and receiving through TransportManager"
+```
+
+---
+
+## Task 10: 应用外壳与端到端验证
+
+**这一步必须有 Xcode，且产出的是唯一能证明第 2 期真正可用的证据。**
+
+**Files:**
+- Create: `ios/Hypo.xcodeproj`
+- Create: `ios/Hypo/HypoApp.swift`
+- Create: `ios/Hypo/Info.plist`
+
+- [ ] **Step 1: 用 Xcode 建 app target**
+
+在 Xcode 中新建 iOS App 项目，保存到 `ios/`，产品名 `Hypo`，界面 SwiftUI，语言 Swift，最低部署目标 **iOS 17.0**，Bundle ID `com.hypo.clipboard.ios`。
+
+然后 File › Add Package Dependencies › Add Local，选择 `shared/HypoiOS`，把 `HypoiOS` 库加入 app target。
+
+- [ ] **Step 2: 写 Info.plist 的本地网络声明**
+
+这两个键**必不可少**。缺了它们，Bonjour 发现会静默失效——不报错、不提示，只是永远发现不到设备。
+
+在 target 的 Info 标签页添加：
+
+| 键 | 类型 | 值 |
+|---|---|---|
+| `NSLocalNetworkUsageDescription` | String | `Hypo finds your other devices on this network to sync your clipboard directly, without going through the cloud.` |
+| `NSBonjourServices` | Array of String | 单个元素：`_hypo._tcp` |
+
+- [ ] **Step 3: 写入口**
+
+`ios/Hypo/HypoApp.swift`：
+
+```swift
+import SwiftUI
+import HypoiOS
+
+@main
+struct HypoApp: App {
+    @State private var context = HypoiOSContext()
+
+    var body: some Scene {
+        WindowGroup {
+            RootView(context: context, historyStore: context.historyStore)
+        }
+    }
+}
+```
+
+删除 Xcode 生成的 `ContentView.swift`。
+
+- [ ] **Step 4: 在模拟器上运行**
+
+```bash
+cd ios && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild -scheme Hypo -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -skipMacroValidation build 2>&1 | tail -5
+```
+
+期望 `BUILD SUCCEEDED`。然后在 Xcode 里运行，或：
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl boot "iPhone 17"
+open -a Simulator
+```
+
+- [ ] **Step 5: 端到端验证清单**
+
+逐条做，每条记录实际结果。**这是第 2 期唯一的真实验收**：
+
+1. App 启动，三个 tab 都能打开，不崩溃
+2. Settings 显示本机设备名——**确认不是 `localhost`**（这是 Task 6 显式传 `UIDevice.current.name` 要防的问题）
+3. Settings 显示通知权限状态；首次启动应弹出授权请求
+4. 首次进入会触发系统的「本地网络」权限弹窗——**同意，并记录弹窗是否真的出现**
+5. Mac 端启动 Hypo（`./scripts/build-macos.sh`），在 Pair tab 请求配对码，在 Mac 上完成配对
+6. 在 Mac 上复制一段文本 → **iOS 的 History 列表应出现该条目**
+7. 在 iOS 上点 Paste 按钮发送 → **Mac 的历史应出现该条目**
+8. 关掉 Mac 的 Wi-Fi 或让两端不在同一网段，重复第 6 步 → 应经云端 relay 仍然同步
+9. 在 Settings 里拒绝本地网络权限（系统设置里关掉），重启 App，观察 LAN 是否失效而云端仍可用
+
+**任何一条不通过都要如实记录，不要跳过。** 第 6、7 两条是第 2 期的核心目标，其余是边界条件。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add ios
+git commit -m "feat(ios): add the app shell and local network declarations"
+```
+
+**注意 `ios/` 下会有 Xcode 生成的用户级文件**（`xcuserdata/`、`*.xcworkspace/xcuserdata/`）。提交前检查 `git status`，若有则加进 `.gitignore` 而不是提交它们。
+
+---
+
+## Task 11: CI 构建 app target
+
+**Files:**
+- Modify: `.github/workflows/ci.yml`
+
+- [ ] **Step 1: 在 ios-core-build job 末尾追加**
+
+```yaml
+      - name: Build the iOS app
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -scheme Hypo \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO
+```
+
+`CODE_SIGNING_ALLOWED=NO` 是必要的：CI 上没有签名证书，而模拟器构建不需要签名。
+
+- [ ] **Step 2: 校验、提交、推送、确认 CI 全绿**
+
+```bash
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" && echo "YAML ok"
+git add .github/workflows/ci.yml
+git commit -m "ci: build the iOS app target"
+PRE_PUSH_ANDROID=0 git push
+gh run list --branch feat/ios-app --limit 3
+```
+
+---
+
+## 第 2 期完成定义
+
+1. `cd macos && swift test` → 56，一个不少
+2. `cd shared/HypoCore && swift test` → 143，一个不少
+3. HypoiOS 的测试在 iOS 模拟器上全绿
+4. `ios` app target 能为模拟器构建
+5. CI 五个 job 全绿，`ios-core-build` 中新增的三步（HypoiOS 构建、HypoiOS 测试、app 构建）均通过
+6. **Task 10 Step 5 的第 6、7 条实测通过**——Mac 复制的内容出现在 iOS，iOS 发送的内容出现在 Mac
+7. Settings 显示的设备名不是 `localhost`
+
+**第 3 期（分享扩展、App Group、Keychain 共享）与第 4 期（APNs 后台落盘）需要付费 Apple Developer 账号，不在本期范围内。** 本期全部功能在免费账号 + 模拟器下可用。

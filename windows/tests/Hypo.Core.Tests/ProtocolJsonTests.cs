@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Hypo.Core.Protocol;
 
@@ -42,5 +43,27 @@ public class ProtocolJsonTests
     public void SerialisesMessageTypeAsALowercaseString(MessageType value, string expected)
     {
         Assert.Equal($"\"{expected}\"", JsonSerializer.Serialize(value, ProtocolJson.Options));
+    }
+
+    [Fact]
+    public void WritesTimestampsWithAZDesignatorAndNoFractionalSeconds()
+    {
+        var value = DateTimeOffset.Parse("2025-10-03T00:00:00Z", CultureInfo.InvariantCulture);
+        Assert.Equal("\"2025-10-03T00:00:00Z\"", JsonSerializer.Serialize(value, ProtocolJson.Options));
+    }
+
+    [Fact]
+    public void WritesNonUtcTimestampsAsUtc()
+    {
+        var value = DateTimeOffset.Parse("2025-10-03T08:00:00+08:00", CultureInfo.InvariantCulture);
+        Assert.Equal("\"2025-10-03T00:00:00Z\"", JsonSerializer.Serialize(value, ProtocolJson.Options));
+    }
+
+    [Fact]
+    public void ReadsBothZAndNumericOffsetTimestamps()
+    {
+        var withZ = JsonSerializer.Deserialize<DateTimeOffset>("\"2025-10-03T00:00:00Z\"", ProtocolJson.Options);
+        var withOffset = JsonSerializer.Deserialize<DateTimeOffset>("\"2025-10-03T00:00:00+00:00\"", ProtocolJson.Options);
+        Assert.Equal(withZ, withOffset);
     }
 }

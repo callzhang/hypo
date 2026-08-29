@@ -83,7 +83,17 @@ cd shared/HypoCore && find Sources -name '*.swift' | while read f; do awk -v F="
 cd shared/HypoCore && grep -rn "NSHomeDirectory\|homeDirectoryForCurrentUser\|/Users/\|~/Library\|UserDefaults(suiteName:" Sources/
 ```
 
-**跨模块可见性的已知盲区**（Task 3 实测结论）：这个代码库的自定义类型基本已经标好 `public`，Task 3 搬的四个文件里三个完全不用改。唯一漏网的是 **`Int.formattedAsKB`——一个对内置类型的扩展**。审计一个文件的「公开 API 面」时，人和模型都倾向于只看自己定义的 type，扩展在 `Int`/`String`/`Data`/`URL` 等系统类型上的成员最容易漏。**每次搬迁前先 `grep -n "^extension \|^public extension " <file>` 过一遍**，比等编译器报错再回头改快。
+**跨模块可见性的三类盲区**（Task 3、5、6 各栽一次，按隐蔽程度排序）：
+
+1. **合成的 memberwise init 永远是 internal**，与属性访问级别无关。Task 6 的 `PairingChallengePayload` 所有存储属性都是 `public`，却没有显式 `public init`，而 `PairingSessionTests.swift`（留在 `HypoAppTests`）直接构造它。**`swift build` 完全看不到——只有 `swift test` 会炸**，因为只有测试代码构造它。搬迁前对每个 `public struct` 确认：它有显式 `public init` 吗？如果没有，谁在构造它？
+
+2. **扩展在内置类型上**（`Int`、`String`、`Data`、`URL`、`CodingUserInfoKey`）。审计"这个文件的公开 API"时，人和模型都只看自己定义的 type，扩展在系统类型上的成员不属于任何本地 type，因而被跳过。Task 3 的 `Int.formattedAsKB`、Task 5 的 `CodingUserInfoKey.skipLargeData` 都是这么漏的。**注意：仅仅 grep 出扩展是不够的**——Task 5 的实现者 grep 到了那个扩展，但没逐个看成员，还是漏了。
+
+3. **扩展在已迁移类型上、但成员被留守文件使用**。Task 6 的 `extension ClipboardEntry { estimatedMemoryFootprint }` 定义在 `OptimizedHistoryStore.swift` 里，被留在 HypoApp 的 `MemoryProfiler.swift` 使用。类型本身是 public 不代表扩展成员是。
+
+**已知的死代码**：`OptimizedHistoryStore`（一个 actor）在全仓库无任何构造点——只有 `MemoryProfiler.swift:284` 一句注释提到它。已随批次 3 迁入 HypoCore。Task 8 拆分 `HistoryStore.swift` 时会与它相邻，**不要顺手删**，与其它清理一样另起提交。
+
+**跨模块可见性的旧盲区说明**（Task 3 实测结论）：这个代码库的自定义类型基本已经标好 `public`，Task 3 搬的四个文件里三个完全不用改。唯一漏网的是 **`Int.formattedAsKB`——一个对内置类型的扩展**。审计一个文件的「公开 API 面」时，人和模型都倾向于只看自己定义的 type，扩展在 `Int`/`String`/`Data`/`URL` 等系统类型上的成员最容易漏。**每次搬迁前先 `grep -n "^extension \|^public extension " <file>` 过一遍**，比等编译器报错再回头改快。
 
 **基线**：抽取开始前 `cd macos && swift test` 的结果是 `✔ Test run with 193 tests passed after 5.699 seconds.`（2026-08-28 实测）。任务过程中通过数只应增加，不应减少。
 

@@ -153,7 +153,8 @@ public final class TransportManager: ObservableObject {
             self.incomingHandler = IncomingClipboardHandler(
                 syncEngine: syncEngine,
                 historyStore: historyStore,
-                dispatcher: self.dispatcher
+                dispatcher: self.dispatcher,
+                clipboard: AppKitClipboard()
             )
             
             // Wire handler callbacks for TransportManager internal needs

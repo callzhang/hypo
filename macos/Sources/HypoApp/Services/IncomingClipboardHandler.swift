@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 #if canImport(UserNotifications)
 import UserNotifications
 #endif
@@ -14,7 +13,7 @@ public final class IncomingClipboardHandler {
     private let syncEngine: SyncEngine
     private let historyStore: HistoryStore
     private let dispatcher: ClipboardEventDispatcher
-    private let pasteboard: NSPasteboard
+    private let clipboard: SystemClipboard
     private let frameCodec = TransportFrameCodec()
     private var onEntryAdded: ((ClipboardEntry, ClipboardEntry?) async -> Void)?
     
@@ -30,13 +29,13 @@ public final class IncomingClipboardHandler {
         syncEngine: SyncEngine,
         historyStore: HistoryStore,
         dispatcher: ClipboardEventDispatcher,
-        pasteboard: NSPasteboard = .general,
+        clipboard: SystemClipboard,
         onEntryAdded: ((ClipboardEntry, ClipboardEntry?) async -> Void)? = nil
     ) {
         self.syncEngine = syncEngine
         self.historyStore = historyStore
         self.dispatcher = dispatcher
-        self.pasteboard = pasteboard
+        self.clipboard = clipboard
         self.onEntryAdded = onEntryAdded
     }
     
@@ -87,9 +86,9 @@ public final class IncomingClipboardHandler {
             
             // Apply to system clipboard AFTER adding to history
             // Post notification to update ClipboardMonitor's changeCount to prevent duplicate detection
-            _ = await MainActor.run { pasteboard.changeCount }
+            _ = await MainActor.run { clipboard.changeCount }
             try await applyToClipboard(payload)
-            let afterChangeCount = await MainActor.run { pasteboard.changeCount }
+            let afterChangeCount = await MainActor.run { clipboard.changeCount }
             
             // Notify dispatcher (multicast) and direct callbacks
             dispatcher.notifyClipboardApplied(changeCount: afterChangeCount)
@@ -113,33 +112,29 @@ public final class IncomingClipboardHandler {
     /// Check if incoming payload matches current clipboard content
     private func matchesCurrentClipboard(_ payload: ClipboardPayload) async -> Bool {
         await MainActor.run {
-            guard let types = pasteboard.types else { return false }
-            
             switch payload.contentType {
             case .text:
-                guard types.contains(.string), let currentText = pasteboard.string(forType: .string) else {
+                guard let currentText = clipboard.currentText() else {
                     return false
                 }
                 let incomingText = String(data: payload.data, encoding: .utf8) ?? ""
                 return currentText == incomingText
-                
+
             case .link:
-                guard types.contains(.string), let currentUrlString = pasteboard.string(forType: .string) else {
+                guard let currentUrlString = clipboard.currentText() else {
                     return false
                 }
                 let incomingUrlString = String(data: payload.data, encoding: .utf8) ?? ""
                 return currentUrlString == incomingUrlString
-                
+
             case .image:
-                // For images, check if pasteboard contains any image type
-                // NSImage can handle all formats, so check if we can read an image
-                let imageObjects = pasteboard.readObjects(forClasses: [NSImage.self], options: nil).compactMap { $0 as? NSImage }
-                guard !imageObjects.isEmpty else {
+                // For images, check if clipboard contains any image type
+                guard clipboard.containsImage() else {
                     return false
                 }
                 // If clipboard has image and incoming is image, assume different (could enhance with hash comparison)
                 return false
-                
+
             case .file:
                 // Files are more complex, skip comparison for now
                 return false
@@ -162,38 +157,38 @@ public final class IncomingClipboardHandler {
         }
         
         _ = await MainActor.run {
-            pasteboard.clearContents()
+            clipboard.clear()
         }
-        
+
         switch payload.contentType {
         case .text:
             let text = String(data: payload.data, encoding: .utf8) ?? ""
             _ = await MainActor.run {
-                pasteboard.setString(text, forType: .string)
+                clipboard.writeText(text)
             }
-            
+
             #if canImport(os)
             logger.info("✅ Applied text to clipboard (\(text.count) chars)")
             #endif
-            
+
         case .link:
             let urlString = String(data: payload.data, encoding: .utf8) ?? ""
             _ = await MainActor.run {
-                pasteboard.setString(urlString, forType: .string)
+                clipboard.writeText(urlString)
             }
-            
+
             #if canImport(os)
             logger.info("✅ Applied link to clipboard: \(urlString)")
             #endif
-            
+
         case .image:
-            guard let image = NSImage(data: payload.data) else {
+            let wrote = await MainActor.run {
+                clipboard.writeImageData(payload.data)
+            }
+            guard wrote else {
                 throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create image from data"])
             }
-            _ = await MainActor.run {
-                pasteboard.writeObjects([image])
-            }
-            
+
             #if canImport(os)
             logger.info("✅ Applied image to clipboard")
             #endif
@@ -217,8 +212,8 @@ public final class IncomingClipboardHandler {
                 
                 // Add file URL to clipboard
                 await MainActor.run {
-                    pasteboard.clearContents()
-                    pasteboard.writeObjects([tempURL as NSURL])
+                    clipboard.clear()
+                    clipboard.writeFileURL(tempURL)
                 }
                 
                 #if canImport(os)
@@ -268,9 +263,8 @@ public final class IncomingClipboardHandler {
             
             // Try to get actual image dimensions from the image data
             var pixelSize = CGSizeValue(width: 0, height: 0)
-            if let image = NSImage(data: payload.data) {
-                let size = image.size
-                pixelSize = CGSizeValue(width: Int(size.width), height: Int(size.height))
+            if let size = clipboard.imagePixelSize(from: payload.data) {
+                pixelSize = CGSizeValue(width: size.width, height: size.height)
             }
             
             // Extract format from metadata - log warning if missing (should be required in protocol)

@@ -1,6 +1,5 @@
 import Testing
 import Foundation
-import AppKit
 import CryptoKit
 @testable import HypoApp
 
@@ -16,13 +15,13 @@ struct IncomingClipboardHandlerTests {
         let transport = NoopTransport()
         let syncEngine = SyncEngine(transport: transport, keyProvider: keyProvider, localDeviceId: "mac")
         
-        let pasteboard = NSPasteboard.withUniqueName()
-        
+        let clipboard = RecordingClipboard()
+
         let handler = IncomingClipboardHandler(
             syncEngine: syncEngine,
             historyStore: historyStore,
             dispatcher: dispatcher,
-            pasteboard: pasteboard
+            clipboard: clipboard
         )
         
         // Setup Key
@@ -62,8 +61,8 @@ struct IncomingClipboardHandlerTests {
         
         await handler.handle(frameData)
         
-        // Verify Pasteboard
-        #expect(pasteboard.string(forType: .string) == "Hello Test")
+        // Verify Clipboard
+        #expect(clipboard.textToReturn == "Hello Test")
         
         // Verify History
         let recent = await historyStore.all()

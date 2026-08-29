@@ -8,15 +8,15 @@ public actor HistoryStore {
     private let logger = HypoLogger(category: "HistoryStore")
     private var entries: [ClipboardEntry] = []
     private var maxEntries: Int
-    private let defaults: UserDefaults
+    private let persistence: HistoryPersistence
     private static let entriesKey = "com.hypo.clipboard.history_entries"
     private static let fileStorageMigrationKey = "com.hypo.clipboard.file_storage_migration_v2"
 
-    public init(maxEntries: Int = 200, defaults: UserDefaults = .standard) {
+    public init(maxEntries: Int = 200, persistence: HistoryPersistence = UserDefaultsHistoryPersistence()) {
         self.maxEntries = max(1, maxEntries)
-        self.defaults = defaults
+        self.persistence = persistence
         // Load persisted entries on init (nonisolated context, so we do it synchronously)
-        if let data = defaults.data(forKey: Self.entriesKey),
+        if let data = try? persistence.data(forKey: Self.entriesKey),
            let decoded = try? JSONDecoder().decode([ClipboardEntry].self, from: data) {
             let count = decoded.count
             self.entries = decoded
@@ -26,33 +26,39 @@ public actor HistoryStore {
             logger.info("✅ Loaded \(count) clipboard entries from persistence")
             #endif
         }
-        
+
         // Migration: If upgrading to v2 (file storage), clear old history to prevent issues
-        if !defaults.bool(forKey: Self.fileStorageMigrationKey) {
+        if !persistence.bool(forKey: Self.fileStorageMigrationKey) {
             logger.warning("⚠️ [HistoryStore] Upgrading to file-based storage. Clearing old history.")
             #if canImport(os)
             let logger = HypoLogger(category: "history")
             logger.info("🧹 Clearing old history for file storage migration")
             #endif
             self.entries.removeAll()
-            // Clear UserDefaults
-            defaults.removeObject(forKey: Self.entriesKey)
+            // Clear persisted history
+            try? persistence.removeValue(forKey: Self.entriesKey)
             // Initialize storage manager (clears files too if needed, though usually empty on first run)
             Task { @MainActor in
                 StorageManager.shared.clearAll()
             }
-            
-            defaults.set(true, forKey: Self.fileStorageMigrationKey)
+
+            persistence.setBool(true, forKey: Self.fileStorageMigrationKey)
         }
     }
-    
+
+    /// Compatibility initializer: existing callers that construct a HistoryStore
+    /// with a UserDefaults suite (e.g. for test isolation) need no changes.
+    public init(maxEntries: Int = 200, defaults: UserDefaults) {
+        self.init(maxEntries: maxEntries, persistence: UserDefaultsHistoryPersistence(defaults: defaults))
+    }
+
     private func persistEntries() {
         let encoder = JSONEncoder()
         // Critical: Skip large data blobs when saving to UserDefaults
         encoder.userInfo[.skipLargeData] = true
-        
+
         if let encoded = try? encoder.encode(self.entries) {
-            defaults.set(encoded, forKey: Self.entriesKey)
+            try? persistence.setData(encoded, forKey: Self.entriesKey)
             logger.info("💾 [HistoryStore] Persisted \(self.entries.count) clipboard entries")
             #if canImport(os)
             let logger = HypoLogger(category: "history")

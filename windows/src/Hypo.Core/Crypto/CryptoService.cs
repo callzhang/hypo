@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using Org.BouncyCastle.Crypto.Agreement;
+using Org.BouncyCastle.Crypto.Parameters;
 
 namespace Hypo.Core.Crypto;
 
@@ -69,5 +71,46 @@ public static class CryptoService
     {
         ArgumentNullException.ThrowIfNull(deviceId);
         return Encoding.UTF8.GetBytes(deviceId.ToLowerInvariant());
+    }
+
+    /// <summary>
+    /// X25519 agreement followed by HKDF-SHA256, matching
+    /// CryptoService.deriveKey in the macOS client.
+    /// </summary>
+    public static byte[] DeriveKey(
+        byte[] privateKey,
+        byte[] peerPublicKey,
+        byte[]? salt = null,
+        byte[]? info = null)
+    {
+        ArgumentNullException.ThrowIfNull(privateKey);
+        ArgumentNullException.ThrowIfNull(peerPublicKey);
+
+        var agreement = new X25519Agreement();
+        agreement.Init(new X25519PrivateKeyParameters(privateKey));
+
+        var sharedSecret = new byte[agreement.AgreementSize];
+        agreement.CalculateAgreement(new X25519PublicKeyParameters(peerPublicKey), sharedSecret, 0);
+
+        try
+        {
+            return HKDF.DeriveKey(
+                HashAlgorithmName.SHA256,
+                sharedSecret,
+                KeySizeBytes,
+                salt ?? HkdfSalt.ToArray(),
+                info ?? HkdfInfo.ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(sharedSecret);
+        }
+    }
+
+    /// <summary>Derives the X25519 public key advertised for a private key.</summary>
+    public static byte[] DerivePublicKey(byte[] privateKey)
+    {
+        ArgumentNullException.ThrowIfNull(privateKey);
+        return new X25519PrivateKeyParameters(privateKey).GeneratePublicKey().GetEncoded();
     }
 }

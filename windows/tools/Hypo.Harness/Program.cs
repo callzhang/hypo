@@ -283,7 +283,24 @@ async Task CloudAsync(string? peerDeviceId, string? textToSend)
         deviceId, "windows", searchFrom: AppContext.BaseDirectory);
 
     await using var client = new CloudWebSocketClient(options);
-    client.EnvelopeReceived += (_, e) => PrintClipboard(e);
+
+    // Through the coordinator rather than decrypting inline, so what is being
+    // tested is what will ship -- dedup included.
+    using var history = new Hypo.Core.History.ClipboardHistoryStore(
+        Path.Combine(storeDir, "history.db"));
+    var clipboard = new Hypo.Harness.ConsoleClipboard();
+    var coordinator = new Hypo.Core.Sync.SyncCoordinator(
+        clipboard, client, store, history, deviceId, deviceName);
+    coordinator.Applied += (_, entry) => Console.WriteLine(
+        $"[applied] {entry.Content.ContentType} hash={entry.Content.LogHash} " +
+        $"from={entry.SourceDeviceName ?? entry.SourceDeviceId}: " +
+        $"{PreviewContent(entry.Content)}");
+    coordinator.Dropped += (_, reason) => Console.WriteLine($"[dropped] {reason}");
+    if (peerDeviceId is not null)
+    {
+        coordinator.Peers.Add(peerDeviceId);
+    }
+
     client.RelayErrorReceived += (_, e) =>
         Console.WriteLine(
             $"[relay] {e.Error.Code}: {e.Error.Message} " +
@@ -406,6 +423,11 @@ static Task WaitForShutdownAsync()
         sigterm.Dispose();
     }, TaskScheduler.Default);
 }
+
+static string PreviewContent(Hypo.Core.Sync.ClipboardContent content) =>
+    content.ContentType is ContentType.Text or ContentType.Link
+        ? Encoding.UTF8.GetString(content.Data)
+        : $"{content.Data.Length} bytes";
 
 static string Preview(ClipboardPayload payload) =>
     payload.ContentType is ContentType.Text or ContentType.Link

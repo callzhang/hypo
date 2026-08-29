@@ -2328,7 +2328,7 @@ public class SigningServiceTests
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~SigningServiceTests`
 
-Expected: FAIL to compile with `CS0246: The type or namespace name 'SigningService' could not be found`.
+Expected: FAIL to compile with `CS0103: The name 'SigningService' does not exist in the current context` — the `Hypo.Core.Crypto` namespace already resolves, so only the type name is unknown.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -2560,7 +2560,7 @@ public class PairingMessagesTests
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~PairingMessagesTests`
 
-Expected: FAIL to compile with `CS0246: The type or namespace name 'Hypo.Core.Pairing' could not be found`.
+Expected: FAIL to compile with `CS0234: The type or namespace name 'Pairing' does not exist in the namespace 'Hypo.Core'` — CS0234 rather than CS0246, because the parent namespace already resolves.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -2793,17 +2793,20 @@ public class PairingSessionTests
     [Fact]
     public void AnAckWhoseResponseHashDoesNotMatchIsRejected()
     {
-        // The hash is what proves the responder actually decrypted the challenge
-        // rather than replaying a well-formed but unrelated message.
         var (responder, responderPublicKey) = StartResponder();
         var initiator = PairingSession.StartInitiator(InitiatorId, "Test PC");
-        var challenge = initiator.CreateChallenge(responderPublicKey);
-        var result = responder.AcceptChallenge(challenge)!;
+        var result = responder.AcceptChallenge(initiator.CreateChallenge(responderPublicKey))!;
 
-        var other = PairingSession.StartInitiator(InitiatorId, "Test PC");
-        var otherResult = responder.AcceptChallenge(other.CreateChallenge(responderPublicKey))!;
+        // A second challenge from the SAME session. The shared key is unchanged,
+        // so the first ack still decrypts cleanly and the hash comparison is
+        // actually reached — but the pending challenge has moved on, so the hash
+        // no longer matches. Borrowing an ack from a *different* session would
+        // make this vacuous: it would fail to decrypt and the comparison would
+        // never run.
+        var second = initiator.CreateChallenge(responderPublicKey);
 
-        Assert.Null(initiator.CompleteWithAck(otherResult.Ack with { ChallengeId = challenge.ChallengeId }, responderPublicKey));
+        Assert.Null(initiator.CompleteWithAck(
+            result.Ack with { ChallengeId = second.ChallengeId }, responderPublicKey));
     }
 
     [Fact]

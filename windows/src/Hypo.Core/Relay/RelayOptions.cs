@@ -1,0 +1,127 @@
+namespace Hypo.Core.Relay;
+
+/// <summary>
+/// Everything needed to open a relay connection.
+///
+/// <para><b>Where the secret comes from, and why this is not the final
+/// answer.</b> The relay authenticates every client with one shared secret.
+/// Android bakes it into <c>BuildConfig</c> at build time from the repo-root
+/// <c>.env</c>. Copying that for Windows would put the secret inside an MSIX
+/// that strangers install, where it is a secret only until someone unzips it.
+/// This class therefore reads the secret at *run* time — from
+/// <c>HYPO_RELAY_AUTH_TOKEN</c>, or from a repo-root <c>.env</c> when running
+/// from a source checkout — which is enough for the harness and the tests and
+/// commits us to nothing.</para>
+///
+/// <para>How a shipped Windows build should obtain relay credentials is an
+/// open question for the packaging plan. It is written here rather than left
+/// implicit so it is a decision someone makes, not a default someone
+/// discovers.</para>
+/// </summary>
+public sealed record RelayOptions
+{
+    public const string DefaultEndpoint = "wss://hypo.fly.dev/ws";
+    public const string SecretVariable = "HYPO_RELAY_AUTH_TOKEN";
+
+    /// <summary>The name the repo-root .env uses, which is not our variable name.</summary>
+    public const string DotEnvKey = "RELAY_WS_AUTH_TOKEN";
+
+    public required Uri Endpoint { get; init; }
+
+    public required string Secret { get; init; }
+
+    public required string DeviceId { get; init; }
+
+    public required string Platform { get; init; }
+
+    public string AuthToken => RelayAuthToken.Compute(Secret, DeviceId);
+
+    /// <summary>
+    /// Resolves the secret from the environment, falling back to a repo-root
+    /// <c>.env</c> found by walking up from <paramref name="searchFrom"/>.
+    /// </summary>
+    /// <param name="env">
+    /// Environment lookup, injected so tests do not have to mutate the process
+    /// environment and race each other.
+    /// </param>
+    public static RelayOptions FromEnvironment(
+        string deviceId,
+        string platform,
+        Func<string, string?>? env = null,
+        string? searchFrom = null,
+        string? endpoint = null)
+    {
+        env ??= Environment.GetEnvironmentVariable;
+
+        var secret = Blank(env(SecretVariable))
+            ? FindInDotEnv(searchFrom ?? AppContext.BaseDirectory)
+            : env(SecretVariable);
+
+        if (Blank(secret))
+        {
+            throw new InvalidOperationException(
+                $"No relay secret. Set {SecretVariable}, or run from a checkout " +
+                $"whose root .env defines {DotEnvKey}. An empty value counts as " +
+                "absent: the relay rejects an empty secret, so proceeding would " +
+                "only turn a clear error here into an opaque 401 later.");
+        }
+
+        return new RelayOptions
+        {
+            Endpoint = new Uri(endpoint ?? DefaultEndpoint),
+            Secret = secret!,
+            DeviceId = deviceId,
+            Platform = platform,
+        };
+    }
+
+    private static bool Blank(string? value) => string.IsNullOrWhiteSpace(value);
+
+    /// <summary>
+    /// Walks up looking for a <c>.env</c> holding <see cref="DotEnvKey"/>. Walks
+    /// rather than assuming a fixed depth because the tests, the harness and a
+    /// git worktree all sit at different distances from the root.
+    /// </summary>
+    private static string? FindInDotEnv(string startDirectory)
+    {
+        var dir = new DirectoryInfo(startDirectory);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(dir.FullName, ".env");
+            if (File.Exists(candidate))
+            {
+                var value = ReadKey(candidate, DotEnvKey);
+                if (!Blank(value))
+                {
+                    return value;
+                }
+            }
+
+            dir = dir.Parent;
+        }
+
+        return null;
+    }
+
+    private static string? ReadKey(string path, string key)
+    {
+        foreach (var raw in File.ReadLines(path))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            var split = line.IndexOf('=');
+            if (split <= 0 || !line.AsSpan(0, split).Trim().SequenceEqual(key))
+            {
+                continue;
+            }
+
+            return line[(split + 1)..].Trim().Trim('"', '\'');
+        }
+
+        return null;
+    }
+}

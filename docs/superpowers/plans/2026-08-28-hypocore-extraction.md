@@ -409,294 +409,182 @@ git commit -m "refactor(core): move utility layer into HypoCore"
 
 ---
 
-## Task 4: 迁移 Models 与设备标识
+## 计划修订（2026-08-29）：搬迁顺序按实测依赖图重排
 
-**Files:**
-- Move: `macos/Sources/HypoApp/Models/ClipboardEntry.swift` → `shared/HypoCore/Sources/HypoCore/Models/ClipboardEntry.swift`
-- Move: `macos/Sources/HypoApp/Models/PairedDevice.swift` → `shared/HypoCore/Sources/HypoCore/Models/PairedDevice.swift`
-- Move: `macos/Sources/HypoApp/Services/DeviceIdentity.swift` → `shared/HypoCore/Sources/HypoCore/Models/DeviceIdentity.swift`
-- Test: `shared/HypoCore/Tests/HypoCoreTests/DevicePlatformTests.swift`（Task 15 才建目录，此处先把测试写进 `macos/Tests/HypoAppTests/DeviceIdentityPlatformTests.swift`）
+Task 4 首次尝试搬 Models 时暴露了原计划的一个结构性错误：`ClipboardEntry.swift` 调用 `StorageManager.shared.load(...)`，`PairedDevice.swift` 的 `init(from peer: DiscoveredPeer)` 依赖 `BonjourBrowser.swift` 里的类型，两者都排在更后面的任务，所以纯 `git mv` 编译不过。
 
-- [ ] **Step 1: 移动文件**
+据此对全部 36 个待迁文件做了依赖图实测，结论：
+
+- **20 个文件**存在有效拓扑序，可分 4 批增量搬迁。
+- **16 个文件构成一个不可分割的循环依赖簇**（传输 / 同步 / 历史核心）。典型环：`TransportFrameCodec ↔ SyncEngine`、`TransportManager ↔ TransportAnalytics ↔ TransportMetricsRecorder`、`WebSocketTransport ↔ HistoryStore`。这类环无法靠排序消除，**必须一次性搬完**。
+
+为了让那个大提交仍然可审，把内容改动与文件移动彻底分离：先在 HypoApp 原地完成拆分与协议抽取（Task 8、9），使那 16 个文件不再引用留在 App 的类型，然后 Task 10 就是一个纯 rename 提交。
+
+**每个搬迁任务的实现者都必须在 `git mv` 之后、写任何测试之前先跑 `cd macos && swift build`**——Task 4 的实现者正是这样才提前发现问题，而不是照着计划一路走到底。
+
+---
+
+## Task 4: 搬迁批次 1（7 个无前置依赖的文件）
+
+**Files（全部 `git mv`，零内容改动）:**
+
+| 源 | 目标 |
+|---|---|
+| `macos/Sources/HypoApp/Services/DeviceIdentity.swift` | `shared/HypoCore/Sources/HypoCore/Models/DeviceIdentity.swift` |
+| `macos/Sources/HypoApp/Services/ClipboardEventDispatcher.swift` | `shared/HypoCore/Sources/HypoCore/Sync/ClipboardEventDispatcher.swift` |
+| `macos/Sources/HypoApp/Services/PairingRelayClient.swift` | `shared/HypoCore/Sources/HypoCore/Pairing/PairingRelayClient.swift` |
+| `macos/Sources/HypoApp/Services/RateLimiter.swift` | `shared/HypoCore/Sources/HypoCore/Transport/RateLimiter.swift` |
+| `macos/Sources/HypoApp/Services/StorageManager.swift` | `shared/HypoCore/Sources/HypoCore/History/StorageManager.swift` |
+| `macos/Sources/HypoApp/Services/WebSocketConnectionPool.swift` | `shared/HypoCore/Sources/HypoCore/Transport/WebSocketConnectionPool.swift` |
+| `macos/Sources/HypoApp/Utilities/BonjourBrowser.swift` | `shared/HypoCore/Sources/HypoCore/Discovery/BonjourBrowser.swift` |
+
+- [ ] **Step 1: 建目录并移动**
 
 ```bash
-mkdir -p shared/HypoCore/Sources/HypoCore/Models
-git mv macos/Sources/HypoApp/Models/ClipboardEntry.swift shared/HypoCore/Sources/HypoCore/Models/ClipboardEntry.swift
-git mv macos/Sources/HypoApp/Models/PairedDevice.swift shared/HypoCore/Sources/HypoCore/Models/PairedDevice.swift
+cd /Users/derek/Documents/Projects/hypo/.worktrees/ios-hypocore
+mkdir -p shared/HypoCore/Sources/HypoCore/{Models,Sync,Pairing,Transport,History,Discovery}
 git mv macos/Sources/HypoApp/Services/DeviceIdentity.swift shared/HypoCore/Sources/HypoCore/Models/DeviceIdentity.swift
+git mv macos/Sources/HypoApp/Services/ClipboardEventDispatcher.swift shared/HypoCore/Sources/HypoCore/Sync/ClipboardEventDispatcher.swift
+git mv macos/Sources/HypoApp/Services/PairingRelayClient.swift shared/HypoCore/Sources/HypoCore/Pairing/PairingRelayClient.swift
+git mv macos/Sources/HypoApp/Services/RateLimiter.swift shared/HypoCore/Sources/HypoCore/Transport/RateLimiter.swift
+git mv macos/Sources/HypoApp/Services/StorageManager.swift shared/HypoCore/Sources/HypoCore/History/StorageManager.swift
+git mv macos/Sources/HypoApp/Services/WebSocketConnectionPool.swift shared/HypoCore/Sources/HypoCore/Transport/WebSocketConnectionPool.swift
+git mv macos/Sources/HypoApp/Utilities/BonjourBrowser.swift shared/HypoCore/Sources/HypoCore/Discovery/BonjourBrowser.swift
 ```
 
-- [ ] **Step 2: 写失败测试——当前平台判定**
-
-创建 `macos/Tests/HypoAppTests/DeviceIdentityPlatformTests.swift`：
-
-```swift
-import Foundation
-import Testing
-@testable import HypoApp
-
-@Suite("DeviceIdentity platform detection")
-struct DeviceIdentityPlatformTests {
-    @Test("currentPlatform matches the compiled platform")
-    func currentPlatformMatchesCompiledPlatform() {
-        #if os(iOS)
-        #expect(DeviceIdentity.currentPlatform == .iOS)
-        #else
-        #expect(DeviceIdentity.currentPlatform == .macOS)
-        #endif
-    }
-}
-```
-
-- [ ] **Step 3: 运行测试确认失败**
+- [ ] **Step 2: 立刻构建，确认边界成立**
 
 ```bash
-cd macos && swift test --filter DeviceIdentityPlatformTests 2>&1 | tail -10
+cd macos && swift build 2>&1 | tail -20
 ```
 
-期望：编译失败，`'currentPlatform' is inaccessible due to 'private' protection level`。
+期望：`Build complete!`。若出现 `cannot find type X in scope`，说明依赖图算漏了一条边——**停下来报告 X 和它的定义位置**，不要自行把别的文件也搬过来。
 
-- [ ] **Step 4: 改为按平台判定并放开可见性**
+- [ ] **Step 3: 补可见性**
 
-在 `shared/HypoCore/Sources/HypoCore/Models/DeviceIdentity.swift` 中，把第 26 行
+编译若报某符号不可见，为其加 `public`。**先主动查扩展**（Task 3 的教训，唯一漏网的是 `Int.formattedAsKB`）：
 
-```swift
-    private static let currentPlatform = DevicePlatform.macOS
+```bash
+cd shared/HypoCore && grep -n "^extension \|^public extension " Sources/HypoCore/**/*.swift
 ```
 
-替换为：
+逐一确认这些扩展的成员可见性。记录所有改成 `public` 的符号。
 
-```swift
-    public static let currentPlatform: DevicePlatform = {
-        #if os(iOS)
-        return .iOS
-        #else
-        return .macOS
-        #endif
-    }()
-```
-
-- [ ] **Step 5: 运行测试确认通过**
+- [ ] **Step 4: 运行测试**
 
 ```bash
 cd macos && swift test 2>&1 | tail -20
 ```
 
-期望：全绿，且新增的 `DeviceIdentityPlatformTests` 通过。
+期望：193 通过，一个不少。
 
-- [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
+- [ ] **Step 5: 可移植性闸门**
 
 ```bash
 cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
+期望：无输出，`exit=1`。
 
-- [ ] **Step 7: 提交**
+`StorageManager.swift` 另跑一次人工复核 grep（见「闸门与 CI 覆盖不到什么」）：
+
+```bash
+cd shared/HypoCore && grep -rn "NSHomeDirectory\|homeDirectoryForCurrentUser\|/Users/\|~/Library\|cachesDirectory" Sources/HypoCore/History/StorageManager.swift
+```
+
+不作为通过判据，把结果写进报告——`cachesDirectory` 在 iOS 上会被系统清理，这是第 2 期要处理的已知问题。
+
+- [ ] **Step 6: 提交并推送**
 
 ```bash
 git add -A
-git commit -m "refactor(core): move models and make platform detection compile-time"
+git commit -m "refactor(core): migrate batch 1 into HypoCore"
+PRE_PUSH_ANDROID=0 PRE_PUSH_BACKEND=0 git push
 ```
+
+- [ ] **Step 7: 确认 CI**
+
+```bash
+gh run list --branch feat/ios-hypocore --limit 3
+```
+
+确认 `HypoCore iOS Build` 与 `macOS Tests` 均为 `success`。
 
 ---
 
-## Task 5: 迁移 Crypto 层
+## Task 5: 搬迁批次 2（9 个文件）
 
-**Files:**
-- Move: `macos/Sources/HypoApp/Crypto/*.swift`（6 个文件）→ `shared/HypoCore/Sources/HypoCore/Crypto/`
+批次 1 落地后这些文件的前置依赖才齐备。
 
-- [ ] **Step 1: 移动文件**
+**Files（全部 `git mv`）:**
+
+| 源 | 目标 |
+|---|---|
+| `Crypto/CryptoService.swift` | `Crypto/CryptoService.swift` |
+| `Crypto/FileBasedKeyStore.swift` | `Crypto/FileBasedKeyStore.swift` |
+| `Crypto/FileBasedPairingSigningKeyStore.swift` | `Crypto/FileBasedPairingSigningKeyStore.swift` |
+| `Crypto/KeychainKeyStore.swift` | `Crypto/KeychainKeyStore.swift` |
+| `Crypto/PairingSigningKeyStore.swift` | `Crypto/PairingSigningKeyStore.swift` |
+| `Models/ClipboardEntry.swift` | `Models/ClipboardEntry.swift` |
+| `Models/PairedDevice.swift` | `Models/PairedDevice.swift` |
+| `Services/TempFileManager.swift` | `Files/TempFileManager.swift` |
+| `Utilities/BonjourPublisher.swift` | `Discovery/BonjourPublisher.swift` |
+
+（源路径前缀 `macos/Sources/HypoApp/`，目标前缀 `shared/HypoCore/Sources/HypoCore/`）
+
+- [ ] **Step 1: 移动**
 
 ```bash
-mkdir -p shared/HypoCore/Sources/HypoCore/Crypto
+mkdir -p shared/HypoCore/Sources/HypoCore/{Crypto,Files}
 git mv macos/Sources/HypoApp/Crypto/CryptoService.swift shared/HypoCore/Sources/HypoCore/Crypto/CryptoService.swift
-git mv macos/Sources/HypoApp/Crypto/DeviceKeyProvider.swift shared/HypoCore/Sources/HypoCore/Crypto/DeviceKeyProvider.swift
 git mv macos/Sources/HypoApp/Crypto/FileBasedKeyStore.swift shared/HypoCore/Sources/HypoCore/Crypto/FileBasedKeyStore.swift
 git mv macos/Sources/HypoApp/Crypto/FileBasedPairingSigningKeyStore.swift shared/HypoCore/Sources/HypoCore/Crypto/FileBasedPairingSigningKeyStore.swift
 git mv macos/Sources/HypoApp/Crypto/KeychainKeyStore.swift shared/HypoCore/Sources/HypoCore/Crypto/KeychainKeyStore.swift
 git mv macos/Sources/HypoApp/Crypto/PairingSigningKeyStore.swift shared/HypoCore/Sources/HypoCore/Crypto/PairingSigningKeyStore.swift
-```
-
-- [ ] **Step 2: 确认 Keychain access group 已就绪（无需改动）**
-
-`KeychainKeyStore.swift:16` 的初始化器已经是 `public init(service: String = "com.hypo.clipboard.keys", accessGroup: String? = nil)`，且第 99 行已在 `accessGroup` 非 nil 时写入 `kSecAttrAccessGroup`。iOS 扩展共享密钥所需的参数化**已经存在**，本任务不改这个文件。
-
-用以下命令确认后直接进入下一步：
-
-```bash
-grep -n "accessGroup" shared/HypoCore/Sources/HypoCore/Crypto/KeychainKeyStore.swift
-```
-
-期望：能看到 `init(... accessGroup: String? = nil)` 与 `query[kSecAttrAccessGroup as String] = accessGroup`。
-
-- [ ] **Step 3: 运行测试**
-
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
-
-期望：全绿。`CryptoServiceTests` 必须通过——它校验的是与 Android 互通的加密行为，一旦回归就是协议级故障。
-
-- [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 5: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): move crypto layer into HypoCore"
-```
-
----
-
-## Task 6: 迁移 Bonjour 发现层
-
-**Files:**
-- Move: `macos/Sources/HypoApp/Utilities/BonjourBrowser.swift` → `shared/HypoCore/Sources/HypoCore/Discovery/BonjourBrowser.swift`
-- Move: `macos/Sources/HypoApp/Utilities/BonjourPublisher.swift` → `shared/HypoCore/Sources/HypoCore/Discovery/BonjourPublisher.swift`
-
-- [ ] **Step 1: 移动文件**
-
-```bash
-mkdir -p shared/HypoCore/Sources/HypoCore/Discovery
-git mv macos/Sources/HypoApp/Utilities/BonjourBrowser.swift shared/HypoCore/Sources/HypoCore/Discovery/BonjourBrowser.swift
+git mv macos/Sources/HypoApp/Models/ClipboardEntry.swift shared/HypoCore/Sources/HypoCore/Models/ClipboardEntry.swift
+git mv macos/Sources/HypoApp/Models/PairedDevice.swift shared/HypoCore/Sources/HypoCore/Models/PairedDevice.swift
+git mv macos/Sources/HypoApp/Services/TempFileManager.swift shared/HypoCore/Sources/HypoCore/Files/TempFileManager.swift
 git mv macos/Sources/HypoApp/Utilities/BonjourPublisher.swift shared/HypoCore/Sources/HypoCore/Discovery/BonjourPublisher.swift
 ```
 
-- [ ] **Step 2: 运行测试**
+- [ ] **Step 2: 构建、补可见性、测试、闸门、提交、推送、确认 CI**
 
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
+与 Task 4 的 Step 2~7 完全相同，提交信息用 `refactor(core): migrate batch 2 into HypoCore`。
 
-期望：全绿，含 `BonjourBrowserTests` 与 `BonjourPublisherTests`。
+**本批的特殊注意事项：**
 
-- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 4: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): move bonjour discovery into HypoCore"
-```
+- **`ClipboardEntry.swift` 是与 Android 互通的协议类型**。必须是纯 rename——不得改动任何 `Codable` conformance、CodingKeys 或序列化行为。改了就是协议破坏，两端会不兼容。
+- **`KeychainKeyStore.swift` 有 iOS 运行时语义差异**（见「闸门与 CI 覆盖不到什么」）：macOS 默认走文件式 keychain，iOS 只有 data-protection keychain；`accessGroup` 在 iOS 需要 entitlement。**本任务不要改它**，只在提交信息里记一句待办，留给第 2 期。
 
 ---
 
-## Task 7: 迁移传输层基础组件
+## Task 6: 搬迁批次 3（3 个文件）
 
 **Files:**
-- Move 6 个文件 → `shared/HypoCore/Sources/HypoCore/Transport/`
-
-- [ ] **Step 1: 移动文件**
 
 ```bash
-mkdir -p shared/HypoCore/Sources/HypoCore/Transport
-git mv macos/Sources/HypoApp/Services/TransportFrameCodec.swift shared/HypoCore/Sources/HypoCore/Transport/TransportFrameCodec.swift
-git mv macos/Sources/HypoApp/Services/RateLimiter.swift shared/HypoCore/Sources/HypoCore/Transport/RateLimiter.swift
-git mv macos/Sources/HypoApp/Services/WebSocketTransport.swift shared/HypoCore/Sources/HypoCore/Transport/WebSocketTransport.swift
-git mv macos/Sources/HypoApp/Services/WebSocketConnectionPool.swift shared/HypoCore/Sources/HypoCore/Transport/WebSocketConnectionPool.swift
-git mv macos/Sources/HypoApp/Services/TransportMetricsRecorder.swift shared/HypoCore/Sources/HypoCore/Transport/TransportMetricsRecorder.swift
-git mv macos/Sources/HypoApp/Services/TransportAnalytics.swift shared/HypoCore/Sources/HypoCore/Transport/TransportAnalytics.swift
-```
-
-- [ ] **Step 2: 运行测试**
-
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
-
-期望：全绿，含 `TransportFrameCodecTests`、`TokenBucketTests`、`WebSocketTransportTests`、`TransportMetricsAggregatorTests`。
-
-- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 4: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): move transport primitives into HypoCore"
-```
-
----
-
-## Task 8: 迁移具体传输实现
-
-**Files:**
-- Move 7 个文件 → `shared/HypoCore/Sources/HypoCore/Transport/`
-
-- [ ] **Step 1: 移动文件**
-
-```bash
-git mv macos/Sources/HypoApp/Services/LanWebSocketTransport.swift shared/HypoCore/Sources/HypoCore/Transport/LanWebSocketTransport.swift
-git mv macos/Sources/HypoApp/Services/LanWebSocketServer.swift shared/HypoCore/Sources/HypoCore/Transport/LanWebSocketServer.swift
-git mv macos/Sources/HypoApp/Services/LanSyncTransport.swift shared/HypoCore/Sources/HypoCore/Transport/LanSyncTransport.swift
-git mv macos/Sources/HypoApp/Services/CloudRelayTransport.swift shared/HypoCore/Sources/HypoCore/Transport/CloudRelayTransport.swift
-git mv "macos/Sources/HypoApp/Services/CloudRelayConfiguration+Defaults.swift" "shared/HypoCore/Sources/HypoCore/Transport/CloudRelayConfiguration+Defaults.swift"
-git mv macos/Sources/HypoApp/Services/DualSyncTransport.swift shared/HypoCore/Sources/HypoCore/Transport/DualSyncTransport.swift
-git mv "macos/Sources/HypoApp/Services/TransportProvider+Default.swift" "shared/HypoCore/Sources/HypoCore/Transport/TransportProvider+Default.swift"
-```
-
-- [ ] **Step 2: 运行测试**
-
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
-
-期望：全绿，含 `LanWebSocketTransportTests`、`LanWebSocketServerTests`、`LanWebSocketServerBufferTests`、`LanSyncTransportTests`、`CloudRelayTransportTests`。
-
-- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。。`LanWebSocketServer.swift` 用的是 `NWListener`，iOS 上可编译；它在 iOS 上不启动是运行时决策（第 2 期），不是编译期决策。
-
-- [ ] **Step 4: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): move LAN and cloud transports into HypoCore"
-```
-
----
-
-## Task 9: 迁移配对层
-
-**Files:**
-- Move: `macos/Sources/HypoApp/Pairing/PairingModels.swift`、`PairingSession.swift`、`macos/Sources/HypoApp/Services/PairingRelayClient.swift` → `shared/HypoCore/Sources/HypoCore/Pairing/`
-
-`Pairing/RemotePairingViewModel.swift` **不迁移**——它是 macOS UI 层。
-
-- [ ] **Step 1: 移动文件**
-
-```bash
-mkdir -p shared/HypoCore/Sources/HypoCore/Pairing
+git mv macos/Sources/HypoApp/Crypto/DeviceKeyProvider.swift shared/HypoCore/Sources/HypoCore/Crypto/DeviceKeyProvider.swift
 git mv macos/Sources/HypoApp/Pairing/PairingModels.swift shared/HypoCore/Sources/HypoCore/Pairing/PairingModels.swift
-git mv macos/Sources/HypoApp/Pairing/PairingSession.swift shared/HypoCore/Sources/HypoCore/Pairing/PairingSession.swift
-git mv macos/Sources/HypoApp/Services/PairingRelayClient.swift shared/HypoCore/Sources/HypoCore/Pairing/PairingRelayClient.swift
+git mv macos/Sources/HypoApp/Services/OptimizedHistoryStore.swift shared/HypoCore/Sources/HypoCore/History/OptimizedHistoryStore.swift
 ```
 
-- [ ] **Step 2: 删除 PairingSession 中未使用的 AppKit import**
+- [ ] **Step 1~7**：与 Task 4 相同的流程。提交信息 `refactor(core): migrate batch 3 into HypoCore`。
 
-`PairingSession.swift` 第 3~5 行形如：
+---
+
+## Task 7: 搬迁 PairingSession
+
+**Files:**
+
+```bash
+git mv macos/Sources/HypoApp/Pairing/PairingSession.swift shared/HypoCore/Sources/HypoCore/Pairing/PairingSession.swift
+```
+
+- [ ] **Step 1: 移动（同上）**
+
+- [ ] **Step 2: 删除未使用的 AppKit import**
+
+`PairingSession.swift` 顶部有一段：
 
 ```swift
 #if canImport(AppKit)
@@ -704,46 +592,384 @@ import AppKit
 #endif
 ```
 
-整段删除。该文件没有任何 `NS*` 类型使用（已核实）。
+整段删除——该文件没有任何 `NS*` 类型使用（已核实）。
 
-- [ ] **Step 3: 运行测试**
+- [ ] **Step 3~7**：构建、测试、闸门、提交（`refactor(core): move PairingSession into HypoCore`）、推送、确认 CI。
+
+---
+
+## Task 8: 原地拆分 HistoryStore.swift（不移动）
+
+`macos/Sources/HypoApp/Services/HistoryStore.swift` 有 1187 行、两个职责。本任务只在 HypoApp 内部拆开，**不搬去 HypoCore**——拆分是内容改动，搬迁是位置改动，分开做才可审。
+
+**Files:**
+- Create: `macos/Sources/HypoApp/Services/ClipboardHistoryViewModel.swift`
+- Modify: `macos/Sources/HypoApp/Services/HistoryStore.swift`（只留 actor）
+
+- [ ] **Step 1: 拆出 ViewModel**
+
+把 `HistoryStore.swift` 第 219 行（`@MainActor public final class ClipboardHistoryViewModel`）到文件末尾的全部内容，移入新文件 `macos/Sources/HypoApp/Services/ClipboardHistoryViewModel.swift`，顶部补上该段实际用到的 import：
+
+```swift
+import Foundation
+import CryptoKit
+#if canImport(Combine)
+import Combine
+#endif
+#if canImport(AppKit)
+import AppKit
+#endif
+#if canImport(os)
+import os.log
+#endif
+#if canImport(UniformTypeIdentifiers)
+import UniformTypeIdentifiers
+#endif
+#if canImport(UserNotifications)
+import UserNotifications
+#endif
+```
+
+- [ ] **Step 2: 精简原文件**
+
+`HistoryStore.swift` 只保留第 1~218 行：顶部 import、第 22 行的 `extension UserDefaults: @retroactive @unchecked Sendable {}`、以及 `public actor HistoryStore`。删除其中的 `#if canImport(AppKit) import AppKit #endif`——actor 部分不使用任何 `NS*` 类型。
+
+- [ ] **Step 3: 测试**
 
 ```bash
 cd macos && swift test 2>&1 | tail -20
 ```
 
-期望：全绿，含 `PairingSessionTests`。
+期望：193 通过。这一步不动任何行为，测试数不应变化。
 
-- [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 5: 提交**
+- [ ] **Step 4: 提交**
 
 ```bash
 git add -A
-git commit -m "refactor(core): move pairing layer into HypoCore"
+git commit -m "refactor(macos): split HistoryStore actor from its view model"
+PRE_PUSH_ANDROID=0 PRE_PUSH_BACKEND=0 git push
 ```
 
 ---
 
-## Task 10: 迁移存储层并抽出 StorageLocations 协议
+## Task 9: 原地抽出三个平台协议（不移动）
 
-`StorageManager.swift:23` 硬编码 `FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!`。iOS 上 Caches 会被系统清理（spec §7.1），必须可注入。
+让循环簇里的文件不再引用留在 HypoApp 的具体类型。协议放进 HypoCore，macOS 实现留在 HypoApp。
 
 **Files:**
-- Create: `shared/HypoCore/Sources/HypoCore/Platform/StorageLocations.swift`
-- Move: `macos/Sources/HypoApp/Services/StorageManager.swift` → `shared/HypoCore/Sources/HypoCore/History/StorageManager.swift`
-- Move: `macos/Sources/HypoApp/Services/OptimizedHistoryStore.swift` → `shared/HypoCore/Sources/HypoCore/History/OptimizedHistoryStore.swift`
-- Test: `macos/Tests/HypoAppTests/StorageLocationsTests.swift`
+- Create: `shared/HypoCore/Sources/HypoCore/Notifications/ClipboardNotificationScheduling.swift`
+- Create: `shared/HypoCore/Sources/HypoCore/Platform/AppLifecycleObserving.swift`
+- Create: `shared/HypoCore/Sources/HypoCore/Platform/ClipboardWriting.swift`
+- Create: `macos/Sources/HypoApp/Platform/AppKitLifecycleObserver.swift`
+- Create: `macos/Sources/HypoApp/Platform/AppKitClipboardWriter.swift`
+- Modify: `macos/Sources/HypoApp/Services/ClipboardNotificationController.swift`、`TransportManager.swift`、`IncomingClipboardHandler.swift`、`App/AppContext.swift`
 
-- [ ] **Step 1: 写失败测试**
+三个协议的完整定义、macOS 实现代码、以及 `TransportManager` / `IncomingClipboardHandler` 的改法，见本文档后面「协议定义与实现」一节（原 Task 14、15 的内容，未作改动，只是提前到此处执行且**不搬文件**）。
 
-创建 `macos/Tests/HypoAppTests/StorageLocationsTests.swift`：
+- [ ] **Step 1~5**：按该节逐条执行；每步之后 `cd macos && swift test` 必须 193 通过。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git commit -m "refactor(macos): put platform couplings behind protocols"
+```
+
+---
+
+## Task 10: 搬迁循环依赖簇（16 个文件，纯 rename）
+
+Task 8、9 完成后，这 16 个文件不再引用留在 HypoApp 的类型，可以一次性搬走。**这个提交必须是纯 rename**——`git show -M --summary` 应当只显示 renames，没有内容 diff。若某个文件仍需改动才能编译，说明 Task 8/9 有遗漏，回去补，不要在本任务里改内容。
+
+**Files（16 个，源前缀 `macos/Sources/HypoApp/Services/`，目标前缀 `shared/HypoCore/Sources/HypoCore/`）:**
+
+`CloudRelayConfiguration+Defaults.swift`、`CloudRelayTransport.swift`、`ConnectionStatusProber.swift`、`DualSyncTransport.swift`、`LanSyncTransport.swift`、`LanWebSocketServer.swift`、`LanWebSocketTransport.swift`、`TransportAnalytics.swift`、`TransportFrameCodec.swift`、`TransportManager.swift`、`TransportMetricsRecorder.swift`、`TransportProvider+Default.swift`、`WebSocketTransport.swift` → `Transport/`
+
+`SyncEngine.swift`、`IncomingClipboardHandler.swift` → `Sync/`
+
+`HistoryStore.swift` → `History/`
+
+- [ ] **Step 1: 移动全部 16 个文件**
+
+- [ ] **Step 2: 构建**
+
+```bash
+cd macos && swift build 2>&1 | tail -30
+```
+
+期望：`Build complete!`。任何 `cannot find` 错误都意味着 Task 8/9 有遗漏——报告缺的是哪个类型，不要就地修补。
+
+- [ ] **Step 3: 确认是纯 rename**
+
+```bash
+git add -A && git diff --cached -M --summary | grep -c "^ rename"
+```
+
+期望：16。若有任何非 rename 的内容改动，说明混入了不该有的东西。
+
+- [ ] **Step 4~7**：测试 193、闸门、提交（`refactor(core): migrate the transport/sync/history cluster`）、推送、确认 CI。
+
+---
+
+## 协议定义与实现（Task 9 执行内容）
+
+### 9.1 `ClipboardNotificationScheduling`
+
+把 `macos/Sources/HypoApp/Services/ClipboardNotificationController.swift:19` 处的 `public protocol ClipboardNotificationScheduling: AnyObject, Sendable { ... }` **整段声明**原样移入新文件 `shared/HypoCore/Sources/HypoCore/Notifications/ClipboardNotificationScheduling.swift`，方法签名一字不改。从原文件删除该声明，保留 `ClipboardNotificationHandling` 协议与 `ClipboardNotificationController` 类不动。
+
+随后解绑两处把协议默认值绑到具体类型的参数：
+
+- `TransportManager.swift:116` 的 `notificationController: ClipboardNotificationScheduling = ClipboardNotificationController.shared` → 去掉默认值，改为 `notificationController: ClipboardNotificationScheduling,`
+- 在 `macos/Sources/HypoApp/App/AppContext.swift` 构造 `TransportManager` 处显式传入 `ClipboardNotificationController.shared`
+
+`ClipboardHistoryViewModel`（Task 8 拆出，留在 HypoApp）里的同类默认值**保持原样**，因为它与控制器同在 HypoApp。
+
+### 9.2 `AppLifecycleObserving`
+
+创建 `shared/HypoCore/Sources/HypoCore/Platform/AppLifecycleObserving.swift`：
+
+```swift
+import Foundation
+
+/// Observes host-application lifecycle transitions.
+///
+/// macOS listens to NSApplication notifications; iOS listens to
+/// UIApplication ones. The core only needs the three transitions below.
+public protocol AppLifecycleObserving: AnyObject {
+    func start(
+        onActivate: @escaping @Sendable () -> Void,
+        onDeactivate: @escaping @Sendable () -> Void,
+        onTerminate: @escaping @Sendable () -> Void
+    )
+    func stop()
+}
+
+/// Test double: events are driven explicitly rather than by the system.
+public final class ManualAppLifecycleObserver: AppLifecycleObserving {
+    private var onActivate: (@Sendable () -> Void)?
+    private var onDeactivate: (@Sendable () -> Void)?
+    private var onTerminate: (@Sendable () -> Void)?
+
+    public init() {}
+
+    public func start(
+        onActivate: @escaping @Sendable () -> Void,
+        onDeactivate: @escaping @Sendable () -> Void,
+        onTerminate: @escaping @Sendable () -> Void
+    ) {
+        self.onActivate = onActivate
+        self.onDeactivate = onDeactivate
+        self.onTerminate = onTerminate
+    }
+
+    public func stop() {
+        onActivate = nil
+        onDeactivate = nil
+        onTerminate = nil
+    }
+
+    public func simulateActivate() { onActivate?() }
+    public func simulateDeactivate() { onDeactivate?() }
+    public func simulateTerminate() { onTerminate?() }
+}
+```
+
+macOS 实现，`macos/Sources/HypoApp/Platform/AppKitLifecycleObserver.swift`：
+
+```swift
+import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
+
+/// macOS implementation of AppLifecycleObserving, replacing the private
+/// ApplicationLifecycleObserver that used to live inside TransportManager.
+public final class AppKitLifecycleObserver: AppLifecycleObserving {
+    private var tokens: [NSObjectProtocol] = []
+
+    public init() {}
+
+    public func start(
+        onActivate: @escaping @Sendable () -> Void,
+        onDeactivate: @escaping @Sendable () -> Void,
+        onTerminate: @escaping @Sendable () -> Void
+    ) {
+        #if canImport(AppKit)
+        let center = NotificationCenter.default
+        tokens.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            onActivate()
+        })
+        tokens.append(center.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+            onDeactivate()
+        })
+        tokens.append(center.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+            onTerminate()
+        })
+        #endif
+    }
+
+    public func stop() {
+        let center = NotificationCenter.default
+        tokens.forEach { center.removeObserver($0) }
+        tokens.removeAll()
+    }
+
+    deinit {
+        stop()
+    }
+}
+```
+
+在 `TransportManager.swift` 中：删除文件末尾 `#if canImport(AppKit) private final class ApplicationLifecycleObserver { ... } #endif` 整段；把持有它的属性改为 `private let lifecycleObserver: AppLifecycleObserving?`；构造处改为调用注入实例的 `start(onActivate:onDeactivate:onTerminate:)`，三个闭包体保持原样。初始化器增加 `lifecycleObserver: AppLifecycleObserving? = nil,`，并在 `AppContext.swift` 构造点传入 `AppKitLifecycleObserver()`。
+
+### 9.3 `ClipboardWriting`
+
+创建 `shared/HypoCore/Sources/HypoCore/Platform/ClipboardWriting.swift`：
+
+```swift
+import Foundation
+
+/// System clipboard access needed by the core.
+///
+/// Covers exactly what IncomingClipboardHandler used to do directly against
+/// NSPasteboard: compare against current contents, then apply the payload.
+@MainActor
+public protocol ClipboardWriting: AnyObject {
+    func clear()
+    func writeText(_ text: String)
+    /// Returns false when the data cannot be decoded as an image on this platform.
+    func writeImageData(_ data: Data) -> Bool
+    func writeFileURL(_ url: URL)
+    func currentText() -> String?
+    func containsImage() -> Bool
+}
+
+/// Test double recording every write.
+@MainActor
+public final class RecordingClipboardWriter: ClipboardWriting {
+    public private(set) var writtenTexts: [String] = []
+    public private(set) var writtenImageData: [Data] = []
+    public private(set) var writtenFileURLs: [URL] = []
+    private var text: String?
+    private var hasImage = false
+
+    public init() {}
+
+    public func clear() {
+        text = nil
+        hasImage = false
+    }
+
+    public func writeText(_ value: String) {
+        text = value
+        writtenTexts.append(value)
+    }
+
+    public func writeImageData(_ data: Data) -> Bool {
+        writtenImageData.append(data)
+        hasImage = true
+        return true
+    }
+
+    public func writeFileURL(_ url: URL) {
+        writtenFileURLs.append(url)
+    }
+
+    public func currentText() -> String? { text }
+
+    public func containsImage() -> Bool { hasImage }
+}
+```
+
+macOS 实现，`macos/Sources/HypoApp/Platform/AppKitClipboardWriter.swift`：
+
+```swift
+import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
+
+/// macOS implementation of ClipboardWriting, backed by NSPasteboard.
+@MainActor
+public final class AppKitClipboardWriter: ClipboardWriting {
+    #if canImport(AppKit)
+    private let pasteboard: NSPasteboard
+
+    public init(pasteboard: NSPasteboard = .general) {
+        self.pasteboard = pasteboard
+    }
+
+    public func clear() {
+        pasteboard.clearContents()
+    }
+
+    public func writeText(_ text: String) {
+        pasteboard.setString(text, forType: .string)
+    }
+
+    public func writeImageData(_ data: Data) -> Bool {
+        guard let image = NSImage(data: data) else { return false }
+        pasteboard.writeObjects([image])
+        return true
+    }
+
+    public func writeFileURL(_ url: URL) {
+        pasteboard.writeObjects([url as NSURL])
+    }
+
+    public func currentText() -> String? {
+        guard let types = pasteboard.types, types.contains(.string) else { return nil }
+        return pasteboard.string(forType: .string)
+    }
+
+    public func containsImage() -> Bool {
+        !pasteboard.readObjects(forClasses: [NSImage.self], options: nil)
+            .compactMap { $0 as? NSImage }
+            .isEmpty
+    }
+    #endif
+}
+```
+
+在 `IncomingClipboardHandler.swift` 中：删除第 2 行的裸 `import AppKit`；把 `private let pasteboard: NSPasteboard` 改为 `private let clipboard: ClipboardWriting`；初始化器参数 `pasteboard: NSPasteboard = .general` 改为 `clipboard: ClipboardWriting`（无默认值）。
+
+`matchesCurrentClipboard` 中：`.text` 与 `.link` 分支改用 `clipboard.currentText()`；`.image` 分支改用 `clipboard.containsImage()`（原逻辑在有图时仍返回 `false`，保持不变）。
+
+`applyToClipboard` 中：`pasteboard.clearContents()` → `clipboard.clear()`；`setString(_:forType: .string)` → `clipboard.writeText(_:)`；`.image` 分支改为：
+
+```swift
+        case .image:
+            guard clipboard.writeImageData(payload.data) else {
+                throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create image from data"])
+            }
+```
+
+`.file` 分支写临时文件的逻辑不变，最后把文件 URL 交给 `clipboard.writeFileURL(tempURL)`。在 `AppContext.swift` 构造 `IncomingClipboardHandler` 处传入 `clipboard: AppKitClipboardWriter()`。
+
+若 `IncomingClipboardHandlerTests` 构造 handler 时传了 `pasteboard:`，改为传 `RecordingClipboardWriter()`，断言从检查 `NSPasteboard.general` 改为检查 `writer.writtenTexts` 等记录属性。
+
+---
+
+## Task 11: 存储与历史持久化协议
+
+Task 4 把 `StorageManager.swift` 原样搬进了 HypoCore，Task 10 搬进了 `HistoryStore` actor。本任务给两者加上 iOS 需要的注入点（spec §7.1、§7.2）。
+
+`StorageManager.swift:23` 硬编码 `FileManager.default.urls(for: .cachesDirectory, ...)`，iOS 上 Caches 会被系统清理；`HistoryStore` actor 直接持有 `UserDefaults`，而 iOS 三个进程并发写历史时 App Group suite 跨进程不可靠。
+
+- [ ] **Step 1~7**：见下方「存储协议定义」一节，逐条执行；每步之后 `cd macos && swift test` 必须 193 通过（新增测试后应为 195+）。
+
+- [ ] **Step 8: 提交**
+
+```bash
+git commit -m "refactor(core): put storage and history behind protocols"
+```
+
+---
+
+## 存储协议定义（Task 11 执行内容）
+
+### 11.1 `StorageLocations`
+
+先写失败测试 `macos/Tests/HypoAppTests/StorageLocationsTests.swift`：
 
 ```swift
 import Foundation
@@ -763,17 +989,9 @@ struct StorageLocationsTests {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+运行 `cd macos && swift test --filter StorageLocationsTests`，期望编译失败 `cannot find 'FixedStorageLocations' in scope`。
 
-```bash
-cd macos && swift test --filter StorageLocationsTests 2>&1 | tail -10
-```
-
-期望：编译失败，`cannot find 'FixedStorageLocations' in scope`。
-
-- [ ] **Step 3: 定义协议与两个实现**
-
-创建 `shared/HypoCore/Sources/HypoCore/Platform/StorageLocations.swift`：
+再创建 `shared/HypoCore/Sources/HypoCore/Platform/StorageLocations.swift`：
 
 ```swift
 import Foundation
@@ -813,15 +1031,7 @@ public struct FixedStorageLocations: StorageLocations {
 }
 ```
 
-- [ ] **Step 4: 移动存储文件并接入协议**
-
-```bash
-mkdir -p shared/HypoCore/Sources/HypoCore/History
-git mv macos/Sources/HypoApp/Services/StorageManager.swift shared/HypoCore/Sources/HypoCore/History/StorageManager.swift
-git mv macos/Sources/HypoApp/Services/OptimizedHistoryStore.swift shared/HypoCore/Sources/HypoCore/History/OptimizedHistoryStore.swift
-```
-
-在 `StorageManager.swift` 中，把第 23 行附近计算 `caches` 与 `imagesDirectory` 的代码替换为注入：
+在 `shared/HypoCore/Sources/HypoCore/History/StorageManager.swift` 中，把第 23 行附近计算 `caches` 与 `imagesDirectory` 的代码替换为注入：
 
 ```swift
     private let locations: StorageLocations
@@ -838,123 +1048,11 @@ git mv macos/Sources/HypoApp/Services/OptimizedHistoryStore.swift shared/HypoCor
     }
 ```
 
-并把文件内其余引用 `imagesDirectory` 的地方改为 `locations.imagesDirectory`。默认参数 `CachesStorageLocations()` 保证 macOS 行为不变。
+文件内其余引用 `imagesDirectory` 处改为 `locations.imagesDirectory`。默认参数保证 macOS 行为不变。
 
-- [ ] **Step 5: 运行测试确认通过**
+### 11.2 `HistoryPersistence`
 
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
-
-期望：全绿，新增 `StorageLocationsTests` 通过。
-
-- [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 7: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): move storage layer behind StorageLocations protocol"
-```
-
----
-
-## Task 11: 拆分 HistoryStore.swift
-
-`macos/Sources/HypoApp/Services/HistoryStore.swift` 有 1187 行两个职责：第 24~218 行是 `public actor HistoryStore`（纯持久化），第 219~1187 行是 `ClipboardHistoryViewModel`（macOS UI，依赖 `KeyboardShortcut`、`ClipboardMonitorDelegate`、`NSPasteboard`、`TempFileManager`）。
-
-**Files:**
-- Create: `shared/HypoCore/Sources/HypoCore/History/HistoryStore.swift`（actor 部分）
-- Create: `macos/Sources/HypoApp/Services/ClipboardHistoryViewModel.swift`（ViewModel 部分）
-- Delete: `macos/Sources/HypoApp/Services/HistoryStore.swift`
-
-- [ ] **Step 1: 拆出 actor 部分到 HypoCore**
-
-把原文件第 1~218 行（含顶部 import 与第 22 行的 `extension UserDefaults: @retroactive @unchecked Sendable {}`）写入 `shared/HypoCore/Sources/HypoCore/History/HistoryStore.swift`。从中删除 `#if canImport(AppKit) import AppKit #endif` 整段——actor 部分不使用任何 `NS*` 类型。
-
-- [ ] **Step 2: 拆出 ViewModel 部分到 HypoApp**
-
-把原文件第 219 行到结尾写入 `macos/Sources/HypoApp/Services/ClipboardHistoryViewModel.swift`，顶部补上该段实际用到的 import：
-
-```swift
-import Foundation
-import CryptoKit
-#if canImport(Combine)
-import Combine
-#endif
-#if canImport(AppKit)
-import AppKit
-#endif
-#if canImport(os)
-import os.log
-#endif
-#if canImport(UniformTypeIdentifiers)
-import UniformTypeIdentifiers
-#endif
-#if canImport(UserNotifications)
-import UserNotifications
-#endif
-```
-
-- [ ] **Step 3: 删除原文件**
-
-```bash
-git rm macos/Sources/HypoApp/Services/HistoryStore.swift
-```
-
-- [ ] **Step 4: 解绑通知控制器默认参数**
-
-原第 272 行把协议默认值绑到了具体类型：
-
-```swift
-        notificationController: ClipboardNotificationScheduling? = ClipboardNotificationController.shared
-```
-
-`ClipboardNotificationController` 留在 `HypoApp`，而该默认值现在位于 `ClipboardHistoryViewModel.swift`（同在 `HypoApp`），因此**此处保持原样即可**，不需要修改。
-
-- [ ] **Step 5: 运行测试**
-
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
-
-期望：全绿，含 `HistoryStoreTests`。若 `HistoryStoreTests` 同时覆盖 actor 与 ViewModel，保持它留在 `HypoAppTests` 不动——Task 15 才决定测试归属。
-
-- [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 7: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): split HistoryStore actor from ClipboardHistoryViewModel"
-```
-
----
-
-## Task 12: 抽出 HistoryPersistence 协议
-
-`HistoryStore` actor 直接持有 `UserDefaults`。iOS 上三个进程并发写历史，`UserDefaults` 的 App Group suite 跨进程不可靠（spec §7.2），因此持久化必须可替换。
-
-**Files:**
-- Create: `shared/HypoCore/Sources/HypoCore/Platform/HistoryPersistence.swift`
-- Modify: `shared/HypoCore/Sources/HypoCore/History/HistoryStore.swift`
-- Test: `macos/Tests/HypoAppTests/HistoryPersistenceTests.swift`
-
-- [ ] **Step 1: 写失败测试**
-
-创建 `macos/Tests/HypoAppTests/HistoryPersistenceTests.swift`：
+先写失败测试 `macos/Tests/HypoAppTests/HistoryPersistenceTests.swift`：
 
 ```swift
 import Foundation
@@ -1003,17 +1101,7 @@ struct HistoryPersistenceTests {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
-
-```bash
-cd macos && swift test --filter HistoryPersistenceTests 2>&1 | tail -10
-```
-
-期望：编译失败，`cannot find 'InMemoryHistoryPersistence' in scope`。
-
-- [ ] **Step 3: 定义协议与两个实现**
-
-创建 `shared/HypoCore/Sources/HypoCore/Platform/HistoryPersistence.swift`：
+运行确认失败（`cannot find 'InMemoryHistoryPersistence' in scope`），再创建 `shared/HypoCore/Sources/HypoCore/Platform/HistoryPersistence.swift`：
 
 ```swift
 import Foundation
@@ -1101,11 +1189,7 @@ public final class InMemoryHistoryPersistence: HistoryPersistence, @unchecked Se
 }
 ```
 
-**键名保持在 `HistoryStore` 内不变**——协议只搬运存取动作，不搬运键名。`HistoryStore` 现有的两个键 `com.hypo.clipboard.history_entries`（entries blob）与 `com.hypo.clipboard.file_storage_migration_v2`（迁移标志）原样保留，用户历史不会因升级丢失。
-
-- [ ] **Step 4: 让 HistoryStore 走协议**
-
-在 `HistoryStore` actor 中，把 `private let defaults: UserDefaults` 替换为 `private let persistence: HistoryPersistence`，初始化器改为：
+在 `HistoryStore` actor 中把 `private let defaults: UserDefaults` 换成 `private let persistence: HistoryPersistence`，初始化器改为：
 
 ```swift
     public init(maxEntries: Int = 200, persistence: HistoryPersistence = UserDefaultsHistoryPersistence()) {
@@ -1113,18 +1197,6 @@ public final class InMemoryHistoryPersistence: HistoryPersistence, @unchecked Se
         self.persistence = persistence
     }
 ```
-
-四处调用点逐一替换（键名不动）：
-
-| 原调用 | 替换为 |
-|---|---|
-| `defaults.data(forKey: Self.entriesKey)` | `try persistence.data(forKey: Self.entriesKey)` |
-| `defaults.set(data, forKey: Self.entriesKey)` | `try persistence.setData(data, forKey: Self.entriesKey)` |
-| `defaults.removeObject(forKey: Self.entriesKey)` | `try persistence.removeValue(forKey: Self.entriesKey)` |
-| `defaults.bool(forKey: Self.fileStorageMigrationKey)` | `persistence.bool(forKey: Self.fileStorageMigrationKey)` |
-| `defaults.set(true, forKey: Self.fileStorageMigrationKey)` | `persistence.setBool(true, forKey: Self.fileStorageMigrationKey)` |
-
-若某个调用点所在方法原先不是 `throws`，用 `try?` 保持原有的静默失败语义，不要改变方法签名。
 
 保留一个兼容初始化器，使现有调用点与测试不必改动：
 
@@ -1134,504 +1206,21 @@ public final class InMemoryHistoryPersistence: HistoryPersistence, @unchecked Se
     }
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+五处调用点逐一替换（**键名不动**，仍为 `com.hypo.clipboard.history_entries` 与 `com.hypo.clipboard.file_storage_migration_v2`，否则升级后用户历史会丢失）：
 
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
+| 原调用 | 替换为 |
+|---|---|
+| `defaults.data(forKey: Self.entriesKey)` | `try persistence.data(forKey: Self.entriesKey)` |
+| `defaults.set(data, forKey: Self.entriesKey)` | `try persistence.setData(data, forKey: Self.entriesKey)` |
+| `defaults.removeObject(forKey: Self.entriesKey)` | `try persistence.removeValue(forKey: Self.entriesKey)` |
+| `defaults.bool(forKey: Self.fileStorageMigrationKey)` | `persistence.bool(forKey: Self.fileStorageMigrationKey)` |
+| `defaults.set(true, forKey: Self.fileStorageMigrationKey)` | `persistence.setBool(true, forKey: Self.fileStorageMigrationKey)` |
 
-期望：全绿，含 `HistoryStoreTests` 与新增的 `HistoryPersistenceTests`。
-
-- [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 7: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): put history behind a HistoryPersistence protocol"
-```
+若某调用点所在方法原先不是 `throws`，用 `try?` 保持原有的静默失败语义，不要改变方法签名。
 
 ---
 
-## Task 13: 迁移同步引擎与临时文件管理
-
-**Files:**
-- Move: `macos/Sources/HypoApp/Services/SyncEngine.swift` → `shared/HypoCore/Sources/HypoCore/Sync/SyncEngine.swift`
-- Move: `macos/Sources/HypoApp/Services/ClipboardEventDispatcher.swift` → `shared/HypoCore/Sources/HypoCore/Sync/ClipboardEventDispatcher.swift`
-- Move: `macos/Sources/HypoApp/Services/TempFileManager.swift` → `shared/HypoCore/Sources/HypoCore/Files/TempFileManager.swift`
-
-`TempFileManager` 必须迁移：它被 `TransportManager.swift:138` 与 `IncomingClipboardHandler.swift:216` 真实调用，两者都进 core。它的 AppKit 用法已被 `#if canImport(AppKit)` 守卫，iOS 上编译得过（只是没有剪贴板变化观察）。
-
-- [ ] **Step 1: 移动文件**
-
-```bash
-mkdir -p shared/HypoCore/Sources/HypoCore/Sync shared/HypoCore/Sources/HypoCore/Files
-git mv macos/Sources/HypoApp/Services/SyncEngine.swift shared/HypoCore/Sources/HypoCore/Sync/SyncEngine.swift
-git mv macos/Sources/HypoApp/Services/ClipboardEventDispatcher.swift shared/HypoCore/Sources/HypoCore/Sync/ClipboardEventDispatcher.swift
-git mv macos/Sources/HypoApp/Services/TempFileManager.swift shared/HypoCore/Sources/HypoCore/Files/TempFileManager.swift
-```
-
-- [ ] **Step 2: 运行测试**
-
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
-
-期望：全绿，含 `SyncEngineTests`、`ClipboardEventDispatcherTests`。
-
-- [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 4: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): move sync engine and temp file manager into HypoCore"
-```
-
----
-
-## Task 14: 抽出 AppLifecycleObserving 并迁移 TransportManager
-
-`TransportManager.swift` 内有私有类 `ApplicationLifecycleObserver`（被 `#if canImport(AppKit)` 守卫），监听 `NSApplication` 的 didBecomeActive / willResignActive / willTerminate。iOS 需要对应的 `UIApplication` 通知，因此提升为协议。
-
-**Files:**
-- Create: `shared/HypoCore/Sources/HypoCore/Platform/AppLifecycleObserving.swift`
-- Create: `shared/HypoCore/Sources/HypoCore/Notifications/ClipboardNotificationScheduling.swift`
-- Create: `macos/Sources/HypoApp/Platform/AppKitLifecycleObserver.swift`
-- Modify: `macos/Sources/HypoApp/Services/ClipboardNotificationController.swift`（删除协议声明）
-- Move: `macos/Sources/HypoApp/Services/TransportManager.swift`、`ConnectionStatusProber.swift` → `shared/HypoCore/Sources/HypoCore/Transport/`
-- Test: `macos/Tests/HypoAppTests/AppLifecycleObservingTests.swift`
-
-- [ ] **Step 1: 写失败测试**
-
-创建 `macos/Tests/HypoAppTests/AppLifecycleObservingTests.swift`：
-
-```swift
-import Foundation
-import Testing
-@testable import HypoApp
-
-@Suite("AppLifecycleObserving")
-struct AppLifecycleObservingTests {
-    @Test("manual observer forwards each lifecycle event exactly once")
-    func manualObserverForwardsEvents() {
-        var activated = 0
-        var deactivated = 0
-        var terminated = 0
-
-        let observer = ManualAppLifecycleObserver()
-        observer.start(
-            onActivate: { activated += 1 },
-            onDeactivate: { deactivated += 1 },
-            onTerminate: { terminated += 1 }
-        )
-
-        observer.simulateActivate()
-        observer.simulateDeactivate()
-        observer.simulateTerminate()
-
-        #expect(activated == 1)
-        #expect(deactivated == 1)
-        #expect(terminated == 1)
-    }
-}
-```
-
-- [ ] **Step 2: 运行测试确认失败**
-
-```bash
-cd macos && swift test --filter AppLifecycleObservingTests 2>&1 | tail -10
-```
-
-期望：编译失败，`cannot find 'ManualAppLifecycleObserver' in scope`。
-
-- [ ] **Step 3: 定义协议与测试替身**
-
-创建 `shared/HypoCore/Sources/HypoCore/Platform/AppLifecycleObserving.swift`：
-
-```swift
-import Foundation
-
-/// Observes host-application lifecycle transitions.
-///
-/// macOS listens to NSApplication notifications; iOS listens to
-/// UIApplication ones. The core only needs the three transitions below.
-public protocol AppLifecycleObserving: AnyObject {
-    func start(
-        onActivate: @escaping @Sendable () -> Void,
-        onDeactivate: @escaping @Sendable () -> Void,
-        onTerminate: @escaping @Sendable () -> Void
-    )
-    func stop()
-}
-
-/// Test double: events are driven explicitly rather than by the system.
-public final class ManualAppLifecycleObserver: AppLifecycleObserving {
-    private var onActivate: (@Sendable () -> Void)?
-    private var onDeactivate: (@Sendable () -> Void)?
-    private var onTerminate: (@Sendable () -> Void)?
-
-    public init() {}
-
-    public func start(
-        onActivate: @escaping @Sendable () -> Void,
-        onDeactivate: @escaping @Sendable () -> Void,
-        onTerminate: @escaping @Sendable () -> Void
-    ) {
-        self.onActivate = onActivate
-        self.onDeactivate = onDeactivate
-        self.onTerminate = onTerminate
-    }
-
-    public func stop() {
-        onActivate = nil
-        onDeactivate = nil
-        onTerminate = nil
-    }
-
-    public func simulateActivate() { onActivate?() }
-    public func simulateDeactivate() { onDeactivate?() }
-    public func simulateTerminate() { onTerminate?() }
-}
-```
-
-- [ ] **Step 4: 提取通知调度协议**
-
-创建 `shared/HypoCore/Sources/HypoCore/Notifications/ClipboardNotificationScheduling.swift`，把 `macos/Sources/HypoApp/Services/ClipboardNotificationController.swift:19` 处的 `public protocol ClipboardNotificationScheduling: AnyObject, Sendable { ... }` **整段声明**原样搬过来（方法签名不改），并从 `ClipboardNotificationController.swift` 中删除该声明，保留 `ClipboardNotificationHandling` 协议与具体类不动。
-
-- [ ] **Step 5: 写 macOS 实现**
-
-创建 `macos/Sources/HypoApp/Platform/AppKitLifecycleObserver.swift`：
-
-```swift
-import Foundation
-#if canImport(AppKit)
-import AppKit
-#endif
-
-/// macOS implementation of AppLifecycleObserving, replacing the private
-/// ApplicationLifecycleObserver that used to live inside TransportManager.
-public final class AppKitLifecycleObserver: AppLifecycleObserving {
-    private var tokens: [NSObjectProtocol] = []
-
-    public init() {}
-
-    public func start(
-        onActivate: @escaping @Sendable () -> Void,
-        onDeactivate: @escaping @Sendable () -> Void,
-        onTerminate: @escaping @Sendable () -> Void
-    ) {
-        #if canImport(AppKit)
-        let center = NotificationCenter.default
-        tokens.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            onActivate()
-        })
-        tokens.append(center.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
-            onDeactivate()
-        })
-        tokens.append(center.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
-            onTerminate()
-        })
-        #endif
-    }
-
-    public func stop() {
-        let center = NotificationCenter.default
-        tokens.forEach { center.removeObserver($0) }
-        tokens.removeAll()
-    }
-
-    deinit {
-        stop()
-    }
-}
-```
-
-- [ ] **Step 6: 迁移 TransportManager 与 ConnectionStatusProber**
-
-```bash
-git mv macos/Sources/HypoApp/Services/TransportManager.swift shared/HypoCore/Sources/HypoCore/Transport/TransportManager.swift
-git mv macos/Sources/HypoApp/Services/ConnectionStatusProber.swift shared/HypoCore/Sources/HypoCore/Transport/ConnectionStatusProber.swift
-```
-
-在 `TransportManager.swift` 中：删除文件末尾 `#if canImport(AppKit) private final class ApplicationLifecycleObserver { ... } #endif` 整段；把持有它的属性改为 `private let lifecycleObserver: AppLifecycleObserving?`；构造该观察者的地方改为调用注入实例的 `start(onActivate:onDeactivate:onTerminate:)`，闭包体保持原样。
-
-初始化器增加参数，默认 `nil` 以保持现有调用点不变：
-
-```swift
-        lifecycleObserver: AppLifecycleObserving? = nil,
-```
-
-在 `macos/Sources/HypoApp/App/AppContext.swift` 构造 `TransportManager` 的地方传入 `lifecycleObserver: AppKitLifecycleObserver()`，保证 macOS 行为不变。
-
-同时把 `TransportManager.swift:116` 的默认参数
-
-```swift
-        notificationController: ClipboardNotificationScheduling = ClipboardNotificationController.shared,
-```
-
-改为无默认值（`notificationController: ClipboardNotificationScheduling,`），并在 `AppContext.swift` 的构造点显式传入 `ClipboardNotificationController.shared`。
-
-- [ ] **Step 7: 运行测试确认通过**
-
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
-
-期望：全绿，含 `TransportManagerTests`、`TransportManagerLanTests` 与新增的 `AppLifecycleObservingTests`。
-
-- [ ] **Step 8: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 9: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): move TransportManager behind AppLifecycleObserving"
-```
-
----
-
-## Task 15: 抽出 ClipboardWriting 并迁移 IncomingClipboardHandler
-
-`IncomingClipboardHandler.swift:2` 是全包唯一的裸 `import AppKit`，且直接使用 `NSPasteboard` 与 `NSImage`（读 `types`/`string(forType:)`/`readObjects`，写 `clearContents`/`setString`/`writeObjects`）。
-
-**Files:**
-- Create: `shared/HypoCore/Sources/HypoCore/Platform/ClipboardWriting.swift`
-- Create: `macos/Sources/HypoApp/Platform/AppKitClipboardWriter.swift`
-- Move: `macos/Sources/HypoApp/Services/IncomingClipboardHandler.swift` → `shared/HypoCore/Sources/HypoCore/Sync/IncomingClipboardHandler.swift`
-- Test: `macos/Tests/HypoAppTests/ClipboardWritingTests.swift`
-
-- [ ] **Step 1: 写失败测试**
-
-创建 `macos/Tests/HypoAppTests/ClipboardWritingTests.swift`：
-
-```swift
-import Foundation
-import Testing
-@testable import HypoApp
-
-@Suite("ClipboardWriting")
-struct ClipboardWritingTests {
-    @Test("recording writer captures text writes in order")
-    @MainActor
-    func recordingWriterCapturesText() {
-        let writer = RecordingClipboardWriter()
-
-        writer.clear()
-        writer.writeText("first")
-        writer.writeText("second")
-
-        #expect(writer.currentText() == "second")
-        #expect(writer.writtenTexts == ["first", "second"])
-    }
-
-    @Test("clear resets the recorded text")
-    @MainActor
-    func clearResetsText() {
-        let writer = RecordingClipboardWriter()
-
-        writer.writeText("value")
-        writer.clear()
-
-        #expect(writer.currentText() == nil)
-    }
-}
-```
-
-- [ ] **Step 2: 运行测试确认失败**
-
-```bash
-cd macos && swift test --filter ClipboardWritingTests 2>&1 | tail -10
-```
-
-期望：编译失败，`cannot find 'RecordingClipboardWriter' in scope`。
-
-- [ ] **Step 3: 定义协议与测试替身**
-
-创建 `shared/HypoCore/Sources/HypoCore/Platform/ClipboardWriting.swift`：
-
-```swift
-import Foundation
-
-/// System clipboard access needed by the core.
-///
-/// Covers exactly what IncomingClipboardHandler used to do directly against
-/// NSPasteboard: compare against current contents, then apply the payload.
-@MainActor
-public protocol ClipboardWriting: AnyObject {
-    func clear()
-    func writeText(_ text: String)
-    /// Returns false when the data cannot be decoded as an image on this platform.
-    func writeImageData(_ data: Data) -> Bool
-    func writeFileURL(_ url: URL)
-    func currentText() -> String?
-    func containsImage() -> Bool
-}
-
-/// Test double recording every write.
-@MainActor
-public final class RecordingClipboardWriter: ClipboardWriting {
-    public private(set) var writtenTexts: [String] = []
-    public private(set) var writtenImageData: [Data] = []
-    public private(set) var writtenFileURLs: [URL] = []
-    private var text: String?
-    private var hasImage = false
-
-    public init() {}
-
-    public func clear() {
-        text = nil
-        hasImage = false
-    }
-
-    public func writeText(_ value: String) {
-        text = value
-        writtenTexts.append(value)
-    }
-
-    public func writeImageData(_ data: Data) -> Bool {
-        writtenImageData.append(data)
-        hasImage = true
-        return true
-    }
-
-    public func writeFileURL(_ url: URL) {
-        writtenFileURLs.append(url)
-    }
-
-    public func currentText() -> String? { text }
-
-    public func containsImage() -> Bool { hasImage }
-}
-```
-
-- [ ] **Step 4: 写 macOS 实现**
-
-创建 `macos/Sources/HypoApp/Platform/AppKitClipboardWriter.swift`：
-
-```swift
-import Foundation
-#if canImport(AppKit)
-import AppKit
-#endif
-
-/// macOS implementation of ClipboardWriting, backed by NSPasteboard.
-@MainActor
-public final class AppKitClipboardWriter: ClipboardWriting {
-    #if canImport(AppKit)
-    private let pasteboard: NSPasteboard
-
-    public init(pasteboard: NSPasteboard = .general) {
-        self.pasteboard = pasteboard
-    }
-
-    public func clear() {
-        pasteboard.clearContents()
-    }
-
-    public func writeText(_ text: String) {
-        pasteboard.setString(text, forType: .string)
-    }
-
-    public func writeImageData(_ data: Data) -> Bool {
-        guard let image = NSImage(data: data) else { return false }
-        pasteboard.writeObjects([image])
-        return true
-    }
-
-    public func writeFileURL(_ url: URL) {
-        pasteboard.writeObjects([url as NSURL])
-    }
-
-    public func currentText() -> String? {
-        guard let types = pasteboard.types, types.contains(.string) else { return nil }
-        return pasteboard.string(forType: .string)
-    }
-
-    public func containsImage() -> Bool {
-        !pasteboard.readObjects(forClasses: [NSImage.self], options: nil)
-            .compactMap { $0 as? NSImage }
-            .isEmpty
-    }
-    #endif
-}
-```
-
-- [ ] **Step 5: 迁移 handler 并改用协议**
-
-```bash
-git mv macos/Sources/HypoApp/Services/IncomingClipboardHandler.swift shared/HypoCore/Sources/HypoCore/Sync/IncomingClipboardHandler.swift
-```
-
-在该文件中：删除第 2 行裸 `import AppKit`；把 `private let pasteboard: NSPasteboard` 改为 `private let clipboard: ClipboardWriting`；初始化器参数 `pasteboard: NSPasteboard = .general` 改为 `clipboard: ClipboardWriting`（无默认值）。
-
-`matchesCurrentClipboard` 中：`.text` 与 `.link` 分支改用 `clipboard.currentText()`；`.image` 分支改用 `clipboard.containsImage()`（原逻辑在有图时仍返回 `false`，保持不变）。
-
-`applyToClipboard` 中：`pasteboard.clearContents()` → `clipboard.clear()`；`setString(_:forType: .string)` → `clipboard.writeText(_:)`；`.image` 分支的 `NSImage(data:)` + `writeObjects` 改为：
-
-```swift
-        case .image:
-            guard clipboard.writeImageData(payload.data) else {
-                throw NSError(domain: "IncomingClipboardHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create image from data"])
-            }
-```
-
-`.file` 分支写临时文件的逻辑不变，最后把文件 URL 交给 `clipboard.writeFileURL(tempURL)`。
-
-在 `macos/Sources/HypoApp/App/AppContext.swift` 构造 `IncomingClipboardHandler` 的地方传入 `clipboard: AppKitClipboardWriter()`。
-
-- [ ] **Step 6: 运行测试确认通过**
-
-```bash
-cd macos && swift test 2>&1 | tail -20
-```
-
-期望：全绿，含 `IncomingClipboardHandlerTests` 与新增的 `ClipboardWritingTests`。若 `IncomingClipboardHandlerTests` 里构造 handler 时传了 `pasteboard:`，改为传 `RecordingClipboardWriter()`，并把断言从检查 `NSPasteboard.general` 改为检查 `writer.writtenTexts` 等记录属性。
-
-- [ ] **Step 7: 可移植性闸门 + CI iOS 验证**
-
-```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
-
-- [ ] **Step 8: 确认全包已无裸 AppKit import**
-
-```bash
-cd shared/HypoCore && grep -rn "^import AppKit" Sources/ ; echo "exit=$?"
-```
-
-期望：无输出，`exit=1`。
-
-- [ ] **Step 9: 提交**
-
-```bash
-git add -A
-git commit -m "refactor(core): move IncomingClipboardHandler behind ClipboardWriting"
-```
-
----
-
-## Task 16: 测试重定位与双平台运行
+## Task 12: 测试重定位与双平台运行
 
 把纯 core 的测试移入 `HypoCore` 自己的测试目标，使它们在 iOS 上也能运行——这是 spec §10「跨平台一致性」的落点。
 
@@ -1750,7 +1339,7 @@ git commit -m "test(core): relocate core tests to HypoCore and run them on iOS"
 
 ---
 
-## Task 17: 验证既有构建与 CI 未受影响
+## Task 13: 验证既有构建与 CI 未受影响
 
 spec §2.2 的前提是 macOS 的构建、签名、CI 一律不动。这一任务专门证明这个前提成立。
 

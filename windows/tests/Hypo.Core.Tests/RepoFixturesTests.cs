@@ -5,12 +5,14 @@ public class RepoFixturesTests
     [Fact]
     public void LocatesTheSharedCryptoVectorFile()
     {
-        Assert.True(File.Exists(RepoFixtures.CryptoVectorsPath));
+        var path = RepoFixtures.CryptoVectorsPath;
+        Assert.True(File.Exists(path), $"Expected the shared crypto vectors at '{path}'.");
     }
 
     [Fact]
     public void LocatesTheSharedFrameVectorFile()
     {
-        Assert.True(File.Exists(RepoFixtures.FrameVectorsPath));
+        var path = RepoFixtures.FrameVectorsPath;
+        Assert.True(File.Exists(path), $"Expected the shared frame vectors at '{path}'.");
     }
 }

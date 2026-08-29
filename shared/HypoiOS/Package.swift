@@ -29,6 +29,7 @@ let package = Package(
             name: "HypoiOSTests",
             dependencies: [
                 "HypoiOS",
+                .product(name: "HypoCore", package: "HypoCore"),
                 .product(name: "Testing", package: "swift-testing")
             ],
             path: "Tests/HypoiOSTests"

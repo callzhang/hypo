@@ -83,6 +83,10 @@ cd shared/HypoCore && find Sources -name '*.swift' | while read f; do awk -v F="
 cd shared/HypoCore && grep -rn "NSHomeDirectory\|homeDirectoryForCurrentUser\|/Users/\|~/Library\|UserDefaults(suiteName:" Sources/
 ```
 
+**`@_exported` 的作用范围（澄清，勿误信相反说法）**：`macos/Sources/HypoApp/HypoCoreExport.swift` 里的 `@_exported import HypoCore` 使 HypoCore 的 public 符号在**整个 HypoApp 模块**可见，而不只是那一个文件。这正是「exported」的含义。
+
+**因此留在 HypoApp 的文件永远不需要新增 `import HypoCore`**，无论它们引用的类型搬走了多少。直接反证：批次 1–3 共搬了 24 个文件，零个消费方文件需要加 import。若有人提出「某文件在依赖搬走后需要显式 import」，那是误解——真正会断的是**可见性**（internal 符号跨模块不可见），不是 import。
+
 **跨模块可见性的三类盲区**（Task 3、5、6 各栽一次，按隐蔽程度排序）：
 
 1. **合成的 memberwise init 永远是 internal**，与属性访问级别无关。Task 6 的 `PairingChallengePayload` 所有存储属性都是 `public`，却没有显式 `public init`，而 `PairingSessionTests.swift`（留在 `HypoAppTests`）直接构造它。**`swift build` 完全看不到——只有 `swift test` 会炸**，因为只有测试代码构造它。搬迁前对每个 `public struct` 确认：它有显式 `public init` 吗？如果没有，谁在构造它？

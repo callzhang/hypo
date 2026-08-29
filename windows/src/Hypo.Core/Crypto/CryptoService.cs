@@ -16,6 +16,9 @@ public static class CryptoService
     public const int NonceSizeBytes = 12;
     public const int TagSizeBytes = 16;
 
+    /// <summary>X25519 keys are always 32 bytes (RFC 7748).</summary>
+    public const int X25519KeySizeBytes = 32;
+
     /// <summary>UTF-8 bytes of "hypo-clipboard-ecdh".</summary>
     public static ReadOnlySpan<byte> HkdfSalt => "hypo-clipboard-ecdh"u8;
 
@@ -102,6 +105,20 @@ public static class CryptoService
         ArgumentNullException.ThrowIfNull(privateKey);
         ArgumentNullException.ThrowIfNull(peerPublicKey);
 
+        if (privateKey.Length != X25519KeySizeBytes)
+        {
+            throw new ArgumentException(
+                $"An X25519 private key is {X25519KeySizeBytes} bytes; got {privateKey.Length}.",
+                nameof(privateKey));
+        }
+
+        if (peerPublicKey.Length != X25519KeySizeBytes)
+        {
+            throw new ArgumentException(
+                $"An X25519 public key is {X25519KeySizeBytes} bytes; got {peerPublicKey.Length}.",
+                nameof(peerPublicKey));
+        }
+
         var agreement = new X25519Agreement();
         agreement.Init(new X25519PrivateKeyParameters(privateKey));
 
@@ -127,6 +144,14 @@ public static class CryptoService
     public static byte[] DerivePublicKey(byte[] privateKey)
     {
         ArgumentNullException.ThrowIfNull(privateKey);
+
+        if (privateKey.Length != X25519KeySizeBytes)
+        {
+            throw new ArgumentException(
+                $"An X25519 private key is {X25519KeySizeBytes} bytes; got {privateKey.Length}.",
+                nameof(privateKey));
+        }
+
         return new X25519PrivateKeyParameters(privateKey).GeneratePublicKey().GetEncoded();
     }
 }

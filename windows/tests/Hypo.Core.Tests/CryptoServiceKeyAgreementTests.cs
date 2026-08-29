@@ -57,4 +57,26 @@ public class CryptoServiceKeyAgreementTests
 
         Assert.NotEqual(withDefault, withOther);
     }
+
+    [Theory]
+    [InlineData(31)]
+    [InlineData(33)]
+    public void RejectsPrivateKeysOfTheWrongLength(int length)
+    {
+        var error = Assert.Throws<ArgumentException>(
+            () => CryptoService.DeriveKey(new byte[length], Field("bob_public_base64")));
+
+        Assert.Equal("privateKey", error.ParamName);
+    }
+
+    [Theory]
+    [InlineData(31)]
+    [InlineData(33)]
+    public void RejectsPeerPublicKeysOfTheWrongLength(int length)
+    {
+        var error = Assert.Throws<ArgumentException>(
+            () => CryptoService.DeriveKey(Field("alice_private_base64"), new byte[length]));
+
+        Assert.Equal("peerPublicKey", error.ParamName);
+    }
 }

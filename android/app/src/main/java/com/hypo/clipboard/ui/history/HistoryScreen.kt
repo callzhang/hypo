@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Cloud
@@ -55,8 +56,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.SearchBar
+import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,6 +72,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -90,14 +92,17 @@ import com.hypo.clipboard.util.SizeConstants
 import com.hypo.clipboard.util.formattedAsKB
 import com.hypo.clipboard.domain.model.TransportOrigin
 import com.hypo.clipboard.transport.ConnectionState
-import com.hypo.clipboard.ui.components.ConnectionStatusBadge
+import com.hypo.clipboard.ui.components.ConnectionStatusIcon
 import com.hypo.clipboard.util.TempFileManager
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CoroutineScope
 
 @Composable
-fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.hiltViewModel()) {
+fun HistoryRoute(
+    onOpenSettings: () -> Unit,
+    viewModel: HistoryViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+) {
     val state by viewModel.state.collectAsState()
     HistoryScreen(
         items = state.items,
@@ -105,11 +110,13 @@ fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.
         currentDeviceId = viewModel.currentDeviceId,
         connectionState = state.connectionState,
         viewModel = viewModel,
-        onQueryChange = viewModel::onQueryChange
+        onQueryChange = viewModel::onQueryChange,
+        onOpenSettings = onOpenSettings
     )
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun HistoryScreen(
     items: List<ClipboardItem>,
     query: String,
@@ -117,6 +124,7 @@ fun HistoryScreen(
     connectionState: ConnectionState,
     viewModel: HistoryViewModel,
     onQueryChange: (String) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -133,39 +141,43 @@ fun HistoryScreen(
     }
     
     
+    var searchActive by rememberSaveable { mutableStateOf(false) }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = stringResource(id = R.string.history_title),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            ConnectionStatusBadge(connectionState = connectionState)
+            SearchBar(
+                query = query,
+                onQueryChange = onQueryChange,
+                onSearch = { searchActive = false },
+                active = searchActive,
+                onActiveChange = { searchActive = it },
+                placeholder = { Text(text = stringResource(id = R.string.history_search_hint)) },
+                leadingIcon = { Icon(imageVector = Icons.Filled.Search, contentDescription = null) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(historySearchBarHeightDp.dp),
+                colors = SearchBarDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) { }
+            IconButton(onClick = {}) {
+                ConnectionStatusIcon(connectionState = connectionState)
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = stringResource(id = R.string.settings_title)
+                )
+            }
         }
-
-        TextField(
-            value = query,
-            onValueChange = onQueryChange,
-            leadingIcon = { Icon(imageVector = Icons.Filled.Search, contentDescription = null) },
-            placeholder = { Text(text = stringResource(id = R.string.history_search_hint)) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            singleLine = true,
-            colors = TextFieldDefaults.colors(
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-        )
 
         if (items.isEmpty()) {
             EmptyHistory()
@@ -234,6 +246,21 @@ fun HistoryScreen(
         }
     }
 }
+
+internal enum class HistoryTopBarAction {
+    SEARCH,
+    CONNECTION_STATUS,
+    SETTINGS
+}
+
+internal fun historyTopBarActions(): List<HistoryTopBarAction> = listOf(
+    HistoryTopBarAction.SEARCH,
+    HistoryTopBarAction.CONNECTION_STATUS,
+    HistoryTopBarAction.SETTINGS
+)
+
+internal const val historySearchBarHeightDp: Int = 48
+internal const val historyShowsTitle: Boolean = false
 
 @Composable
 private fun EmptyHistory() {

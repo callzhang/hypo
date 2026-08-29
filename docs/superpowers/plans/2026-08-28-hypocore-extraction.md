@@ -29,12 +29,24 @@ cd macos && swift test 2>&1 | tail -20
 **本地可移植性闸门**（每个搬迁任务都要跑）：
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。这不能证明 iOS 构建成功，但能在本地立刻抓住最可能的破坏源——把 macOS 专有类型带进了 core。
 
 **CI 上的权威验证**：Task 1B 新增的 `ios-core-build` job 在 `macos-15` runner 上跑真正的 `xcodebuild`。**每个任务提交后都要推送并确认该 job 通过**，不要攒着一次推。
+
+**闸门与 CI 覆盖不到什么**（Task 3 质量审查结论，务必先读再动 Task 5/6/10）：
+
+本地 grep 闸门只能抓**编译期**的 AppKit 符号泄漏；CI 的 `ios-core-build` 跑的是 `xcodebuild build`，**只证明能编译，不启动模拟器、不执行测试**。以下三类问题「编译通过 + CI 全绿」却会在真机上静默失效，必须靠人工复核，不要因为闸门是绿的就认为安全：
+
+- **Task 5 Keychain**：`KeychainKeyStore` 对两端构造相同的 `SecItemAdd`/`SecItemCopyMatching` 查询，但语义不同——macOS 默认使用旧的文件式 keychain，除非设置 `kSecUseDataProtectionKeychain`（iOS 只有 data-protection keychain）；`accessGroup` 在 iOS 上还需要对应 entitlement 才生效。搬迁时**不要**顺手改这些，但要在提交信息里记下这个待办，留给第 2/3 期处理。
+- **Task 6 Bonjour**：`NetService`/`NetServiceBrowser` 在 iOS 编译无碍，但 iOS 14+ 缺少 `NSLocalNetworkUsageDescription` 与 `NSBonjourServices` 会导致发现静默失败。这是 Info.plist 的职责，SwiftPM library target 承载不了，属于第 2 期 iOS App 外壳的工作。
+- **Task 10 存储路径**：`UserDefaults` 与 `FileManager` 在 iOS 上都存在，但 `NSHomeDirectory()`、`~/Library`、非沙盒路径拼接会解析到错误位置或直接失败。搬迁时额外跑一遍这个**人工复核用**的 grep（不作为通过/失败判据，只是把可疑点摊开来看）：
+
+```bash
+cd shared/HypoCore && grep -rn "NSHomeDirectory\|homeDirectoryForCurrentUser\|/Users/\|~/Library\|UserDefaults(suiteName:" Sources/
+```
 
 **跨模块可见性的已知盲区**（Task 3 实测结论）：这个代码库的自定义类型基本已经标好 `public`，Task 3 搬的四个文件里三个完全不用改。唯一漏网的是 **`Int.formattedAsKB`——一个对内置类型的扩展**。审计一个文件的「公开 API 面」时，人和模型都倾向于只看自己定义的 type，扩展在 `Int`/`String`/`Data`/`URL` 等系统类型上的成员最容易漏。**每次搬迁前先 `grep -n "^extension \|^public extension " <file>` 过一遍**，比等编译器报错再回头改快。
 
@@ -383,7 +395,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -475,7 +487,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -529,7 +541,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -568,7 +580,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -610,7 +622,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -652,7 +664,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。。`LanWebSocketServer.swift` 用的是 `NWListener`，iOS 上可编译；它在 iOS 上不启动是运行时决策（第 2 期），不是编译期决策。
@@ -705,7 +717,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 4: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -839,7 +851,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -917,7 +929,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -1133,7 +1145,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 6: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -1176,7 +1188,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 3: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -1383,7 +1395,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 8: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。
@@ -1597,7 +1609,7 @@ cd macos && swift test 2>&1 | tail -20
 - [ ] **Step 7: 可移植性闸门 + CI iOS 验证**
 
 ```bash
-cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent" Sources/ ; echo "exit=$?"
+cd shared/HypoCore && grep -rn "import AppKit\|NSPasteboard\|NSImage\|NSApplication\|NSWorkspace\|NSStatusItem\|NSColor\|NSEvent\|NSWindow\|NSMenu\|NSAlert\|NSViewController\|NSCursor" Sources/ ; echo "exit=$?"
 ```
 
 期望：无输出，`exit=1`。随后推送本任务的提交，确认 CI 的 `ios-core-build` job 通过——那才是 iOS 构建的权威结论。

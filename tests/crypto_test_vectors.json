@@ -20,5 +20,10 @@
     "bob_private_base64": "gYj5PaHP9CCg3aR/WASi21CJR0mxp/tojUc2JR1RKSU=",
     "bob_public_base64": "0Bdsk+FlRveSB70cQcwTnaksP5iNPa1bAK2Yb7bpsls=",
     "shared_key_base64": "qeEkuYq/7Hrvr8Fc5UxPyzBF8zoxmqhBjhG1x6Nal7Q="
+  },
+  "gzip": {
+    "description": "A gzip container (RFC 1952) holding a representative ClipboardPayload document. Every client must decompress compressed_base64 to plaintext_base64, and must round-trip plaintext_base64 through its own compressor. Clients must NOT assert that their own compression reproduces compressed_base64 byte for byte: gzip output varies legitimately with compression level, the MTIME field and the OS byte.",
+    "plaintext_base64": "eyJjb250ZW50X3R5cGUiOiJ0ZXh0IiwiZGF0YV9iYXNlNjQiOiJTR1ZzYkc4c0lFaDVjRzhoIiwiY29tcHJlc3NlZCI6dHJ1ZX0=",
+    "compressed_base64": "H4sIAAAAAAAA/6tWSs7PK0nNK4kvqSxIVbJSKkmtKFHSUUpJLEmMT0osTjUzAQoGu4cVJ7lbFHu6Zpgmu1tkABUk5+cWFKUWF6emKFmVFJWm1gIAa9Z3oUoAAAA="
   }
 }

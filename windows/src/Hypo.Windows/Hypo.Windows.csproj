@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- A library until Task 4 adds the entry point. -->
+    <OutputType>Library</OutputType>
+    <!-- Windows-only, and deliberately a separate project: Hypo.Core must keep
+         building and testing on any machine, because that is what the
+         real-device verification from a Mac depends on. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Hypo.Core\Hypo.Core.csproj" />
+  </ItemGroup>
+
+</Project>

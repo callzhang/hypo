@@ -1920,10 +1920,15 @@ public sealed class LanWebSocketServer : IAsyncDisposable
         {
             // Port in use. The caller retries on 0.
             //
-            // Measured on macOS. Windows is the platform this fallback actually
-            // ships for and its exception type here is unverified — confirm it
-            // on the first Windows CI run, because a fallback that catches the
-            // wrong type is a fallback that does not exist.
+            // Measured on macOS: IOException, thrown by Kestrel's own
+            // AddressBinder wrapping the platform SocketException, so the type
+            // is likely stable on Windows too since that wrapper is shared.
+            //
+            // The real Windows risk is different and no catch clause addresses
+            // it: given SO_EXCLUSIVEADDRUSE and SO_REUSEADDR semantics, the
+            // second bind may simply succeed. If it does, the fallback never
+            // runs and two servers end up on one port. Verify on the first
+            // Windows CI run.
             await app.DisposeAsync().ConfigureAwait(false);
             return null;
         }
@@ -2033,8 +2038,11 @@ Expected: PASS, 4 tests.
 
 If `FallsBackToAnEphemeralPortWhenThePreferredOneIsTaken` fails because the
 second bind succeeded on the same port, the platform is allowing address reuse.
-Report it rather than deleting the test: on Windows the behaviour differs from
-macOS and Linux, and this fallback is what spec section 7 requires.
+Report it rather than deleting the test: this is the failure mode most likely to
+appear first on Windows, whose `SO_EXCLUSIVEADDRUSE` and `SO_REUSEADDR`
+semantics differ from macOS and Linux, and the fallback is what spec section 7
+requires. Note that no `catch` clause helps here — the bind does not throw, it
+succeeds — so the fix would be an explicit probe before binding.
 
 - [ ] **Step 6: Commit**
 
@@ -2169,7 +2177,10 @@ public class LanLoopbackTests
     [Fact]
     public async Task ConnectingToANonListeningPortFaults()
     {
-        // Port 1 is privileged and nothing listens there in a test run.
+        // Port 1 works here because nothing is listening on it, so the
+        // connect is refused. Not because it is privileged: on macOS a
+        // non-root process binds ports 1, 80 and 443 without complaint, which
+        // was measured rather than assumed.
         await using var client = new LanWebSocketClient(PeerOn(1), ClientId);
         var faulted = new TaskCompletionSource<TransportStateChangedEventArgs>();
         client.StateChanged += (_, e) => { if (e.State == TransportState.Faulted) faulted.TrySetResult(e); };

@@ -280,8 +280,10 @@ Plan 2 real debugging time:
    that honoured this field and dialled `wss://` would fail to connect to every
    peer. Ignore the field; the LAN transport is plain WebSocket, and payload
    encryption is the security boundary (section 3.2).
-2. **`fingerprint_sha256` is decorative.** `TransportManager` only prints it in a
-   diagnostic string. There is no certificate to pin, because there is no TLS.
+2. **`fingerprint_sha256` is inert, though not meaningless.** It is the SHA-256
+   of the advertised key agreement public key, added so peers could pin each
+   other; it is not a TLS certificate fingerprint, and there is no certificate
+   to pin because there is no TLS. No client verifies it today.
 3. **`device_name` is read but never written.** `BonjourBrowser` populates
    `LanEndpoint.deviceName` from a `device_name` TXT key that
    `BonjourPublisher` does not emit, so it is always nil. Display names must
@@ -290,6 +292,55 @@ Plan 2 real debugging time:
    `derek\8217s\032MacBook\032Air\032(2)`, where `\032` is a space and
    `\8217` is a right single quote. The client must unescape decimal escapes
    before showing a name to the user.
+
+#### The pairing exchange, as implemented
+
+`docs/protocol.md` section 9.2 states that the responder returns its ephemeral
+public key inside the ACK and that the initiator then re-derives the shared key.
+`PairingAckMessage` has no such field. Reading `PairingSession.swift` gives the
+actual sequence:
+
+```
+Responder  PairingSession.start()
+           generates a fresh X25519 pair for this attempt and publishes the
+           public half as peer_pub_key, before any challenge arrives
+                     ▼
+Initiator  derives shared = X25519(own ephemeral private, responder pub_key)
+           sends PairingChallengeMessage:
+             challenge_id, initiator_device_id, initiator_device_name,
+             initiator_pub_key, nonce, ciphertext, tag
+           ciphertext = AES-GCM({ challenge, timestamp }),
+             aad = utf8(initiator_device_id)
+                     ▼
+Responder  derives shared = X25519(own ephemeral private, initiator_pub_key)
+           replies PairingAckMessage:
+             challenge_id, responder_device_id, responder_device_name,
+             nonce, ciphertext, tag
+           ciphertext = AES-GCM({ response_hash = SHA256(challenge), issued_at }),
+             aad = utf8(responder_device_id)
+```
+
+Both sides now hold the same key without the ACK carrying one. The responder's
+key is published *before* the challenge, not returned after it.
+
+Key rotation is real: `start()` generates a new agreement key on every attempt,
+so a re-pairing does not reuse the previous key.
+
+Two more details measured from `TransportManager`:
+
+- **`protocols` is a hardcoded literal**, `["ws+tls"]`, not derived from any
+  capability. This is the origin of the false advertising in the previous
+  section.
+- **`fingerprint_sha256` is the SHA-256 of the advertised key agreement public
+  key**, not of a TLS certificate — the code comment says it exists "so peers
+  can pin us". The intent was key pinning. No client verifies it, so it is
+  currently inert, but it is not meaningless the way a certificate fingerprint
+  without TLS would be. A Windows client should publish it the same way and may
+  verify it against `pub_key`, which is free.
+- **The advertised port is hardcoded to 7010** rather than read back from the
+  listener, so a macOS instance that failed to bind 7010 advertises a port it is
+  not on. The Windows server reads its bound port back and advertises that, which
+  is the behaviour spec section 7 asks for.
 
 #### mDNS library interoperability — validated
 

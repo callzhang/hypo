@@ -12,15 +12,15 @@
 
 **Prerequisite:** Plan 1, merged. `Hypo.Core` at 78 passing tests.
 
-> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 3.**
-> Tasks 1 to 3 are written to this plan's own standard: failing test, complete
+> **STATUS: INCOMPLETE — DO NOT EXECUTE PAST TASK 4.**
+> Tasks 1 to 4 are written to this plan's own standard: failing test, complete
 > implementation, exact commands, expected counts. Tasks 3–16 are currently only
 > scoped, not written. A summarised task is a plan failure, not a shortcut — the
 > whole reason Plan 1's subagents caught a JSON writer that escaped `+`, a
 > converter override that was never invoked, and an associated-data formula that
 > would have broken interoperability with both peer clients is that they were
 > handed exact code to run and could watch it fail. Finish writing them before
-> dispatching anyone past Task 3.
+> dispatching anyone past Task 4.
 
 ---
 
@@ -710,11 +710,353 @@ git commit -m "feat(windows): model a discovered LAN peer"
 
 ---
 
-## Tasks 4 to 16 — still to be written
+## Task 4: mDNS discovery
 
-These remain scoped but not written. Two of them are now de-risked by working spike code that should be lifted into the plan rather than reinvented:
+The one dependency spec section 11 called the project's highest risk. It is
+already spiked against live peers, so this task is transcribing verified code
+rather than exploring.
 
-**Task 4, `MdnsPeerDiscovery`.** The spike at `scratchpad/mdns-spike/Program.cs` is working, verified code: it browses `_hypo._tcp`, filters by service type (necessary — `ServiceInstanceDiscovered` fires for every service on the network), and correlates SRV, A and TXT records into a peer. Advertising is `ServiceProfile` plus `ServiceDiscovery.Advertise` and `Announce`, with `MulticastService.Start()` before announcing. Note the API split the spike found: `AnswerReceived` lives on `MulticastService`, not `ServiceDiscovery`, so the two must be constructed separately and the service passed in.
+**Files:**
+- Create: `windows/src/Hypo.Core/Discovery/MdnsPeerDiscovery.cs`
+- Test: `windows/tests/Hypo.Core.Tests/MdnsPeerDiscoveryTests.cs`
+
+- [ ] **Step 1: Write the failing test**
+
+These tests exercise the record-correlation logic without touching a network.
+Live-network behaviour is Task 5, which is opt-in.
+
+Create `windows/tests/Hypo.Core.Tests/MdnsPeerDiscoveryTests.cs`:
+
+```csharp
+using Hypo.Core.Discovery;
+
+namespace Hypo.Core.Tests;
+
+public class MdnsPeerDiscoveryTests
+{
+    [Fact]
+    public void IgnoresInstancesOfOtherServiceTypes()
+    {
+        // ServiceInstanceDiscovered fires for every service on the network; the
+        // spike saw AirPlay, Spotify Connect and Roku. Without this filter the
+        // device list fills with televisions.
+        Assert.False(MdnsPeerDiscovery.IsHypoInstance("65in TCL Roku TV._airplay._tcp.local"));
+        Assert.False(MdnsPeerDiscovery.IsHypoInstance("x._spotify-connect._tcp.local"));
+        Assert.True(MdnsPeerDiscovery.IsHypoInstance("OPPO PLP110._hypo._tcp.local"));
+    }
+
+    [Fact]
+    public void MatchesTheServiceTypeCaseInsensitively()
+    {
+        Assert.True(MdnsPeerDiscovery.IsHypoInstance("X._HYPO._TCP.LOCAL"));
+    }
+
+    [Fact]
+    public void BuildsAPeerOnlyWhenSrvAndAddressAreBothKnown()
+    {
+        var records = new MdnsRecordSet();
+        var instance = "OPPO PLP110._hypo._tcp.local";
+
+        Assert.Null(records.TryBuildPeer(instance));
+
+        records.NoteSrv(instance, "Android_TCDVBQQI.local", 7010);
+        Assert.Null(records.TryBuildPeer(instance));
+
+        records.NoteAddress("Android_TCDVBQQI.local", "10.0.0.17");
+        var peer = records.TryBuildPeer(instance);
+
+        Assert.NotNull(peer);
+        Assert.Equal("10.0.0.17", peer.Address);
+        Assert.Equal(7010, peer.Port);
+    }
+
+    [Fact]
+    public void CarriesTxtPropertiesOntoThePeer()
+    {
+        var records = new MdnsRecordSet();
+        var instance = "OPPO PLP110._hypo._tcp.local";
+        records.NoteSrv(instance, "h.local", 7010);
+        records.NoteAddress("h.local", "10.0.0.17");
+        records.NoteTxt(instance, new Dictionary<string, string>
+        {
+            ["device_id"] = "BBE296D6-0785-43D2-91B6-B135B72F4C41",
+            ["pub_key"] = "ZuPQTwT2QainOfqI5TikmthXtYGM6ENfrtH3szCnfEo=",
+        });
+
+        var peer = records.TryBuildPeer(instance)!;
+
+        Assert.Equal("bbe296d6-0785-43d2-91b6-b135b72f4c41", peer.DeviceId);
+        Assert.Equal(32, peer.PublicKey!.Length);
+    }
+
+    [Fact]
+    public void ALaterSrvRecordReplacesAnEarlierOne()
+    {
+        // A peer that changes IP re-announces; the newest record wins.
+        var records = new MdnsRecordSet();
+        var instance = "x._hypo._tcp.local";
+        records.NoteSrv(instance, "old.local", 7010);
+        records.NoteAddress("old.local", "10.0.0.5");
+        records.NoteSrv(instance, "new.local", 7011);
+        records.NoteAddress("new.local", "10.0.0.6");
+
+        var peer = records.TryBuildPeer(instance)!;
+
+        Assert.Equal("10.0.0.6", peer.Address);
+        Assert.Equal(7011, peer.Port);
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~MdnsPeerDiscoveryTests`
+
+Expected: FAIL to compile with `CS0246` for `MdnsPeerDiscovery` and `MdnsRecordSet`.
+
+- [ ] **Step 3: Add the package**
+
+```bash
+cd windows
+dotnet add src/Hypo.Core/Hypo.Core.csproj package Makaretu.Dns.Multicast
+```
+
+Version 0.27.0 is what the spike validated against macOS and Android peers.
+
+- [ ] **Step 4: Write the implementation**
+
+Create `windows/src/Hypo.Core/Discovery/MdnsPeerDiscovery.cs`:
+
+```csharp
+using Makaretu.Dns;
+
+namespace Hypo.Core.Discovery;
+
+/// <summary>
+/// Correlates the SRV, A and TXT records that arrive separately for one peer.
+/// Split out from the network plumbing so it can be tested without multicast.
+/// </summary>
+public sealed class MdnsRecordSet
+{
+    private readonly Dictionary<string, (string Host, int Port)> _srv = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _address = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _txt = new(StringComparer.OrdinalIgnoreCase);
+
+    public void NoteSrv(string instance, string host, int port) => _srv[instance] = (host, port);
+
+    public void NoteAddress(string host, string address) => _address[host] = address;
+
+    public void NoteTxt(string instance, IReadOnlyDictionary<string, string> txt) => _txt[instance] = txt;
+
+    /// <summary>
+    /// Returns a peer once both its SRV record and the A record for that SRV
+    /// target have arrived. TXT is optional: a peer with no pairing keys is
+    /// still worth showing, it just cannot be paired with yet.
+    /// </summary>
+    public DiscoveredPeer? TryBuildPeer(string instance)
+    {
+        if (!_srv.TryGetValue(instance, out var srv) ||
+            !_address.TryGetValue(srv.Host, out var address))
+        {
+            return null;
+        }
+
+        var txt = _txt.TryGetValue(instance, out var t)
+            ? t
+            : new Dictionary<string, string>();
+
+        return DiscoveredPeer.FromTxt(instance, srv.Host, address, srv.Port, txt);
+    }
+}
+
+/// <summary>
+/// Publishes this device and browses for peers over mDNS. Validated against
+/// live macOS and Android clients; see the design spec section 4.2.
+/// </summary>
+public sealed class MdnsPeerDiscovery : IPeerDiscovery
+{
+    private const string QueryName = "_hypo._tcp";
+
+    private readonly MulticastService _mdns = new();
+    private readonly ServiceDiscovery _sd;
+    private readonly MdnsRecordSet _records = new();
+    private readonly Dictionary<string, DiscoveredPeer> _peers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock _gate = new();
+
+    private ServiceProfile? _advertised;
+    private bool _started;
+
+    public MdnsPeerDiscovery()
+    {
+        // AnswerReceived lives on MulticastService, not ServiceDiscovery, so the
+        // two have to be constructed separately and the service passed in.
+        _sd = new ServiceDiscovery(_mdns);
+        _mdns.AnswerReceived += OnAnswer;
+    }
+
+    public event EventHandler<DiscoveredPeer>? PeerDiscovered;
+    public event EventHandler<string>? PeerLost;
+
+    public IReadOnlyCollection<DiscoveredPeer> KnownPeers
+    {
+        get { lock (_gate) { return _peers.Values.ToArray(); } }
+    }
+
+    public static bool IsHypoInstance(string instanceName) =>
+        instanceName.EndsWith(DiscoveredPeer.ServiceType, StringComparison.OrdinalIgnoreCase);
+
+    public Task AdvertiseAsync(
+        string deviceName,
+        int port,
+        IReadOnlyDictionary<string, string> txt,
+        CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(port);
+
+        var profile = new ServiceProfile(deviceName, QueryName, (ushort)port);
+        foreach (var (key, value) in txt)
+        {
+            profile.AddProperty(key, value);
+        }
+
+        _advertised = profile;
+        EnsureStarted();
+        _sd.Advertise(profile);
+        _sd.Announce(profile);
+        return Task.CompletedTask;
+    }
+
+    public Task StartBrowsingAsync(CancellationToken ct = default)
+    {
+        EnsureStarted();
+        _sd.QueryServiceInstances(QueryName);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Re-sends the query. Peers that started late answer this one.</summary>
+    public void Refresh() => _sd.QueryServiceInstances(QueryName);
+
+    private void EnsureStarted()
+    {
+        if (_started)
+        {
+            return;
+        }
+
+        _mdns.Start();
+        _started = true;
+    }
+
+    private void OnAnswer(object? sender, MessageEventArgs e)
+    {
+        var changed = new List<DiscoveredPeer>();
+
+        lock (_gate)
+        {
+            foreach (var record in e.Message.Answers.Concat(e.Message.AdditionalRecords))
+            {
+                var name = record.Name.ToString();
+                switch (record)
+                {
+                    case SRVRecord srv when IsHypoInstance(name):
+                        _records.NoteSrv(name, srv.Target.ToString(), srv.Port);
+                        break;
+                    case TXTRecord txt when IsHypoInstance(name):
+                        _records.NoteTxt(name, ParseTxt(txt));
+                        break;
+                    case ARecord a:
+                        _records.NoteAddress(name, a.Address.ToString());
+                        break;
+                }
+            }
+
+            foreach (var instance in e.Message.Answers
+                         .Concat(e.Message.AdditionalRecords)
+                         .Select(r => r.Name.ToString())
+                         .Where(IsHypoInstance)
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var peer = _records.TryBuildPeer(instance);
+                if (peer is null)
+                {
+                    continue;
+                }
+
+                if (!_peers.TryGetValue(instance, out var existing) || existing != peer)
+                {
+                    _peers[instance] = peer;
+                    changed.Add(peer);
+                }
+            }
+        }
+
+        foreach (var peer in changed)
+        {
+            PeerDiscovered?.Invoke(this, peer);
+        }
+    }
+
+    private static Dictionary<string, string> ParseTxt(TXTRecord record)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in record.Strings)
+        {
+            var split = entry.IndexOf('=');
+            if (split > 0)
+            {
+                result[entry[..split]] = entry[(split + 1)..];
+            }
+        }
+
+        return result;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _mdns.AnswerReceived -= OnAnswer;
+        if (_advertised is not null)
+        {
+            _sd.Unadvertise(_advertised);
+        }
+
+        _sd.Dispose();
+        _mdns.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
+```
+
+`PeerLost` is declared but never raised here. Makaretu surfaces goodbye packets
+inconsistently across platforms, and a peer that stops answering is
+indistinguishable from one on a flaky network. Plan 3 adds staleness eviction
+driven by a last-seen timestamp, which is what the macOS client does.
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `cd windows && dotnet test --filter FullyQualifiedName~MdnsPeerDiscoveryTests`
+
+Expected: PASS, 5 tests.
+
+- [ ] **Step 6: Confirm the core layer is still platform-neutral**
+
+Run: `cd windows && dotnet build`
+
+Expected: `Build succeeded` with 0 warnings. A warning here would most likely be
+`CA1416`, meaning the new package pulled in a Windows-only API and the
+dependency rule has been broken.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add windows/src/Hypo.Core/Discovery/MdnsPeerDiscovery.cs windows/tests/Hypo.Core.Tests/MdnsPeerDiscoveryTests.cs windows/src/Hypo.Core/Hypo.Core.csproj
+git commit -m "feat(windows): discover Hypo peers over mDNS"
+```
+
+---
+
+## Tasks 5 to 16 — still to be written
+
+These remain scoped but not written. The transport group is de-risked by working spike code that should be lifted into the plan rather than reinvented:
 
 **Tasks 6 to 9, the transport.** A second spike verified the whole shape:
 - Kestrel with `builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Any, port))`, `app.UseWebSockets()`, and `ctx.WebSockets.AcceptWebSocketAsync()`.
@@ -725,7 +1067,7 @@ These remain scoped but not written. Two of them are now de-risked by working sp
 
 Remaining scope:
 
-4. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
+5. **`SigningService`** — Ed25519 sign and verify via BouncyCastle, closing the one unimplemented row of spec §4.1.
 11. **`PairingMessages`** — `PairingChallengeMessage` and `PairingAckMessage`, matching `macos/Sources/HypoApp/Pairing/PairingModels.swift` field for field, with `challenge_id` lowercase.
 12. **`PairingSession`** — generates a fresh ephemeral X25519 pair per attempt, sends the challenge, verifies and consumes the ack, derives the shared key. Rejects a replayed `challenge_id` and an expired payload.
 13. **Pairing round-trip test** — two sessions in one process complete a pairing and derive the same key, and a tampered ack is rejected.

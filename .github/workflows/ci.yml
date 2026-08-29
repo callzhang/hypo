@@ -56,7 +56,10 @@ jobs:
   macos-tests:
     name: macOS Tests
     runs-on: macos-15
-    timeout-minutes: 10
+    # Raised from 10, which this job had grown into: the run at 33256583728 was
+    # cancelled at 10m19s and passed on re-run with no code change. The caching
+    # below should keep it far under, but the headroom is the insurance.
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -64,6 +67,24 @@ jobs:
       - name: Remove Conflicting Workspace
         working-directory: macos
         run: rm -rf HypoApp.xcworkspace
+      - name: Record the Xcode version
+        # Must precede the cache step: DerivedData is not portable across
+        # toolchains, so the Xcode build number belongs in the cache key.
+        run: echo "XCODE_BUILD=$(xcodebuild -version | tr '\n' ' ' | tr -s ' ')" >> "$GITHUB_ENV"
+      - name: Cache SwiftPM checkouts and build products
+        uses: actions/cache@v4
+        with:
+          # Both paths are pinned explicitly by the xcodebuild flags below.
+          # DerivedData is what actually matters: the expensive part of a cold
+          # run is compiling swift-syntax, a macro package, not fetching it.
+          path: |
+            macos/.spm-cache
+            macos/.derived
+          # Xcode version is in the key because DerivedData is not portable
+          # across toolchains. No restore-keys on purpose: a partially stale
+          # DerivedData is a well-known source of baffling build failures, and
+          # a cold build is better than a poisoned one.
+          key: macos-spm-${{ runner.os }}-${{ env.XCODE_BUILD }}-${{ hashFiles('macos/Package.resolved') }}
       - name: List Schemes
         working-directory: macos
         run: xcodebuild -list
@@ -75,6 +96,8 @@ jobs:
             -destination 'platform=macOS' \
             -skipMacroValidation \
             -enableCodeCoverage NO \
+            -clonedSourcePackagesDirPath .spm-cache \
+            -derivedDataPath .derived \
             -resultBundlePath "$RUNNER_TEMP/hypo-macos-tests.xcresult"
       - name: Summarize macOS test failures
         if: failure()

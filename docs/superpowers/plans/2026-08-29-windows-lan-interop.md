@@ -177,14 +177,21 @@ public class FrameReaderTests
     }
 
     [Fact]
-    public void ResetDiscardsBufferedBytes()
+    public void ResetDiscardsBufferedBytesAndLeavesTheReaderUsable()
     {
         var reader = new FrameReader();
         reader.Append(Frame("hello").AsSpan(0, 5).ToArray());
+        Assert.Equal(5, reader.Buffered);
 
         reader.Reset();
 
-        Assert.Empty(reader.Append(Frame("x")).Where(f => Encoding.UTF8.GetString(f) != "x"));
+        Assert.Equal(0, reader.Buffered);
+
+        // The discarded prefix must not corrupt what follows: a whole frame
+        // appended after a Reset has to parse cleanly.
+        var completed = reader.Append(Frame("x"));
+        Assert.Single(completed);
+        Assert.Equal("x", Encoding.UTF8.GetString(completed[0]));
     }
 }
 ```
@@ -369,7 +376,7 @@ public class DnsSdNameTests
 
 Run: `cd windows && dotnet test --filter FullyQualifiedName~DnsSdNameTests`
 
-Expected: FAIL to compile with `CS0246: The type or namespace name 'Hypo.Core.Discovery' could not be found`.
+Expected: FAIL to compile with `CS0234: The type or namespace name 'Discovery' does not exist in the namespace 'Hypo.Core'` — the compiler reports CS0234 rather than CS0246 when the parent namespace already resolves.
 
 - [ ] **Step 3: Write the implementation**
 

@@ -337,7 +337,7 @@ The milestone.
 **Files:**
 - Modify: `docs/superpowers/plans/2026-08-29-windows-bidirectional-lan.md` (record the outcome)
 
-- [ ] **Step 1: Pair and stay up**
+- [x] **Step 1: Pair and stay up**
 
 ```
 cd windows && dotnet run --project tools/Hypo.Harness -- discover
@@ -346,19 +346,19 @@ cd windows && dotnet run --project tools/Hypo.Harness -- pair <device-id>
 
 Leave it running.
 
-- [ ] **Step 2: Confirm the phone can see us**
+- [x] **Step 2: Confirm the phone can see us**
 
 `dns-sd -B _hypo._tcp local` should list the harness. On the phone, the paired
 device list should show it as reachable.
 
-- [ ] **Step 3: Copy something on the phone**
+- [x] **Step 3: Copy something on the phone**
 
 This needs a human: `cmd clipboard set-primary-clip` is not implemented on the
 test device, so the copy cannot be driven over adb.
 
 Expected: the harness prints the copied text.
 
-- [ ] **Step 4: If nothing arrives, narrow it before changing anything**
+- [x] **Step 4: If nothing arrives, narrow it before changing anything**
 
 In order, because each answer changes what the next step means:
 
@@ -372,12 +372,12 @@ In order, because each answer changes what the next step means:
    arrive as a *binary* frame with a length prefix, so a text frame here would
    mean something unexpected.
 
-- [ ] **Step 5: Record the outcome**
+- [x] **Step 5: Record the outcome**
 
 Add a "Task 3 outcome" section stating what ran and what happened, success or
 not. Plan 2's value came as much from its recorded failures as its successes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/superpowers/plans/2026-08-29-windows-bidirectional-lan.md
@@ -399,3 +399,56 @@ Cloud relay, `DualSyncTransport` and `TransportManager`, then the SQLite history
 store — Plan 2's original handoff list, minus what this plan closes. Message-id
 deduplication (protocol §6) belongs with the cloud relay, since that is when a
 message can first arrive twice. Peer staleness eviction remains open from Plan 2.
+
+### Task 3 outcome — the milestone landed
+
+A clipboard item copied on the OPPO reached the Windows harness over the LAN,
+decrypted, on 2026-08-29. Both the short case and a 260-character string with
+spaces, punctuation and CJK arrived byte-identical:
+
+```
+Listening on port 61777, advertising as "Hypo Harness".
+[Lan] Text: Plan3
+[Lan] Text: Windows harness received this from the OPPO phone over LAN - with
+spaces, punctuation, and 中文字符 - xxxxx…
+```
+
+That closes the direction Plan 2 could not verify. Windows now both sends to
+and receives from a real phone.
+
+**Two things this plan asserted that turned out to be false.**
+
+*"This needs a human."* It does not. The Android app does not watch the
+clipboard at all — nothing in the source registers an
+`OnPrimaryClipChangedListener`, because Android 10+ forbids background
+clipboard reads. Copying is driven by three exported entry points:
+`ProcessTextActivity` (the "Hypo" item in the text-selection menu),
+`ShareImageActivity`, and a Quick Settings tile. The first is exported and
+takes the selected text as an intent extra, so the exact path a human's tap
+takes is reachable from adb:
+
+```
+adb shell "am start -n com.hypo.clipboard/.ProcessTextActivity \
+  -a android.intent.action.PROCESS_TEXT -t text/plain \
+  --es android.intent.extra.PROCESS_TEXT '<text>'"
+```
+
+Quote the whole `am` invocation for the *device* shell. Unquoted, `am` splits
+the extra on spaces and silently takes a later word as the package name — the
+first run sent `Plan3` instead of the full sentence and reported success.
+
+*"The app needs its accessibility service enabled, which it has on the test
+device."* It does not have one enabled — `settings get secure
+enabled_accessibility_services` lists only an unrelated app — and it does not
+need one, per the above. Step 4's first diagnostic would have sent the next
+reader looking for a service that was never involved.
+
+**One defect found and fixed before the milestone could be trusted.**
+`await Task.Delay(Timeout.Infinite)` never returns, so the harness's
+`await using` scopes never unwound, `MdnsPeerDiscovery` was never disposed, and
+no goodbye packet went out. Three runs in, `dns-sd -L "Hypo Harness"` answered
+with three records, three public keys, three ports at dead processes. A peer
+that resolves a stale one gets silence — indistinguishable from the sync bug
+you would then go hunting. Fixed with `PosixSignalRegistration`;
+`Console.CancelKeyPress` alone does not fire for a process with no controlling
+terminal, which is how the harness gets started from a script.

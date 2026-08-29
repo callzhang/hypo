@@ -199,7 +199,7 @@ public actor OptimizedHistoryStore {
 }
 
 // MARK: - Extensions for Memory Optimization
-extension ClipboardEntry {
+public extension ClipboardEntry {
     var estimatedMemoryFootprint: Int {
         var size = 0
         

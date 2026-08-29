@@ -1,8 +1,5 @@
 import Foundation
 import CryptoKit
-#if canImport(AppKit)
-import AppKit
-#endif
 
 @MainActor
 public protocol PairingSessionDelegate: AnyObject {

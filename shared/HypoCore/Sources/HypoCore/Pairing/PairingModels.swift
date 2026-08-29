@@ -288,6 +288,11 @@ public struct PairingAckMessage: Codable, Equatable, Sendable {
 public struct PairingChallengePayload: Codable, Equatable, Sendable {
     public let challenge: Data
     public let timestamp: Date
+
+    public init(challenge: Data, timestamp: Date) {
+        self.challenge = challenge
+        self.timestamp = timestamp
+    }
 }
 
 public struct PairingAckPayload: Codable, Equatable, Sendable {

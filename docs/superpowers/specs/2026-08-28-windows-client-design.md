@@ -241,14 +241,12 @@ vectors (§8.1).
 ### 4.2 LAN discovery pairing
 
 ```
-On start ──► MdnsPublisher advertises _hypo._tcp.local (service name, port)
+On start ──► MdnsPublisher advertises _hypo._tcp.local (service name, port, TXT)
          └─► MdnsBrowser watches for the same service type
 
 User selects a discovered device in Settings
-         ▼
-Read the peer's PairingPayload — Ed25519-signed, carrying peer_pub_key,
-peer_signing_pub_key, service, port, relay_hint, issued_at, expires_at
-         │ verify signature, check not expired
+         │ the TXT record already carries device_id, pub_key and
+         │ signing_pub_key; SRV gives host and port
          ▼
 Send PairingChallengeMessage (fresh ephemeral X25519 public key, nonce,
 ciphertext, tag)
@@ -258,6 +256,58 @@ Receive PairingAckMessage (peer's fresh ephemeral X25519 public key)
 Both sides derive the shared key from (own ephemeral private, peer ephemeral
 public) and persist it via DPAPI
 ```
+
+#### The advertised TXT record
+
+Measured against live macOS and Android peers on a real network, and confirmed
+against `macos/Sources/HypoApp/Utilities/BonjourPublisher.swift`:
+
+| Key | Example | Notes |
+|-----|---------|-------|
+| `device_id` | `007e4a95-0e1a-4b10-91fa-87942efaa68e` | Bare lowercase UUID |
+| `pub_key` | base64, 32 bytes | X25519 |
+| `signing_pub_key` | base64, 32 bytes | Ed25519 |
+| `version` | `1.1.6`, `1.1.6-debug` | App version |
+| `fingerprint_sha256` | 64 hex chars | Advertised but not verified by any client |
+| `protocols` | `ws+tls` | **Inaccurate — see below** |
+
+Four things this measurement settled, each of which would otherwise have cost
+Plan 2 real debugging time:
+
+1. **`protocols=ws+tls` is false advertising.** Both peers announce TLS support
+   they do not have: `LanSyncTransport.swift` connects with `ws://` and
+   `LanWebSocketServer.swift` binds with `NWParameters.tcp`. A Windows client
+   that honoured this field and dialled `wss://` would fail to connect to every
+   peer. Ignore the field; the LAN transport is plain WebSocket, and payload
+   encryption is the security boundary (section 3.2).
+2. **`fingerprint_sha256` is decorative.** `TransportManager` only prints it in a
+   diagnostic string. There is no certificate to pin, because there is no TLS.
+3. **`device_name` is read but never written.** `BonjourBrowser` populates
+   `LanEndpoint.deviceName` from a `device_name` TXT key that
+   `BonjourPublisher` does not emit, so it is always nil. Display names must
+   come from the DNS-SD instance name instead.
+4. **Instance names arrive DNS-escaped.** A real peer appears as
+   `derek\8217s\032MacBook\032Air\032(2)`, where `\032` is a space and
+   `\8217` is a right single quote. The client must unescape decimal escapes
+   before showing a name to the user.
+
+#### mDNS library interoperability — validated
+
+Spec section 11 flagged `Makaretu.Dns.Multicast` as the highest-risk dependency
+in the project. It was spiked before Plan 2 was written, on a network carrying
+live peers, and interoperates in both directions:
+
+- **Windows → peers.** A .NET advertisement was discovered and resolved by
+  macOS `dns-sd`, with TXT properties intact.
+- **Peers → Windows.** The .NET browser discovered a live macOS client at
+  `10.0.0.252:7010` and a live Android client at `10.0.0.17:7010`, with SRV, A
+  and TXT records all parsed correctly.
+
+One behaviour to design around: `ServiceDiscovery.ServiceInstanceDiscovered`
+fires for **every** service type on the network, not only the one queried — the
+spike saw AirPlay, Spotify Connect and Roku instances. Filtering by
+`_hypo._tcp.local` is the caller's responsibility, or the device list will fill
+with televisions.
 
 ### 4.3 Remote code pairing
 
@@ -576,8 +626,10 @@ SignPath approval does not materialise (§9.2).
 - Confirm `desktop4:FileExplorerContextMenus` behaviour on the Windows 10 22H2
   floor during implementation; adjust to classic `shellex` registration if it
   proves unavailable there.
-- Determine whether `Makaretu.Dns.Multicast` interoperates with macOS Bonjour and
-  Android NSD advertisements in practice; this is the highest-risk third-party
-  dependency and should be spiked early against a real macOS peer.
+- ~~Determine whether `Makaretu.Dns.Multicast` interoperates with macOS Bonjour
+  and Android NSD advertisements in practice.~~ **Done.** Spiked against live
+  macOS and Android peers before Plan 2 was written; interoperates in both
+  directions. See section 4.2 for the measured TXT schema and the four
+  behaviours it settled.
 - Apply to SignPath Foundation early — approval latency is on the critical path
   for the first signed release.

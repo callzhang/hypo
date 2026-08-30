@@ -182,15 +182,19 @@ jobs:
             -skipMacroValidation
       - name: Run HypoiOS tests on iOS Simulator
         run: ./scripts/run-ios-tests.sh shared/HypoiOS HypoiOS 'iPhone 16'
+      # Builds and drives the app. These are XCUITest, so xcodebuild's exit
+      # code is meaningful here — unlike the Swift Testing suites above, which
+      # need scripts/run-ios-tests.sh to notice failures at all.
       # CODE_SIGNING_ALLOWED=NO because the runner has no signing certificate
       # and a simulator build does not need one.
-      - name: Build the iOS app
+      - name: Build and UI-test the iOS app
         working-directory: ios
         run: |
-          xcodebuild build \
+          xcodebuild test \
             -scheme Hypo \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
             -skipMacroValidation \
+            -enableCodeCoverage NO \
             CODE_SIGNING_ALLOWED=NO
   windows-tests:
     name: Windows Core Tests

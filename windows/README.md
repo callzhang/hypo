@@ -72,6 +72,13 @@ cd windows && dotnet test
 On a non-Windows machine the Win32 tests skip rather than fail, so this command
 is green everywhere; CI runs the skipped ones.
 
+That has a sharp edge worth knowing about: **a Windows-only test can go stale
+without anything here noticing.** Implementing file support turned an assertion
+that files were refused into a lie, and the local run stayed green because that
+test skips. After changing what the Windows clipboard accepts, read
+`tests/Hypo.Windows.Tests` for assertions that the change has invalidated — the
+local suite cannot tell you.
+
 ## Run
 
 ```bash

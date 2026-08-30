@@ -94,19 +94,6 @@ public class ClipboardImageTests
     }
 
     [SkippableFact]
-    public async Task RefusesFilesClearlyRatherThanCorruptingThem()
-    {
-        RequireWindows();
-
-        // SyncCoordinator keeps such an item in history and reports it, so the
-        // message is not lost -- but it must not be written as mojibake either.
-        using var listener = new ClipboardListener();
-
-        await Assert.ThrowsAsync<NotSupportedException>(() => listener.SetAsync(
-            new ClipboardContent { ContentType = ContentType.File, Data = [1, 2, 3] }));
-    }
-
-    [SkippableFact]
     public async Task RefusesAnImageThatIsNotPng()
     {
         RequireWindows();

@@ -132,13 +132,4 @@ public class ClipboardListenerTests
         Assert.Equal(0, raised);
     }
 
-    [SkippableFact]
-    public async Task RefusesContentItCannotWriteYet()
-    {
-        RequireWindows();
-        using var listener = new ClipboardListener();
-
-        await Assert.ThrowsAsync<NotSupportedException>(() => listener.SetAsync(
-            new ClipboardContent { ContentType = ContentType.Image, Data = [1, 2, 3] }));
-    }
 }

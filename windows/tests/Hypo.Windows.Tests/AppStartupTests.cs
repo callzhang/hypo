@@ -113,6 +113,35 @@ public class AppStartupTests : IDisposable
         Assert.Contains(blocked, result.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void TheConsoleClientAndTheTrayApplicationAgreeOnTheDeviceId()
+    {
+        // Two copies of "which id am I?" would be two chances to disagree, and
+        // disagreeing means every pairing made by the other one stops working.
+        // The console client used to have its own.
+        var store = new InMemorySecretStore();
+
+        var first = AppStartup.LoadOrCreateDeviceId(store);
+
+        Assert.Equal(first, Program.ReadDeviceIdForTests(store));
+    }
+
+    [Fact]
+    public void RunningWithNoArgumentsSyncs()
+    {
+        // Someone who typed the name of a sync tool wanted it to sync. Printing
+        // usage instead is one wrong word away and would be quietly annoying
+        // forever.
+        Assert.Equal("run", Program.DefaultCommand);
+        Assert.Contains(Program.DefaultCommand, Program.Commands);
+    }
+
+    [Fact]
+    public void EveryDocumentedCommandIsOneItAnswersTo()
+    {
+        Assert.Equal(["discover", "pair", "run"], Program.Commands);
+    }
+
     /// <summary>
     /// Runs a start with the relay secret hidden.
     ///

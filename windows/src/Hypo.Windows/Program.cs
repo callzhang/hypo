@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Hypo.Core.Abstractions;
+using Hypo.Windows.App;
 using Hypo.Core.Client;
 using Hypo.Core.Discovery;
 using Hypo.Core.History;
@@ -33,10 +34,13 @@ public static class Program
         Directory.CreateDirectory(StateDirectory);
         var store = new FileSecretStore(StateDirectory);
 
-        var deviceId = LoadOrCreateDeviceId(store);
+        // The same helper the tray application uses. Two copies of "which id am
+        // I?" would be two chances to disagree, and disagreeing means every
+        // pairing made by the other one stops working.
+        var deviceId = AppStartup.LoadOrCreateDeviceId(store);
         var deviceName = Environment.GetEnvironmentVariable("HYPO_DEVICE_NAME") ?? Environment.MachineName;
 
-        return (args.FirstOrDefault() ?? "run") switch
+        return (args.FirstOrDefault() ?? DefaultCommand) switch
         {
             "discover" => await DiscoverAsync(),
             "pair" => await PairAsync(store, deviceId, deviceName, args.ElementAtOrDefault(1)),
@@ -45,33 +49,29 @@ public static class Program
         };
     }
 
+    /// <summary>
+    /// What running the program with no arguments does.
+    ///
+    /// <para>Syncing, not printing help: someone who typed the name of a sync
+    /// tool wanted it to sync, and the usage text is one wrong word away.</para>
+    /// </summary>
+    public const string DefaultCommand = "run";
+
+    /// <summary>The commands it answers to.</summary>
+    public static IReadOnlyList<string> Commands { get; } = ["discover", "pair", "run"];
+
+    /// <summary>
+    /// The device id this program would use, for a test that checks it agrees
+    /// with the tray application's.
+    /// </summary>
+    internal static string ReadDeviceIdForTests(ISecretStore store) =>
+        AppStartup.LoadOrCreateDeviceId(store);
+
     private static int Usage(string command)
     {
         Console.Error.WriteLine($"Unknown command '{command}'.");
         Console.Error.WriteLine("usage: hypo [discover | pair <device-id> | run]");
         return 2;
-    }
-
-    /// <summary>
-    /// One identity per installation, kept with the keys.
-    ///
-    /// <para>A device id that changed between runs would make every existing
-    /// pairing useless -- peers key on it -- so it is generated once and stored
-    /// beside the keys it belongs with.</para>
-    /// </summary>
-    private static string LoadOrCreateDeviceId(ISecretStore store)
-    {
-        const string Key = "local-device-id";
-
-        var stored = store.Read(Key);
-        if (stored is not null)
-        {
-            return new Guid(stored).ToString();
-        }
-
-        var id = Guid.NewGuid();
-        store.Write(Key, id.ToByteArray());
-        return id.ToString();
     }
 
     private static async Task<int> DiscoverAsync()

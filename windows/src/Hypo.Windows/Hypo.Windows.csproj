@@ -18,4 +18,8 @@
     <ProjectReference Include="..\Hypo.Core\Hypo.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Hypo.Windows.Tests" />
+  </ItemGroup>
+
 </Project>

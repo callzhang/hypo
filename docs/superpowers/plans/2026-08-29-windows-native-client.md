@@ -202,6 +202,15 @@ the clipboard".
 
 ### What remains unverified
 
+*Corrected later. This list was written on the assumption that CI has no
+interactive desktop, which was never measured and is false: a `windows-latest`
+runner shows windows, renders them, creates a notification-area icon and
+captures the screen. Items 3 and 5 below are wrong — there is a graphical
+interface and it is tested, at three display scalings, with screenshots
+published on every build. What holds is the interactive-desktop item, the
+clipboard-manager one, and long-running behaviour.*
+
+
 - **An interactive desktop.** The runner has no logged-in session in the way a
   user does. Clipboard ownership, focus, and what happens when the user is
   switching applications are all untested.

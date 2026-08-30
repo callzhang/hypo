@@ -58,9 +58,12 @@ machine. Two defects surfaced within minutes of looking at the first set: the
 search box had no label, and an already-paired device looked identical to a new
 one.
 
-What is still open is what a runner cannot be: a person using it. Whether the
-window is legible at your DPI, survives a second monitor, or behaves after a
-session lock is not established here.
+Display scaling is covered too: the history window is captured at 100%, 150%
+and 200%, which catches a layout that only holds together at 100% without a
+second machine.
+
+What is still open is what a runner cannot be: a second monitor, a session lock,
+and a person's judgement about whether any of it is pleasant to use.
 
 Two defects found by Windows CI that a Mac cannot reproduce are worth knowing
 about if you touch this code:

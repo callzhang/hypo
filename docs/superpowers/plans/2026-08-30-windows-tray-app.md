@@ -151,8 +151,17 @@ immediately: an unlabelled search box, and an already-paired device rendering
 identically to a new one — the distinction existed in the view model, was
 tested, and never reached the screen.
 
-What remains unverified is genuinely smaller: DPI, multiple monitors, session
-locks, and a person's judgement about whether any of it is pleasant.
+DPI turned out to be testable too — WPF renders at whatever DPI it is asked
+for, so the history window is captured at 100%, 150% and 200%. What is left is
+a second monitor, a session lock, and a person's judgement about whether any of
+it is pleasant.
+
+**Everything the interface does now has a test**, driven through the controls'
+own events rather than the view models behind them: opening history from the
+menu, double-clicking an entry to put it back and hide the window,
+double-clicking empty space and correctly doing nothing, pausing, quitting,
+reusing an open window, reopening a closed one, restoring a minimised one, and
+taking the icon out of the tray on exit.
 
 **The original text follows, wrong where it says CI cannot look.**
 

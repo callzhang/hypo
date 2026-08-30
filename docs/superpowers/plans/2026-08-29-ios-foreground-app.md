@@ -1003,6 +1003,34 @@ git commit -m "feat(ios): assemble the iOS object graph"
 
 ---
 
+
+### 执行记录：CI 的 iOS 任务此前一直看不见测试失败
+
+**`xcodebuild` 在 Swift Testing 测试失败时仍然打印 `** TEST SUCCEEDED **` 并返回 0。** 它统计的是 XCTest 结果，而 HypoCore 和 HypoiOS 两个包里一个 XCTest 用例都没有，于是它看到"零失败"判绿。
+
+用 workflow 里一模一样的调用形状复现（把 `HypoiOSContext` 的 `lanRole` 改成 `.peer`，让监听器断言失败）：
+
+```
+✘ Test run with 15 tests failed after 1.272 seconds with 1 issue.
+** TEST SUCCEEDED **
+EXIT=0
+```
+
+**后果**：`ios-core-build` 里的两个测试步骤从建立起就一直是绿的，但那个绿不代表任何事情。第 1 期"iOS 117 个测试在 CI 上全绿"这个结论是建立在一个瞎信号上的，需要重新核实。（第 1 期确实抓到过 18 个 iOS 失败，那是人工读日志发现的，不是 CI 判红。）
+
+**修法**：`scripts/run-ios-tests.sh` 包一层，自己检查 Swift Testing 的汇总行。三种失败都要判红：
+
+1. `xcodebuild` 自己返回非零——构建失败、模拟器不可用，这些仍然是真失败，照常传递。
+2. 输出里出现 `✘ Test run with`——测试真的红了。
+3. 输出里**没有任何** `✔ Test run with` 汇总——套件压根没跑起来，这种绿同样是假的。
+
+第 3 条不是多余的：如果 scheme 名写错或测试 target 没被包含，前两条都不会触发。
+
+已双向验证：`.peer` 构建下退出 1 并指名失败的测试，`.clientOnly` 下退出 0。
+
+**教训**：这条和本期的另外两个坑（`Host.current()` 只有 iOS CI 抓得到、`previewDescription` 的归属靠推断）是同一类——**用来验证的工具本身没有被验证过**。任何新建的检查，都应该先构造一次确定的失败，确认它真的会红，再开始信任它的绿。
+
+
 ## Task 7: 历史列表 ViewModel
 
 **Files:**

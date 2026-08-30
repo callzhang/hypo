@@ -1138,8 +1138,7 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
 
     public var visibleEntries: [ClipboardEntry] {
         guard !searchText.isEmpty else { return entries }
-        let needle = searchText.lowercased()
-        return entries.filter { $0.content.previewDescription.lowercased().contains(needle) }
+        return entries.filter { $0.matches(query: searchText) }
     }
 
     public func load() async {
@@ -1166,7 +1165,15 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
 }
 ```
 
-`visibleEntries` 用 `content.previewDescription` 过滤——该属性属于 `ClipboardContent` 而非 `ClipboardEntry`，必须经 `.content` 取用。
+**不要用 `content.previewDescription` 过滤。** `ClipboardEntry` 上有个公开的 `matches(query:)`，正是为搜索而写的，会检查设备 ID、完整正文、链接、图片 altText 和文件名；`macos/Sources/HypoApp/App/HypoMenuBarApp.swift:1494` 用的就是它。改用它有三个理由：
+
+1. `previewDescription` 在 100 字符处截断，超出部分永远搜不到。
+2. 对图片它匹配的是格式化后的 `"名字 · PNG · 1.2 MB"` 字符串，而不是 altText。
+3. 它搜不到设备 ID。
+
+两端用同一个谓词，搜索行为才一致。已用一个把关键词放在第 200 个字符处的用例把这个差别钉住。
+
+（`previewDescription` 本身定义在 `ClipboardContent` 上而非 `ClipboardEntry` 上——取用要经 `.content`。这一点在别处仍然成立，比如通知正文。）
 
 - [ ] **Step 4: 确认通过并提交**
 

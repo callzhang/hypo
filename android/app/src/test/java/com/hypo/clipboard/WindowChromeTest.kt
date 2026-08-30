@@ -6,6 +6,7 @@ import android.view.View
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -50,5 +51,20 @@ class WindowChromeTest {
             "@android:color/transparent",
             themeItems["android:navigationBarDividerColor"]
         )
+    }
+
+    @Test
+    fun `root scaffold leaves the bottom navigation inset to each screen`() {
+        val projectDirectory = File(requireNotNull(System.getProperty("hypo.android.project.dir")))
+        val source = File(
+            projectDirectory,
+            "src/main/java/com/hypo/clipboard/MainActivity.kt"
+        ).readText()
+        val rootScaffold = source.substringAfter("Scaffold(").substringBefore(") { innerPadding ->")
+
+        assertContains(rootScaffold, "WindowInsets.safeDrawing.only(")
+        assertContains(rootScaffold, "WindowInsetsSides.Top")
+        assertContains(rootScaffold, "WindowInsetsSides.Horizontal")
+        assertFalse(rootScaffold.contains("WindowInsetsSides.Bottom"))
     }
 }

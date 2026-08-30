@@ -13,6 +13,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material3.MaterialTheme
@@ -95,7 +97,9 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     containerColor = MaterialTheme.colorScheme.background,
-                    contentWindowInsets = WindowInsets.safeDrawing
+                    contentWindowInsets = WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Top
+                    )
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,

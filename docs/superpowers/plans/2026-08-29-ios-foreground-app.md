@@ -1833,3 +1833,53 @@ gh run list --branch feat/ios-app --limit 3
 7. Settings 显示的设备名不是 `localhost`
 
 **第 3 期（分享扩展、App Group、Keychain 共享）与第 4 期（APNs 后台落盘）需要付费 Apple Developer 账号，不在本期范围内。** 本期全部功能在免费账号 + 模拟器下可用。
+
+---
+
+## 第 2 期完成记录（2026-08-30）
+
+分支 `feat/ios-app`，`c15ea9b..db3c290`，31 个提交。
+
+### 完成定义逐条核对
+
+| # | 条件 | 结果 |
+|---|---|---|
+| 1 | `cd macos && swift test` → 56 | ✅ 56 |
+| 2 | `cd shared/HypoCore && swift test` → 143 | ✅ 143 |
+| 3 | HypoiOS 测试在 iOS 模拟器全绿 | ✅ 27（本地与 CI 一致） |
+| 4 | `ios` app target 能为模拟器构建 | ✅ |
+| 5 | CI 五个 job 全绿，iOS job 新增三步通过 | ✅ run 33329440657 |
+| 6 | **Task 10 第 6、7 条实测通过** | ❌ **未达成** |
+
+**第 6 条没有达成，第 2 期因此不算完整交付。** 配对需要在 iOS 上点按钮、在 macOS 菜单栏 app 里输入配对码；`xcrun simctl` 没有点击命令，用 computer-use 驱动界面的授权请求被用户拒绝。跨设备同步这件事本身尚未被观测到。
+
+### 本期修掉的问题
+
+按发现方式分类，因为这比按模块分类更有用：
+
+**只有跑真实 app 才能发现的**
+- 健康检查每 30 秒撤销 `.clientOnly` 角色（第一拍在 30 秒，单元测试等 500 毫秒）
+
+**只有 CI 才能发现的**
+- `UNNotificationSettings` 跨隔离边界：本机 Xcode 26.5 放行，CI 的 macos-15 拒绝
+
+**靠质疑验证手段本身才能发现的**
+- `xcodebuild` 在 Swift Testing 失败时报 `** TEST SUCCEEDED **` 并返回 0
+
+**靠对挂死进程取栈才能发现的**
+- `-[UIPasteboard string]` 阻塞主线程，且在无宿主 app 的测试包里永不返回
+
+**靠问「谁调用它」才能发现的**
+- `PasteButton` 没有接进任何视图——发送功能没有入口
+- `AppContainerStorageLocations` 是死代码——iOS 图片仍存在可被系统清空的 Caches
+
+**设计文档早已标记、一直没修的**
+- `DeviceIdentity` 硬编码 `.macOS`，iPhone 向对端自称 Mac
+
+后四类的共同点是：**单元测试全绿，且每一条都不是单元测试能覆盖的形状**。
+
+### 已知未处理
+
+- `ConnectionStatusProber` 的创建包在 `#if canImport(AppKit)` 里，iOS 上 `connectionState` 不会更新。当前界面不显示连接状态，第 3 期若要显示必须先处理。
+- `swift test` 跑完不退出：`LanWebSocketTransport` 有个无人关闭的心跳任务吊着进程和监听端口。测试本身早已通过。属于 HypoCore 范畴，本期未动。
+- HypoiOS 的 27 个测试在 CI 上耗时 211 秒，本地 1.2 秒。未查因，不影响正确性。

@@ -1889,3 +1889,68 @@ gh run list --branch feat/ios-app --limit 3
 - `ConnectionStatusProber` 的创建包在 `#if canImport(AppKit)` 里，iOS 上 `connectionState` 不会更新。当前界面不显示连接状态，第 3 期若要显示必须先处理。
 - `swift test` 跑完不退出：`LanWebSocketTransport` 有个无人关闭的心跳任务吊着进程和监听端口。测试本身早已通过。属于 HypoCore 范畴，本期未动。
 - HypoiOS 的 27 个测试在 CI 上耗时 211 秒，本地 1.2 秒。未查因，不影响正确性。
+
+
+---
+
+## 端到端验收的最终状态（2026-08-30）
+
+第 6 条达成了。一个 Mac 上的独立进程复制的内容，出现在 iOS app 的历史列表里，用真实界面断言：
+
+```
+testPairsWithHarnessAndReceivesWhatItSends passed (29.233 seconds)
+```
+
+| # | 项 | 结果 |
+|---|---|---|
+| 1 | 界面可用、不崩溃 | ✅ XCUITest |
+| 2 | 设备名不是 `localhost` | ✅ XCUITest |
+| 3 | 通知授权 | ✅ XCUITest |
+| 4 | 本地网络权限弹窗 | ⛔ 模拟器不强制，只能真机验 |
+| 5 | 与独立对端配对 | ✅ 经真实 relay，设备入列并落盘 |
+| **6** | **对端 → iOS 内容送达** | **✅ 真实界面断言** |
+| 7 | iOS → 对端 | ❌ 见下 |
+| 8 | 跨网段经 relay | ❌ relay 令牌两个平台都缺 |
+
+### 靠什么做到的：`tools/HypoHarness`
+
+对端不能是一个单元测试——必须有东西真的持有 socket、真的在 Bonjour 上广播、真的用一个设备 ID 应答。这个 harness 就是那个东西，对应 Windows 的 `windows/tools/Hypo.Harness`。
+
+用法：
+
+```bash
+HYPO_CODE_FILE=/tmp/hypo-code.txt HYPO_DEVICE_NAME="Harness Mac" \
+HYPO_SEND_TEXT="hello" swift run HypoHarness show
+```
+
+它出示配对码、监听 LAN、广播 Bonjour，并把收到的内容打印出来（`HYPO_RECEIVED_FILE` 可写进文件供自动化读取）。
+
+### 它逼出来的 bug
+
+**每一个都是单元测试全绿的情况下存在的**，且只有对着真实对端才会暴露：
+
+| bug | 后果 |
+|---|---|
+| `NetService.dictionary(fromTXTRecord:)` 桥接崩溃 | **一发现对端就 SIGABRT**，真机上一看到 Mac 就挂 |
+| LAN 拨号 URL 丢掉端口 | 所有拨号打到 80 端口，**iOS 永远连不上任何东西** |
+| 入站帧只接在 server delegate 上 | iOS 从不监听，所以**能发不能收** |
+| 设备 ID 大小写敏感比较 | 对端找不到该回哪条连接，内容被丢弃 |
+| 配对后无人拨号 | 刚配上的设备要等一个不相干的发现事件 |
+| 发现与配对两条同步路径互相拆连接 | 连上、identify、立刻断开 |
+| session 在首次使用前公开 | 并发 disconnect 作废它，**建任务时 abort 整个 app** |
+| `LanSyncTransport.send` 送不到也报成功 | 界面显示"已发送"而实际什么都没发生 |
+
+### 第 7 条为什么没验成
+
+iOS 读取**别的 app 写入**的剪贴板会弹系统授权框。自动化测试里那个弹窗拦住了 `readForegroundText()`，XCUITest 的中断监视器没能可靠地消掉它。发送逻辑本身有单元测试覆盖，卡住的是剪贴板读取这一步。
+
+**这是自动化环境的限制，不等于产品缺陷**——真机上用户自己点一下"允许粘贴"就过了。但它没有被验证过，不要当成已验证。
+
+### 第 8 条为什么没验成
+
+`/Applications/Hypo.app` 里也没有 relay 令牌，所以 **macOS 同样连不上 relay**（`/health` 的 `connections` 为 0）。iOS 侧已经加了构建阶段注入。要恢复云端通道，macOS 需要在有 `.env` 的环境下重新构建。
+
+### 遗留问题
+
+- **对端连上就发的第一帧可能丢失**：设备在**发现**阶段就拨号，早于配对完成，所以第一帧可能在收方还没拿到密钥时到达，然后被静默丢弃、无人重试。用户再复制一次会成功。harness 因此改成周期重发。这是真实缺陷，未修。
+- **329 MB 构建产物进了 git 历史**：`git add -A` 扫进了 `tools/HypoHarness/.build`。已从 HEAD 移除并补进 `.gitignore`，但历史和远端仍在。清理需要重写分支，会影响其他人，没有擅自做。

@@ -56,6 +56,10 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
         entries = await store.togglePin(id: id)
     }
 
+    public func updateLimit(_ newLimit: Int) async {
+        entries = await store.updateLimit(newLimit)
+    }
+
     public func clearAll() async {
         await store.clear()
         entries = await store.all()

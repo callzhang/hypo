@@ -18,26 +18,16 @@ public struct RootView: View {
         ))
     }
 
+    /// Two tabs, matching Android: History and Settings. Pairing is reached
+    /// from the devices section of Settings, not from a tab of its own —
+    /// it is something you do occasionally, not somewhere you live.
     public var body: some View {
         TabView {
             HistoryListView(viewModel: historyViewModel)
                 .tabItem { Label("History", systemImage: "list.bullet") }
 
-            // pairingParameters() is where macOS gets this too. Passing nil —
-            // which the plan called for — makes RemotePairingViewModel fail
-            // immediately with "Relay configuration missing", so pairing could
-            // never have succeeded.
-            PairingView(
-                viewModel: pairingViewModel,
-                relayHint: context.transportManager.pairingParameters().relayHint
-            )
-                .tabItem { Label("Pair", systemImage: "link") }
-
-            SettingsView(
-                deviceName: context.identity.deviceName,
-                deviceId: context.identity.deviceIdString
-            )
-            .tabItem { Label("Settings", systemImage: "gear") }
+            SettingsView(context: context, pairingViewModel: pairingViewModel)
+                .tabItem { Label("Settings", systemImage: "gear") }
         }
     }
 }

@@ -470,8 +470,11 @@ public final class TransportManager: ObservableObject {
             await self?.historyViewModel?.handleIncomingRemoteEntry(entry, duplicate: duplicate)
         }
         
-        // Initialize connection status prober now that we have the ViewModel
-        #if canImport(AppKit)
+        // Initialize connection status prober now that we have the ViewModel.
+        // This used to be #if canImport(AppKit), which left connectionState
+        // frozen at .disconnected on iOS forever. ConnectionStatusProber does
+        // not use AppKit — the import in that file is a leftover from the
+        // phase-1 migration — so the guard was gating portable code.
         if connectionStatusProber == nil {
             logger.info("🔧 [TransportManager] Initializing ConnectionStatusProber")
             
@@ -487,7 +490,6 @@ public final class TransportManager: ObservableObject {
         } else {
             logger.info("🔧 [TransportManager] ConnectionStatusProber already initialized")
         }
-        #endif
     }
     
     /// Update the connection state (used by ConnectionStatusProber)

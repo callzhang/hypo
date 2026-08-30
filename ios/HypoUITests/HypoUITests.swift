@@ -24,19 +24,28 @@ final class HypoUITests: XCTestCase {
         return app
     }
 
-    func testAllThreeTabsOpen() {
+    func testBothTabsOpen() {
         let app = launch()
 
         XCTAssertTrue(app.staticTexts["History"].waitForExistence(timeout: 10))
-
-        app.buttons["Pair"].tap()
-        XCTAssertTrue(app.staticTexts["Pair a device"].waitForExistence(timeout: 5))
 
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
 
         app.buttons["History"].tap()
         XCTAssertTrue(app.staticTexts["History"].waitForExistence(timeout: 5))
+    }
+
+    /// Pairing lives inside Settings, the way it does on Android, rather than
+    /// in a tab of its own.
+    func testPairingIsReachedFromSettings() {
+        let app = launch()
+        app.buttons["Settings"].tap()
+
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 10))
+        app.buttons["Pair a device"].tap()
+
+        XCTAssertTrue(app.staticTexts["Pair a device"].waitForExistence(timeout: 5))
     }
 
     func testSettingsShowsARealDeviceName() {
@@ -59,8 +68,10 @@ final class HypoUITests: XCTestCase {
     /// button that does nothing.
     func testRequestingAPairingCodeReachesTheRelay() throws {
         let app = launch()
-        app.buttons["Pair"].tap()
-        XCTAssertTrue(app.staticTexts["Pair a device"].waitForExistence(timeout: 10))
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 10))
+        app.buttons["Pair a device"].tap()
+        XCTAssertTrue(app.buttons["Request pairing code"].waitForExistence(timeout: 10))
 
         app.buttons["Request pairing code"].tap()
 

@@ -100,4 +100,5 @@ final class HypoUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Search"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Paste"].exists)
     }
+
 }

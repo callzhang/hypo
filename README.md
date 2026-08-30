@@ -31,20 +31,28 @@ Hypo enables seamless clipboard synchronization between any devices. Copy on one
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐         LAN (mDNS)           ┌──────────────────┐
-│   macOS Client  │◄────────────────────────────►│ Android Client   │
-│  (Swift/SwiftUI)│                              │ (Kotlin/Compose) │
-└────────┬────────┘                              └────────┬─────────┘
-         │                                                │
-         │           Cloud Fallback (WebSocket)           │
-         └────────────────────┬───────────────────────────┘
-                              │
-                    ┌─────────▼──────────┐
-                    │  Backend Relay     │
-                    │  (Rust/Actix-web)  │
-                    │  + Redis           │
-                    └────────────────────┘
+┌─────────────────┐        LAN (mDNS)        ┌──────────────────┐
+│   macOS Client  │◄────────────────────────►│ Android Client   │
+│  (Swift/SwiftUI)│                          │ (Kotlin/Compose) │
+└────────┬────────┘                          └────────┬─────────┘
+         │              ┌─────────────────┐           │
+         │◄────────────►│ Windows Client  │◄─────────►│
+         │              │  (C#/.NET 10)   │           │
+         │              └────────┬────────┘           │
+         │                       │                    │
+         │      Cloud Fallback (WebSocket)            │
+         └───────────────────────┼────────────────────┘
+                                 │
+                       ┌─────────▼──────────┐
+                       │  Backend Relay     │
+                       │  (Rust/Actix-web)  │
+                       │  + Redis           │
+                       └────────────────────┘
 ```
+
+The Windows client syncs text and images over both paths today and has no
+graphical interface yet; see [`windows/README.md`](windows/README.md) for what
+is and is not implemented.
 
 **See**: [`docs/architecture.mermaid`](docs/architecture.mermaid) for detailed component diagram
 
@@ -91,6 +99,7 @@ For development setup, see [Development Setup](#development-setup) below.
 hypo/
 ├── macos/              # Swift/SwiftUI macOS client
 ├── android/            # Kotlin/Compose Android client
+├── windows/            # C#/.NET 10 Windows client
 ├── backend/            # Rust backend relay server
 ├── docs/               # Architecture and specifications
 ├── tasks/              # Development tasks and planning
@@ -109,6 +118,22 @@ hypo/
 # Build macOS only
 ./scripts/build-macos.sh
 ```
+
+### Windows Client
+
+```bash
+# Everything: the Win32 tests skip on non-Windows rather than failing
+cd windows && dotnet test
+
+# Pair with a peer on the network, then sync
+dotnet run --project src/Hypo.Windows -- discover
+dotnet run --project src/Hypo.Windows -- pair <device-id>
+dotnet run --project src/Hypo.Windows -- run
+```
+
+`Hypo.Core` has no Windows APIs and is verified against real devices from any
+machine; the Win32 layer is verified by CI on a Windows runner, which also
+publishes a self-contained build as `hypo-console-win-x64`.
 
 ### macOS Client
 

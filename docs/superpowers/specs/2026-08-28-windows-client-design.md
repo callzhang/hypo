@@ -252,25 +252,66 @@ the transport shape was wrong.
 
 ### 3.3 Transport selection
 
-`TransportManager` preserves macOS behaviour: LAN and cloud connect
-concurrently and every message is dual-sent. LAN wins on latency when available;
-cloud covers the gap when it is not. There is no explicit failover state machine.
-The "transport preference" setting controls which channels are *permitted*, not
-their priority.
+*Revised during implementation. This section previously said every message is
+dual-sent, "preserving macOS behaviour". `DualSyncTransport` does not do that,
+and should not: sending one clipboard item over both channels delivers it to the
+peer twice and leaves the peer to sort it out. The Android client's duplicate
+sends were exactly this class of bug seen from the other side.*
+
+`DualSyncTransport` prefers the LAN and falls back to the relay, **per peer
+rather than per transport**. "The LAN is up" says nothing about whether a given
+device is on it: a phone on cellular and a laptop in the next room are both
+paired, and only one is reachable. So a send routes on the envelope's target;
+`LanSyncTransport` reports `PeerUnreachableException` when it holds no
+connection for that peer, and that is the only failure the dual transport falls
+back on. Falling back on any exception would hide a genuine send error behind a
+second attempt that quietly succeeds.
+
+Both channels connect concurrently and either alone is enough to start. LAN is
+preferred because it is faster, does not leave the building, and works when the
+relay is down.
+
+Inbound messages are deduplicated by envelope id, which covers one message
+arriving on both channels. It does **not** cover a peer sending the same content
+twice as two messages — those carry different ids — so content-level dedup lives
+above the transport, after decryption, where a hash of the plaintext is
+available. See `ContentDeduplicator`.
 
 ### 3.4 Windows clipboard hazards
 
-1. **`CF_DIBV5` alpha handling.** Reading DIB directly produces black
-   backgrounds on semi-transparent images. Prefer the registered `"PNG"` format,
-   which modern applications (Chrome, Snipaste, QQ) provide; fall back to
-   `CF_DIBV5`, then `CF_BITMAP`.
+1. **Images travel as the registered `"PNG"` format, and only that.** Reading
+   `CF_DIB` directly produces black backgrounds on semi-transparent images, and
+   the protocol already carries PNG bytes — converting to DIB would mean decoding
+   and re-encoding an image to hand back something worse. Every browser and image
+   editor publishes and accepts `"PNG"`. *The DIB and `CF_BITMAP` fallbacks this
+   section originally called for are not implemented: they would only matter for
+   an application that publishes a bitmap and no PNG, and none has been observed.
+   Writes verify the PNG signature first, so a peer sending JPEG is refused
+   rather than advertised as something it is not.*
 2. **The clipboard is a globally exclusive resource.** `OpenClipboard` fails when
-   another process holds it. All access goes through a wrapper that retries up to
-   5 times with 20 ms backoff, then skips the round and logs. It never throws to
-   the UI — contention is the most common crash source in clipboard tools.
+   another process holds it, which on a desktop with Office, a browser and any
+   clipboard manager is routine rather than exceptional. Access goes through a
+   wrapper that retries 25 times with 20 ms backoff before reporting failure.
+   *Two corrections to the original text. The retry count was 5; that is too few
+   when a clipboard manager is active. And "never throws" was replaced with
+   "throws where a caller can handle it": the listener's message pump catches it
+   and drops one update, because missing an update is survivable and dying on the
+   pump thread is not.*
 3. **`WM_CLIPBOARDUPDATE` requires a window.** A message-only window
    (`HWND_MESSAGE`) hosts the listener. It is invisible, absent from the taskbar,
    and lives for the process lifetime.
+4. **Every clipboard call runs on the message-pump thread.** Not tidiness —
+   correctness, in two ways CI demonstrated. Recording our own clipboard sequence
+   number from a caller's thread races the update that write causes: the
+   notification can be handled before the field is assigned, the echo escapes,
+   and two devices bounce one item between them. And a reader on the pump thread
+   contends with a writer on a caller's thread for a resource only one can hold,
+   which surfaces as `EmptyClipboard` failing on a clipboard we believed we
+   owned.
+5. **Read the sequence number *after* the clipboard session closes.** It advances
+   when the change is committed at `CloseClipboard`, so reading it inside the
+   open session returns the value from before our own write — the comparison
+   never matches and the echo suppression silently does nothing.
 
 ---
 
@@ -442,20 +483,32 @@ Windows↔Windows, Windows↔macOS and Windows↔Android must all work.
 
 ### 4.5 Key storage
 
-`DpapiSecretStore` implements `ISecretStore` using
-`ProtectedData.Protect(..., DataProtectionScope.CurrentUser)`, with files under
-`%LOCALAPPDATA%\Hypo\`.
+*What shipped is `FileSecretStore`, not the `DpapiSecretStore` this section
+originally specified.* It writes one file per key under `%LOCALAPPDATA%\Hypo\`,
+restricted to the owner. Key names are validated against `[a-z0-9-_]`, because a
+key is a path component and a peer-supplied device id must not be able to
+escape the directory.
 
-`CurrentUser` rather than `LocalMachine`: keys are decryptable only by the
-current Windows user, so another account on the same machine gains nothing from
-the files.
+DPAPI remains the right upgrade and is nobody's commitment yet. It buys
+encryption at rest against another account on the same machine that can already
+read the files; owner-only permissions already prevent that, so the gain is
+against an attacker who has bypassed file permissions — real, but not what
+blocked shipping.
 
-`%LOCALAPPDATA%` rather than `%APPDATA%`: roaming profiles synchronise `%APPDATA%`
-to other domain machines, where DPAPI ciphertext cannot be decrypted. Storing
-keys there would manifest as pairings inexplicably failing.
+`%LOCALAPPDATA%` rather than `%APPDATA%`: roaming profiles synchronise
+`%APPDATA%` to other domain machines, where DPAPI ciphertext could not be
+decrypted. That reasoning holds for the DPAPI upgrade and costs nothing now.
 
-Three items are stored: device identity (id and name), the Ed25519 pairing
-signing key, and one shared key per paired device.
+Four items are stored: this device's id (`local-device-id`), the Ed25519 pairing
+signing key, an X25519 agreement key, and one shared key per paired device. The
+peers are the GUID-shaped keys; `HypoClient.PairedPeers` filters on that shape
+rather than keeping a second list, so pairing stays the single source of truth.
+
+The relay's shared secret is deliberately **not** stored here. It is read at run
+time from `HYPO_RELAY_AUTH_TOKEN` or a repo-root `.env`, because baking it into
+an MSIX that strangers install makes it a secret only until someone unzips it.
+How a shipped build obtains relay credentials is an open question for
+packaging.
 
 ---
 

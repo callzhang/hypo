@@ -1,58 +1,95 @@
 # Hypo Windows Client
 
-Windows client for Hypo, at feature parity with the macOS menu-bar client.
+Clipboard sync between Windows and the macOS and Android clients, over the local
+network and through the relay.
 
 **Design:** [`docs/superpowers/specs/2026-08-28-windows-client-design.md`](../docs/superpowers/specs/2026-08-28-windows-client-design.md)
 
 ## Status
 
-| Layer | Plan | State |
-|-------|------|-------|
-| `Hypo.Core` — protocol, crypto, compression | Plan 1 | Implemented |
-| Transport, discovery, pairing, storage | Plan 2 | Not started |
-| Windows platform layer and tray app | Plan 3 | Not started |
-| History panel and settings UI | Plan 4 | Not started |
-| Shell extension, packaging, release | Plan 5 | Not started |
+Working: text and images sync in both directions, over the LAN and the relay,
+verified against a real phone. There is no graphical interface yet — the client
+is a console program.
 
-Plan 1 is [`docs/superpowers/plans/2026-08-28-windows-core-foundation.md`](../docs/superpowers/plans/2026-08-28-windows-core-foundation.md).
-Plans 2–5 are not written yet; the split above follows the scope boundary that
-plan sets out.
+| Layer | State |
+|-------|-------|
+| Protocol, crypto, compression, framing | Done |
+| mDNS discovery and LAN pairing | Done |
+| LAN transport (listens, advertises, dials) | Done |
+| Relay transport, keepalive, reconnect | Done |
+| Clipboard history (SQLite) and content dedup | Done |
+| Windows clipboard: text, links, images | Done |
+| Windows clipboard: files | Not implemented — see below |
+| Tray icon, history window, settings | Not started |
+| MSIX packaging and winget | Not started |
+
+Files are the one content type the protocol carries that this client does not.
+An incoming file is kept in the history and reported; it is not placed on the
+clipboard, because that needs somewhere for it to land on disk and a `CF_HDROP`
+pointing at it. It is refused deliberately rather than written into a text
+format as mojibake.
+
+## What is verified, and how
+
+Everything except the Windows clipboard itself is cross-platform .NET and is
+tested against real devices from any machine. The Win32 layer is tested on a
+`windows-latest` runner in CI, which has a real clipboard: reads, writes,
+ownership, the message loop, and the echo suppression all run there.
+
+CI publishes `hypo-console-win-x64`, a self-contained build. Nothing here can
+tell you how the client behaves on a logged-in interactive desktop, alongside a
+real clipboard manager, or over hours — download that artifact and use it.
+
+Two defects found by Windows CI that a Mac cannot reproduce are worth knowing
+about if you touch this code:
+
+- Recording our own clipboard sequence number from a caller's thread races the
+  update that write causes, and the echo escapes. All clipboard calls run on the
+  message-pump thread for that reason.
+- The sequence number advances when the change is committed at
+  `CloseClipboard`, so reading it inside the open session returns the value from
+  *before* our own write, and the echo suppression silently does nothing.
 
 ## Requirements
 
 - .NET 10 SDK
-- Windows 10 22H2 (build 19045) or later to run the app; `Hypo.Core` alone
-  builds and tests on any platform the SDK supports
+- Windows 10 22H2 (build 19045) or later to run it. `Hypo.Core` builds and tests
+  on any platform the SDK supports, which is what keeps the protocol layer
+  verifiable without a Windows machine.
+- A relay secret in `HYPO_RELAY_AUTH_TOKEN`, or a repo-root `.env` defining
+  `RELAY_WS_AUTH_TOKEN`, for cloud sync. LAN sync needs neither.
 
 ## Build and test
 
 ```bash
-cd windows
-dotnet build
-dotnet test
+cd windows && dotnet test
 ```
+
+On a non-Windows machine the Win32 tests skip rather than fail, so this command
+is green everywhere; CI runs the skipped ones.
+
+## Run
+
+```bash
+cd windows && dotnet run --project src/Hypo.Windows -- discover
+```
+
+`discover` lists peers on the network, `pair <device-id>` pairs with one, and
+`run` syncs. State lives in `%LOCALAPPDATA%\Hypo`: keys, this device's id, and
+`history.db`.
 
 ## Layout
 
-- `src/Hypo.Core` — protocol models, framing, cryptography, compression, and the
-  `ISecretStore` persistence contract. Targets `net10.0` with no Windows APIs,
-  which is what keeps the layer testable in isolation. Do not add a
-  Windows-specific dependency here; the DPAPI-backed secret store arrives in
-  Plan 3 behind `ISecretStore`.
-- `tests/Hypo.Core.Tests` — xUnit suite. The crypto, framing and gzip tests read
-  `tests/crypto_test_vectors.json` and `tests/transport/frame_vectors.json` from
-  the repository root, the same fixtures the macOS and Android suites use. If a
-  change makes one of those tests fail, the Windows client has diverged from the
-  other two clients — fix the client, not the fixture.
+- `src/Hypo.Core` — protocol, crypto, discovery, pairing, both transports,
+  history, and the sync coordinator. `net10.0`, no Windows APIs. Keep it that
+  way: it is what lets the protocol be verified against real devices from a Mac.
+- `src/Hypo.Windows` — `net10.0-windows`. The Win32 clipboard and the console
+  entry point, and nothing else.
+- `tools/Hypo.Harness` — a console tool for driving discovery, pairing and sync
+  against real peers. Its `sync` command builds the same `HypoClient` the
+  application does, which is how that composition gets exercised off Windows.
+- `tests/Hypo.Core.Tests`, `tests/Hypo.Windows.Tests`.
 
-## Interoperability notes
-
-- Android encodes base64 without padding. Decode through `Base64Compat`, never
-  `Convert.FromBase64String` directly.
-- `System.Text.Json` writes `DateTimeOffset` with a numeric offset (`+00:00`),
-  while both peer clients emit a `Z` designator. Serialize timestamps through
-  `Iso8601DateTimeOffsetConverter`, which is already registered on the shared
-  options in `ProtocolJson`.
-- Compression is a gzip container (RFC 1952), not raw deflate.
-- Device IDs are bare lowercase UUIDs. Platform-prefixed IDs were removed in
-  protocol v1.1.
+Note that `net10.0-windows` does not stop code running elsewhere —
+`SupportedOSPlatform` is an analyser annotation, not a runtime gate — so
+Windows-only tests skip explicitly.

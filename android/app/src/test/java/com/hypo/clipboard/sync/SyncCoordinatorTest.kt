@@ -265,4 +265,160 @@ class SyncCoordinatorTest {
         attributes = mapOf("device_id" to deviceId),
         lastSeen = Instant.now()
     )
+
+    /**
+     * One user action produces two events with different ids: ProcessTextActivity
+     * fires FORCE_PROCESS with the text, finishes, and MainActivity's onResume
+     * fires it again without the text, which falls back to reading the clipboard.
+     * The peer cannot dedup them -- the ids differ -- so they must not both be
+     * sent.
+     */
+    @Test
+    fun `does not broadcast the same content twice in quick succession`() = runTest {
+        coEvery { repository.getLatestEntry() } returns null
+        coEvery { repository.findMatchingEntryInHistory(any()) } returns null
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
+
+        val coordinator = SyncCoordinator(
+            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+        val clock = MutableClock(Instant.parse("2026-08-29T20:00:00Z"))
+        coordinator.clock = clock
+
+        advanceUntilIdle()
+        coordinator.setTargetDevices(setOf("mac-device"))
+        coordinator.start(this)
+
+        coordinator.onClipboardEvent(textEvent("event-a", "one copy"))
+        advanceUntilIdle()
+
+        // The real pair arrives about 40ms apart.
+        clock.advanceMillis(40)
+        coordinator.onClipboardEvent(textEvent("event-b", "one copy"))
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { syncEngine.sendClipboard(any(), "mac-device") }
+
+        coordinator.stop()
+        advanceUntilIdle()
+        clearMocks(syncEngine)
+    }
+
+    /**
+     * The behaviour the existing comment protects: "Broadcast even if item matched
+     * history - user may have re-copied it". A person copying the same string again
+     * later is a real second event, and suppressing it would be a worse bug than
+     * the one being fixed.
+     */
+    @Test
+    fun `broadcasts the same content again after the window`() = runTest {
+        coEvery { repository.getLatestEntry() } returns null
+        coEvery { repository.findMatchingEntryInHistory(any()) } returns null
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
+
+        val coordinator = SyncCoordinator(
+            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+        val clock = MutableClock(Instant.parse("2026-08-29T20:00:00Z"))
+        coordinator.clock = clock
+
+        advanceUntilIdle()
+        coordinator.setTargetDevices(setOf("mac-device"))
+        coordinator.start(this)
+
+        coordinator.onClipboardEvent(textEvent("event-a", "copied twice on purpose"))
+        advanceUntilIdle()
+
+        clock.advanceMillis(SyncCoordinator.BROADCAST_DEDUP_WINDOW.toMillis() + 1_000)
+        coordinator.onClipboardEvent(textEvent("event-b", "copied twice on purpose"))
+        advanceUntilIdle()
+
+        coVerify(exactly = 2) { syncEngine.sendClipboard(any(), "mac-device") }
+
+        coordinator.stop()
+        advanceUntilIdle()
+        clearMocks(syncEngine)
+    }
+
+    @Test
+    fun `different content inside the window is still broadcast`() = runTest {
+        coEvery { repository.getLatestEntry() } returns null
+        coEvery { repository.findMatchingEntryInHistory(any()) } returns null
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
+
+        val coordinator = SyncCoordinator(
+            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+        val clock = MutableClock(Instant.parse("2026-08-29T20:00:00Z"))
+        coordinator.clock = clock
+
+        advanceUntilIdle()
+        coordinator.setTargetDevices(setOf("mac-device"))
+        coordinator.start(this)
+
+        coordinator.onClipboardEvent(textEvent("event-a", "first thing"))
+        advanceUntilIdle()
+        clock.advanceMillis(40)
+        coordinator.onClipboardEvent(textEvent("event-b", "second thing"))
+        advanceUntilIdle()
+
+        coVerify(exactly = 2) { syncEngine.sendClipboard(any(), "mac-device") }
+
+        coordinator.stop()
+        advanceUntilIdle()
+        clearMocks(syncEngine)
+    }
+
+    /**
+     * A suppressed repeat must not refresh the window, or a source retrying in a
+     * tight loop would hold it open indefinitely and the content would never sync.
+     */
+    @Test
+    fun `a repeating source cannot hold the window open forever`() = runTest {
+        coEvery { repository.getLatestEntry() } returns null
+        coEvery { repository.findMatchingEntryInHistory(any()) } returns null
+        coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
+
+        val coordinator = SyncCoordinator(
+            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+        val clock = MutableClock(Instant.parse("2026-08-29T20:00:00Z"))
+        coordinator.clock = clock
+
+        advanceUntilIdle()
+        coordinator.setTargetDevices(setOf("mac-device"))
+        coordinator.start(this)
+
+        coordinator.onClipboardEvent(textEvent("event-0", "retried"))
+        advanceUntilIdle()
+
+        repeat(5) { attempt ->
+            clock.advanceMillis(500)
+            coordinator.onClipboardEvent(textEvent("event-$attempt-retry", "retried"))
+            advanceUntilIdle()
+        }
+
+        // 2.5s of retries have passed the 2s window, so one of them got through.
+        coVerify(atLeast = 2) { syncEngine.sendClipboard(any(), "mac-device") }
+
+        coordinator.stop()
+        advanceUntilIdle()
+        clearMocks(syncEngine)
+    }
+
+    private fun textEvent(id: String, content: String) = ClipboardEvent(
+        id = id,
+        type = ClipboardType.TEXT,
+        content = content,
+        preview = content,
+        metadata = emptyMap(),
+        createdAt = Instant.parse("2026-08-29T20:00:00Z")
+    )
+
+    /** A clock the test moves by hand; the dedup window is wall-clock, not virtual time. */
+    private class MutableClock(private var instant: Instant) : java.time.Clock() {
+        override fun getZone(): java.time.ZoneId = java.time.ZoneOffset.UTC
+        override fun withZone(zone: java.time.ZoneId): java.time.Clock = this
+        override fun instant(): Instant = instant
+        fun advanceMillis(millis: Long) {
+            instant = instant.plusMillis(millis)
+        }
+    }
+
 }

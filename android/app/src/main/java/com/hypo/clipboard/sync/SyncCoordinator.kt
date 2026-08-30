@@ -49,6 +49,15 @@ class SyncCoordinator @Inject constructor(
     private val keyStoreJob = SupervisorJob()
     private val keyStoreScope = CoroutineScope(keyStoreJob + Dispatchers.Default)
     private val pairedDeviceIdsCache = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * Overridable so tests can control the dedup window without sleeping.
+     * Production always uses the system clock.
+     */
+    internal var clock: java.time.Clock = java.time.Clock.systemUTC()
+
+    /** The last item actually put on the wire, and when. Guarded by the single event loop. */
+    private var lastBroadcast: Pair<ClipboardItem, Instant>? = null
     
     init {
         // Initial load of paired device IDs (event-driven updates happen in addTargetDevice/removeTargetDevice)
@@ -302,8 +311,9 @@ class SyncCoordinator @Inject constructor(
                 // Incoming remote updates attempt system clipboard writes separately.
 
                 // Only broadcast if not a received item (prevent loops)
-                // IMPORTANT: Broadcast even if item matched history - user may have re-copied it
-                if (!event.skipBroadcast) {
+                // IMPORTANT: Broadcast even if item matched history - user may have re-copied it.
+                // That stays true: the guard below is measured in seconds, not "seen ever".
+                if (!event.skipBroadcast && !isRepeatOfLastBroadcast(item)) {
                     // Wait up to 10 seconds for targets to be available (handles race condition with peer discovery)
                     var pairedDevices = _targets.value
                     if (pairedDevices.isEmpty()) {
@@ -333,6 +343,12 @@ class SyncCoordinator @Inject constructor(
                             }
                         }
                         Log.v(TAG, "📤 Sync: ${pairedDevices.size} device(s) → ${results.joinToString(", ")}")
+
+                        // Only after something actually went out. Recording it when
+                        // there were no targets would suppress the next event for
+                        // content that was never sent, and if a peer appeared inside
+                        // the window that copy would be lost entirely.
+                        lastBroadcast = item to Instant.now(clock)
                     } else {
                         Log.d(TAG, "⏭️ Sync: No paired devices (targets: ${_targets.value})")
                     }
@@ -347,6 +363,43 @@ class SyncCoordinator @Inject constructor(
         job?.cancel()
         job = null
         keyStoreJob.cancel()
+    }
+
+    /**
+     * True when [item] is the same content we just put on the wire.
+     *
+     * One user action reaches this loop twice. ProcessTextActivity copies, fires
+     * FORCE_PROCESS *with* the text, then finishes -- which resumes MainActivity,
+     * whose onResume fires FORCE_PROCESS again *without* it. The second one falls
+     * back to reading the clipboard, and by then the app is foreground so the read
+     * usually succeeds, producing a second event with a fresh UUID. The peer sees
+     * two envelopes with different ids for one copy, which no id-based dedup on
+     * its side can suppress.
+     *
+     * Neither trigger can simply be removed. The intent carries the text because
+     * Android 10+ restricts background clipboard reads; the onResume check exists
+     * to catch copies made while the app was away.
+     *
+     * So the guard is here, where every path converges, and it is time-bounded
+     * rather than "seen ever": copying the same string again a minute later is a
+     * real second event the user expects to see on their other device. The two
+     * duplicate events arrive about 40ms apart, so seconds is generous.
+     *
+     * A suppressed repeat deliberately does not refresh the timestamp -- otherwise
+     * a source retrying in a tight loop would hold the window open indefinitely
+     * and the content would never sync at all.
+     */
+    private fun isRepeatOfLastBroadcast(item: ClipboardItem): Boolean {
+        val (previous, at) = lastBroadcast ?: return false
+
+        val elapsed = java.time.Duration.between(at, Instant.now(clock))
+        val repeat = elapsed < BROADCAST_DEDUP_WINDOW && item.matchesContent(previous)
+
+        if (repeat) {
+            Log.d(TAG, "⏭️ Skipping duplicate broadcast ${elapsed.toMillis()}ms after the same content")
+        }
+
+        return repeat
     }
 
     suspend fun onClipboardEvent(event: ClipboardEvent) {
@@ -397,5 +450,12 @@ class SyncCoordinator @Inject constructor(
 
     companion object {
         private const val TAG = "SyncCoordinator"
+
+        /**
+         * How long after sending an item an identical one counts as the same copy
+         * rather than a new one. The duplicate pair arrives ~40ms apart; a person
+         * re-copying the same text takes far longer than this.
+         */
+        internal val BROADCAST_DEDUP_WINDOW: java.time.Duration = java.time.Duration.ofSeconds(2)
     }
 }

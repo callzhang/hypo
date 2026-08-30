@@ -64,7 +64,15 @@ internal static class Wpf
 
         var thread = new Thread(() =>
         {
-            _ = System.Windows.Application.Current ?? new System.Windows.Application();
+            var application = System.Windows.Application.Current ?? new System.Windows.Application();
+
+            // Without this the Application shuts down when a test closes the
+            // last window it opened, and every test after it fails with "the
+            // Application object is being shut down". The real App.xaml sets the
+            // same mode, for the same reason: this is a tray application and its
+            // windows come and go.
+            application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
             ready.SetResult(Dispatcher.CurrentDispatcher);
             Dispatcher.Run();
         })

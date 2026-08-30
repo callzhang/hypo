@@ -56,6 +56,13 @@ public sealed class ClipboardListener : IClipboard, IDisposable
 
     private readonly string _receivedFiles;
 
+    /// <summary>
+    /// How far written items may travel. Settable because the user can change it
+    /// while the application runs, and a setting that needed a restart would be
+    /// one people assume did not work.
+    /// </summary>
+    public ClipboardPrivacy Privacy { get; set; } = ClipboardPrivacy.Private;
+
     private nint _hwnd;
 
     /// <summary>
@@ -196,8 +203,8 @@ public sealed class ClipboardListener : IClipboard, IDisposable
             // write causes is dispatched afterwards, by which time the sequence
             // number it must be compared against is already recorded.
             _ownSequences.Enqueue(text is null
-                ? WindowsClipboard.WritePng(content.Data)
-                : WindowsClipboard.WriteText(text));
+                ? WindowsClipboard.WritePng(content.Data, Privacy)
+                : WindowsClipboard.WriteText(text, Privacy));
             while (_ownSequences.Count > 8)
             {
                 _ownSequences.Dequeue();
@@ -237,7 +244,7 @@ public sealed class ClipboardListener : IClipboard, IDisposable
 
         return OnPump<object?>(() =>
         {
-            _ownSequences.Enqueue(WindowsClipboard.WriteFilePaths([path]));
+            _ownSequences.Enqueue(WindowsClipboard.WriteFilePaths([path], Privacy));
             while (_ownSequences.Count > 8)
             {
                 _ownSequences.Dequeue();

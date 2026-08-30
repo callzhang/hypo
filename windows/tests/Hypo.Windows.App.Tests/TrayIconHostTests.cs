@@ -58,7 +58,10 @@ public class TrayIconHostTests : IDisposable
         public Task SetAsync(ClipboardContent content, CancellationToken ct = default) => Task.CompletedTask;
     }
 
-    private TrayIconHost Build(Action? shutdown = null)
+    private readonly List<HypoSettings> _saved = [];
+    private readonly List<Hypo.Windows.Clipboard.ClipboardPrivacy> _applied = [];
+
+    private TrayIconHost Build(Action? shutdown = null, HypoSettings? settings = null)
     {
         var store = new InMemorySecretStore();
 
@@ -67,7 +70,11 @@ public class TrayIconHostTests : IDisposable
             new HistoryViewModel(_history, new NullClipboard()),
             () => new PairingViewModel(
                 store, new LanPairingCoordinator(store), "11111111-2222-3333-4444-555555555555", "Test PC"),
-            shutdown ?? (() => { }));
+            shutdown ?? (() => { }),
+            client: null,
+            settings: settings,
+            saveSettings: _saved.Add,
+            applyPrivacy: _applied.Add);
     }
 
     [SkippableFact]
@@ -361,6 +368,91 @@ public class TrayIconHostTests : IDisposable
             Assert.Equal(System.Windows.WindowState.Normal, window.WindowState);
 
             window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void TheSharingSettingsStartOffAndTheMenuSaysSo()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            var sharing = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Where(item => item.Text!.Contains("Win+V", StringComparison.Ordinal)
+                            || item.Text!.Contains("Microsoft account", StringComparison.Ordinal))
+                .ToArray();
+
+            Assert.Equal(2, sharing.Length);
+            Assert.All(sharing, item => Assert.False(item.Checked));
+        });
+    }
+
+    [SkippableFact]
+    public void TurningOnCloudUploadAppliesItBeforeSavingIt()
+    {
+        RequireWindows();
+
+        // Applied first on purpose: a setting that took effect only after a
+        // restart is one people conclude did not work, and this one governs
+        // where their clipboard goes.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            _applied.Clear();
+
+            tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.Contains("Microsoft account", StringComparison.Ordinal))
+                .PerformClick();
+
+            Assert.True(tray.Settings.AllowCloudClipboardUpload);
+            Assert.True(Assert.Single(_applied).AllowCloudUpload);
+            Assert.True(Assert.Single(_saved).AllowCloudClipboardUpload);
+        });
+    }
+
+    [SkippableFact]
+    public void TheTwoSharingSettingsAreIndependent()
+    {
+        RequireWindows();
+
+        // They are separate because the exposures differ in kind: Win+V stays on
+        // the machine, the cloud one roams to a Microsoft account.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.Contains("Win+V", StringComparison.Ordinal))
+                .PerformClick();
+
+            Assert.True(tray.Settings.ShareWithWindowsHistory);
+            Assert.False(tray.Settings.AllowCloudClipboardUpload);
+        });
+    }
+
+    [SkippableFact]
+    public void StartingAppliesWhatWasSavedLastTime()
+    {
+        RequireWindows();
+
+        // Otherwise the menu shows one thing and the clipboard does another
+        // until something else changes.
+        Wpf.Run(() =>
+        {
+            using var tray = Build(settings: new HypoSettings { AllowCloudClipboardUpload = true });
+            tray.Start();
+
+            Assert.True(Assert.Single(_applied).AllowCloudUpload);
+            Assert.True(tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.Contains("Microsoft account", StringComparison.Ordinal))
+                .Checked);
         });
     }
 }

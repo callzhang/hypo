@@ -49,9 +49,9 @@ public static class WindowsClipboard
     }
 
     /// <summary>Publishes files on the clipboard, returning the new sequence number.</summary>
-    public static uint WriteFilePaths(IReadOnlyList<string> paths)
+    public static uint WriteFilePaths(IReadOnlyList<string> paths, ClipboardPrivacy? privacy = null)
     {
-        Write(ClipboardFormats.CfHdrop, ClipboardFiles.Encode(paths));
+        Write([(ClipboardFormats.CfHdrop, ClipboardFiles.Encode(paths))], privacy);
 
         return NativeMethods.GetClipboardSequenceNumber();
     }
@@ -100,11 +100,11 @@ public static class WindowsClipboard
     /// afterwards, which the listener uses to recognise -- and ignore -- its own
     /// write.
     /// </summary>
-    public static uint WriteText(string text)
+    public static uint WriteText(string text, ClipboardPrivacy? privacy = null)
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        Write(ClipboardFormats.CfUnicodeText, ClipboardFormats.EncodeUnicodeText(text));
+        Write([(ClipboardFormats.CfUnicodeText, ClipboardFormats.EncodeUnicodeText(text))], privacy);
 
         // Read *after* the session closes. The sequence number advances when the
         // change is committed at CloseClipboard, so reading it inside the open
@@ -118,7 +118,7 @@ public static class WindowsClipboard
     /// Publishes PNG bytes on the clipboard, returning the sequence number the
     /// listener uses to recognise its own write.
     /// </summary>
-    public static uint WritePng(byte[] png)
+    public static uint WritePng(byte[] png, ClipboardPrivacy? privacy = null)
     {
         ArgumentNullException.ThrowIfNull(png);
 
@@ -130,12 +130,22 @@ public static class WindowsClipboard
             throw new ArgumentException("These bytes are not a PNG.", nameof(png));
         }
 
-        Write(ClipboardFormats.PngFormat, png);
+        Write([(ClipboardFormats.PngFormat, png)], privacy);
 
         return NativeMethods.GetClipboardSequenceNumber();
     }
 
-    private static void Write(uint format, byte[] bytes)
+    /// <summary>
+    /// Publishes every format in one clipboard session.
+    ///
+    /// <para>One session, not one per format. EmptyClipboard wipes what came
+    /// before it, so writing the content and then its privacy markers separately
+    /// would publish the markers over an empty clipboard and leave the content
+    /// unmarked -- which fails in the direction of sharing more than intended.</para>
+    /// </summary>
+    private static void Write(
+        IReadOnlyList<(uint Format, byte[] Data)> entries,
+        ClipboardPrivacy? privacy)
     {
         using var _ = Open();
 
@@ -148,6 +158,14 @@ public static class WindowsClipboard
                 $"EmptyClipboard failed (error {Marshal.GetLastPInvokeError()}).");
         }
 
+        foreach (var (format, data) in entries.Concat((privacy ?? ClipboardPrivacy.Private).Markers()))
+        {
+            Publish(format, data);
+        }
+    }
+
+    private static void Publish(uint format, byte[] bytes)
+    {
         var handle = NativeMethods.GlobalAlloc(NativeMethods.GmemMoveable, (nuint)bytes.Length);
         if (handle == 0)
         {
@@ -189,6 +207,13 @@ public static class WindowsClipboard
                 NativeMethods.GlobalFree(handle);
             }
         }
+    }
+
+    /// <summary>Whether a format is currently on the clipboard.</summary>
+    public static bool HasFormat(uint format)
+    {
+        using var _ = Open();
+        return NativeMethods.IsClipboardFormatAvailable(format);
     }
 
     public static uint SequenceNumber() => NativeMethods.GetClipboardSequenceNumber();

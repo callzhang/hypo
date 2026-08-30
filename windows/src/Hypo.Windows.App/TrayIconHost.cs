@@ -4,6 +4,7 @@ using System.Windows.Forms;
 using Hypo.Core.Client;
 using Hypo.Core.Transport;
 using Hypo.Windows.App;
+using Hypo.Windows.Clipboard;
 
 namespace Hypo.Windows.App.Shell;
 
@@ -34,6 +35,10 @@ public sealed class TrayIconHost : IDisposable
     private readonly NotifyIcon _icon = new();
     private readonly System.Windows.Forms.Timer _poll = new();
     private readonly ToolStripMenuItem _pauseItem;
+    private readonly ToolStripMenuItem _historyItem;
+    private readonly ToolStripMenuItem _cloudItem;
+    private readonly Action<HypoSettings> _saveSettings;
+    private HypoSettings _settings;
 
     private HistoryWindow? _historyWindow;
     private PairingWindow? _pairingWindow;
@@ -51,6 +56,29 @@ public sealed class TrayIconHost : IDisposable
     /// <summary>Recomputes the icon and tooltip now, rather than on the next tick.</summary>
     public void Refresh() => UpdateStatus();
 
+    /// <summary>The sharing settings as they currently stand.</summary>
+    public HypoSettings Settings => _settings;
+
+    private readonly Action<ClipboardPrivacy> _applyPrivacy;
+
+    /// <summary>
+    /// Applies a change immediately and writes it down.
+    ///
+    /// <para>Applied before saving: a setting that took effect only after a
+    /// restart is one people reasonably conclude did not work, and this one
+    /// governs where their clipboard goes.</para>
+    /// </summary>
+    private void Update(HypoSettings settings)
+    {
+        _settings = settings;
+
+        _applyPrivacy(settings.Privacy);
+        _saveSettings(settings);
+
+        _historyItem.Checked = settings.ShareWithWindowsHistory;
+        _cloudItem.Checked = settings.AllowCloudClipboardUpload;
+    }
+
     /// <summary>The history window while it is open, and null once it is closed.</summary>
     public Window? OpenHistoryWindow => _historyWindow;
 
@@ -67,19 +95,49 @@ public sealed class TrayIconHost : IDisposable
         HistoryViewModel history,
         Func<PairingViewModel> pairing,
         Action shutdown,
-        HypoClient? client = null)
+        HypoClient? client = null,
+        HypoSettings? settings = null,
+        Action<HypoSettings>? saveSettings = null,
+        Action<ClipboardPrivacy>? applyPrivacy = null)
     {
         _status = status;
         _client = client;
+        _settings = settings ?? new HypoSettings();
+        _saveSettings = saveSettings ?? (_ => { });
+        _applyPrivacy = applyPrivacy ?? (_ => { });
         _history = history;
         _pairing = pairing;
         _shutdown = shutdown;
 
         _pauseItem = new ToolStripMenuItem("Pause syncing", null, (_, _) => TogglePause());
 
+        // Both start off. The labels say what turning them on does rather than
+        // naming a feature, because "Share with Windows clipboard history" is
+        // only meaningful if you already know what that is.
+        _historyItem = new ToolStripMenuItem(
+            "Show synced items in Windows clipboard history (Win+V)",
+            null,
+            (_, _) => Update(_settings with { ShareWithWindowsHistory = !_settings.ShareWithWindowsHistory }))
+        {
+            CheckOnClick = false,
+            Checked = _settings.ShareWithWindowsHistory,
+        };
+
+        _cloudItem = new ToolStripMenuItem(
+            "Let Windows upload synced items to your Microsoft account",
+            null,
+            (_, _) => Update(_settings with { AllowCloudClipboardUpload = !_settings.AllowCloudClipboardUpload }))
+        {
+            CheckOnClick = false,
+            Checked = _settings.AllowCloudClipboardUpload,
+        };
+
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem("Clipboard history…", null, (_, _) => ShowHistory()));
         menu.Items.Add(new ToolStripMenuItem("Pair a device…", null, (_, _) => ShowPairing()));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_historyItem);
+        menu.Items.Add(_cloudItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_pauseItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -94,6 +152,9 @@ public sealed class TrayIconHost : IDisposable
 
     public void Start()
     {
+        // So the listener starts out matching what the menu shows.
+        _applyPrivacy(_settings.Privacy);
+
         UpdateStatus();
         _icon.Visible = true;
         _poll.Start();

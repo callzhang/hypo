@@ -19,6 +19,7 @@ the relay, from a notification-area application.
 | Clipboard history (SQLite) and content dedup | Done |
 | Windows clipboard: text, links, images, files | Done |
 | Tray icon, history window, pairing window | Done |
+| Clipboard sharing settings (both default off) | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
 | x64 and ARM64 builds | Done |
 
@@ -114,6 +115,21 @@ an icon in the notification area:
 - **Clipboard history…** — search, and double-click an entry to put it back
 - **Pair a device…** — devices running Hypo on this network
 - **Pause syncing** — distinct from being disconnected, and the icon says which
+- Two sharing switches, **both off by default**
+
+Those two decide how far a synced item travels once it reaches this machine.
+Windows shares clipboard content in two directions that have nothing to do with
+Hypo: the local Win+V history, and the cloud clipboard that roams to a Microsoft
+account and every machine signed into it. By default Hypo opts out of both by
+publishing the marker formats Windows looks for.
+
+They are off because Hypo carries whatever was copied on another device, and a
+password from a phone's password manager silently roaming to a Microsoft account
+is worse than the convenience is good. Turning either on is one click; turning it
+off afterwards does not un-upload anything. The settings live in
+`%LOCALAPPDATA%\Hypo\settings.json`, and a corrupt file falls back to both
+being off — the only failure here that would matter is one that widens sharing
+without being asked.
 
 The icon is a coloured dot: green when a device is reachable on this network,
 amber when only the relay is, red when nothing is, grey when paused.

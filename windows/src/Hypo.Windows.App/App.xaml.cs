@@ -63,13 +63,18 @@ public partial class App : System.Windows.Application
         var store = new FileSecretStore(AppStartup.DefaultStateDirectory);
         var deviceId = result.DeviceId!;
 
+        var settingsPath = HypoSettings.PathIn(AppStartup.DefaultStateDirectory);
+
         _tray = new TrayIconHost(
             new ClientStatusSource(_client),
             new HistoryViewModel(_history, _clipboard),
             () => new PairingViewModel(
                 store, new LanPairingCoordinator(store), deviceId, Environment.MachineName, _client.Coordinator),
             Shutdown,
-            _client);
+            _client,
+            HypoSettings.Load(settingsPath),
+            settings => settings.Save(settingsPath),
+            privacy => _clipboard.Privacy = privacy);
 
         _tray.Start();
     }

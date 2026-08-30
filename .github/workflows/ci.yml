@@ -211,3 +211,17 @@ jobs:
           name: hypo-console-win-x64
           path: artifacts/hypo-win-x64
           if-no-files-found: error
+      # The tray application is the one thing here CI cannot judge -- it has no
+      # interactive desktop. Publishing it is how a person on Windows can.
+      - name: Publish the tray application
+        working-directory: windows
+        run: >
+          dotnet publish src/Hypo.Windows.App/Hypo.Windows.App.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          --output ../artifacts/hypo-app-win-x64
+      - name: Upload the tray application
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypo-app-win-x64
+          path: artifacts/hypo-app-win-x64
+          if-no-files-found: error

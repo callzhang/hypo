@@ -1,0 +1,46 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Hypo.Windows.App.Shell.PairingWindow"
+        Title="Hypo — Pair a Device"
+        Width="460" Height="420"
+        WindowStartupLocation="CenterScreen">
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <TextBlock Grid.Row="0"
+               TextWrapping="Wrap"
+               Foreground="#FF6B6B6B"
+               Text="Devices running Hypo on this network. Open Hypo on the other device first." />
+
+    <ListBox x:Name="Peers"
+             Grid.Row="1"
+             Margin="0,10"
+             HorizontalContentAlignment="Stretch">
+      <ListBox.ItemTemplate>
+        <DataTemplate>
+          <StackPanel Margin="2,6">
+            <TextBlock Text="{Binding DisplayName}" />
+            <TextBlock Foreground="#FF6B6B6B" FontSize="11" Text="{Binding DeviceId}" />
+          </StackPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <TextBlock x:Name="Message"
+               Grid.Row="2"
+               Margin="0,0,0,10"
+               TextWrapping="Wrap" />
+
+    <Button x:Name="PairButton"
+            Grid.Row="3"
+            Padding="12,6"
+            HorizontalAlignment="Right"
+            Content="Pair"
+            Click="OnPair" />
+  </Grid>
+</Window>

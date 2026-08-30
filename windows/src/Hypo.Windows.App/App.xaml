@@ -1,0 +1,14 @@
+<Application xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Hypo.Windows.App.Shell.App"
+             ShutdownMode="OnExplicitShutdown">
+  <Application.Resources>
+    <!-- Deliberately sparse. The shell's job is to bind, and a stylesheet here
+         would be the first thing to drift from what anyone actually sees. -->
+    <Style TargetType="Window">
+      <Setter Property="Background" Value="#FFF9F9F9" />
+      <Setter Property="FontFamily" Value="Segoe UI" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+  </Application.Resources>
+</Application>

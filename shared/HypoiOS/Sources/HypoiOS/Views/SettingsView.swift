@@ -11,14 +11,20 @@ public struct SettingsView: View {
     private let context: HypoiOSContext
     @ObservedObject private var transportManager: TransportManager
     private let pairingViewModel: RemotePairingViewModel
+    private let claimViewModel: ClaimPairingCodeViewModel
 
     @State private var notificationStatus: String = "Checking…"
     @State private var historyLimit: Double = 200
 
-    public init(context: HypoiOSContext, pairingViewModel: RemotePairingViewModel) {
+    public init(
+        context: HypoiOSContext,
+        pairingViewModel: RemotePairingViewModel,
+        claimViewModel: ClaimPairingCodeViewModel
+    ) {
         self.context = context
         self.transportManager = context.transportManager
         self.pairingViewModel = pairingViewModel
+        self.claimViewModel = claimViewModel
     }
 
     public var body: some View {
@@ -54,6 +60,7 @@ public struct SettingsView: View {
                 NavigationLink("Pair a device") {
                     PairingView(
                         viewModel: pairingViewModel,
+                        claimViewModel: claimViewModel,
                         relayHint: transportManager.pairingParameters().relayHint
                     )
                 }

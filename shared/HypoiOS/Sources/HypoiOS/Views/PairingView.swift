@@ -4,10 +4,16 @@ import HypoCore
 /// Pushed from the devices section of Settings, the way Android reaches it.
 public struct PairingView: View {
     @ObservedObject private var viewModel: RemotePairingViewModel
+    @ObservedObject private var claimViewModel: ClaimPairingCodeViewModel
     private let relayHint: URL?
 
-    public init(viewModel: RemotePairingViewModel, relayHint: URL?) {
+    public init(
+        viewModel: RemotePairingViewModel,
+        claimViewModel: ClaimPairingCodeViewModel,
+        relayHint: URL?
+    ) {
         self.viewModel = viewModel
+        self.claimViewModel = claimViewModel
         self.relayHint = relayHint
     }
 
@@ -51,6 +57,32 @@ public struct PairingView: View {
 
             Button("Reset") { viewModel.reset() }
                 .buttonStyle(.bordered)
+
+            Divider()
+                .padding(.vertical, 8)
+
+            // The other half. Pairing needs one device to show a code and the
+            // other to claim it, so an app that can only show one can only
+            // pair with something that can claim — which, until this existed,
+            // meant Android and nothing else.
+            VStack(spacing: 12) {
+                Text(claimViewModel.statusMessage)
+                    .multilineTextAlignment(.center)
+                    .font(.callout)
+
+                TextField("Code from the other device", text: $claimViewModel.code)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.center)
+                    .font(.system(.title3, design: .monospaced))
+                    .accessibilityIdentifier("PairingCodeField")
+
+                Button("Enter this code") {
+                    claimViewModel.claim(relayHint: relayHint)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!claimViewModel.canSubmit)
+            }
         }
         .padding()
         .navigationTitle("Pair a device")

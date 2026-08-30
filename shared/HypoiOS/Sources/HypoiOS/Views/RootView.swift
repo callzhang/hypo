@@ -10,6 +10,7 @@ public struct RootView: View {
     private let context: HypoiOSContext
     @StateObject private var historyViewModel: HistoryListViewModel
     @StateObject private var pairingViewModel: RemotePairingViewModel
+    @StateObject private var claimViewModel: ClaimPairingCodeViewModel
     @State private var showingSettings = false
 
     public init(context: HypoiOSContext) {
@@ -18,8 +19,14 @@ public struct RootView: View {
         // registered as the receiver. Building a second here would show a list
         // that never receives anything.
         _historyViewModel = StateObject(wrappedValue: context.historyViewModel)
+        let manager = context.transportManager
         _pairingViewModel = StateObject(wrappedValue: RemotePairingViewModel(
-            identity: context.identity
+            identity: context.identity,
+            onDevicePaired: { device in manager.registerPairedDevice(device) }
+        ))
+        _claimViewModel = StateObject(wrappedValue: ClaimPairingCodeViewModel(
+            identity: context.identity,
+            onDevicePaired: { device in manager.registerPairedDevice(device) }
         ))
     }
 
@@ -31,7 +38,11 @@ public struct RootView: View {
                 onOpenSettings: { showingSettings = true }
             )
             .navigationDestination(isPresented: $showingSettings) {
-                SettingsView(context: context, pairingViewModel: pairingViewModel)
+                SettingsView(
+                    context: context,
+                    pairingViewModel: pairingViewModel,
+                    claimViewModel: claimViewModel
+                )
             }
         }
     }

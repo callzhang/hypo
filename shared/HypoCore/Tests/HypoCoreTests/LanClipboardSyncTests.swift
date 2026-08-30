@@ -173,3 +173,32 @@ struct LanSendFailureTests {
         }
     }
 }
+
+@Suite("LAN dial URL")
+struct LanDialURLTests {
+    /// The URL a LAN dial actually uses, after the transport strips the query.
+    private func cleanedLanURL(from original: URL) throws -> URL {
+        var components = URLComponents(url: original, resolvingAgainstBaseURL: false)
+        components?.query = nil
+        if components?.path.isEmpty ?? true { components?.path = "/ws" }
+        return try #require(components?.url)
+    }
+
+    @Test("the port survives")
+    func keepsPort() throws {
+        // Rebuilding the URL as scheme://host+path dropped the port, so every
+        // dial to a peer on 7010 went to 80 and could never connect.
+        let url = try cleanedLanURL(from: URL(string: "ws://10.0.0.252:7010")!)
+        #expect(url.port == 7010)
+        #expect(url.host == "10.0.0.252")
+        #expect(url.path == "/ws")
+    }
+
+    @Test("the query goes, everything else stays")
+    func dropsOnlyQuery() throws {
+        let url = try cleanedLanURL(from: URL(string: "ws://10.0.0.252:7010/socket?token=abc")!)
+        #expect(url.query == nil)
+        #expect(url.port == 7010)
+        #expect(url.path == "/socket")
+    }
+}

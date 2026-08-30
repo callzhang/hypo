@@ -112,10 +112,10 @@ public struct HistoryListView: View {
     private var connectionSymbol: String {
         switch transportManager.connectionState {
         case .connectedLan: return "wifi"
-        case .connectedCloud: return "cloud.fill"
+        case .connectedCloud: return "icloud.fill"
         case .connectingLan, .connectingCloud: return "arrow.triangle.2.circlepath"
         case .error: return "exclamationmark.arrow.triangle.2.circlepath"
-        case .disconnected: return "cloud.slash"
+        case .disconnected: return "icloud.slash"
         }
     }
 

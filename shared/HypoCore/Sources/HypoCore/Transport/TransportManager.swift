@@ -90,6 +90,7 @@ public final class TransportManager: ObservableObject {
         return (service: service, port: port, relayHint: relayHint)
     }
     private var connectionSupervisorTask: Task<Void, Never>?
+    private var peerSyncTask: Task<Void, Never>?
     private var autoConnectTask: Task<Void, Never>?
     private var initTask: Task<Void, Never>?
     private var manualRetryRequested = false
@@ -401,6 +402,33 @@ public final class TransportManager: ObservableObject {
         updatedDevices.sort { $0.lastSeen > $1.lastSeen }
         pairedDevices = updatedDevices
         persistPairedDevices()
+
+        schedulePeerConnectionSync()
+    }
+
+    /// Dials whatever is paired and discovered, coalescing bursts into one pass.
+    ///
+    /// syncPeerConnections used to run only on Bonjour discovery events, and a
+    /// peer is normally discovered *before* it is paired — so nothing
+    /// reconnected afterwards and a freshly paired peer was never dialled.
+    /// That is invisible on macOS, which also listens and can be dialled
+    /// instead. It is fatal on iOS, which is a LAN client only: if iOS does
+    /// not dial, no connection exists in either direction.
+    ///
+    /// Coalesced because registerPairedDevice is called once per device when
+    /// the stored list loads at startup. Firing a sync per device raced
+    /// several passes against each other over the same connection table, and
+    /// tearing a connection down while another pass was still opening it
+    /// aborted the app inside URLSession.
+    private func schedulePeerConnectionSync() {
+        peerSyncTask?.cancel()
+        peerSyncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled, let self else { return }
+            if let provider = self.provider as? DefaultTransportProvider {
+                await provider.syncPeerConnections()
+            }
+        }
     }
 
     // MARK: - Helper Methods

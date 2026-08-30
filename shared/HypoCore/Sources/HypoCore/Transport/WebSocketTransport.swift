@@ -183,7 +183,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         lastActivity = dateProvider()
 
         let session = sessionFactory(self, configuration.idleTimeout)
-        self.session = session
         
         var request = URLRequest(url: configuration.url)
         if configuration.headers.isEmpty {
@@ -208,16 +207,33 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             // For cloud connections, preserve query parameters if present
             finalURL = originalURL
         } else {
-            // For LAN connections, remove query parameters
-            let cleanURLString = "\(scheme)://\(host)\(path)"
-            guard let url = URL(string: cleanURLString) else {
-                logger.error("❌ [WebSocketTransport] Failed to create clean URL from: \(cleanURLString)")
+            // For LAN connections, drop the query string — and nothing else.
+            //
+            // This used to rebuild the URL as "\(scheme)://\(host)\(path)",
+            // which silently discarded the port: every LAN dial to a peer on
+            // 7010 went to port 80 instead and could never connect. Invisible
+            // on macOS, which is usually dialled rather than dialling; fatal on
+            // iOS, which only ever dials.
+            var components = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)
+            components?.query = nil
+            if components?.path.isEmpty ?? true {
+                components?.path = path
+            }
+            guard let url = components?.url else {
+                logger.error("❌ [WebSocketTransport] Failed to create clean URL from: \(originalURL)")
                 throw NSError(domain: "WebSocketTransport", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create clean URL"])
             }
             finalURL = url
         }
         request.url = finalURL
         let task = session.webSocketTask(with: request)
+        // Published only once the task exists. Assigning earlier let a
+        // concurrent disconnect() invalidate this very session between its
+        // creation and its first use, and creating a task on an invalidated
+        // session throws an ObjC exception that no Swift catch can hold —
+        // the app aborted with "Task created in a session that has been
+        // invalidated" the moment it started dialling peers.
+        self.session = session
         
         // CRITICAL: Set maximumMessageSize to 1GB to support large file transfers
         // This allows WebSocket to automatically fragment large messages using RFC 6455 fragmentation

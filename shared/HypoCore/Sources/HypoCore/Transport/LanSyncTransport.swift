@@ -91,7 +91,8 @@ public final class LanSyncTransport: SyncTransport {
             pinnedFingerprint: pinnedFingerprint,
             headers: [
                 "X-Device-Id": deviceIdentity.deviceId.uuidString,
-                "X-Device-Platform": "macos"
+                // Was hardcoded "macos"; DeviceIdentity knows what this is.
+                "X-Device-Platform": deviceIdentity.platform.rawValue
             ],
             idleTimeout: 3600,
             environment: "lan",

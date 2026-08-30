@@ -111,4 +111,26 @@ public class FileSecretStoreTests : IDisposable
 
         Assert.NotNull(store.Read("bbe296d6-0785-43d2-91b6-b135b72f4c41"));
     }
+
+    [Fact]
+    public void ListsTheKeysOnDisk()
+    {
+        var store = new FileSecretStore(_dir);
+        store.Write("aaaaaaaa-0000-0000-0000-000000000000", [1]);
+        store.Write("local-signing-key", [2]);
+
+        Assert.Equal(
+            ["aaaaaaaa-0000-0000-0000-000000000000", "local-signing-key"],
+            store.Keys().OrderBy(k => k, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void SurvivesADeletedDirectory()
+    {
+        // The client asks who it is paired with before anything has been
+        // written, and on a first run the directory may not exist yet.
+        var store = new FileSecretStore(Path.Combine(_dir, "not-created-yet"));
+
+        Assert.Empty(store.Keys());
+    }
 }

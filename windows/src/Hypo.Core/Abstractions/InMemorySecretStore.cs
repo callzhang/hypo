@@ -13,6 +13,8 @@ public sealed class InMemorySecretStore : ISecretStore
     public void Write(string key, ReadOnlySpan<byte> value) =>
         _entries[Normalise(key)] = value.ToArray();
 
+    public IEnumerable<string> Keys() => _entries.Keys.ToArray();
+
     public bool Delete(string key) => _entries.TryRemove(Normalise(key), out _);
 
     private static string Normalise(string key)

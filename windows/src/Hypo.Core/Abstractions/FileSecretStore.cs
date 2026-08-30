@@ -38,6 +38,11 @@ public sealed class FileSecretStore : ISecretStore
         }
     }
 
+    public IEnumerable<string> Keys() =>
+        Directory.Exists(_directory)
+            ? Directory.EnumerateFiles(_directory).Select(Path.GetFileName).OfType<string>().ToArray()
+            : [];
+
     public bool Delete(string key)
     {
         var path = PathFor(key);

@@ -98,57 +98,28 @@ async Task PairAsync(string? target)
 
     Console.WriteLine($"Pairing with {peer.DisplayName} at {peer.Address}:{peer.Port}...");
 
-    var session = PairingSession.StartInitiator(deviceId, deviceName);
-    var challenge = session.CreateChallenge(peer.PublicKey);
+    // Through the shared coordinator rather than a second copy of the
+    // handshake. Two implementations drift, and the one that drifts is the one
+    // without the tests.
+    var result = await new Hypo.Core.Pairing.LanPairingCoordinator(store)
+        .PairAsync(peer, deviceId, deviceName);
 
-    await using var client = new LanWebSocketClient(peer, deviceId);
-    var ackReceived = new TaskCompletionSource<PairingAckMessage>();
-
-    client.PairingMessageReceived += (_, e) =>
+    if (!result.Succeeded)
     {
-        try
+        Console.WriteLine(result.Outcome switch
         {
-            var ack = JsonSerializer.Deserialize<PairingAckMessage>(e.Json, ProtocolJson.Options);
-            if (ack is not null)
-            {
-                ackReceived.TrySetResult(ack);
-            }
-        }
-        catch (JsonException)
-        {
-            Console.WriteLine($"Ignoring unparseable pairing message: {e.Json}");
-        }
-    };
-    client.EnvelopeReceived += (_, e) => PrintClipboard(e);
-
-    await client.ConnectAsync();
-    await client.SendPairingAsync(challenge);
-
-    PairingAckMessage ack;
-    try
-    {
-        ack = await ackReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
-    }
-    catch (TimeoutException)
-    {
-        Console.WriteLine("No pairing reply within 30s.");
-        Console.WriteLine(
-            "That is all this says: the connection was accepted and no parseable ack arrived. "
-            + "Whether the peer never answered or answered in a shape we dropped needs a probe "
-            + "that logs raw inbound frames.");
+            Hypo.Core.Pairing.PairingOutcome.PeerAdvertisesNoKey =>
+                $"{peer.DisplayName} advertises no pub_key, so it cannot be paired with over the LAN.",
+            Hypo.Core.Pairing.PairingOutcome.NoReply =>
+                "No pairing reply arrived. That is all this says: the connection was accepted and "
+                + "no parseable ack came back. Whether the peer never answered or answered in a "
+                + "shape we dropped needs a probe that logs raw inbound frames.",
+            _ => "Pairing failed: the ack did not verify.",
+        });
         return;
     }
 
-    var completed = session.CompleteWithAck(ack, peer.PublicKey);
-
-    if (completed is null)
-    {
-        Console.WriteLine("Pairing failed: the ack did not verify.");
-        return;
-    }
-
-    store.Write(completed.PeerDeviceId, completed.SharedKey);
-    Console.WriteLine($"Paired with {completed.PeerDeviceName} ({completed.PeerDeviceId}).");
+    Console.WriteLine($"Paired with {result.PeerDeviceName} ({result.PeerDeviceId}).");
 
     // Stay discoverable. The peer dials devices it has paired with and can see;
     // being paired is not enough on its own.
@@ -168,7 +139,20 @@ async Task PairAsync(string? target)
     }
 
     var signingPublic = SigningService.DerivePublicKey(signingPrivate);
-    var agreementPublic = session.AgreementPublicKey;
+
+    // A persisted agreement key rather than the pairing session's ephemeral
+    // one, which the coordinator owns and discards. Advertising a key that
+    // changes every run makes this device look like a different peer each time.
+    const string AgreementKeyId = "local-agreement-key";
+    var agreementPrivate = store.Read(AgreementKeyId);
+    if (agreementPrivate is null)
+    {
+        agreementPrivate = new byte[CryptoService.X25519KeySizeBytes];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(agreementPrivate);
+        store.Write(AgreementKeyId, agreementPrivate);
+    }
+
+    var agreementPublic = CryptoService.DerivePublicKey(agreementPrivate);
 
     await using var advert = new MdnsPeerDiscovery();
     await advert.AdvertiseAsync(deviceName, server.BoundPort, new Dictionary<string, string>
@@ -190,8 +174,12 @@ async Task PairAsync(string? target)
     var outbound = Environment.GetEnvironmentVariable("HYPO_SEND_TEXT");
     if (!string.IsNullOrEmpty(outbound))
     {
-        await SendClipboardAsync(client, completed.SharedKey, outbound);
-        Console.WriteLine($"Sent {Encoding.UTF8.GetByteCount(outbound)} bytes of text to {completed.PeerDeviceName}.");
+        // A fresh connection: the pairing coordinator owns and closes the one it
+        // used, which is the right boundary even though it costs a dial here.
+        await using var sender = new LanWebSocketClient(peer, deviceId);
+        await sender.ConnectAsync();
+        await SendClipboardAsync(sender, store.Read(result.PeerDeviceId!)!, outbound);
+        Console.WriteLine($"Sent {Encoding.UTF8.GetByteCount(outbound)} bytes of text to {result.PeerDeviceName}.");
     }
 
     await WaitForShutdownAsync();

@@ -63,4 +63,32 @@ public class InMemorySecretStoreTests
 
         Assert.Equal(new byte[] { 0x01 }, store.Read("device-key"));
     }
+
+    [Fact]
+    public void ListsTheKeysItHolds()
+    {
+        var store = new InMemorySecretStore();
+        store.Write("aaaaaaaa-0000-0000-0000-000000000000", [1]);
+        store.Write("local-signing-key", [2]);
+
+        Assert.Equal(
+            ["aaaaaaaa-0000-0000-0000-000000000000", "local-signing-key"],
+            store.Keys().OrderBy(k => k, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void ListsNormalisedKeys()
+    {
+        // Callers match these against device ids, which travel lowercase.
+        var store = new InMemorySecretStore();
+        store.Write("AAAAAAAA-0000-0000-0000-000000000000", [1]);
+
+        Assert.Equal(["aaaaaaaa-0000-0000-0000-000000000000"], store.Keys());
+    }
+
+    [Fact]
+    public void ListsNothingWhenEmpty()
+    {
+        Assert.Empty(new InMemorySecretStore().Keys());
+    }
 }

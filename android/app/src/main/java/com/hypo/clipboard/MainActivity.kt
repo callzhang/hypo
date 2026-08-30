@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(SETTINGS_ROUTE) {
                             SettingsRoute(
+                                onBack = { navController.popBackStack() },
                                 onOpenBatterySettings = ::openBatterySettings,
                                 onRequestSmsPermission = ::requestSmsPermission,
                                 onRequestNotificationPermission = ::requestNotificationPermission,

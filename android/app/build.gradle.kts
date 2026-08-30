@@ -181,6 +181,10 @@ android {
                     "hypo.drawable.dir",
                     project.layout.projectDirectory.dir("src/main/res/drawable").asFile.absolutePath
                 )
+                it.systemProperty(
+                    "hypo.android.project.dir",
+                    project.layout.projectDirectory.asFile.absolutePath
+                )
                 it.extensions.configure(JacocoTaskExtension::class.java) {
                     isIncludeNoLocationClasses = true
                     excludes = listOf("jdk.internal.*")

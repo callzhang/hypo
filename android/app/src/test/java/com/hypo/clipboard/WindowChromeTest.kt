@@ -3,6 +3,8 @@ package com.hypo.clipboard
 import android.app.Activity
 import android.graphics.Color
 import android.view.View
+import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -26,7 +28,27 @@ class WindowChromeTest {
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         assertEquals(Color.TRANSPARENT, activity.window.navigationBarColor)
+        assertEquals(Color.TRANSPARENT, activity.window.navigationBarDividerColor)
         assertFalse(activity.window.isNavigationBarContrastEnforced)
         assertTrue(activity.window.decorView.systemUiVisibility and edgeToEdgeFlags == edgeToEdgeFlags)
+    }
+
+    @Test
+    fun `theme does not draw a navigation bar divider before compose starts`() {
+        val projectDirectory = File(requireNotNull(System.getProperty("hypo.android.project.dir")))
+        val themesFile = File(projectDirectory, "src/main/res/values/themes.xml")
+        val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(themesFile)
+        val items = document.getElementsByTagName("item")
+        val themeItems = buildMap {
+            repeat(items.length) { index ->
+                val item = items.item(index)
+                put(item.attributes.getNamedItem("name").nodeValue, item.textContent.trim())
+            }
+        }
+
+        assertEquals(
+            "@android:color/transparent",
+            themeItems["android:navigationBarDividerColor"]
+        )
     }
 }

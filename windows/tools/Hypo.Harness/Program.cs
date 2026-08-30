@@ -392,12 +392,28 @@ async Task SyncAsync(string? textToSend)
         // Through the clipboard, so the outbound path under test is the real one.
         await Task.Delay(TimeSpan.FromSeconds(6));
         Console.WriteLine($"[lan peers] {string.Join(", ", client.LanPeers)}");
-        clipboard.Copy(new Hypo.Core.Sync.ClipboardContent
-        {
-            ContentType = ContentType.Text,
-            Data = Encoding.UTF8.GetBytes(textToSend),
-        });
-        Console.WriteLine($"Copied {Encoding.UTF8.GetByteCount(textToSend)} bytes locally.");
+        // A path means send that file; anything else is text. The harness exists
+        // to exercise the real paths, and files had never been tried against a
+        // real peer.
+        var content = File.Exists(textToSend)
+            ? new Hypo.Core.Sync.ClipboardContent
+            {
+                ContentType = ContentType.File,
+                Data = File.ReadAllBytes(textToSend),
+                Metadata = new Dictionary<string, string>
+                {
+                    ["file_name"] = Path.GetFileName(textToSend),
+                    ["filename"] = Path.GetFileName(textToSend),
+                },
+            }
+            : new Hypo.Core.Sync.ClipboardContent
+            {
+                ContentType = ContentType.Text,
+                Data = Encoding.UTF8.GetBytes(textToSend),
+            };
+
+        clipboard.Copy(content);
+        Console.WriteLine($"Copied {content.ContentType} ({content.Data.Length} bytes) locally.");
     }
 
     Console.WriteLine("Ctrl+C to exit.");

@@ -27,6 +27,7 @@ public sealed class LanSyncTransport : ISyncTransport
     private readonly string _localDeviceId;
     private readonly string _localDeviceName;
     private readonly Func<string, bool> _isPaired;
+    private readonly TimeSpan _rediscoveryInterval;
 
     private readonly Lock _gate = new();
     private readonly Dictionary<string, LanWebSocketClient> _outbound = new(StringComparer.OrdinalIgnoreCase);
@@ -57,18 +58,25 @@ public sealed class LanSyncTransport : ISyncTransport
     private readonly Dictionary<string, DiscoveredPeer> _pending = new(StringComparer.OrdinalIgnoreCase);
 
     private TransportState _state = TransportState.Disconnected;
+    private CancellationTokenSource? _refreshing;
 
     /// <param name="isPaired">
     /// Decides whether a discovered peer is one of ours. Dialling every device on
     /// the network would be both rude and useless -- without a key we could not
     /// read anything it sent.
     /// </param>
+    /// <param name="rediscoveryInterval">
+    /// How often to re-query the network. A dropped LAN connection is forgotten
+    /// and nothing re-dials until the peer is seen again, so without this a
+    /// transient network blip pushes that peer onto the relay until it restarts.
+    /// </param>
     public LanSyncTransport(
         IPeerDiscovery discovery,
         LanWebSocketServer server,
         string localDeviceId,
         string localDeviceName,
-        Func<string, bool> isPaired)
+        Func<string, bool> isPaired,
+        TimeSpan? rediscoveryInterval = null)
     {
         ArgumentNullException.ThrowIfNull(discovery);
         ArgumentNullException.ThrowIfNull(server);
@@ -80,6 +88,7 @@ public sealed class LanSyncTransport : ISyncTransport
         _localDeviceId = localDeviceId.ToLowerInvariant();
         _localDeviceName = localDeviceName;
         _isPaired = isPaired;
+        _rediscoveryInterval = rediscoveryInterval ?? TimeSpan.FromSeconds(30);
 
         _server.EnvelopeReceived += (_, e) => EnvelopeReceived?.Invoke(this, e);
         _discovery.PeerDiscovered += OnPeerDiscovered;
@@ -127,6 +136,34 @@ public sealed class LanSyncTransport : ISyncTransport
         // never find anyone; a client that refused to start until the LAN had
         // someone on it would fail to start on a network with only a relay.
         SetState(TransportState.Disconnected, null);
+
+        _refreshing = new CancellationTokenSource();
+        _ = Task.Run(() => RediscoverAsync(_refreshing.Token), CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Asks the network again, periodically.
+    ///
+    /// <para>Announcements alone leave two holes: a peer already present when we
+    /// started never announces again, and one whose connection dropped is
+    /// forgotten with nothing to trigger a re-dial. Both look the same to a user
+    /// -- the LAN quietly stops being used and everything goes through the
+    /// relay.</para>
+    /// </summary>
+    private async Task RediscoverAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(_rediscoveryInterval, ct).ConfigureAwait(false);
+                _discovery.Refresh();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutting down.
+        }
     }
 
     public async Task SendAsync(SyncEnvelope envelope, CancellationToken ct = default)
@@ -152,6 +189,13 @@ public sealed class LanSyncTransport : ISyncTransport
 
     public async Task DisconnectAsync(CancellationToken ct = default)
     {
+        if (_refreshing is not null)
+        {
+            await _refreshing.CancelAsync().ConfigureAwait(false);
+            _refreshing.Dispose();
+            _refreshing = null;
+        }
+
         LanWebSocketClient[] clients;
         lock (_gate)
         {

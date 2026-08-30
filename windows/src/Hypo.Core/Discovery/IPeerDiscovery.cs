@@ -21,5 +21,16 @@ public interface IPeerDiscovery : IAsyncDisposable
 
     Task StartBrowsingAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Re-queries the network.
+    ///
+    /// <para>Browsing alone is not enough over time. A peer announces when it
+    /// starts, and a client that only listens for announcements misses anyone who
+    /// was already there, and never hears again from one whose connection dropped
+    /// without its record changing. Asking again is how a dropped LAN link
+    /// recovers without waiting for the peer to restart.</para>
+    /// </summary>
+    void Refresh();
+
     IReadOnlyCollection<DiscoveredPeer> KnownPeers { get; }
 }

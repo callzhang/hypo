@@ -35,6 +35,21 @@ public class LanSyncTransportTests
 
         public void Announce(DiscoveredPeer peer) => PeerDiscovered?.Invoke(this, peer);
 
+        public int Refreshes;
+
+        /// <summary>Re-announces what it has seen, the way a real query does.</summary>
+        public List<DiscoveredPeer> Standing { get; } = [];
+
+        public void Refresh()
+        {
+            Interlocked.Increment(ref Refreshes);
+
+            foreach (var peer in Standing.ToArray())
+            {
+                Announce(peer);
+            }
+        }
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
@@ -317,5 +332,53 @@ public class LanSyncTransportTests
 
         Assert.True(await Eventually(() => transport.ConnectedPeers.Count == 1, TimeSpan.FromSeconds(30)),
             "the announcement that arrived mid-dial was dropped");
+    }
+
+    [Fact]
+    public async Task AsksTheNetworkAgainOnAnInterval()
+    {
+        // A peer already present when we started never announces again, and one
+        // whose connection dropped is forgotten with nothing to trigger a
+        // re-dial. Both look the same to a user: the LAN quietly stops being
+        // used and everything goes through the relay.
+        var discovery = new FakeDiscovery();
+        await using var transport = new LanSyncTransport(
+            discovery, new LanWebSocketServer(port: 0), LocalId, "Test PC", _ => true,
+            rediscoveryInterval: TimeSpan.FromMilliseconds(60));
+
+        await transport.ConnectAsync();
+
+        Assert.True(await Eventually(() => Volatile.Read(ref discovery.Refreshes) >= 3),
+            $"expected repeated refreshes, saw {discovery.Refreshes}");
+    }
+
+    [Fact]
+    public async Task RedialsAPeerAfterItsConnectionDrops()
+    {
+        var peerServer = new LanWebSocketServer(port: 0);
+        await peerServer.StartAsync();
+
+        var discovery = new FakeDiscovery();
+        await using var transport = new LanSyncTransport(
+            discovery, new LanWebSocketServer(port: 0), LocalId, "Test PC", _ => true,
+            rediscoveryInterval: TimeSpan.FromMilliseconds(100));
+        await transport.ConnectAsync();
+
+        var peer = Peer(peerServer.BoundPort);
+        discovery.Standing.Add(peer);
+        discovery.Announce(peer);
+
+        Assert.True(await Eventually(() => transport.ConnectedPeers.Count == 1));
+
+        // The peer goes away and comes back on the same port, as a phone leaving
+        // and rejoining a network does.
+        await peerServer.DisposeAsync();
+        Assert.True(await Eventually(() => transport.ConnectedPeers.Count == 0));
+
+        await using var restarted = new LanWebSocketServer(peer.Port);
+        await restarted.StartAsync();
+
+        Assert.True(await Eventually(() => transport.ConnectedPeers.Count == 1, TimeSpan.FromSeconds(15)),
+            "the peer never came back without a fresh announcement");
     }
 }

@@ -135,3 +135,41 @@ private final class ClipboardInbox: LanWebSocketServerDelegate, @unchecked Senda
         Task { @MainActor in await handler.handle(data) }
     }
 }
+
+@Suite("LAN send failure reporting")
+@MainActor
+struct LanSendFailureTests {
+    @Test("sending to a device with no connection throws rather than claiming success")
+    func unreachableTargetThrows() async throws {
+        let server = LanWebSocketServer(localDeviceId: "local-device")
+        try server.start(port: 0)
+        defer { server.stop() }
+        _ = try await server.waitForPort(timeout: 5.0)
+
+        let transport = LanSyncTransport(server: server)
+        try await transport.connect()
+
+        let envelope = SyncEnvelope(
+            type: .clipboard,
+            payload: SyncEnvelope.Payload(
+                contentType: .text,
+                ciphertext: Data("nobody is listening".utf8),
+                deviceId: "local-device",
+                devicePlatform: "test",
+                deviceName: "Local",
+                target: "a-device-that-is-not-connected",
+                encryption: SyncEnvelope.EncryptionMetadata(
+                    nonce: Data(repeating: 0, count: 12),
+                    tag: Data(repeating: 0, count: 16)
+                )
+            )
+        )
+
+        // Used to return normally, so callers reported "sent" for items that
+        // went nowhere — the reason iOS said "Sent to 1 device" with no
+        // connection open.
+        await #expect(throws: LanSyncTransportError.self) {
+            try await transport.send(envelope)
+        }
+    }
+}

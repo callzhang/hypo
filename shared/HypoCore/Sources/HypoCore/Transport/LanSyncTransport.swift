@@ -245,29 +245,34 @@ public final class LanSyncTransport: SyncTransport {
                 logger.debug("📡 [LanSyncTransport] Target device not in active connections, trying persistent connection...")
                 #endif
                 
-                if let clientTransport = clientTransports[targetDeviceId] {
-                    Task {
-                        do {
-                            if !clientTransport.isConnected() {
-                                try await clientTransport.connect()
-                            }
-                            try await clientTransport.send(envelope)
-                            #if canImport(os)
-                            let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
-                            logger.debug("✅ [LanSyncTransport] Sent to target device \(deviceDesc) via persistent connection")
-                            #endif
-                        } catch {
-                            #if canImport(os)
-                            let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
-                            logger.warning("⚠️ [LanSyncTransport] Failed to send to target device \(deviceDesc): \(error.localizedDescription)")
-                            #endif
-                        }
-                    }
-                } else {
+                let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
+
+                guard let clientTransport = clientTransports[targetDeviceId] else {
+                    // Reaching nobody is a failure, and it used to be reported
+                    // as success: the caller saw send() return normally and
+                    // told the user the item had gone. On iOS that made every
+                    // send read as "Sent to 1 device" with nothing sent.
                     #if canImport(os)
-                    let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
                     logger.warning("⚠️ [LanSyncTransport] No connection found for target device \(deviceDesc)")
                     #endif
+                    throw LanSyncTransportError.noConnectionToTarget(targetDeviceId)
+                }
+
+                // Awaited, not fired into a detached Task. A Task swallows the
+                // error the same way the missing branch above did.
+                do {
+                    if !clientTransport.isConnected() {
+                        try await clientTransport.connect()
+                    }
+                    try await clientTransport.send(envelope)
+                    #if canImport(os)
+                    logger.debug("✅ [LanSyncTransport] Sent to target device \(deviceDesc) via persistent connection")
+                    #endif
+                } catch {
+                    #if canImport(os)
+                    logger.warning("⚠️ [LanSyncTransport] Failed to send to target device \(deviceDesc): \(error.localizedDescription)")
+                    #endif
+                    throw error
                 }
             }
         } else {
@@ -397,5 +402,16 @@ public final class LanSyncTransport: SyncTransport {
     
     public func unregisterMessageHandler(id: UUID) {
         messageHandlers.removeValue(forKey: id)
+    }
+}
+
+public enum LanSyncTransportError: LocalizedError {
+    case noConnectionToTarget(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .noConnectionToTarget(let deviceId):
+            return "No LAN connection to device \(deviceId.prefix(8))"
+        }
     }
 }

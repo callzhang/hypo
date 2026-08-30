@@ -238,6 +238,39 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
         services.removeAll()
     }
 
+    /// Parses a Bonjour TXT record without going through
+    /// `NetService.dictionary(fromTXTRecord:)`.
+    ///
+    /// That API is typed `[String: Data]` in Swift, but the DNS-SD format
+    /// allows a key with no value, which Foundation represents as `NSNull`.
+    /// Bridging the resulting dictionary then fails a dynamic cast and aborts
+    /// the process — the app crashed the moment it resolved a peer
+    /// advertising one, which is any peer with an empty field in its record.
+    ///
+    /// The wire format is a sequence of length-prefixed `key=value` strings,
+    /// where the `=value` part is optional.
+    nonisolated static func parseTXTRecord(_ data: Data) -> [String: String] {
+        var result: [String: String] = [:]
+        var index = data.startIndex
+        while index < data.endIndex {
+            let length = Int(data[index])
+            index = data.index(after: index)
+            guard length > 0,
+                  let end = data.index(index, offsetBy: length, limitedBy: data.endIndex)
+            else { break }
+            let entry = data[index..<end]
+            index = end
+            guard let text = String(data: entry, encoding: .utf8) else { continue }
+            if let separator = text.firstIndex(of: "=") {
+                result[String(text[text.startIndex..<separator])] =
+                    String(text[text.index(after: separator)...])
+            } else {
+                result[text] = ""
+            }
+        }
+        return result
+    }
+
     private func emitResolved(for service: NetService) {
         guard let host = service.hostName else { return }
         
@@ -257,11 +290,7 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
         }
         
         let displayHost = ipAddress ?? host
-        let txt = NetService.dictionary(fromTXTRecord: service.txtRecordData() ?? Data())
-        var metadata: [String: String] = [:]
-        for (key, value) in txt {
-            metadata[key] = String(data: value, encoding: .utf8) ?? ""
-        }
+        let metadata = Self.parseTXTRecord(service.txtRecordData() ?? Data())
         let record = BonjourServiceRecord(
             serviceName: service.name,
             host: displayHost,

@@ -11,6 +11,7 @@
 		1A00000000000000000000C3 /* HypoiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000000C2 /* HypoiOS */; };
 		1A00000000000000000000D3 /* HypoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000D2 /* HypoUITests.swift */; };
 		1A00000000000000000000E5 /* PairingEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000E4 /* PairingEndToEndTests.swift */; };
+		1A00000000000000000000E7 /* HarnessSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000E6 /* HarnessSyncTests.swift */; };
 		1A00000000000000000000E2 /* HypoCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000000E1 /* HypoCore */; };
 /* End PBXBuildFile section */
 
@@ -21,6 +22,7 @@
 		1A00000000000000000000D1 /* HypoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HypoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A00000000000000000000D2 /* HypoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HypoUITests.swift; sourceTree = "<group>"; };
 		1A00000000000000000000E4 /* PairingEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingEndToEndTests.swift; sourceTree = "<group>"; };
+		1A00000000000000000000E6 /* HarnessSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessSyncTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,6 +77,7 @@
 			children = (
 				1A00000000000000000000D2 /* HypoUITests.swift */,
 				1A00000000000000000000E4 /* PairingEndToEndTests.swift */,
+				1A00000000000000000000E6 /* HarnessSyncTests.swift */,
 			);
 			path = HypoUITests;
 			sourceTree = "<group>";
@@ -208,6 +211,7 @@
 			files = (
 				1A00000000000000000000D3 /* HypoUITests.swift in Sources */,
 				1A00000000000000000000E5 /* PairingEndToEndTests.swift in Sources */,
+				1A00000000000000000000E7 /* HarnessSyncTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -268,7 +268,16 @@ jobs:
         run: >
           dotnet publish src/Hypo.Windows.App/Hypo.Windows.App.csproj
           --configuration Release --runtime win-x64 --self-contained true
-          --output ../artifacts/hypo-windows
+          --output ../artifacts/hypo-windows-x64
+
+      # A Windows VM on an Apple Silicon Mac is ARM64, and so is every Copilot+
+      # PC. x64 runs there under emulation; this does not have to.
+      - name: Publish the tray application (ARM64)
+        working-directory: windows
+        run: >
+          dotnet publish src/Hypo.Windows.App/Hypo.Windows.App.csproj
+          --configuration Release --runtime win-arm64 --self-contained true
+          --output ../artifacts/hypo-windows-arm64
 
       - name: Create Windows ZIP
         shell: bash
@@ -287,16 +296,17 @@ jobs:
 
           # Named so it cannot be mistaken for the macOS archive: the release job
           # picks that one with a glob, and two matching files would be a coin toss.
-          cd artifacts/hypo-windows
-          7z a -tzip "../Hypo-${SAFE_VERSION}-windows-x64.zip" . > /dev/null
-          cd ..
-          ls -la Hypo-*.zip
+          for arch in x64 arm64; do
+            (cd "artifacts/hypo-windows-${arch}" \
+              && 7z a -tzip "../Hypo-${SAFE_VERSION}-windows-${arch}.zip" . > /dev/null)
+          done
+          ls -la artifacts/Hypo-*.zip
 
       - name: Upload Windows App
         uses: actions/upload-artifact@v4
         with:
           name: hypo-windows-zip
-          path: artifacts/Hypo-*-windows-x64.zip
+          path: artifacts/Hypo-*-windows-*.zip
           retention-days: 30
 
   create-release:
@@ -627,6 +637,7 @@ jobs:
             artifacts/Hypo-*-release.apk
             artifacts/Hypo-*-release.zip
             artifacts/Hypo-*-windows-x64.zip
+            artifacts/Hypo-*-windows-arm64.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
           generate_release_notes: true

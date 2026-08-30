@@ -134,10 +134,10 @@ dotnet run --project src/Hypo.Windows -- run
 `Hypo.Core` has no Windows APIs and is verified against real devices from any
 machine; the Win32 layer is verified by CI on a Windows runner.
 
-Releases carry `Hypo-<version>-windows-x64.zip` — self-contained, unzip and run
-`Hypo.exe`, no installer and no .NET runtime needed. Every green CI build also
-publishes the same thing as `hypo-app-win-x64`, plus `hypo-console-win-x64` for
-troubleshooting.
+Releases carry `Hypo-<version>-windows-x64.zip` and `-arm64.zip` —
+self-contained, unzip and run `Hypo.exe`, no installer and no .NET runtime
+needed. Every green CI build publishes the same builds as `hypo-app-win-x64` and
+`hypo-app-win-arm64`, plus `hypo-console-win-x64` for troubleshooting.
 
 ### macOS Client
 

@@ -20,6 +20,7 @@ the relay, from a notification-area application.
 | Windows clipboard: text, links, images, files | Done |
 | Tray icon, history window, pairing window | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
+| x64 and ARM64 builds | Done |
 
 A file from a peer is written under `%LOCALAPPDATA%\Hypo\received` and its path
 put on the clipboard as `CF_HDROP`, so pasting it into Explorer works. Existing
@@ -87,7 +88,13 @@ local suite cannot tell you.
 
 ## Run
 
-Download `hypo-app-win-x64` from any green CI run and launch `Hypo.exe`. It puts
+Download `hypo-app-win-x64` (or `hypo-app-win-arm64`) from any green CI run and
+launch `Hypo.exe`. Releases carry both as
+`Hypo-<version>-windows-x64.zip` and `-arm64.zip`.
+
+ARM64 matters more than it sounds: a Windows VM on an Apple Silicon Mac is
+ARM64, and so is every Copilot+ PC. The x64 build runs there under emulation;
+the ARM64 one does not have to. It puts
 an icon in the notification area:
 
 - **Clipboard history…** — search, and double-click an entry to put it back

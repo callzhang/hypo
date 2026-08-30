@@ -26,7 +26,15 @@ macOS, Android, and other Windows devices through the same code paths.
 | Architectures | x64 and ARM64 |
 | Runtime | .NET 10 (LTS) |
 | UI framework | WPF with the WPF-UI Fluent theme |
-| Distribution | MSIX on GitHub Releases (SignPath Foundation signing) + winget manifest |
+| Distribution | A self-contained zip on GitHub Releases, x64 and ARM64 |
+
+*Distribution was revised. MSIX signing needs a certificate whose private key
+must live on FIPS 140-2 hardware — since June 2023 a CA cannot issue a `.pfx` —
+so it means an OSS signing programme, a subscription, or a USB token. None of
+that buys anything a zip does not, and SmartScreen warns on first run either way
+until a signature builds reputation. winget follows signing, so it is out too.
+The MSIX manifest and packing script were written and removed; `git log` has
+them.*
 
 ### Out of scope for v1
 

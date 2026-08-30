@@ -225,3 +225,18 @@ jobs:
           name: hypo-app-win-x64
           path: artifacts/hypo-app-win-x64
           if-no-files-found: error
+      # ARM64 is in the design's support matrix and was never built. It matters
+      # more than it looks: a Windows VM on an Apple Silicon Mac is ARM64, so
+      # without this the only way to try the app is under x64 emulation.
+      - name: Publish the tray application (ARM64)
+        working-directory: windows
+        run: >
+          dotnet publish src/Hypo.Windows.App/Hypo.Windows.App.csproj
+          --configuration Release --runtime win-arm64 --self-contained true
+          --output ../artifacts/hypo-app-win-arm64
+      - name: Upload the tray application (ARM64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypo-app-win-arm64
+          path: artifacts/hypo-app-win-arm64
+          if-no-files-found: error

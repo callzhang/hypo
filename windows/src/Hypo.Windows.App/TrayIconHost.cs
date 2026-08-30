@@ -25,7 +25,8 @@ public sealed class TrayIconHost : IDisposable
     /// </summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
 
-    private readonly HypoClient _client;
+    private readonly ISyncStatusSource _status;
+    private readonly HypoClient? _client;
     private readonly HistoryViewModel _history;
     private readonly Func<PairingViewModel> _pairing;
     private readonly Action _shutdown;
@@ -38,12 +39,31 @@ public sealed class TrayIconHost : IDisposable
     private PairingWindow? _pairingWindow;
     private bool _paused;
 
+    /// <summary>What the icon currently says. Exposed so a test can read it.</summary>
+    public TrayStatus? Status { get; private set; }
+
+    /// <summary>The menu, so its wiring can be exercised without a mouse.</summary>
+    public ContextMenuStrip Menu => _icon.ContextMenuStrip!;
+
+    /// <summary>Whether syncing is paused.</summary>
+    public bool IsPaused => _paused;
+
+    /// <summary>Recomputes the icon and tooltip now, rather than on the next tick.</summary>
+    public void Refresh() => UpdateStatus();
+
+    /// <param name="client">
+    /// Optional, and only so the pairing window can watch for peers arriving
+    /// while it is open. Everything else the tray needs comes through
+    /// <paramref name="status"/>, which is what makes this class testable at all.
+    /// </param>
     public TrayIconHost(
-        HypoClient client,
+        ISyncStatusSource status,
         HistoryViewModel history,
         Func<PairingViewModel> pairing,
-        Action shutdown)
+        Action shutdown,
+        HypoClient? client = null)
     {
+        _status = status;
         _client = client;
         _history = history;
         _pairing = pairing;

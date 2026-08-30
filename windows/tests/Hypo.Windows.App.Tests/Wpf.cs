@@ -92,15 +92,24 @@ internal static class Wpf
         Dispatcher.PushFrame(frame);
     }
 
-    /// <summary>Renders a window to a PNG and returns the pixels for assertions.</summary>
-    public static byte[] Capture(this Window window, string name)
+    /// <summary>
+    /// Renders a window to a PNG and returns the pixels for assertions.
+    /// </summary>
+    /// <param name="dpi">
+    /// The rendering DPI. 96 is 100%; 144 is the 150% most laptops ship at and
+    /// 192 is 200%. Rendering at scale is how a layout that only works at 100%
+    /// gets caught without a second machine -- which is most of what "we cannot
+    /// test DPI here" was hiding.
+    /// </param>
+    public static byte[] Capture(this Window window, string name, double dpi = 96)
     {
         window.Settle();
 
-        var width = (int)Math.Max(window.ActualWidth, 1);
-        var height = (int)Math.Max(window.ActualHeight, 1);
+        var scale = dpi / 96.0;
+        var width = (int)Math.Max(window.ActualWidth * scale, 1);
+        var height = (int)Math.Max(window.ActualHeight * scale, 1);
 
-        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        var bitmap = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
         bitmap.Render(window);
 
         var encoder = new PngEncoder();

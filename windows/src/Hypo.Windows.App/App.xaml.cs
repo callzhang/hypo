@@ -89,11 +89,12 @@ public partial class App : System.Windows.Application
             RelayOptions.FromEnvironment(deviceId, "windows", searchFrom: AppContext.BaseDirectory));
 
         _tray = new TrayIconHost(
-            _client,
+            new ClientStatusSource(_client),
             new HistoryViewModel(_history, _clipboard),
             () => new PairingViewModel(
                 store, new LanPairingCoordinator(store), deviceId, deviceName, _client.Coordinator),
-            Shutdown);
+            Shutdown,
+            _client);
 
         await _client.StartAsync();
         _tray.Start();

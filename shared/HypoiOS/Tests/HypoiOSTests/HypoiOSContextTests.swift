@@ -20,16 +20,6 @@ struct HypoiOSContextTests {
         #expect(context.webSocketServer.listeningPort == nil)
     }
 
-    @Test("storage is the app container, not caches")
-    @MainActor
-    func usesAppContainerStorage() {
-        let context = HypoiOSContext(notificationScheduler: .init(center: nil))
-
-        let path = context.storageLocations.imagesDirectory.path
-        #expect(path.contains("Application Support"))
-        #expect(!path.contains("Caches"))
-    }
-
     @Test("the context wires up receiving")
     @MainActor
     func receivingIsWired() {

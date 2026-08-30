@@ -9,7 +9,6 @@ import HypoCore
 @MainActor
 public final class HypoiOSContext {
     public let identity: DeviceIdentity
-    public let storageLocations: StorageLocations
     public let clipboard: UIKitClipboard
     public let lifecycleObserver: UIKitLifecycleObserver
     public let notificationScheduler: UserNotificationScheduler
@@ -27,7 +26,6 @@ public final class HypoiOSContext {
         // own name instead.
         self.identity = DeviceIdentity(hostname: UIDevice.current.name)
 
-        self.storageLocations = AppContainerStorageLocations()
         self.clipboard = UIKitClipboard()
         self.lifecycleObserver = UIKitLifecycleObserver()
         self.notificationScheduler = notificationScheduler

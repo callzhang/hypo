@@ -43,6 +43,19 @@ public sealed class LanSyncTransport : ISyncTransport
     /// </summary>
     private readonly HashSet<string> _dialing = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// The latest announcement that arrived while a dial for that peer was
+    /// already in flight.
+    ///
+    /// <para>Dropping it outright is what a plain in-flight guard does, and it is
+    /// wrong in a way that only shows up when a dial is slow: if the attempt then
+    /// fails, the peer is not retried until the *next* announcement, which may be
+    /// minutes away or may never come. Windows CI found this -- connecting to a
+    /// dead port there is slow enough that the follow-up announcement always
+    /// landed mid-dial.</para>
+    /// </summary>
+    private readonly Dictionary<string, DiscoveredPeer> _pending = new(StringComparer.OrdinalIgnoreCase);
+
     private TransportState _state = TransportState.Disconnected;
 
     /// <param name="isPaired">
@@ -145,6 +158,7 @@ public sealed class LanSyncTransport : ISyncTransport
             clients = _outbound.Values.ToArray();
             _outbound.Clear();
             _dialing.Clear();
+            _pending.Clear();
         }
 
         foreach (var client in clients)
@@ -166,8 +180,16 @@ public sealed class LanSyncTransport : ISyncTransport
 
         lock (_gate)
         {
-            if (_outbound.ContainsKey(peer.DeviceId) || !_dialing.Add(peer.DeviceId))
+            if (_outbound.ContainsKey(peer.DeviceId))
             {
+                return;
+            }
+
+            if (!_dialing.Add(peer.DeviceId))
+            {
+                // A dial is already running. Remember this record so the attempt
+                // in flight can pick it up rather than losing it.
+                _pending[peer.DeviceId] = peer;
                 return;
             }
         }
@@ -175,54 +197,88 @@ public sealed class LanSyncTransport : ISyncTransport
         _ = Task.Run(() => DialAsync(peer));
     }
 
+    /// <summary>
+    /// Dials <paramref name="peer"/>, then any announcement that arrived while
+    /// that was happening, until one connects or there is nothing left to try.
+    /// </summary>
     private async Task DialAsync(DiscoveredPeer peer)
     {
-        var client = new LanWebSocketClient(peer, _localDeviceId);
+        var deviceId = peer.DeviceId!;
 
         try
         {
-            await client.ConnectAsync().ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            // A peer that advertised and will not answer is ordinary: the record
-            // outlives the process that published it. The relay covers it.
-            await client.DisposeAsync().ConfigureAwait(false);
+            while (true)
+            {
+                var client = new LanWebSocketClient(peer, _localDeviceId);
 
+                try
+                {
+                    await client.ConnectAsync().ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // A peer that advertised and will not answer is ordinary: the
+                    // record outlives the process that published it. The relay
+                    // covers it, and a later announcement gets another attempt.
+                    await client.DisposeAsync().ConfigureAwait(false);
+
+                    lock (_gate)
+                    {
+                        if (!_pending.Remove(deviceId, out var retry))
+                        {
+                            return;
+                        }
+
+                        peer = retry;
+                    }
+
+                    continue;
+                }
+
+                if (Adopt(deviceId, peer, client))
+                {
+                    return;
+                }
+
+                await client.DisposeAsync().ConfigureAwait(false);
+                return;
+            }
+        }
+        finally
+        {
             lock (_gate)
             {
-                _dialing.Remove(peer.DeviceId!);
+                _dialing.Remove(deviceId);
+                _pending.Remove(deviceId);
             }
-
-            return;
         }
+    }
 
+    /// <summary>Keeps a freshly connected client, unless another already won.</summary>
+    private bool Adopt(string deviceId, DiscoveredPeer peer, LanWebSocketClient client)
+    {
         client.EnvelopeReceived += (_, e) => EnvelopeReceived?.Invoke(this, e);
         client.StateChanged += (_, e) =>
         {
             if (e.State is TransportState.Disconnected or TransportState.Faulted)
             {
-                Forget(peer.DeviceId!);
+                Forget(deviceId);
             }
         };
 
-        bool first;
         lock (_gate)
         {
-            _dialing.Remove(peer.DeviceId!);
-            first = _outbound.TryAdd(peer.DeviceId!, client);
-        }
-
-        if (!first)
-        {
-            // Lost a race we thought we had won; keep the connection that landed
-            // first rather than leaving two sockets to the same peer.
-            await client.DisposeAsync().ConfigureAwait(false);
-            return;
+            if (!_outbound.TryAdd(deviceId, client))
+            {
+                // Lost a race we thought we had won; keep the connection that
+                // landed first rather than leaving two sockets to one peer.
+                return false;
+            }
         }
 
         SetState(TransportState.Connected, null);
         PeerConnected?.Invoke(this, peer);
+        return true;
     }
 
     private void Forget(string deviceId)

@@ -294,4 +294,28 @@ public class LanSyncTransportTests
         Assert.True(await Eventually(() => transport.ConnectedPeers.Count == 1),
             "a failed dial left the peer permanently unreachable");
     }
+
+    [Fact]
+    public async Task PicksUpAnAnnouncementThatArrivedWhileItWasStillDialling()
+    {
+        // The case Windows CI found. Connecting to a dead port is slow enough
+        // there that the follow-up announcement always landed mid-dial, and a
+        // plain in-flight guard dropped it -- leaving the peer unreachable until
+        // some later announcement that might never come.
+        await using var peerServer = new LanWebSocketServer(port: 0);
+        await peerServer.StartAsync();
+
+        var discovery = new FakeDiscovery();
+        await using var transport = new LanSyncTransport(
+            discovery, new LanWebSocketServer(port: 0), LocalId, "Test PC", _ => true);
+        await transport.ConnectAsync();
+
+        // Both announcements without waiting: the second necessarily arrives
+        // while the first dial is still in flight.
+        discovery.Announce(Peer(1));
+        discovery.Announce(Peer(peerServer.BoundPort));
+
+        Assert.True(await Eventually(() => transport.ConnectedPeers.Count == 1, TimeSpan.FromSeconds(30)),
+            "the announcement that arrived mid-dial was dropped");
+    }
 }

@@ -51,7 +51,7 @@ iOS 侧**必须**有 xcodeproj——App Extension、App Group、APNs capability 
 - 后端 `backend/src/models/device.rs` 的 `Platform` enum 已包含 `Ios`。
 - Android 的 `device_platform` 是裸字符串直接透传（`SyncModels.kt:35`）。
 - macOS 的 `DevicePlatform` enum **已经有 `case iOS = "ios"`**（还有 `windows`、`linux`）。
-- 唯一缺口：`DeviceIdentity.swift:26` 把当前平台硬编码为 `private static let currentPlatform = DevicePlatform.macOS`，需改成按 `#if os(iOS)` 判定。
+- ~~唯一缺口：`DeviceIdentity.swift:26` 把当前平台硬编码为 `private static let currentPlatform = DevicePlatform.macOS`~~ **已修**（第 2 期 Task 8 期间）：改为按 `#if os(iOS)` / `#if os(Windows)` 判定。这个值在首次启动时写入 UserDefaults 并发给对端，所以不修的话 iPhone 会把自己报告成 Mac 并一直如此。已在模拟器上确认真实 app 持久化的 `device_platform` 为 `ios`。已持久化的值仍然优先，老装机不会被改写。
 
 ### 2.4 后端现状
 
@@ -161,7 +161,13 @@ macOS 约 4500 行 UI 代码中，`HypoMenuBarApp.swift`（3404 行）、`Histor
 
 iOS 特有配置：`NSLocalNetworkUsageDescription`、`NSBonjourServices: [_hypo._tcp]`。
 
-**必须处理的 iOS 坑**：首次浏览会弹「本地网络」权限窗，用户拒绝后 Bonjour 静默失效且不报错。设置页必须显式展示「本地网络：未授权（当前仅云端同步）」并提供跳转系统设置的引导，否则用户只会觉得 LAN 莫名其妙不生效。
+**必须处理的 iOS 坑**：首次浏览会弹「本地网络」权限窗，用户拒绝后 Bonjour 静默失效且不报错。
+
+**更正（第 2 期实施时发现）**：本文原先要求设置页展示「本地网络：未授权」——**这做不到，iOS 没有提供读取该权限状态的 API**。设置页只能给出说明文字和跳转系统设置的入口，不能显示实际状态。这是平台限制。
+
+**另一处 iOS 特有的语义收窄**：`SystemClipboard.currentText()` / `containsImage()` 在 iOS 上只回答本 app 自己写入的内容，未命中返回 `nil` / `false`，不回落到读取 `UIPasteboard`。原因是 `-[UIPasteboard string]` 会阻塞调用线程等 pasteboard 服务，而协议是 `@MainActor` 的、没有别的线程可挪；且 iOS 16+ 对非本 app 写入的内容会弹粘贴授权框。唯一的读取调用方 `IncomingClipboardHandler` 只用它做回声抑制，关心的永远是刚写进去的内容，缓存对这一档回答得精确；未命中时 `nil` 落到去重逻辑上就是"照常写入"，正是安全的一侧。
+
+**iOS 只做发起端是靠类型保证的**：`TransportManager` 新增 `LanRole`（`.peer` / `.clientOnly`），iOS 传 `.clientOnly`，跳过绑定监听器与 Bonjour 广播，保留浏览发现、prune/health-check/network-monitor 与云端自动连接。
 
 ---
 
@@ -230,7 +236,7 @@ NSE 解密并写入 `UIPasteboard` → 立即回读校验 → 校验失败则改
 
 | 情况 | 处理 |
 |---|---|
-| 本地网络权限被拒 | 降级为仅云端；设置页明示状态并给跳转引导 |
+| 本地网络权限被拒 | 降级为仅云端；设置页给出说明与跳转引导（**无法明示状态**——iOS 不提供读取该权限的 API） |
 | 通知权限被拒 | 后台完全收不到内容；设置页明示后果 |
 | APNs token 失效 | 重新注册 |
 | relay 不可达 | 指数退避重连；UI 显示离线状态 |

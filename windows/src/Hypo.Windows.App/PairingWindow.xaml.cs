@@ -12,16 +12,25 @@ public partial class PairingWindow : Window
 {
     private readonly PairingViewModel _model;
 
-    public PairingWindow(PairingViewModel model, HypoClient client)
+    /// <param name="client">
+    /// Optional. When present, peers discovered while the window is open appear
+    /// in it; without one the list is whatever the view model already knows. The
+    /// window is useful either way, and requiring a live client would make it
+    /// impossible to show one in a test.
+    /// </param>
+    public PairingWindow(PairingViewModel model, HypoClient? client = null)
     {
         _model = model;
         InitializeComponent();
 
-        client.LanPeerConnected += (_, peer) => Dispatcher.Invoke(() =>
+        if (client is not null)
         {
-            _model.Observe(peer);
-            Bind();
-        });
+            client.LanPeerConnected += (_, peer) => Dispatcher.Invoke(() =>
+            {
+                _model.Observe(peer);
+                Bind();
+            });
+        }
 
         Bind();
     }

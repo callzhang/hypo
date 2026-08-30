@@ -195,7 +195,21 @@ jobs:
         run: dotnet build --no-restore --configuration Release
       - name: Run Windows core tests
         working-directory: windows
+        env:
+          # Somewhere predictable for the interface screenshots the WPF tests
+          # take, so they can be collected below.
+          HYPO_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/screenshots
         run: dotnet test --no-build --configuration Release --verbosity normal
+      # The runner is a fully interactive session -- it shows windows and renders
+      # them -- so these are the only way anyone without a Windows machine sees
+      # the interface at all.
+      - name: Upload interface screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypo-ui-screenshots
+          path: artifacts/screenshots
+          if-no-files-found: error
       # Publishes something a person can download and run. Without this, "CI is
       # green" is the only evidence the Windows client works, and it is not the
       # kind of evidence anyone can act on.

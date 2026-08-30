@@ -17,6 +17,10 @@ jobs:
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
+    env:
+      # gradlew otherwise redirects builds to ~/.cache in regular Git clones,
+      # while the artifact uploader expects a stable workspace-relative path.
+      HYPO_ANDROID_BUILD_DIR: ${{ github.workspace }}/android/ci-build
     
     steps:
       - name: Checkout code
@@ -84,7 +88,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-release-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: android/ci-build/app/outputs/apk/release/app-release.apk
+          if-no-files-found: error
           # Optimize retention: shorter for test branches, longer for releases
           retention-days: ${{ contains(github.ref, 'refs/heads/test/') && '7' || '30' }}
           compression-level: 6

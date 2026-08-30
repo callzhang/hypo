@@ -250,9 +250,58 @@ jobs:
           path: Hypo-*.zip
           retention-days: 30
 
+  build-windows:
+    name: Build Windows App
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish the tray application
+        working-directory: windows
+        run: >
+          dotnet publish src/Hypo.Windows.App/Hypo.Windows.App.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          --output ../artifacts/hypo-windows
+
+      - name: Create Windows ZIP
+        shell: bash
+        run: |
+          # Same version logic as the macOS job; keeping them in step matters
+          # more than avoiding the repetition.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="v1.0.0-test"
+          fi
+          VERSION="${VERSION#v}"
+          SAFE_VERSION="${VERSION//\//-}"
+
+          # Named so it cannot be mistaken for the macOS archive: the release job
+          # picks that one with a glob, and two matching files would be a coin toss.
+          cd artifacts/hypo-windows
+          7z a -tzip "../Hypo-${SAFE_VERSION}-windows-x64.zip" . > /dev/null
+          cd ..
+          ls -la Hypo-*.zip
+
+      - name: Upload Windows App
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypo-windows-zip
+          path: artifacts/Hypo-*-windows-x64.zip
+          retention-days: 30
+
   create-release:
     name: Create Release
-    needs: [build-android, build-macos]
+    needs: [build-android, build-macos, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -299,6 +348,12 @@ jobs:
         with:
           name: Hypo
           path: ./artifacts
+
+      - name: Download Windows App
+        uses: actions/download-artifact@v4
+        with:
+          name: hypo-windows-zip
+          path: ./artifacts
       
       - name: Rename artifacts with version
         run: |
@@ -312,8 +367,10 @@ jobs:
             exit 1
           fi
           # Rename macOS zip to use tag name with -release suffix (for consistency with local build scripts)
-          if [ -f "Hypo-"*.zip ]; then
-            OLD_ZIP=$(ls Hypo-*.zip | head -1)
+          # Excluding the Windows archive: it is already named correctly, and
+          # this glob would otherwise rename whichever of the two sorts first.
+          if ls Hypo-*.zip >/dev/null 2>&1 && [ -n "$(ls Hypo-*.zip | grep -v -- '-windows-' || true)" ]; then
+            OLD_ZIP=$(ls Hypo-*.zip | grep -v -- '-windows-' | head -1)
             EXPECTED_NAME="Hypo-${TAG_NAME}-release.zip"
             if [ "$OLD_ZIP" != "$EXPECTED_NAME" ]; then
               mv "$OLD_ZIP" "$EXPECTED_NAME"
@@ -569,6 +626,7 @@ jobs:
           files: |
             artifacts/Hypo-*-release.apk
             artifacts/Hypo-*-release.zip
+            artifacts/Hypo-*-windows-x64.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
           generate_release_notes: true

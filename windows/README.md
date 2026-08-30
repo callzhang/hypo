@@ -19,8 +19,7 @@ the relay, from a notification-area application.
 | Clipboard history (SQLite) and content dedup | Done |
 | Windows clipboard: text, links, images, files | Done |
 | Tray icon, history window, pairing window | Done |
-| MSIX packaging | Packs unsigned; signing needs a certificate |
-| winget | Not started — needs a signed package first |
+| Installer (MSIX, winget) | Not planned — distributed as a zip |
 
 A file from a peer is written under `%LOCALAPPDATA%\Hypo\received` and its path
 put on the clipboard as `CF_HDROP`, so pasting it into Explorer works. Existing
@@ -98,9 +97,15 @@ an icon in the notification area:
 The icon is a coloured dot: green when a device is reachable on this network,
 amber when only the relay is, red when nothing is, grey when paused.
 
-CI also packs an unsigned MSIX (`hypo-msix-unsigned-win-x64`). Windows will not
-install it as it stands — see [`packaging/README.md`](packaging/README.md) for
-signing, which is the step that is genuinely blocked on having a certificate.
+There is no installer, by choice. Signing an MSIX needs a code-signing
+certificate whose private key must live on FIPS 140-2 hardware — since June 2023
+a CA cannot hand you a `.pfx` — which means either an OSS signing programme, a
+subscription service, or a USB token, and none of that buys anything a zip does
+not. Windows Defender SmartScreen will still warn on first run either way until
+a signature builds reputation.
+
+The MSIX manifest and packing script were written and then removed; `git log`
+has them if winget ever becomes worth the certificate.
 
 There is also a console client, which is what CI tests against and what to reach
 for when something is wrong:

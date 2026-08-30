@@ -50,6 +50,11 @@ public final class DefaultTransportProvider: TransportProvider {
     }
     
     /// Set the closure for getting discovered peers (used by LanSyncTransport for client-side connections)
+    /// Routes frames arriving on connections this device opened.
+    public func setLanIncomingMessageHandler(_ handler: @escaping @Sendable (Data, TransportOrigin) async -> Void) {
+        lanTransport.setOnIncomingMessage(handler)
+    }
+
     public func setGetDiscoveredPeers(_ closure: @escaping () -> [DiscoveredPeer]) {
         lanTransport.setGetDiscoveredPeers(closure)
     }

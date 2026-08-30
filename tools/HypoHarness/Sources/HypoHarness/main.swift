@@ -193,18 +193,25 @@ func sendWhenConnected(
     )
     let payload = ClipboardPayload(contentType: .text, data: Data(text.utf8))
 
-    for attempt in 1...30 {
+    // Sends repeatedly rather than once.
+    //
+    // The peer dials as soon as it discovers this harness, which is before it
+    // has finished pairing — so the first send can arrive while the other side
+    // still has no key for us, and it is dropped with nothing to retry it. A
+    // real user copying a second thing would recover; a single send does not.
+    var delivered = 0
+    for attempt in 1...20 {
         do {
             try await engine.transmit(entry: entry, payload: payload, targetDeviceId: peer)
-            print("Sent \"\(text)\" to \(peer)")
-            return
+            delivered += 1
+            print("Sent \"\(text)\" to \(peer) (attempt \(attempt))")
         } catch {
-            if attempt == 30 {
-                print("Could not send after 30 tries: \(error.localizedDescription)")
+            if attempt == 20 && delivered == 0 {
+                print("Could not send after 20 tries: \(error.localizedDescription)")
                 return
             }
-            try? await Task.sleep(for: .seconds(2))
         }
+        try? await Task.sleep(for: .seconds(4))
     }
 }
 

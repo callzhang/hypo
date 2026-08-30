@@ -232,6 +232,16 @@ public final class TransportManager: ObservableObject {
                     self?.logger.error("❌ [TransportManager] Failed to decode envelope: \(error.localizedDescription)")
                 }
             }
+
+            // The same routing for frames that arrive on LAN connections this
+            // device opened. Those never touch webSocketServer, so on a device
+            // that only dials — iOS — nothing was received at all.
+            if let defaultProvider = provider as? DefaultTransportProvider {
+                defaultProvider.setLanIncomingMessageHandler { [weak self, weak handler] data, transportOrigin in
+                    self?.logger.info("📥 [TransportManager] LAN client incoming message: \(data.count.formattedAsKB)")
+                    await handler?.handle(data, transportOrigin: transportOrigin)
+                }
+            }
         }
 
         if autoStartLanServices {
@@ -1339,24 +1349,19 @@ public final class TransportManager: ObservableObject {
                 }
             }
             
-            // Sync peer connections in LanSyncTransport (maintain persistent connections)
-            if let provider = provider as? DefaultTransportProvider {
-                Task { @MainActor in
-                    await provider.syncPeerConnections()
-                }
-            }
+            // Coalesced: this handler also calls registerPairedDevice, which
+            // asks for a sync too. Firing both raced two passes over the same
+            // connection table, which opened several connections to one peer
+            // and then tore them down — the peer saw a connection arrive,
+            // identify, and immediately drop.
+            schedulePeerConnectionSync()
         case .removed(let serviceName):
             logger.info("🔍 [TransportManager] Peer removed: \(serviceName)")
             lanPeers.removeValue(forKey: serviceName)
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
             
-            // Sync peer connections in LanSyncTransport (remove disconnected peer)
-            if let provider = provider as? DefaultTransportProvider {
-                Task { @MainActor in
-                    await provider.syncPeerConnections()
-                }
-            }
+            schedulePeerConnectionSync()
         }
     }
     

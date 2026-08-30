@@ -14,6 +14,7 @@ public final class LanSyncTransport: SyncTransport {
     private var isConnected = false
     private var messageHandlers: [UUID: (Data) async throws -> Void] = [:]
     private var getDiscoveredPeers: (() -> [DiscoveredPeer])?
+    private var onIncomingMessage: (@Sendable (Data, TransportOrigin) async -> Void)?
     // Persistent connections: one WebSocketTransport per peer (deviceId)
     // Connections are maintained for all discovered peers, mirroring Android's architecture
     private var clientTransports: [String: WebSocketTransport] = [:] // deviceId -> transport
@@ -36,6 +37,21 @@ public final class LanSyncTransport: SyncTransport {
         self.decoder.dateDecodingStrategy = .iso8601
     }
     
+    /// Routes frames arriving on outbound connections.
+    ///
+    /// Without this, a device that dials out can send but never receive: the
+    /// incoming handler is wired to the server's delegate, and connections we
+    /// opened ourselves do not go through the server at all. On macOS that is
+    /// invisible, because peers dial it and their frames arrive server-side.
+    /// On iOS it means nothing can ever be received — iOS never listens, so
+    /// every inbound frame comes back over a connection it opened.
+    public func setOnIncomingMessage(_ handler: @escaping @Sendable (Data, TransportOrigin) async -> Void) {
+        self.onIncomingMessage = handler
+        for transport in clientTransports.values {
+            transport.setOnIncomingMessage(handler)
+        }
+    }
+
     public func setGetDiscoveredPeers(_ closure: @escaping () -> [DiscoveredPeer]) {
         self.getDiscoveredPeers = closure
     }
@@ -90,7 +106,12 @@ public final class LanSyncTransport: SyncTransport {
             url: url,
             pinnedFingerprint: pinnedFingerprint,
             headers: [
-                "X-Device-Id": deviceIdentity.deviceId.uuidString,
+                // deviceIdString, not deviceId.uuidString: the latter is
+                // uppercase, every target id in the system is lowercase, and
+                // the peer matches connections to targets by string equality —
+                // so an uppercase identify meant a peer could never find the
+                // connection to send back over.
+                "X-Device-Id": deviceIdentity.deviceIdString,
                 // Was hardcoded "macos"; DeviceIdentity knows what this is.
                 "X-Device-Platform": deviceIdentity.platform.rawValue
             ],
@@ -105,6 +126,9 @@ public final class LanSyncTransport: SyncTransport {
             metricsRecorder: NullTransportMetricsRecorder(),
             analytics: NoopTransportAnalytics()
         )
+        if let onIncomingMessage {
+            clientTransport.setOnIncomingMessage(onIncomingMessage)
+        }
         clientTransports[deviceId] = clientTransport
         peerURLs[deviceId] = url
 
@@ -230,8 +254,10 @@ public final class LanSyncTransport: SyncTransport {
             // Find connection(s) for target device
             var sentToTarget = false
             for connectionId in activeConnections {
+                // Case-insensitive: clients are not consistent about how they
+                // present a UUID, and a mismatch here silently drops the item.
                 if let metadata = server.connectionMetadata(for: connectionId),
-                   metadata.deviceId == targetDeviceId {
+                   metadata.deviceId?.lowercased() == targetDeviceId.lowercased() {
                     try? server.send(framed, to: connectionId)
                     sentToTarget = true
                     #if canImport(os)

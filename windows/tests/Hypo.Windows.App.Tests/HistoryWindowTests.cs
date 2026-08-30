@@ -177,6 +177,77 @@ public class HistoryWindowTests : IDisposable
     }
 
     [SkippableFact]
+    public void DoubleClickingAnEntryPutsItBackAndGetsOutOfTheWay()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        Add("an entry to paste again", 1);
+
+        Wpf.Run(() =>
+        {
+            var window = new HistoryWindow(Model());
+            window.Show();
+            window.Settle();
+
+            var list = (System.Windows.Controls.ListBox)window.FindName("Rows");
+            list.SelectedIndex = 0;
+
+            // Through the control's own event, so the code-behind handler is
+            // what is under test rather than the view model it calls.
+            list.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
+                System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left)
+            {
+                RoutedEvent = System.Windows.Controls.Control.MouseDoubleClickEvent,
+            });
+
+            window.Settle();
+
+            Assert.Equal(
+                "an entry to paste again",
+                Encoding.UTF8.GetString(Assert.Single(_clipboard.Writes).Data));
+
+            // Hidden, not closed: the user picked something to paste, and a
+            // window left over their work has to be dismissed every time.
+            Assert.False(window.IsVisible);
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void DoubleClickingNothingDoesNothing()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        Add("an entry", 1);
+
+        Wpf.Run(() =>
+        {
+            var window = new HistoryWindow(Model());
+            window.Show();
+            window.Settle();
+
+            var list = (System.Windows.Controls.ListBox)window.FindName("Rows");
+            list.SelectedIndex = -1;
+
+            list.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
+                System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left)
+            {
+                RoutedEvent = System.Windows.Controls.Control.MouseDoubleClickEvent,
+            });
+
+            window.Settle();
+
+            // Double-clicking the empty area below the list must not put the
+            // last thing on the clipboard, or hide the window.
+            Assert.Empty(_clipboard.Writes);
+            Assert.True(window.IsVisible);
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
     public void HasAWindowThatIsActuallySized()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");

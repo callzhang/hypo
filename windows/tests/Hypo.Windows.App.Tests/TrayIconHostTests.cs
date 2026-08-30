@@ -255,4 +255,112 @@ public class TrayIconHostTests : IDisposable
             Assert.True(tray.Status!.Tooltip.Length > 63, "the status was not long enough to test clipping");
         });
     }
+
+    [SkippableFact]
+    public void DisposingTakesTheIconOutOfTheTray()
+    {
+        RequireWindows();
+
+        // The classic tray bug: the process exits and its icon sits there until
+        // someone hovers over it. NotifyIcon has to be hidden explicitly.
+        Wpf.Run(() =>
+        {
+            var tray = Build();
+            tray.Start();
+
+            var icon = tray.GetType()
+                .GetField("_icon", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .GetValue(tray) as System.Windows.Forms.NotifyIcon;
+
+            Assert.NotNull(icon);
+            Assert.True(icon!.Visible);
+
+            tray.Dispose();
+
+            Assert.False(icon.Visible);
+        });
+    }
+
+    [SkippableFact]
+    public void OpeningHistoryTwiceReusesTheSameWindow()
+    {
+        RequireWindows();
+
+        // Otherwise every click from the menu leaves another copy behind.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.Contains("history", StringComparison.OrdinalIgnoreCase));
+
+            history.PerformClick();
+            var first = tray.OpenHistoryWindow;
+
+            history.PerformClick();
+
+            Assert.NotNull(first);
+            Assert.Same(first, tray.OpenHistoryWindow);
+
+            first!.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void ReopeningAfterClosingGivesAFreshWindow()
+    {
+        RequireWindows();
+
+        // And the opposite: once it has been closed, clicking again has to work
+        // rather than trying to show a dead window.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.Contains("history", StringComparison.OrdinalIgnoreCase));
+
+            history.PerformClick();
+            var first = tray.OpenHistoryWindow;
+            first!.Close();
+
+            Assert.Null(tray.OpenHistoryWindow);
+
+            history.PerformClick();
+
+            Assert.NotNull(tray.OpenHistoryWindow);
+            Assert.NotSame(first, tray.OpenHistoryWindow);
+
+            tray.OpenHistoryWindow!.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void AMinimisedWindowComesBackWhenTheMenuIsUsedAgain()
+    {
+        RequireWindows();
+
+        // Show() alone leaves a minimised window minimised, so the menu item
+        // would appear to do nothing.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.Contains("history", StringComparison.OrdinalIgnoreCase));
+
+            history.PerformClick();
+            var window = tray.OpenHistoryWindow!;
+            window.WindowState = System.Windows.WindowState.Minimized;
+
+            history.PerformClick();
+
+            Assert.Equal(System.Windows.WindowState.Normal, window.WindowState);
+
+            window.Close();
+        });
+    }
 }

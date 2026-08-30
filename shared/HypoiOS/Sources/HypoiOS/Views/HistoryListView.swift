@@ -8,6 +8,26 @@ public struct HistoryListView: View {
         self.viewModel = viewModel
     }
 
+    /// Says what became of the last send. Entries are written to local history
+    /// either way, so without this a send that reached nobody would look
+    /// exactly like one that worked.
+    private var sendStatusMessage: String? {
+        switch viewModel.lastSendOutcome {
+        case .none:
+            return nil
+        case .notConfigured:
+            return "Not connected yet"
+        case .noPairedDevices:
+            return "No paired devices — pair one first"
+        case .sent(let count):
+            return "Sent to \(count) device\(count == 1 ? "" : "s")"
+        case .allFailed(let count):
+            return "Could not reach \(count) device\(count == 1 ? "" : "s")"
+        case .partial(let sent, let failed):
+            return "Sent to \(sent), failed for \(failed)"
+        }
+    }
+
     public var body: some View {
         NavigationStack {
             List {
@@ -46,6 +66,25 @@ public struct HistoryListView: View {
                     }
                     .disabled(viewModel.entries.isEmpty)
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 6) {
+                    if let message = sendStatusMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    // The system paste button is the only way to read the
+                    // clipboard on iOS without interrupting the user with a
+                    // permission prompt, so sending starts here rather than
+                    // from a poll.
+                    PasteButton { text in
+                        Task { await viewModel.sendText(text) }
+                    }
+                }
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(.bar)
             }
             .task { await viewModel.load() }
         }

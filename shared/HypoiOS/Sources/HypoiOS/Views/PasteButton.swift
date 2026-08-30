@@ -24,6 +24,17 @@ public struct PasteButton: UIViewRepresentable {
 
     public func updateUIView(_ uiView: UIPasteControl, context: Context) {}
 
+    /// Without this SwiftUI hands the control whatever width it proposes, and
+    /// the button stretches edge to edge. UIPasteControl already knows how big
+    /// it wants to be.
+    public func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: UIPasteControl,
+        context: Context
+    ) -> CGSize? {
+        uiView.intrinsicContentSize
+    }
+
     public func makeCoordinator() -> Coordinator {
         Coordinator(onPaste: onPaste)
     }

@@ -182,6 +182,16 @@ jobs:
             -skipMacroValidation
       - name: Run HypoiOS tests on iOS Simulator
         run: ./scripts/run-ios-tests.sh shared/HypoiOS HypoiOS 'iPhone 16'
+      # CODE_SIGNING_ALLOWED=NO because the runner has no signing certificate
+      # and a simulator build does not need one.
+      - name: Build the iOS app
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -scheme Hypo \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO
   windows-tests:
     name: Windows Core Tests
     runs-on: windows-latest

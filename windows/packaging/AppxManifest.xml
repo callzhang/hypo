@@ -2,8 +2,9 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap rescap">
+  IgnorableNamespaces="uap uap5 rescap">
 
   <!--
     Publisher must match the subject of the signing certificate exactly, or
@@ -52,9 +53,14 @@
           Start with Windows. A clipboard tool that syncs only while someone
           remembers to launch it is one people stop trusting.
         -->
-        <uap:Extension Category="windows.startupTask" Executable="Hypo.exe" EntryPoint="Windows.FullTrustApplication">
-          <uap:StartupTask TaskId="HypoStartup" Enabled="true" DisplayName="Hypo" />
-        </uap:Extension>
+        <!--
+          uap5, not uap: windows.startupTask is not in the uap extension
+          enumeration, and makeappx rejects the package with a schema error that
+          names every category except the one you wanted.
+        -->
+        <uap5:Extension Category="windows.startupTask" Executable="Hypo.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask TaskId="HypoStartup" Enabled="true" DisplayName="Hypo" />
+        </uap5:Extension>
       </Extensions>
     </Application>
   </Applications>

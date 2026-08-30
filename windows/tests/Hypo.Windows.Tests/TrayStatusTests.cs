@@ -82,4 +82,32 @@ public class TrayStatusTests
 
         Assert.Equal(TrayIcon.Paused, status.Icon);
     }
+
+    [Fact]
+    public void ClipsALongTooltipAndMarksThatItDidSo()
+    {
+        var clipped = TrayStatus.ClipTooltip(new string('x', 200));
+
+        Assert.True(clipped.Length <= 63, $"length was {clipped.Length}");
+        Assert.EndsWith("…", clipped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LeavesAShortTooltipAlone()
+    {
+        Assert.Equal("Hypo — paused", TrayStatus.ClipTooltip("Hypo — paused"));
+    }
+
+    [Fact]
+    public void EveryTooltipItProducesSurvivesClipping()
+    {
+        // The status text is built from peer names, which are user-supplied and
+        // can be any length.
+        var status = TrayStatus.From(
+            TransportState.Connected,
+            TransportState.Connected,
+            [new string('A', 80), new string('B', 80), new string('C', 80)]);
+
+        Assert.True(TrayStatus.ClipTooltip(status.Tooltip).Length <= 63);
+    }
 }

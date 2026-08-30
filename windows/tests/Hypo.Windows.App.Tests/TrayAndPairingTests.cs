@@ -2,6 +2,7 @@ using System.IO;
 using Hypo.Core.Abstractions;
 using Hypo.Core.Discovery;
 using Hypo.Core.Pairing;
+using Hypo.Core.Transport;
 using Hypo.Windows.App;
 using Hypo.Windows.App.Shell;
 
@@ -50,31 +51,39 @@ public class TrayAndPairingTests
         });
     }
 
-    [SkippableTheory]
-    [InlineData(63)]
-    [InlineData(64)]
-    [InlineData(200)]
-    public void ATooltipLongerThanWindowsAllowsIsRejected(int length)
+    [SkippableFact]
+    public void EveryClippedTooltipIsAcceptedByTheTrayIcon()
     {
         RequireWindows();
 
-        // NotifyIcon.Text throws past 63 characters rather than truncating, so
-        // the tray host clips it. This pins the limit the clipping is built on
-        // instead of trusting a number in a comment.
+        // NotifyIcon.Text throws on a long value rather than truncating, which
+        // would take the icon out entirely. This checks the clipping against the
+        // real control instead of against a remembered limit -- 64 characters
+        // turns out to be fine, so the historic 63-character figure is not the
+        // boundary and guessing at it is how this breaks.
+        var longest = TrayStatus.From(
+            TransportState.Connected,
+            TransportState.Connected,
+            ["A device with a rather long name", "And another one", "A third"]);
+
         Wpf.Run(() =>
         {
             using var icon = new System.Windows.Forms.NotifyIcon();
-            var text = new string('x', length);
+            icon.Text = TrayStatus.ClipTooltip(longest.Tooltip);
+            Assert.NotEmpty(icon.Text);
+        });
+    }
 
-            if (length <= 63)
-            {
-                icon.Text = text;
-                Assert.Equal(text, icon.Text);
-            }
-            else
-            {
-                Assert.ThrowsAny<ArgumentException>(() => icon.Text = text);
-            }
+    [SkippableFact]
+    public void AnUnclippedTooltipWouldBreakTheTrayIcon()
+    {
+        RequireWindows();
+
+        // Why the clipping exists, pinned rather than described.
+        Wpf.Run(() =>
+        {
+            using var icon = new System.Windows.Forms.NotifyIcon();
+            Assert.ThrowsAny<ArgumentException>(() => icon.Text = new string('x', 200));
         });
     }
 

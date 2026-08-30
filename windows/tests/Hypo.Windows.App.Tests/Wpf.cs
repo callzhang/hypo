@@ -59,20 +59,37 @@ internal static class Wpf
     }
 
     /// <summary>
-    /// Lets layout and rendering happen.
+    /// Lets layout and rendering actually happen.
     ///
-    /// <para>Showing a window does not lay it out synchronously: bindings apply
-    /// and measure/arrange run at Loaded priority. Capturing before that gives a
-    /// blank bitmap, which is the failure mode that makes screenshot tests look
-    /// flaky rather than wrong.</para>
+    /// <para>Dispatcher.Invoke from the dispatcher's own thread runs inline and
+    /// processes nothing that is queued, so a window measured that way stays
+    /// 0x0 and renders as a blank bitmap. Pushing a frame is what drains the
+    /// queue, and there is no message pump running here to do it otherwise.</para>
     /// </summary>
     public static void Settle(this Window window)
     {
         for (var i = 0; i < 3; i++)
         {
-            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
+            PumpTo(DispatcherPriority.Loaded);
             window.UpdateLayout();
+            PumpTo(DispatcherPriority.Background);
         }
+    }
+
+    private static void PumpTo(DispatcherPriority priority)
+    {
+        var frame = new DispatcherFrame();
+
+        Dispatcher.CurrentDispatcher.BeginInvoke(
+            priority,
+            new DispatcherOperationCallback(state =>
+            {
+                ((DispatcherFrame)state).Continue = false;
+                return null;
+            }),
+            frame);
+
+        Dispatcher.PushFrame(frame);
     }
 
     /// <summary>Renders a window to a PNG and returns the pixels for assertions.</summary>

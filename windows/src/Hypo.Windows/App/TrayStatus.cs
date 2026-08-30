@@ -35,6 +35,24 @@ public sealed record TrayStatus
 
     public required string Tooltip { get; init; }
 
+    /// <summary>
+    /// Shortens a tooltip to something <c>NotifyIcon.Text</c> accepts.
+    ///
+    /// <para>It throws on a long value rather than truncating, so an unclipped
+    /// status would take the tray icon out entirely -- and the length at which
+    /// it throws is not 64, whatever the historic 63-character Win32 limit
+    /// suggests. Clipping well under any of the candidates costs a few
+    /// characters and removes the question.</para>
+    /// </summary>
+    public static string ClipTooltip(string tooltip)
+    {
+        ArgumentNullException.ThrowIfNull(tooltip);
+
+        return tooltip.Length <= MaxTooltip ? tooltip : tooltip[..(MaxTooltip - 1)] + "…";
+    }
+
+    private const int MaxTooltip = 63;
+
     public static TrayStatus From(
         TransportState lan,
         TransportState relay,

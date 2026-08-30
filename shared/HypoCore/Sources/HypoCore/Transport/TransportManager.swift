@@ -13,6 +13,18 @@ import Network
 import Darwin
 #endif
 
+/// Whether this device offers a LAN listener that other devices can dial.
+///
+/// macOS and Windows do. iOS does not: the system suspends the app in the
+/// background, so an advertised listener would make peers watch the device
+/// flap online and offline. A client-only manager still browses for peers,
+/// prunes them, health-checks them and connects to the cloud relay — it just
+/// never binds a socket and never advertises one over Bonjour.
+public enum LanRole: Sendable {
+    case peer
+    case clientOnly
+}
+
 @MainActor
 public final class TransportManager: ObservableObject {
     private let logger = HypoLogger(category: "TransportManager")
@@ -91,6 +103,7 @@ public final class TransportManager: ObservableObject {
     public var webSocketServerInstance: LanWebSocketServer { webSocketServer }
 
     private let lifecycleObserver: AppLifecycleObserving?
+    private let lanRole: LanRole
 
     private let notificationController: ClipboardNotificationScheduling
     private let clipboard: SystemClipboard
@@ -112,6 +125,7 @@ public final class TransportManager: ObservableObject {
         notificationController: ClipboardNotificationScheduling,
         clipboard: SystemClipboard,
         lifecycleObserver: AppLifecycleObserving? = nil,
+        lanRole: LanRole = .peer,
         autoStartLanServices: Bool = true
     ) {
         self.defaults = defaults
@@ -133,6 +147,7 @@ public final class TransportManager: ObservableObject {
         self.notificationController = notificationController
         self.clipboard = clipboard
         self.lifecycleObserver = lifecycleObserver
+        self.lanRole = lanRole
 
         // Configure TempFileManager with the dispatcher
         TempFileManager.shared.configure(dispatcher: self.dispatcher)
@@ -664,7 +679,7 @@ public final class TransportManager: ObservableObject {
         logger.info("🎬 [TransportManager] activateLanServices called")
         
         // Start WebSocket server first to resolve port if ephemeral
-        if !isServerRunning, lanConfiguration.port >= 0 {
+        if lanRole == .peer, !isServerRunning, lanConfiguration.port >= 0 {
             logger.info("📡 [TransportManager] Starting WebSocket server on port \(lanConfiguration.port)")
             do {
                 try webSocketServer.start(port: lanConfiguration.port)
@@ -714,7 +729,7 @@ public final class TransportManager: ObservableObject {
         }
 
         // Start Bonjour advertising with (possibly updated) port
-        if !isAdvertising, lanConfiguration.port > 0 {
+        if lanRole == .peer, !isAdvertising, lanConfiguration.port > 0 {
             logger.info("📢 [TransportManager] Starting Bonjour advertising on port \(lanConfiguration.port)")
             publisher.start(with: lanConfiguration)
             isAdvertising = true

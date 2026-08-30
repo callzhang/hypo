@@ -109,6 +109,9 @@ jobs:
       
       - name: Install Python dependencies
         run: pip install Pillow
+
+      - name: Install SVG renderer
+        run: brew install librsvg
       
       - name: Build macOS App
         id: build-macos-app
@@ -167,10 +170,12 @@ jobs:
           VERSION="${VERSION#v}"  # Remove 'v' prefix if present
           # Create Info.plist using printf to avoid YAML lint issues with heredoc
           # Include NSServices for "Copy to Hypo" context menu feature
-          # Extract build number from version (e.g., 1.0.7 -> 7)
-          BUILD_NUMBER=$(echo "${VERSION}" | awk -F. '{print $3}')
-          if [ -z "$BUILD_NUMBER" ]; then
-            BUILD_NUMBER="1"  # Fallback if version format is unexpected
+          # Encode SemVer as a monotonically increasing numeric bundle version.
+          # Example: 1.2.0 -> 10200.
+          VERSION_CORE="${VERSION%%-*}"
+          BUILD_NUMBER=$(echo "${VERSION_CORE}" | awk -F. '{print ($1 * 10000) + ($2 * 100) + $3}')
+          if [ -z "$BUILD_NUMBER" ] || [ "$BUILD_NUMBER" -eq 0 ]; then
+            BUILD_NUMBER="10000"  # Fallback if version format is unexpected
           fi
           printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n    <key>CFBundleExecutable</key>\n    <string>HypoMenuBar</string>\n    <key>CFBundleIdentifier</key>\n    <string>com.hypo.clipboard</string>\n    <key>CFBundleName</key>\n    <string>Hypo</string>\n    <key>CFBundlePackageType</key>\n    <string>APPL</string>\n    <key>CFBundleVersion</key>\n    <string>%s</string>\n    <key>CFBundleShortVersionString</key>\n    <string>%s</string>\n    <key>LSMinimumSystemVersion</key>\n    <string>13.0</string>\n    <key>LSUIElement</key>\n    <true/>\n    <key>NSHighResolutionCapable</key>\n    <true/>\n    <key>CFBundleIconFile</key>\n    <string>AppIcon</string>\n    <key>NSPrincipalClass</key>\n    <string>NSApplication</string>\n    <key>HypoBuildConfiguration</key>\n    <string>Release</string>\n    <key>NSServices</key>\n    <array>\n        <dict>\n            <key>NSMenuItem</key>\n            <dict>\n                <key>default</key>\n                <string>Copy to Hypo</string>\n            </dict>\n            <key>NSMessage</key>\n            <string>copyToHypo</string>\n            <key>NSPortName</key>\n            <string>com.hypo.clipboard</string>\n            <key>NSSendTypes</key>\n            <array>\n                <string>NSStringPboardType</string>\n                <string>public.plain-text</string>\n            </array>\n        </dict>\n    </array>\n</dict>\n</plist>\n' "${BUILD_NUMBER}" "${VERSION}" > Hypo.app/Contents/Info.plist
           
@@ -183,18 +188,19 @@ jobs:
             if python3 ../scripts/generate-icons.py 2>&1; then
               echo "✅ Icons generated successfully"
               # Verify icon was created
-              if [ -f "Hypo.app/Contents/Resources/AppIcon.icns" ] || [ -d "Hypo.app/Contents/Resources/AppIcon.iconset" ]; then
+              if [ -f "Hypo.app/Contents/Resources/AppIcon.icns" ]; then
                 echo "✅ Icon file verified"
               else
-                echo "⚠️  Warning: Icon generation reported success but icon file not found"
+                echo "❌ Icon generation reported success but AppIcon.icns was not created"
+                exit 1
               fi
             else
               echo "❌ Icon generation failed"
-              echo "⚠️  App will run without icon"
+              exit 1
             fi
           else
-            echo "⚠️  Icon generation script not found at ../scripts/generate-icons.py"
-            echo "⚠️  App will run without icon"
+            echo "❌ Icon generation script not found at ../scripts/generate-icons.py"
+            exit 1
           fi
           
           END_TIME=$(date +%s)

@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Hypo.Core.Abstractions;
+using Hypo.Core.Client;
 using Hypo.Core.Discovery;
 using Hypo.Core.History;
 using Hypo.Core.Pairing;
@@ -170,13 +171,8 @@ public static class Program
 
     private static async Task<int> RunAsync(ISecretStore store, string deviceId, string deviceName)
     {
-        // Only the GUID-shaped keys are peers: the store also holds this
-        // device's own id and signing key.
-        var peers = store.Keys()
-            .Where(key => Guid.TryParse(key, out _))
-            .ToArray();
-
-        if (peers.Length == 0)
+        var peers = HypoClient.PairedPeers(store);
+        if (peers.Count == 0)
         {
             Console.Error.WriteLine("No paired devices. Run 'hypo pair <device-id>' first.");
             return 1;
@@ -185,46 +181,33 @@ public static class Program
         using var clipboard = new ClipboardListener();
         using var history = new ClipboardHistoryStore(Path.Combine(StateDirectory, "history.db"));
 
-        await using var server = new LanWebSocketServer();
-        await server.StartAsync();
-
-        await using var discovery = new MdnsPeerDiscovery();
-        await discovery.AdvertiseAsync(deviceName, server.BoundPort, new Dictionary<string, string>
-        {
-            ["device_id"] = deviceId,
-            ["version"] = "1.0.0-windows",
-        });
-
-        var cloud = new CloudWebSocketClient(
+        await using var client = HypoClient.Create(
+            clipboard,
+            store,
+            history,
+            deviceId,
+            deviceName,
             RelayOptions.FromEnvironment(deviceId, "windows", searchFrom: AppContext.BaseDirectory));
 
-        // The LAN half is the inbound server here; a peer dials us. Outbound
-        // over the LAN needs a discovered peer, which the tray application will
-        // manage -- for now the relay carries what the LAN cannot.
-        await using var transport = new DualSyncTransport(new ServerTransport(server), cloud);
-
-        var coordinator = new SyncCoordinator(clipboard, transport, store, history, deviceId, deviceName);
-        foreach (var peer in peers)
-        {
-            coordinator.Peers.Add(peer);
-        }
-
-        coordinator.Applied += (_, entry) => Console.WriteLine(
+        client.Coordinator.Applied += (_, entry) => Console.WriteLine(
             $"<- {entry.SourceDeviceName ?? entry.SourceDeviceId}: {Preview(entry)}");
-        coordinator.Dropped += (_, reason) => Console.WriteLine($"   ({reason})");
+        client.Coordinator.Dropped += (_, reason) => Console.WriteLine($"   ({reason})");
+        client.LanPeerConnected += (_, peer) => Console.WriteLine(
+            $"   (LAN: {peer.DisplayName} at {peer.Address}:{peer.Port})");
+        client.RelayError += (_, e) => Console.WriteLine($"   (relay: {e.Error.Code})");
 
         try
         {
-            await transport.ConnectAsync();
+            await client.StartAsync();
         }
-        catch (InvalidOperationException)
+        catch (Exception ex)
         {
-            Console.Error.WriteLine("Neither the LAN nor the relay could be reached.");
+            Console.Error.WriteLine($"Could not start: {ex.Message}");
             return 1;
         }
 
-        Console.WriteLine($"{deviceName} ({deviceId}) syncing with {peers.Length} device(s).");
-        Console.WriteLine($"LAN port {server.BoundPort}. Ctrl+C to stop.");
+        Console.WriteLine($"{deviceName} ({deviceId}) syncing with {peers.Count} device(s).");
+        Console.WriteLine("Ctrl+C to stop.");
 
         await WaitForShutdownAsync();
         return 0;
@@ -262,35 +245,4 @@ public static class Program
             },
             TaskScheduler.Default);
     }
-}
-
-/// <summary>
-/// Presents the inbound LAN server as a transport. It receives but cannot dial,
-/// which is honest about what this build does: outbound LAN needs peer
-/// selection, and until that exists the relay carries what the LAN cannot.
-/// </summary>
-internal sealed class ServerTransport(LanWebSocketServer server) : ISyncTransport
-{
-    public event EventHandler<EnvelopeReceivedEventArgs>? EnvelopeReceived
-    {
-        add => server.EnvelopeReceived += value;
-        remove => server.EnvelopeReceived -= value;
-    }
-
-    public event EventHandler<TransportStateChangedEventArgs>? StateChanged;
-
-    public TransportState State => TransportState.Disconnected;
-
-    public Task ConnectAsync(CancellationToken ct = default)
-    {
-        _ = StateChanged;
-        return Task.CompletedTask;
-    }
-
-    public Task SendAsync(Core.Protocol.SyncEnvelope envelope, CancellationToken ct = default) =>
-        throw new InvalidOperationException("The inbound LAN server cannot originate messages.");
-
-    public Task DisconnectAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

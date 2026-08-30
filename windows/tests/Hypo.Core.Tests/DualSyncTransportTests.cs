@@ -38,8 +38,16 @@ public class DualSyncTransportTests
             return Task.CompletedTask;
         }
 
+        /// <summary>Peers this transport has no route to, as the real LAN reports.</summary>
+        public HashSet<string> Unreachable { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         public Task SendAsync(SyncEnvelope envelope, CancellationToken ct = default)
         {
+            if (envelope.Payload.Target is { } target && Unreachable.Contains(target))
+            {
+                throw new PeerUnreachableException(target);
+            }
+
             Sent.Add(envelope);
             return Task.CompletedTask;
         }
@@ -53,7 +61,7 @@ public class DualSyncTransportTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private static SyncEnvelope Envelope(Guid? id = null) => new()
+    private static SyncEnvelope Envelope(Guid? id = null, string? target = null) => new()
     {
         Id = id ?? Guid.NewGuid(),
         Timestamp = DateTimeOffset.UtcNow,
@@ -63,6 +71,7 @@ public class DualSyncTransportTests
             ContentType = ContentType.Text,
             Ciphertext = [1, 2, 3],
             DeviceId = "bbe296d6-0785-43d2-91b6-b135b72f4c41",
+            Target = target,
             Encryption = new EncryptionMetadata { Nonce = new byte[12], Tag = new byte[16] },
         },
     };
@@ -192,5 +201,85 @@ public class DualSyncTransportTests
 
         Assert.Equal(TransportState.Disconnected, dual.State);
         Assert.Null(dual.PreferredOrigin);
+    }
+
+    [Fact]
+    public async Task FallsBackToTheRelayForAPeerTheLanCannotReach()
+    {
+        // "The LAN is up" says nothing about whether a given device is on it: a
+        // phone on cellular and a laptop next door are both paired, and only one
+        // is reachable.
+        const string OnLan = "aaaaaaaa-0000-0000-0000-000000000001";
+        const string OnCellular = "bbbbbbbb-0000-0000-0000-000000000002";
+
+        var lan = new FakeTransport(TransportOrigin.Lan);
+        var cloud = new FakeTransport(TransportOrigin.Cloud);
+        lan.Unreachable.Add(OnCellular);
+
+        await using var dual = new DualSyncTransport(lan, cloud);
+        await dual.ConnectAsync();
+
+        await dual.SendAsync(Envelope(target: OnLan));
+        await dual.SendAsync(Envelope(target: OnCellular));
+
+        Assert.Equal(OnLan, Assert.Single(lan.Sent).Payload.Target);
+        Assert.Equal(OnCellular, Assert.Single(cloud.Sent).Payload.Target);
+    }
+
+    [Fact]
+    public async Task DoesNotFallBackOnAnOrdinarySendFailure()
+    {
+        // Retrying every failure over the relay would hide a real error behind a
+        // second attempt that quietly succeeds.
+        var lan = new ThrowingTransport();
+        var cloud = new FakeTransport(TransportOrigin.Cloud);
+
+        await using var dual = new DualSyncTransport(lan, cloud);
+        await dual.ConnectAsync();
+
+        await Assert.ThrowsAsync<IOException>(() => dual.SendAsync(Envelope(target: "any")));
+        Assert.Empty(cloud.Sent);
+    }
+
+    [Fact]
+    public async Task SaysWhichPeerCouldNotBeReachedWhenNeitherChannelCan()
+    {
+        const string Peer = "cccccccc-0000-0000-0000-000000000003";
+
+        var lan = new FakeTransport(TransportOrigin.Lan);
+        var cloud = new FakeTransport(TransportOrigin.Cloud);
+        lan.Unreachable.Add(Peer);
+
+        await using var dual = new DualSyncTransport(lan, cloud);
+        lan.SetState(TransportState.Connected);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => dual.SendAsync(Envelope(target: Peer)));
+
+        Assert.Contains(Peer, error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>Fails the way a broken socket does, not the way an absent peer does.</summary>
+    private sealed class ThrowingTransport : ISyncTransport
+    {
+        public event EventHandler<EnvelopeReceivedEventArgs>? EnvelopeReceived;
+        public event EventHandler<TransportStateChangedEventArgs>? StateChanged;
+
+        public TransportState State { get; private set; } = TransportState.Disconnected;
+
+        public Task ConnectAsync(CancellationToken ct = default)
+        {
+            State = TransportState.Connected;
+            StateChanged?.Invoke(this, new TransportStateChangedEventArgs(State, null));
+            _ = EnvelopeReceived;
+            return Task.CompletedTask;
+        }
+
+        public Task SendAsync(SyncEnvelope envelope, CancellationToken ct = default) =>
+            throw new IOException("the socket went away mid-send");
+
+        public Task DisconnectAsync(CancellationToken ct = default) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

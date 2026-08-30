@@ -60,7 +60,11 @@ public sealed class DualSyncTransport : ISyncTransport
                     ? TransportState.Faulted
                     : TransportState.Disconnected;
 
-    /// <summary>Which channel the next send would take, or null if neither can.</summary>
+    /// <summary>
+    /// Which channel a send would prefer, ignoring whether a particular peer is
+    /// reachable on it. <see cref="SendAsync"/> is the authority; this is for
+    /// callers that want to show a status.
+    /// </summary>
     public TransportOrigin? PreferredOrigin =>
         _lan.State == TransportState.Connected ? TransportOrigin.Lan
         : _cloud.State == TransportState.Connected ? TransportOrigin.Cloud
@@ -99,16 +103,44 @@ public sealed class DualSyncTransport : ISyncTransport
         }
     }
 
-    public Task SendAsync(SyncEnvelope envelope, CancellationToken ct = default)
+    /// <summary>
+    /// Sends over the LAN when it can reach this envelope's peer, and over the
+    /// relay otherwise.
+    ///
+    /// <para>The fallback is per peer rather than per transport, because "the LAN
+    /// is up" says nothing about whether a given device is on it -- a phone on
+    /// cellular and a laptop in the next room are both paired, and only one is
+    /// reachable. The LAN reports that with
+    /// <see cref="PeerUnreachableException"/>, and only that: falling back on any
+    /// failure would hide a real send error behind a second attempt that quietly
+    /// succeeds.</para>
+    /// </summary>
+    public async Task SendAsync(SyncEnvelope envelope, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
-        return PreferredOrigin switch
+        if (_lan.State == TransportState.Connected)
         {
-            TransportOrigin.Lan => _lan.SendAsync(envelope, ct),
-            TransportOrigin.Cloud => _cloud.SendAsync(envelope, ct),
-            _ => throw new InvalidOperationException("Neither the LAN nor the relay is connected."),
-        };
+            try
+            {
+                await _lan.SendAsync(envelope, ct).ConfigureAwait(false);
+                return;
+            }
+            catch (PeerUnreachableException)
+            {
+                // This peer is not on the LAN, though others may be.
+            }
+        }
+
+        if (_cloud.State == TransportState.Connected)
+        {
+            await _cloud.SendAsync(envelope, ct).ConfigureAwait(false);
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "Neither the LAN nor the relay can reach " +
+            $"{envelope.Payload.Target ?? "the peer"}.");
     }
 
     public async Task DisconnectAsync(CancellationToken ct = default)

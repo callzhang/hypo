@@ -40,6 +40,9 @@ switch (command)
     case "cloud":
         await CloudAsync(args.ElementAtOrDefault(1), args.ElementAtOrDefault(2));
         break;
+    case "sync":
+        await SyncAsync(args.ElementAtOrDefault(1));
+        break;
     default:
         Console.WriteLine("usage: discover | pair <device-id> | listen");
         break;
@@ -339,6 +342,62 @@ async Task CloudAsync(string? peerDeviceId, string? textToSend)
         });
 
         Console.WriteLine($"Sent {Encoding.UTF8.GetByteCount(textToSend)} bytes to {peerDeviceId}.");
+    }
+
+    Console.WriteLine("Ctrl+C to exit.");
+    await WaitForShutdownAsync();
+}
+
+/// <summary>
+/// Runs the shipping client's composition -- LAN and relay together, through
+/// HypoClient -- with a console clipboard standing in for the Windows one.
+///
+/// This is the only way the Windows client's wiring gets exercised anywhere: it
+/// is the same object graph the application builds, and it can run here.
+///
+/// Usage: sync [text-to-send]
+/// </summary>
+async Task SyncAsync(string? textToSend)
+{
+    using var history = new Hypo.Core.History.ClipboardHistoryStore(
+        Path.Combine(storeDir, "harness-history.db"));
+
+    var clipboard = new Hypo.Harness.ConsoleClipboard();
+
+    await using var client = Hypo.Core.Client.HypoClient.Create(
+        clipboard,
+        store,
+        history,
+        deviceId,
+        deviceName,
+        Hypo.Core.Relay.RelayOptions.FromEnvironment(
+            deviceId, "windows", searchFrom: AppContext.BaseDirectory),
+        lanPort: 0);
+
+    client.Coordinator.Applied += (_, entry) => Console.WriteLine(
+        $"[applied] {entry.Content.ContentType} hash={entry.Content.LogHash} " +
+        $"from={entry.SourceDeviceName ?? entry.SourceDeviceId}: {PreviewContent(entry.Content)}");
+    client.Coordinator.Dropped += (_, reason) => Console.WriteLine($"[dropped] {reason}");
+    client.LanPeerConnected += (_, peer) => Console.WriteLine(
+        $"[lan] {peer.DisplayName} id={peer.DeviceId} instance={peer.InstanceName} at {peer.Address}:{peer.Port}");
+    client.RelayError += (_, e) => Console.WriteLine($"[relay] {e.Error.Code}: {e.Error.Message}");
+
+    await client.StartAsync();
+
+    var peers = Hypo.Core.Client.HypoClient.PairedPeers(store);
+    Console.WriteLine($"Syncing as {deviceName} ({deviceId}) with {peers.Count} paired device(s).");
+
+    if (!string.IsNullOrEmpty(textToSend))
+    {
+        // Through the clipboard, so the outbound path under test is the real one.
+        await Task.Delay(TimeSpan.FromSeconds(6));
+        Console.WriteLine($"[lan peers] {string.Join(", ", client.LanPeers)}");
+        clipboard.Copy(new Hypo.Core.Sync.ClipboardContent
+        {
+            ContentType = ContentType.Text,
+            Data = Encoding.UTF8.GetBytes(textToSend),
+        });
+        Console.WriteLine($"Copied {Encoding.UTF8.GetByteCount(textToSend)} bytes locally.");
     }
 
     Console.WriteLine("Ctrl+C to exit.");

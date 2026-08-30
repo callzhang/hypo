@@ -275,5 +275,21 @@ NSE 解密并写入 `UIPasteboard` → 立即回读校验 → 校验失败则改
 
 ## 11. 未决事项
 
+- **🔴 Swift 侧没有实现配对的应答方,因此 iOS 与 macOS 无法互相配对。**（2026-08-30 实测发现）
+
+  配对是不对称的:一方出示配对码,另一方认领该码并发出 challenge。`RemotePairingViewModel` + `PairingRelayClient` 实现的是**出示码**的那一半——`createPairingCode` / `pollChallenge` / `submitAck`。macOS 用它,iOS 现在也用它。
+
+  另一半从来没有 Swift 实现。后端有对应端点(`POST /pairing/claim`、`POST /pairing/code/{code}/challenge`、`GET .../ack`),Android 的 `PairingRelayClient.kt` 有,Windows 的 .NET harness 有;`shared/HypoCore` 与 `macos/Sources` 里一处都没有。全仓库唯一构造 `PairingChallengeMessage` 的 Swift 代码是 `PairingSessionTests.swift:243` 的测试辅助函数。
+
+  界面文案「Waiting for Android device…」把这件事说得很清楚,只是从没人当真:**能与 macOS 或 iOS 配对的,今天只有 Android**(以及经 LAN 的 .NET harness,但那要求对端在监听,iOS 不监听)。
+
+  **因此本文第 9 节给第 2 期定的验收「模拟器与 macOS 双向同步成功」是当前代码无法满足的**——不是没验证,是缺功能。这个验收标准从写下时就不可达,直到有人真的走一遍配对流程才暴露。
+
+  补齐需要三件事,都超出第 2 期计划范围,应单独立项:
+  1. `PairingRelayClient` 增加 `claimPairingCode` 与 `submitChallenge`
+  2. 一个构造 `PairingChallengeMessage` 的实现(X25519 + AES-GCM,`PairingSession.handleChallenge` 的镜像;可用它做往返测试验证)
+  3. macOS 或 iOS 上一个「输入对方配对码」的入口
+
+
 - **Apple Developer Program 账号**：本文档按已有付费账号设计。若最终只有免费账号，第 3、4 期无法执行（无 App Groups、无 APNs），iOS 端将退化为「仅前台、无扩展」的形态，需重新评审。
 - **分发目标**：TestFlight/App Store 还是仅自用真机。若上架，需额外处理剪贴板相关的审核说明、隐私清单（Privacy Manifest）、本地网络权限文案。

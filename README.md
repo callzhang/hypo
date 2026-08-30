@@ -50,9 +50,9 @@ Hypo enables seamless clipboard synchronization between any devices. Copy on one
                        └────────────────────┘
 ```
 
-The Windows client syncs text and images over both paths today and has no
-graphical interface yet; see [`windows/README.md`](windows/README.md) for what
-is and is not implemented.
+The Windows client syncs text, links, images and files over both paths, from a
+notification-area application; see [`windows/README.md`](windows/README.md) for
+what is and is not implemented.
 
 **See**: [`docs/architecture.mermaid`](docs/architecture.mermaid) for detailed component diagram
 
@@ -132,8 +132,9 @@ dotnet run --project src/Hypo.Windows -- run
 ```
 
 `Hypo.Core` has no Windows APIs and is verified against real devices from any
-machine; the Win32 layer is verified by CI on a Windows runner, which also
-publishes a self-contained build as `hypo-console-win-x64`.
+machine; the Win32 layer is verified by CI on a Windows runner, which publishes
+two self-contained builds: `hypo-app-win-x64` (the tray application) and
+`hypo-console-win-x64` (the console client CI tests against).
 
 ### macOS Client
 

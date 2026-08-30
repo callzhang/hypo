@@ -8,8 +8,7 @@ network and through the relay.
 ## Status
 
 Working: text, links, images and files sync in both directions, over the LAN and
-the relay. There is no graphical interface yet — the client is a console
-program.
+the relay, from a notification-area application.
 
 | Layer | State |
 |-------|-------|
@@ -19,7 +18,7 @@ program.
 | Relay transport, keepalive, reconnect | Done |
 | Clipboard history (SQLite) and content dedup | Done |
 | Windows clipboard: text, links, images, files | Done |
-| Tray icon, history window, settings | Not started |
+| Tray icon, history window, pairing window | Done |
 | MSIX packaging and winget | Not started |
 
 A file from a peer is written under `%LOCALAPPDATA%\Hypo\received` and its path
@@ -43,6 +42,13 @@ ownership, the message loop, and the echo suppression all run there.
 CI publishes `hypo-console-win-x64`, a self-contained build. Nothing here can
 tell you how the client behaves on a logged-in interactive desktop, alongside a
 real clipboard manager, or over hours — download that artifact and use it.
+
+**The tray application is the one part no test covers.** Its logic — what the
+icon means, how history filters, what a pairing failure says — lives in
+`Hypo.Windows` and is tested; the WPF project binds to that and does nothing
+else, which is why the split exists. But whether the icon appears, the menu
+opens, the window is legible or the app survives a display change is not
+established by anything here. Only running it is.
 
 Two defects found by Windows CI that a Mac cannot reproduce are worth knowing
 about if you touch this code:
@@ -81,21 +87,38 @@ local suite cannot tell you.
 
 ## Run
 
+Download `hypo-app-win-x64` from any green CI run and launch `Hypo.exe`. It puts
+an icon in the notification area:
+
+- **Clipboard history…** — search, and double-click an entry to put it back
+- **Pair a device…** — devices running Hypo on this network
+- **Pause syncing** — distinct from being disconnected, and the icon says which
+
+The icon is a coloured dot: green when a device is reachable on this network,
+amber when only the relay is, red when nothing is, grey when paused.
+
+There is also a console client, which is what CI tests against and what to reach
+for when something is wrong:
+
 ```bash
 cd windows && dotnet run --project src/Hypo.Windows -- discover
 ```
 
-`discover` lists peers on the network, `pair <device-id>` pairs with one, and
-`run` syncs. State lives in `%LOCALAPPDATA%\Hypo`: keys, this device's id, and
-`history.db`.
+`discover` lists peers, `pair <device-id>` pairs with one, `run` syncs.
+
+State lives in `%LOCALAPPDATA%\Hypo`: keys, this device's id, `history.db`, and
+`received\` for files that arrive from a peer.
 
 ## Layout
 
 - `src/Hypo.Core` — protocol, crypto, discovery, pairing, both transports,
   history, and the sync coordinator. `net10.0`, no Windows APIs. Keep it that
   way: it is what lets the protocol be verified against real devices from a Mac.
-- `src/Hypo.Windows` — `net10.0-windows`. The Win32 clipboard and the console
-  entry point, and nothing else.
+- `src/Hypo.Windows` — `net10.0-windows`, no WPF. The Win32 clipboard, the
+  console entry point, and the application's presentation logic (`App/`), which
+  lives here precisely so it can be tested.
+- `src/Hypo.Windows.App` — the WPF shell: tray icon, two windows, wiring. Keep
+  logic out of it; it is the only code here nothing can verify.
 - `tools/Hypo.Harness` — a console tool for driving discovery, pairing and sync
   against real peers. Its `sync` command builds the same `HypoClient` the
   application does, which is how that composition gets exercised off Windows.

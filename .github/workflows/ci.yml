@@ -168,15 +168,11 @@ jobs:
       - name: Build HypoCore for macOS
         working-directory: shared/HypoCore
         run: swift build
+      # Via the wrapper, not xcodebuild directly: xcodebuild prints
+      # "** TEST SUCCEEDED **" and exits 0 even when Swift Testing tests fail,
+      # because it only tallies XCTest results and these packages have none.
       - name: Run HypoCore tests on iOS Simulator
-        working-directory: shared/HypoCore
-        run: |
-          xcodebuild test \
-            -scheme HypoCore \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
-            -skipMacroValidation \
-            -enableCodeCoverage NO \
-            -parallel-testing-enabled NO
+        run: ./scripts/run-ios-tests.sh shared/HypoCore HypoCore 'iPhone 16'
       - name: Build HypoiOS for iOS Simulator
         working-directory: shared/HypoiOS
         run: |
@@ -185,14 +181,7 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -skipMacroValidation
       - name: Run HypoiOS tests on iOS Simulator
-        working-directory: shared/HypoiOS
-        run: |
-          xcodebuild test \
-            -scheme HypoiOS \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
-            -skipMacroValidation \
-            -enableCodeCoverage NO \
-            -parallel-testing-enabled NO
+        run: ./scripts/run-ios-tests.sh shared/HypoiOS HypoiOS 'iPhone 16'
   windows-tests:
     name: Windows Core Tests
     runs-on: windows-latest

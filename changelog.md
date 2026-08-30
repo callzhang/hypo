@@ -11,6 +11,8 @@ All notable changes to the Hypo project will be documented in this file.
 - **Windows Console Client**: Added a native clipboard client with pairing, LAN discovery, cloud relay transport, persistent credentials, deduplication, and real clipboard synchronization.
 
 ### Fixed
+- **Android System Navigation Chrome**: Explicitly removed the navigation-bar divider in both the launch theme and runtime window configuration so ColorOS does not inherit a light line below the app.
+- **Android Settings Navigation**: Added a visible, accessible back button to the Settings top bar that returns to clipboard history.
 - **Android History Window Chrome**: Replaced the vertically clipped Material search bar with a 40dp single-line compact field, and extended the themed Scaffold background behind transparent system bars while preserving safe content insets to remove the separate white navigation strip.
 - **Android Brand Icons**: Adaptive launcher icons now use the full Hypo blue-to-purple background with only the layered oval mark in the foreground, and the Quick Settings tile uses the matching monochrome Hypo silhouette instead of a generic clipboard glyph.
 - **Cross-Device Clipboard Echo Loop**: Duplicate LAN/cloud deliveries are discarded on Android without replaying history rows, repeated remote content already at the top no longer triggers delete/reinsert flicker, and macOS no longer rebroadcasts identical content when only the pasteboard generation changes.

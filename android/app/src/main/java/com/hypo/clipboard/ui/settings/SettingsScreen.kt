@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
@@ -51,6 +52,7 @@ import com.hypo.clipboard.util.MiuiAdapter
 
 @Composable
 fun SettingsRoute(
+    onBack: () -> Unit,
     onOpenBatterySettings: () -> Unit,
     onRequestSmsPermission: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -60,6 +62,7 @@ fun SettingsRoute(
     val state by viewModel.state.collectAsState()
     SettingsScreen(
         state = state,
+        onBack = onBack,
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
         onOpenBatterySettings = onOpenBatterySettings,
         onRequestSmsPermission = onRequestSmsPermission,
@@ -75,6 +78,7 @@ fun SettingsRoute(
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
+    onBack: () -> Unit,
     onHistoryLimitChanged: (Int) -> Unit,
     onOpenBatterySettings: () -> Unit,
     onRequestSmsPermission: () -> Unit,
@@ -87,7 +91,17 @@ fun SettingsScreen(
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(text = stringResource(id = R.string.settings_title)) })
+            TopAppBar(
+                title = { Text(text = stringResource(id = R.string.settings_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(id = R.string.navigate_back)
+                        )
+                    }
+                }
+            )
         }
     ) { innerPadding ->
         LazyColumn(

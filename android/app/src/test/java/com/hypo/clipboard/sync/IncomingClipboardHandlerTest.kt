@@ -90,7 +90,7 @@ class IncomingClipboardHandlerTest {
         advanceUntilIdle()
         
         coVerify(exactly = 1) { syncEngine.decode(any()) }
-        coVerify(exactly = 2) { syncCoordinator.onClipboardEvent(any()) } // Second call uses cache to move to top
+        coVerify(exactly = 1) { syncCoordinator.onClipboardEvent(any()) }
     }
 
     @Test

@@ -1,50 +1,79 @@
 package com.hypo.clipboard
 
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.graphics.drawable.Icon
-import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import com.hypo.clipboard.service.ClipboardServiceStartReason
+import com.hypo.clipboard.service.ClipboardServiceStarter
+import com.hypo.clipboard.service.ClipboardSyncService
 
-/** Quick Settings action that brings the Hypo history screen to the foreground. */
+/** Quick Settings toggle for the Hypo background clipboard sync service. */
 class QuickSettingsTileService : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
         qsTile?.apply {
             label = getString(R.string.quick_settings_tile_label)
-            icon = Icon.createWithResource(this@QuickSettingsTileService, R.drawable.ic_launcher_foreground)
-            state = Tile.STATE_INACTIVE
+            icon = Icon.createWithResource(this@QuickSettingsTileService, R.drawable.ic_quick_settings)
+            state = if (QuickSettingsTileState.isEnabled(this@QuickSettingsTileService)) {
+                Tile.STATE_ACTIVE
+            } else {
+                Tile.STATE_INACTIVE
+            }
             updateTile()
         }
     }
 
-    @Suppress("DEPRECATION")
     override fun onClick() {
         super.onClick()
 
-        val launchIntent = createLaunchIntent(this)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            val pendingIntent = PendingIntent.getActivity(
-                this,
-                0,
-                launchIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val currentlyEnabled = QuickSettingsTileState.isEnabled(this)
+        if (currentlyEnabled) {
+            ClipboardServiceStarter.start(
+                context = this,
+                reason = ClipboardServiceStartReason.QUICK_SETTINGS,
+                action = ClipboardSyncService.ACTION_STOP,
+                scheduleRecoveryOnFailure = false
             )
-            startActivityAndCollapse(pendingIntent)
+            QuickSettingsTileState.setEnabled(this, false)
         } else {
-            startActivityAndCollapse(launchIntent)
+            val started = ClipboardServiceStarter.start(
+                context = this,
+                reason = ClipboardServiceStartReason.QUICK_SETTINGS,
+                scheduleRecoveryOnFailure = false
+            )
+            if (started) {
+                QuickSettingsTileState.setEnabled(this, true)
+            }
         }
+
+        qsTile?.state = if (QuickSettingsTileState.isEnabled(this)) {
+            Tile.STATE_ACTIVE
+        } else {
+            Tile.STATE_INACTIVE
+        }
+        qsTile?.updateTile()
     }
 
     internal companion object {
-        fun createLaunchIntent(context: Context): Intent =
-            Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
+        fun nextTileState(currentState: Int): Int =
+            if (currentState == Tile.STATE_ACTIVE) Tile.STATE_INACTIVE else Tile.STATE_ACTIVE
+    }
+}
+
+internal object QuickSettingsTileState {
+    private const val PREFS_NAME = "quick_settings_tile"
+    private const val KEY_SERVICE_ENABLED = "service_enabled"
+
+    fun isEnabled(context: Context): Boolean = context
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .getBoolean(KEY_SERVICE_ENABLED, false)
+
+    fun setEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SERVICE_ENABLED, enabled)
+            .apply()
     }
 }

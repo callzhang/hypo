@@ -32,6 +32,10 @@ public final class ClipboardMonitor {
     private let deviceId: UUID
     private let platform: DevicePlatform
     private let deviceName: String
+    // Some clipboard providers rewrite identical content and increment the
+    // pasteboard generation. Keep the last captured content so that a remote
+    // write cannot become an endless local re-broadcast loop.
+    private var lastCapturedContent: ClipboardContent?
     public weak var delegate: ClipboardMonitorDelegate?
     
     public init(
@@ -103,17 +107,13 @@ public final class ClipboardMonitor {
         // so we need to prioritize image detection before file detection
         if let imageEntry = captureImage(types: types) {
             logger.info("📋 [ClipboardMonitor] Captured image, calling delegate...")
-            delegate?.clipboardMonitor(self, didCapture: imageEntry)
-            logger.info("📋 [ClipboardMonitor] Delegate called for image")
-            return imageEntry
+            return deliverIfNew(imageEntry)
         }
 
         // Check for files - non-image files (files that aren't images)
         if let fileEntry = captureFile(types: types) {
             logger.info("📋 [ClipboardMonitor] Captured file, calling delegate...")
-            delegate?.clipboardMonitor(self, didCapture: fileEntry)
-            logger.info("📋 [ClipboardMonitor] Delegate called for file")
-            return fileEntry
+            return deliverIfNew(fileEntry)
         }
 
         // Check for URLs (links)
@@ -127,9 +127,7 @@ public final class ClipboardMonitor {
                 transportOrigin: nil  // Explicitly nil for local copies
             )
             logger.info("📋 [ClipboardMonitor] Captured local link: \(url.absoluteString.prefix(50)), calling delegate...")
-            delegate?.clipboardMonitor(self, didCapture: entry)
-            logger.info("📋 [ClipboardMonitor] Delegate called for link")
-            return entry
+            return deliverIfNew(entry)
         }
 
         // Check for plain text LAST - this catches text that isn't a file path or URL
@@ -143,9 +141,7 @@ public final class ClipboardMonitor {
                 transportOrigin: nil  // Explicitly nil for local copies
             )
             logger.info("📋 [ClipboardMonitor] Captured local text: \(string.prefix(50)), calling delegate...")
-            delegate?.clipboardMonitor(self, didCapture: entry)
-            logger.info("📋 [ClipboardMonitor] Delegate called for text")
-            return entry
+            return deliverIfNew(entry)
         }
         
         return nil
@@ -155,6 +151,17 @@ public final class ClipboardMonitor {
     /// This is called after IncomingClipboardHandler applies a received clipboard
     public func updateChangeCount() {
         changeCount = pasteboard.changeCount
+    }
+
+    private func deliverIfNew(_ entry: ClipboardEntry) -> ClipboardEntry? {
+        guard lastCapturedContent != entry.content else {
+            logger.info("⏭️ [ClipboardMonitor] Ignoring identical content after pasteboard generation change")
+            return nil
+        }
+        lastCapturedContent = entry.content
+        delegate?.clipboardMonitor(self, didCapture: entry)
+        logger.info("📋 [ClipboardMonitor] Delegate called for \(entry.content.title.lowercased())")
+        return entry
     }
 
     private func captureImage(types: [NSPasteboard.PasteboardType]) -> ClipboardEntry? {

@@ -18,7 +18,7 @@ class QuickSettingsTileManifestTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
 
     @Test
-    fun `quick settings tile is registered to open Hypo`() {
+    fun `quick settings tile is registered for the background sync service`() {
         val tileService = context.packageManager
             .queryIntentServices(
                 Intent(TileService.ACTION_QS_TILE),
@@ -33,5 +33,18 @@ class QuickSettingsTileManifestTest {
             tileService.permission
         )
         assertTrue(tileService.exported, "Quick Settings must be able to bind the tile")
+    }
+
+    @Test
+    fun `quick settings tile uses a dedicated monochrome icon`() {
+        val tileService = context.packageManager
+            .queryIntentServices(
+                Intent(TileService.ACTION_QS_TILE),
+                PackageManager.MATCH_ALL
+            )
+            .first { it.serviceInfo.name == "com.hypo.clipboard.QuickSettingsTileService" }
+            .serviceInfo
+
+        assertEquals(R.drawable.ic_quick_settings, tileService.icon)
     }
 }

@@ -13,6 +13,7 @@ import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Cloud
@@ -55,8 +58,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,6 +65,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import android.graphics.BitmapFactory
 import java.util.Base64
 import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -82,6 +84,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hypo.clipboard.R
 import com.hypo.clipboard.domain.model.ClipboardItem
@@ -90,14 +93,18 @@ import com.hypo.clipboard.util.SizeConstants
 import com.hypo.clipboard.util.formattedAsKB
 import com.hypo.clipboard.domain.model.TransportOrigin
 import com.hypo.clipboard.transport.ConnectionState
-import com.hypo.clipboard.ui.components.ConnectionStatusBadge
+import com.hypo.clipboard.ui.components.ConnectionStatusIcon
+import com.hypo.clipboard.ui.components.connectionStatusIconTint
 import com.hypo.clipboard.util.TempFileManager
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CoroutineScope
 
 @Composable
-fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.hiltViewModel()) {
+fun HistoryRoute(
+    onOpenSettings: () -> Unit,
+    viewModel: HistoryViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+) {
     val state by viewModel.state.collectAsState()
     HistoryScreen(
         items = state.items,
@@ -105,11 +112,13 @@ fun HistoryRoute(viewModel: HistoryViewModel = androidx.hilt.navigation.compose.
         currentDeviceId = viewModel.currentDeviceId,
         connectionState = state.connectionState,
         viewModel = viewModel,
-        onQueryChange = viewModel::onQueryChange
+        onQueryChange = viewModel::onQueryChange,
+        onOpenSettings = onOpenSettings
     )
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun HistoryScreen(
     items: List<ClipboardItem>,
     query: String,
@@ -117,6 +126,7 @@ fun HistoryScreen(
     connectionState: ConnectionState,
     viewModel: HistoryViewModel,
     onQueryChange: (String) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -131,41 +141,45 @@ fun HistoryScreen(
             clipboardManager = clipboardManager
         )
     }
-    
-    
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = stringResource(id = R.string.history_title),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            ConnectionStatusBadge(connectionState = connectionState)
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                CompactHistorySearchField(
+                    query = query,
+                    onQueryChange = onQueryChange,
+                    modifier = Modifier
+                        .widthIn(max = historySearchBarMaxWidthDp.dp)
+                        .height(historySearchBarHeightDp.dp)
+                )
+            }
+            IconButton(onClick = {}) {
+                ConnectionStatusIcon(
+                    connectionState = connectionState,
+                    tint = connectionStatusIconTint(
+                        connectionState = connectionState,
+                        defaultTint = null,
+                        cloudTint = MaterialTheme.colorScheme.primary
+                    )
+                )
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = stringResource(id = R.string.settings_title)
+                )
+            }
         }
-
-        TextField(
-            value = query,
-            onValueChange = onQueryChange,
-            leadingIcon = { Icon(imageVector = Icons.Filled.Search, contentDescription = null) },
-            placeholder = { Text(text = stringResource(id = R.string.history_search_hint)) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            singleLine = true,
-            colors = TextFieldDefaults.colors(
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-        )
 
         if (items.isEmpty()) {
             EmptyHistory()
@@ -233,6 +247,78 @@ fun HistoryScreen(
             }
         }
     }
+}
+
+internal enum class HistoryTopBarAction {
+    SEARCH,
+    CONNECTION_STATUS,
+    SETTINGS
+}
+
+internal fun historyTopBarActions(): List<HistoryTopBarAction> = listOf(
+    HistoryTopBarAction.SEARCH,
+    HistoryTopBarAction.CONNECTION_STATUS,
+    HistoryTopBarAction.SETTINGS
+)
+
+internal const val historySearchBarHeightDp: Int = 40
+internal const val historySearchBarMaxWidthDp: Int = 240
+internal const val historySearchFieldSingleLine: Boolean = true
+internal const val historyShowsTitle: Boolean = false
+
+@Composable
+private fun CompactHistorySearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    BasicTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        singleLine = historySearchFieldSingleLine,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(
+            color = MaterialTheme.colorScheme.onSurface
+        ),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        modifier = modifier,
+        decorationBox = { innerTextField ->
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = stringResource(id = R.string.history_search_hint),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
+            }
+        }
+    )
 }
 
 @Composable

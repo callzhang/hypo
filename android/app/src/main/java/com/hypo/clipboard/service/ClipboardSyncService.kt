@@ -82,6 +82,7 @@ class ClipboardSyncService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        com.hypo.clipboard.QuickSettingsTileState.setEnabled(this, true)
         if (!isInitialized) {
             startSyncComponents()
         }
@@ -246,6 +247,7 @@ class ClipboardSyncService : Service() {
 
     override fun onDestroy() {
         val shouldScheduleRestart = !stopRequestedByUser
+        com.hypo.clipboard.QuickSettingsTileState.setEnabled(this, false)
         shutdownForRemoval("onDestroy")
         
         transportManager.clearPeerStatusChangedHandler()
@@ -1087,7 +1089,7 @@ class ClipboardSyncService : Service() {
         private const val ACTION_PAUSE = "com.hypo.clipboard.action.PAUSE"
         private const val ACTION_RESUME = "com.hypo.clipboard.action.RESUME"
         private const val ACTION_OPEN_CLIPBOARD_SETTINGS = "com.hypo.clipboard.action.OPEN_CLIPBOARD_SETTINGS"
-        private const val ACTION_STOP = "com.hypo.clipboard.action.STOP"
+        const val ACTION_STOP = "com.hypo.clipboard.action.STOP"
         const val ACTION_FORCE_PROCESS_CLIPBOARD = "com.hypo.clipboard.action.FORCE_PROCESS_CLIPBOARD"
     }
 }

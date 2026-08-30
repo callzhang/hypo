@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.hypo.clipboard.R
@@ -24,7 +25,47 @@ import com.hypo.clipboard.transport.ConnectionState
 
 @Composable
 fun ConnectionStatusBadge(connectionState: ConnectionState, modifier: Modifier = Modifier) {
-    val visuals = when (connectionState) {
+    val visuals = statusVisuals(connectionState)
+
+    Row(
+        modifier = modifier
+            .background(visuals.containerColor, RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(imageVector = visuals.icon, contentDescription = null, tint = visuals.contentColor)
+        Text(
+            text = stringResource(id = visuals.textRes),
+            style = MaterialTheme.typography.labelMedium,
+            color = visuals.contentColor
+        )
+    }
+}
+
+@Composable
+fun ConnectionStatusIcon(
+    connectionState: ConnectionState,
+    modifier: Modifier = Modifier,
+    tint: Color? = null
+) {
+    val visuals = statusVisuals(connectionState)
+    Icon(
+        imageVector = visuals.icon,
+        contentDescription = stringResource(id = visuals.textRes),
+        tint = tint ?: visuals.contentColor,
+        modifier = modifier
+    )
+}
+
+internal fun connectionStatusIconTint(
+    connectionState: ConnectionState,
+    defaultTint: Color?,
+    cloudTint: Color
+): Color? = if (connectionState == ConnectionState.ConnectedCloud) cloudTint else defaultTint
+
+@Composable
+private fun statusVisuals(connectionState: ConnectionState): StatusVisuals = when (connectionState) {
         ConnectionState.ConnectedLan -> StatusVisuals(
             icon = Icons.Filled.Wifi,
             textRes = R.string.status_lan,
@@ -55,22 +96,6 @@ fun ConnectionStatusBadge(connectionState: ConnectionState, modifier: Modifier =
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
-    }
-
-    Row(
-        modifier = modifier
-            .background(visuals.containerColor, RoundedCornerShape(16.dp))
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Icon(imageVector = visuals.icon, contentDescription = null, tint = visuals.contentColor)
-        Text(
-            text = stringResource(id = visuals.textRes),
-            style = MaterialTheme.typography.labelMedium,
-            color = visuals.contentColor
-        )
-    }
 }
 
 private data class StatusVisuals(

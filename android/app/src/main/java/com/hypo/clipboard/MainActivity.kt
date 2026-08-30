@@ -12,22 +12,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.hypo.clipboard.service.ClipboardServiceStartReason
 import com.hypo.clipboard.service.ClipboardServiceStarter
@@ -87,52 +80,34 @@ class MainActivity : ComponentActivity() {
             }
         }
         
-        // Configure status bar for white background: use dark icons and text
-        // This makes status bar icons dark (visible on white background)
+        configureEdgeToEdgeWindow(window)
+
+        // Use dark system-bar icons on the current light application theme.
         val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
         windowInsetsController.isAppearanceLightStatusBars = true
+        windowInsetsController.isAppearanceLightNavigationBars = true
         
         ClipboardServiceStarter.start(this, ClipboardServiceStartReason.APP_LAUNCH)
 
         setContent {
             HypoTheme {
                 val navController = rememberNavController()
-                val destinations = listOf(AppDestination.History, AppDestination.Settings)
-                val backStackEntry by navController.currentBackStackEntryAsState()
-                val currentRoute = backStackEntry?.destination?.route ?: AppDestination.History.route
 
                 Scaffold(
-                    bottomBar = {
-                        NavigationBar {
-                            destinations.forEach { destination ->
-                                NavigationBarItem(
-                                    selected = currentRoute == destination.route,
-                                    onClick = {
-                                        if (currentRoute != destination.route) {
-                                            navController.navigate(destination.route) {
-                                                popUpTo(AppDestination.History.route)
-                                                launchSingleTop = true
-                                            }
-                                        }
-                                    },
-                                    icon = {
-                                        Icon(imageVector = destination.icon, contentDescription = null)
-                                    },
-                                    label = { Text(text = stringResource(id = destination.labelRes)) }
-                                )
-                            }
-                        }
-                    }
+                    containerColor = MaterialTheme.colorScheme.background,
+                    contentWindowInsets = WindowInsets.safeDrawing
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,
-                        startDestination = AppDestination.History.route,
+                        startDestination = HISTORY_ROUTE,
                         modifier = Modifier.padding(innerPadding)
                     ) {
-                        composable(AppDestination.History.route) {
-                            HistoryRoute()
+                        composable(HISTORY_ROUTE) {
+                            HistoryRoute(onOpenSettings = {
+                                navController.navigate(SETTINGS_ROUTE)
+                            })
                         }
-                        composable(AppDestination.Settings.route) {
+                        composable(SETTINGS_ROUTE) {
                             SettingsRoute(
                                 onOpenBatterySettings = ::openBatterySettings,
                                 onRequestSmsPermission = ::requestSmsPermission,
@@ -214,11 +189,5 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private sealed class AppDestination(
-    val route: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-    @androidx.annotation.StringRes val labelRes: Int
-) {
-    data object History : AppDestination("history", Icons.Filled.History, R.string.history_title)
-    data object Settings : AppDestination("settings", Icons.Filled.Settings, R.string.settings_title)
-}
+private const val HISTORY_ROUTE = "history"
+private const val SETTINGS_ROUTE = "settings"

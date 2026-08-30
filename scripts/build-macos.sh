@@ -368,7 +368,12 @@ fi
 
 # Inject RELAY_WS_AUTH_TOKEN from .env if available
 ENV_FILE="$PROJECT_ROOT/.env"
-if [ -f "$ENV_FILE" ]; then
+# Prefer an explicitly supplied environment variable. This keeps isolated
+# worktrees from needing a second copy of the repository's secret-bearing .env.
+AUTH_TOKEN="${RELAY_WS_AUTH_TOKEN:-}"
+if [ -n "$AUTH_TOKEN" ]; then
+    log_info "Using RELAY_WS_AUTH_TOKEN from environment..."
+elif [ -f "$ENV_FILE" ]; then
     # Load .env variables cleanly
     set +e
     while IFS='=' read -r key value || [ -n "$key" ]; do
@@ -384,25 +389,32 @@ if [ -f "$ENV_FILE" ]; then
         fi
     done < "$ENV_FILE"
     set -e
-    
-    if [ -n "$AUTH_TOKEN" ]; then
-        log_info "Injecting RELAY_WS_AUTH_TOKEN into Info.plist..."
-        if command -v plutil &> /dev/null; then
-            plutil -replace RelayWsAuthToken -string "$AUTH_TOKEN" "$APP_BUNDLE/Contents/Info.plist"
-        else
-            # Fallback for systems without plutil (unlikely on macOS)
-            if grep -q "RelayWsAuthToken" "$APP_BUNDLE/Contents/Info.plist"; then
-                 sed -i '' "s/<string>.*<\/string>.*RelayWsAuthToken/<string>$AUTH_TOKEN<\/string>/" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
-            else
-                 sed -i '' "s|</dict>|    <key>RelayWsAuthToken</key>\n    <string>$AUTH_TOKEN</string>\n</dict>|" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
-            fi
-        fi
-        log_success "Injected Auth Token"
-    else
-        log_warn "RELAY_WS_AUTH_TOKEN not found in .env"
-    fi
 else
     log_warn ".env file not found at $ENV_FILE"
+fi
+
+if [ -n "$AUTH_TOKEN" ]; then
+    log_info "Injecting RELAY_WS_AUTH_TOKEN into Info.plist..."
+    if command -v plutil &> /dev/null; then
+        # Use `-insert` for a newly-created bundle. Some macOS plutil
+        # versions return success for `-replace` even when the key is
+        # absent, so checking the key explicitly is more reliable.
+        if plutil -extract RelayWsAuthToken raw -o - "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1; then
+            plutil -replace RelayWsAuthToken -string "$AUTH_TOKEN" "$APP_BUNDLE/Contents/Info.plist"
+        else
+            plutil -insert RelayWsAuthToken -string "$AUTH_TOKEN" "$APP_BUNDLE/Contents/Info.plist"
+        fi
+    else
+        # Fallback for systems without plutil (unlikely on macOS)
+        if grep -q "RelayWsAuthToken" "$APP_BUNDLE/Contents/Info.plist"; then
+             sed -i '' "s/<string>.*<\/string>.*RelayWsAuthToken/<string>$AUTH_TOKEN<\/string>/" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+        else
+             sed -i '' "s|</dict>|    <key>RelayWsAuthToken</key>\n    <string>$AUTH_TOKEN</string>\n</dict>|" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+        fi
+    fi
+    log_success "Injected Auth Token"
+else
+    log_warn "RELAY_WS_AUTH_TOKEN not found"
 fi
 
 # Clean resource forks and extended attributes aggressively before signing

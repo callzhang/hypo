@@ -46,6 +46,23 @@ struct ClipboardMonitorTests {
 
     @Test
     @MainActor
+    func testDoesNotRecaptureSameContentWhenPasteboardGenerationChanges() {
+        let pasteboard = MockPasteboard()
+        let monitor = makeMonitor(pasteboard: pasteboard, throttle: TokenBucket(capacity: 10, refillInterval: 0.01))
+        let delegate = CapturingDelegate()
+        monitor.delegate = delegate
+
+        pasteboard.setString("Repeated remote content", for: .string)
+        #expect(monitor.evaluatePasteboard() != nil)
+
+        // Some clipboard providers rewrite identical content and increment changeCount.
+        pasteboard.changeCount += 1
+        #expect(monitor.evaluatePasteboard() == nil)
+        #expect(delegate.entries.count == 1)
+    }
+
+    @Test
+    @MainActor
     func testCapturesFileMetadataWithinLimit() throws {
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let data = Data(repeating: 0xA, count: 2048)

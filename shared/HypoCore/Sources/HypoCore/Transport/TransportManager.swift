@@ -818,20 +818,28 @@ public final class TransportManager: ObservableObject {
                 try? await Task.sleep(nanoseconds: interval)
                 if Task.isCancelled { break }
                 
+                // All three checks below are about listening and advertising,
+                // which a .clientOnly device deliberately does not do. Without
+                // the role in the condition this loop asserts every 30 seconds
+                // that something is broken, calls activateLanServices() to no
+                // effect, and would start a listener on iOS the moment anyone
+                // touched the guards in there.
+                let shouldServe = self.lanRole == .peer
+
                 // Check if advertising should be active but isn't
-                if self.lanConfiguration.port > 0 && !self.isAdvertising {
+                if shouldServe && self.lanConfiguration.port > 0 && !self.isAdvertising {
                     self.logger.warning("⚠️ [TransportManager] Health check: Advertising should be active but isn't. Restarting...")
                     await self.activateLanServices()
                 }
                 
                 // Check if WebSocket server should be running but isn't
-                if self.lanConfiguration.port > 0 && !self.isServerRunning {
+                if shouldServe && self.lanConfiguration.port > 0 && !self.isServerRunning {
                     self.logger.warning("⚠️ [TransportManager] Health check: WebSocket server should be running but isn't. Restarting...")
                     await self.activateLanServices()
                 }
                 
                 // Verify publisher is still active (check currentEndpoint)
-                if self.isAdvertising, self.publisher.currentEndpoint == nil {
+                if shouldServe, self.isAdvertising, self.publisher.currentEndpoint == nil {
                     self.logger.warning("⚠️ [TransportManager] Health check: Publisher endpoint is nil but isAdvertising=true. Restarting...")
                     await self.activateLanServices()
                 }

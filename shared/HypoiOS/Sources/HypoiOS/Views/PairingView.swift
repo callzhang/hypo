@@ -10,13 +10,26 @@ public struct PairingView: View {
         self.relayHint = relayHint
     }
 
+    /// The code is carried by two states, not one: the session moves from
+    /// .displaying to .awaitingChallenge as soon as the relay accepts it, and
+    /// both hold the code. Rendering only .displaying made the code flash up
+    /// and vanish before it could be read or typed anywhere.
+    private var visibleCode: String? {
+        switch viewModel.state {
+        case .displaying(let code, _), .awaitingChallenge(let code, _):
+            return code
+        default:
+            return nil
+        }
+    }
+
     public var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
                 Text(viewModel.statusMessage)
                     .multilineTextAlignment(.center)
 
-                if case let .displaying(code, _) = viewModel.state {
+                if let code = visibleCode {
                     Text(code)
                         .font(.system(size: 44, weight: .bold, design: .monospaced))
                         .textSelection(.enabled)

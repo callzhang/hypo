@@ -23,7 +23,14 @@ public struct RootView: View {
             HistoryListView(viewModel: historyViewModel)
                 .tabItem { Label("History", systemImage: "list.bullet") }
 
-            PairingView(viewModel: pairingViewModel, relayHint: nil)
+            // pairingParameters() is where macOS gets this too. Passing nil —
+            // which the plan called for — makes RemotePairingViewModel fail
+            // immediately with "Relay configuration missing", so pairing could
+            // never have succeeded.
+            PairingView(
+                viewModel: pairingViewModel,
+                relayHint: context.transportManager.pairingParameters().relayHint
+            )
                 .tabItem { Label("Pair", systemImage: "link") }
 
             SettingsView(

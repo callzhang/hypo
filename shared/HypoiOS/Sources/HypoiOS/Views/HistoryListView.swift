@@ -46,28 +46,14 @@ public struct HistoryListView: View {
             list
         }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 6) {
-                if let message = sendStatusMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                // The system paste control is the only way to read the
-                // clipboard on iOS without interrupting the user with a
-                // permission prompt, so sending starts here rather than from a
-                // background poll the way Android does it. Its label is drawn
-                // by the system and cannot be changed, so the caption has to
-                // carry the meaning.
-                PasteButton { text in
-                    Task { await viewModel.sendText(text) }
-                }
-                Text("Send what you copied to your other devices")
-                    .font(.caption2)
+            if let message = sendStatusMessage {
+                Text(message)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(.bar)
             }
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(.bar)
         }
         .task { await viewModel.load() }
     }

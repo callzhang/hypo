@@ -12,6 +12,7 @@ public struct RootView: View {
     @StateObject private var pairingViewModel: RemotePairingViewModel
     @StateObject private var claimViewModel: ClaimPairingCodeViewModel
     @State private var showingSettings = false
+    @Environment(\.scenePhase) private var scenePhase
 
     public init(context: HypoiOSContext) {
         self.context = context
@@ -37,6 +38,13 @@ public struct RootView: View {
                 transportManager: context.transportManager,
                 onOpenSettings: { showingSettings = true }
             )
+            // The same trigger Android uses in onResume: neither platform can
+            // watch the clipboard from the background, so both check on the way
+            // back to the foreground.
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                Task { await historyViewModel.sendClipboardIfChanged() }
+            }
             .navigationDestination(isPresented: $showingSettings) {
                 SettingsView(
                     context: context,

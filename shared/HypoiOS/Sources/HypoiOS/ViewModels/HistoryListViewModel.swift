@@ -16,15 +16,29 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
     private let store: HistoryStore
     private let transportManager: TransportManager?
     private let identity: DeviceIdentityProviding?
+    private let clipboard: UIKitClipboard?
 
     public init(
         store: HistoryStore,
         transportManager: TransportManager? = nil,
-        identity: DeviceIdentityProviding? = nil
+        identity: DeviceIdentityProviding? = nil,
+        clipboard: UIKitClipboard? = nil
     ) {
         self.store = store
         self.transportManager = transportManager
         self.identity = identity
+        self.clipboard = clipboard
+    }
+
+    /// Sends whatever was copied while the app was away.
+    ///
+    /// Called when the app becomes active, which is the same moment Android
+    /// checks the clipboard in onResume — neither platform can watch it from
+    /// the background. Does nothing when this app wrote the current contents,
+    /// so an entry that just arrived is not sent straight back.
+    public func sendClipboardIfChanged() async {
+        guard let clipboard, let text = await clipboard.readForegroundText() else { return }
+        await sendText(text)
     }
 
     /// Filtered through `ClipboardEntry.matches(query:)`, the same predicate the

@@ -110,4 +110,22 @@ struct UIKitClipboardTests {
         #expect(clipboard.currentText() == nil)
         #expect(clipboard.containsImage() == false)
     }
+
+    @Test("nothing is offered for sending when we wrote the contents ourselves")
+    @MainActor
+    func foregroundReadSkipsOurOwnWrites() async {
+        let clipboard = UIKitClipboard()
+
+        clipboard.writeText("something that just arrived from a peer")
+
+        // Returns before touching the pasteboard, which is what stops an entry
+        // that just arrived from being sent straight back to the device it
+        // came from.
+        #expect(await clipboard.readForegroundText() == nil)
+    }
+
+    // The other branch — reading content another app wrote — cannot be
+    // exercised here. A test bundle has no host app, so the pasteboard read
+    // waits on a prompt that has nowhere to appear and never returns. It is
+    // covered by running the app.
 }

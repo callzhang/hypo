@@ -57,7 +57,8 @@ public final class HypoiOSContext {
         let viewModel = HistoryListViewModel(
             store: historyStore,
             transportManager: manager,
-            identity: identity
+            identity: identity,
+            clipboard: clipboard
         )
         self.historyViewModel = viewModel
         manager.setHistoryViewModel(viewModel)

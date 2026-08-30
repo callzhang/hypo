@@ -10,6 +10,8 @@
 		1A00000000000000000000B2 /* HypoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000B1 /* HypoApp.swift */; };
 		1A00000000000000000000C3 /* HypoiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000000C2 /* HypoiOS */; };
 		1A00000000000000000000D3 /* HypoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000D2 /* HypoUITests.swift */; };
+		1A00000000000000000000E5 /* PairingEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000E4 /* PairingEndToEndTests.swift */; };
+		1A00000000000000000000E2 /* HypoCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000000E1 /* HypoCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -18,6 +20,7 @@
 		1A00000000000000000000B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1A00000000000000000000D1 /* HypoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HypoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A00000000000000000000D2 /* HypoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HypoUITests.swift; sourceTree = "<group>"; };
+		1A00000000000000000000E4 /* PairingEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingEndToEndTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -33,6 +36,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A00000000000000000000E2 /* HypoCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,6 +74,7 @@
 			isa = PBXGroup;
 			children = (
 				1A00000000000000000000D2 /* HypoUITests.swift */,
+				1A00000000000000000000E4 /* PairingEndToEndTests.swift */,
 			);
 			path = HypoUITests;
 			sourceTree = "<group>";
@@ -110,6 +115,9 @@
 				1A00000000000000000000DB /* PBXTargetDependency */,
 			);
 			name = HypoUITests;
+			packageProductDependencies = (
+				1A00000000000000000000E1 /* HypoCore */,
+			);
 			productName = HypoUITests;
 			productReference = 1A00000000000000000000D1 /* HypoUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -144,6 +152,7 @@
 			mainGroup = 1A00000000000000000000A4;
 			packageReferences = (
 				1A00000000000000000000C1 /* XCLocalSwiftPackageReference "../shared/HypoiOS" */,
+				1A00000000000000000000E3 /* XCLocalSwiftPackageReference "../shared/HypoCore" */,
 			);
 			productRefGroup = 1A00000000000000000000A6 /* Products */;
 			projectDirPath = "";
@@ -179,6 +188,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A00000000000000000000D3 /* HypoUITests.swift in Sources */,
+				1A00000000000000000000E5 /* PairingEndToEndTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -370,12 +380,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../shared/HypoiOS;
 		};
+		1A00000000000000000000E3 /* XCLocalSwiftPackageReference "../shared/HypoCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../shared/HypoCore;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		1A00000000000000000000C2 /* HypoiOS */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HypoiOS;
+		};
+		1A00000000000000000000E1 /* HypoCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HypoCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

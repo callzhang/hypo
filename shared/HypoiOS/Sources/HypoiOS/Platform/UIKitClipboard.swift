@@ -74,6 +74,33 @@ public final class UIKitClipboard: SystemClipboard {
         cacheIsCurrent ? lastWrittenIsImage : false
     }
 
+    /// Reads text this app did not write, for sending it on.
+    ///
+    /// `currentText()` deliberately refuses to do this: it answers echo
+    /// suppression questions, where reading foreign content would block the
+    /// main thread and raise a paste prompt for no reason the user asked for.
+    /// Sending is the opposite case — the user opened the app expecting what
+    /// they copied to go somewhere, so the prompt is the price of the feature,
+    /// the same read Android does in onResume.
+    ///
+    /// Returns nil when this object was the last writer, which means nothing
+    /// new has been copied and sending would echo back what just arrived.
+    ///
+    /// Loads through NSItemProvider rather than `pasteboard.string`, which
+    /// blocks the calling thread on a semaphore while the pasteboard server
+    /// produces the item — the read that deadlocked before.
+    public func readForegroundText() async -> String? {
+        guard !cacheIsCurrent else { return nil }
+        guard let provider = pasteboard.itemProviders.first,
+              provider.canLoadObject(ofClass: NSString.self) else { return nil }
+
+        return await withCheckedContinuation { continuation in
+            _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                continuation.resume(returning: object as? String)
+            }
+        }
+    }
+
     public func imagePixelSize(from data: Data) -> (width: Int, height: Int)? {
         guard let image = UIImage(data: data) else { return nil }
         // UIImage reports points; multiplying by scale gives pixels, which is

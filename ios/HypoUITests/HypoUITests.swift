@@ -91,11 +91,13 @@ final class HypoUITests: XCTestCase {
         XCTAssertNotNil(code, "the relay did not produce a pairing code; screen said: \(labels)")
     }
 
-    func testHistoryOffersASendControl() {
+    /// Sending is automatic on foreground now, the way Android does it in
+    /// onResume, so there is no send button to find — and there should not be
+    /// one lying around either.
+    func testHistoryHasNoManualSendButton() {
         let app = launch()
 
         XCTAssertTrue(app.textFields["Search"].waitForExistence(timeout: 10))
-        // The system paste control is how sending is invoked at all.
-        XCTAssertTrue(app.buttons["Paste"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Paste"].exists)
     }
 }

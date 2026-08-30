@@ -102,17 +102,18 @@ public sealed class TrayIconHost : IDisposable
 
     private void UpdateStatus()
     {
-        var status = TrayStatus.From(
-            _client.LanPeers.Count > 0 ? TransportState.Connected : TransportState.Disconnected,
-            _client.State,
-            _client.LanPeers.ToArray(),
+        Status = TrayStatus.From(
+            _status.LanPeers.Count > 0 ? TransportState.Connected : TransportState.Disconnected,
+            _status.State,
+            _status.LanPeers.ToArray(),
             _paused);
 
-        _icon.Icon = IconFor(status.Icon);
+        _icon.Icon = IconFor(Status.Icon);
 
-        // NotifyIcon truncates silently past 63 characters, which turns a useful
-        // tooltip into a mystery.
-        _icon.Text = status.Tooltip.Length <= 63 ? status.Tooltip : status.Tooltip[..60] + "…";
+        // Through ClipTooltip, which is tested. NotifyIcon.Text throws on a long
+        // value rather than truncating, so getting this wrong takes the icon out
+        // of the tray entirely.
+        _icon.Text = TrayStatus.ClipTooltip(Status.Tooltip);
     }
 
     /// <summary>

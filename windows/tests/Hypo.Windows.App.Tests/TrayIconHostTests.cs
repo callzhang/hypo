@@ -227,4 +227,33 @@ public class TrayIconHostTests : IDisposable
             Assert.Contains("OPPO PLP110", tray.Status!.Tooltip, StringComparison.Ordinal);
         });
     }
+
+    [SkippableFact]
+    public void ManyLongPeerNamesDoNotTakeTheIconOutOfTheTray()
+    {
+        RequireWindows();
+
+        // The test that would have caught the real bug here. TrayStatus.ClipTooltip
+        // was added and tested, and the tray host went on using its own inline
+        // truncation for a commit -- covered by nothing, because every test
+        // exercised the helper directly instead of the host that has to call it.
+        _status.State = TransportState.Connected;
+        _status.LanPeers =
+        [
+            "A phone with an unusually long device name",
+            "A laptop with an equally unreasonable name",
+            "And a third, for good measure",
+            "And a fourth",
+        ];
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+
+            // Start throws if the tooltip reaches NotifyIcon unclipped.
+            tray.Start();
+
+            Assert.True(tray.Status!.Tooltip.Length > 63, "the status was not long enough to test clipping");
+        });
+    }
 }

@@ -1718,6 +1718,43 @@ git commit -m "feat(ios): add the app shell and local network declarations"
 
 ---
 
+
+### 执行记录：Task 10 的实测结果
+
+**工程是手写的，不是 Xcode 生成的。** 本机没有 XcodeGen 也没有 Tuist，装任何一个都会让每次构建（包括 CI）多一层工具链依赖，而这个 target 只有一个源文件和一个包引用。`ios/Hypo.xcodeproj/project.pbxproj` 与 `xcshareddata/xcschemes/Hypo.xcscheme` 直接入库，其余 Xcode 写的用户级文件按 `.gitignore` 里新增的 `ios/` 段落忽略。
+
+**跑真实 app 抓到一个单元测试抓不到的 bug。** 启动后日志里每 30 秒出现：
+
+```
+⚠️ Health check: Advertising should be active but isn't. Restarting...
+⚠️ Health check: WebSocket server should be running but isn't. Restarting...
+```
+
+`startHealthCheckTaskIfNeeded` 不认识 `LanRole`，在 `.clientOnly` 设备上会永远断言"广播应该开着"并反复调用 `activateLanServices()`。今天之所以无害，只是因为那个函数里有角色守卫会提前返回——这让它从 bug 变成陷阱：谁动了那两个守卫，iOS 就会开始监听，而没有任何测试会红。已修（三个判断都加上 `shouldServe`），并在模拟器上等过两个周期确认警告消失。
+
+Task 6 的上下文测试等的是 500 毫秒，而健康检查的第一拍在 30 秒——**这个 bug 在单元测试的时间尺度之外**。
+
+#### 端到端清单的实际完成情况
+
+| # | 项 | 结果 |
+|---|---|---|
+| 1 | 三个 tab 都能打开，不崩溃 | ✅ 三个视图分别单独渲染截图确认 |
+| 2 | 设备名不是 `localhost` | ✅ Settings 显示 `iPhone 17`；`device_name` 持久化值一致 |
+| 3 | 通知权限状态与首次授权弹窗 | ✅ 弹窗出现 |
+| 4 | 本地网络权限弹窗 | ⛔ **模拟器不适用**——iOS 模拟器不强制本地网络权限，这条只能在真机上验 |
+| 5 | 与 Mac 配对 | ⛔ 未验证，需要人工 |
+| 6 | Mac 复制 → iOS 收到 | ⛔ 未验证，需要人工 |
+| 7 | iOS 发送 → Mac 收到 | ⛔ 未验证，需要人工 |
+| 8 | 跨网段经云端 relay 同步 | ⛔ 未验证，需要人工 |
+| 9 | 拒绝本地网络权限后的降级 | ⛔ 未验证，需要真机 |
+
+**5–9 条为什么自动化不了**：`xcrun simctl` 没有点击命令（`idb` 未安装），而配对必须在 iOS 上点「Request pairing code」、再在 macOS 菜单栏 app 里输入配对码——两端都要真实的界面交互。用 computer-use 控制模拟器需要用户当场授权。第 1–3 条是靠"把单个视图临时设为根视图"重新构建后截图绕过点击验证的，配对流程绕不过去，因为它需要的是交互而不只是渲染。
+
+**所以第 2 期的核心验收（第 6、7 条）尚未取得证据。** 代码路径已接通并有单元测试覆盖，但"Mac 复制的东西出现在 iPhone 上"这件事本身还没有被观测到。不要把前面那些绿当成这一条的证据。
+
+**另记一条留给后续**：`ConnectionStatusProber` 的创建包在 `#if canImport(AppKit)` 里（`TransportManager.setHistoryViewModel`），所以 iOS 上永远不会启动，`connectionState` 不会更新。当前界面不显示连接状态，所以不阻塞第 2 期；等界面要显示连接状态时必须处理。
+
+
 ## Task 11: CI 构建 app target
 
 **Files:**

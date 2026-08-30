@@ -7,9 +7,12 @@ public struct RootView: View {
     @StateObject private var historyViewModel: HistoryListViewModel
     @StateObject private var pairingViewModel: RemotePairingViewModel
 
-    public init(context: HypoiOSContext, historyStore: HistoryStore) {
+    public init(context: HypoiOSContext) {
         self.context = context
-        _historyViewModel = StateObject(wrappedValue: HistoryListViewModel(store: historyStore))
+        // The context already owns this one, wired to the transport manager and
+        // registered as the receiver. Building a second here would show a list
+        // that never receives anything.
+        _historyViewModel = StateObject(wrappedValue: context.historyViewModel)
         _pairingViewModel = StateObject(wrappedValue: RemotePairingViewModel(
             identity: context.identity
         ))

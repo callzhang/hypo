@@ -30,6 +30,20 @@ struct HypoiOSContextTests {
         #expect(!path.contains("Caches"))
     }
 
+    @Test("the context wires up receiving")
+    @MainActor
+    func receivingIsWired() {
+        let context = HypoiOSContext(
+            notificationScheduler: .init(center: nil),
+            historyStore: HistoryStore(persistence: InMemoryHistoryPersistence())
+        )
+
+        // False when no history store reaches TransportManager's initialiser.
+        // That same branch resolves discovered peers for LanSyncTransport, so
+        // this also guards the outbound dial path iOS depends on entirely.
+        #expect(context.transportManager.isReceivingEnabled)
+    }
+
     @Test("the device identity carries a real name, not localhost")
     @MainActor
     func identityHasDeviceName() {

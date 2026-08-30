@@ -452,6 +452,15 @@ public final class TransportManager: ObservableObject {
         return provider.preferredTransport()
     }
 
+    /// Whether incoming clipboard payloads will be handled at all.
+    ///
+    /// False when no history store was supplied at construction. That one
+    /// branch also sets the server's local-device-id filter, hands the LAN
+    /// transport a way to resolve discovered peers, and gives it a back
+    /// reference for logging — so omitting the store silently disables
+    /// receiving *and* outbound LAN dialling, with nothing to notice it by.
+    public var isReceivingEnabled: Bool { incomingHandler != nil }
+
     public func setHistoryViewModel(_ viewModel: any RemoteEntryReceiving) {
         logger.info("🔧 [TransportManager] setHistoryViewModel called")
         

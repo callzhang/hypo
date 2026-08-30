@@ -15,18 +15,22 @@ import java.io.FileOutputStream
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -141,10 +145,15 @@ fun HistoryScreen(
             clipboardManager = clipboardManager
         )
     }
+    val navigationBarBottomPadding = WindowInsets.navigationBars
+        .asPaddingValues()
+        .calculateBottomPadding()
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp)
+            .padding(top = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
@@ -216,6 +225,7 @@ fun HistoryScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = navigationBarBottomPadding + 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(items, key = { it.id }) { item ->

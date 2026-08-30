@@ -11,6 +11,7 @@ All notable changes to the Hypo project will be documented in this file.
 - **Windows Console Client**: Added a native clipboard client with pairing, LAN discovery, cloud relay transport, persistent credentials, deduplication, and real clipboard synchronization.
 
 ### Fixed
+- **Android Bottom Content Inset**: Removed the root navigation host's duplicate bottom safe-area reservation so screen content reaches the ColorOS gesture area while retaining top, horizontal, and per-screen padding.
 - **Android System Navigation Chrome**: Explicitly removed the navigation-bar divider in both the launch theme and runtime window configuration so ColorOS does not inherit a light line below the app.
 - **Android Settings Navigation**: Added a visible, accessible back button to the Settings top bar that returns to clipboard history.
 - **Android History Window Chrome**: Replaced the vertically clipped Material search bar with a 40dp single-line compact field, and extended the themed Scaffold background behind transparent system bars while preserving safe content insets to remove the separate white navigation strip.

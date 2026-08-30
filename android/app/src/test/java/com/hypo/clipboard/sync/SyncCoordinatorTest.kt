@@ -212,14 +212,11 @@ class SyncCoordinatorTest {
         
         // Discovered unpaired device - should NOT be in targets
         peersFlow.value = listOf(mockPeer("unpaired-device"))
-        // Wait a bit to ensure collect processes it
-        delay(100)
-        assertEquals(setOf("paired-device"), coordinator.targets.value)
+        assertTargetsRemain(coordinator, setOf("paired-device"))
         
         // Discovered paired device - should be in targets (already was because it's paired)
         peersFlow.value = listOf(mockPeer("paired-device"))
-        delay(100)
-        assertEquals(setOf("paired-device"), coordinator.targets.value)
+        assertTargetsRemain(coordinator, setOf("paired-device"))
         
         // Add manual target that is paired
         coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("paired-device", "paired-device-2")
@@ -229,12 +226,35 @@ class SyncCoordinatorTest {
         coordinator.stop()
     }
 
+    /**
+     * Waits for [coordinator]'s targets to settle on [expected].
+     *
+     * The budget is generous on purpose. The old 2.5s was enough on a developer
+     * machine and not on a loaded CI runner, where this went red on a commit
+     * that touched no Android code at all -- a flake that costs more attention
+     * than the seconds it saves, because every red build has to be read before
+     * it can be dismissed. A passing run still returns as soon as the value
+     * arrives, so the ceiling only applies to genuine failures.
+     */
     private suspend fun awaitTargets(coordinator: SyncCoordinator, expected: Set<String>) {
-        repeat(50) {
+        repeat(200) {
             if (coordinator.targets.value == expected) return
             delay(50)
         }
         assertEquals(expected, coordinator.targets.value, "Targets did not reach expected state")
+    }
+
+    /**
+     * Asserts targets *stay* [expected] rather than merely reaching it, for the
+     * cases where the point is that something was filtered out and must not
+     * appear. A bare delay-then-assert would pass for the wrong reason if the
+     * unwanted value simply had not arrived yet.
+     */
+    private suspend fun assertTargetsRemain(coordinator: SyncCoordinator, expected: Set<String>) {
+        repeat(10) {
+            assertEquals(expected, coordinator.targets.value)
+            delay(30)
+        }
     }
 
     private fun mockPeer(deviceId: String) = com.hypo.clipboard.transport.lan.DiscoveredPeer(

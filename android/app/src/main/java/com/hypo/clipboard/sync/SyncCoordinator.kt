@@ -397,6 +397,17 @@ class SyncCoordinator @Inject constructor(
      * A suppressed repeat deliberately does not refresh the timestamp -- otherwise
      * a source retrying in a tight loop would hold the window open indefinitely
      * and the content would never sync at all.
+     *
+     * To reproduce the duplicate, the phone's **screen must be awake and
+     * unlocked**. That is the whole trick, and it is not obvious: OPPO denies
+     * clipboard access to an app that does not have focus, so with the screen off
+     * every one of the secondary paths reads null and only the intent that carries
+     * the text gets through -- one envelope, looking correct. Awake and unlocked,
+     * the reads succeed and the duplicate is reliable. Measured 2026-08-29 on the
+     * OPPO against the deployed relay with Wi-Fi off, so no LAN route existed:
+     * four copies produced eight envelopes before this guard and four after, with
+     * the two events 2-3ms apart. Roughly twenty attempts with the screen off had
+     * produced none, which is how long it took to notice.
      */
     private fun isRepeatOfLastBroadcast(item: ClipboardItem): Boolean {
         val (previous, at) = lastBroadcast ?: return false

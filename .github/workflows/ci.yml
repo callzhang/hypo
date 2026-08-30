@@ -149,7 +149,7 @@ jobs:
   ios-core-build:
     name: HypoCore iOS Build
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       - name: Checkout

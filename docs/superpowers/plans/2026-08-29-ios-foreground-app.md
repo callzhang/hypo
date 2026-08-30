@@ -1755,6 +1755,24 @@ Task 6 的上下文测试等的是 500 毫秒，而健康检查的第一拍在 3
 **另记一条留给后续**：`ConnectionStatusProber` 的创建包在 `#if canImport(AppKit)` 里（`TransportManager.setHistoryViewModel`），所以 iOS 上永远不会启动，`connectionState` 不会更新。当前界面不显示连接状态，所以不阻塞第 2 期；等界面要显示连接状态时必须处理。
 
 
+
+### 执行记录：两处「写了但没人用」
+
+Task 10 收尾时复查发现两个组件按计划写完了、测试也绿了，但**没有任何调用方**。两处都不是笔误，是计划本身没有指定接线点，而验证方式恰好绕过了这个问题。
+
+**一、`PasteButton` 没有出现在任何视图里。** Task 8 在四个视图之后附了 `UIPasteControl` 的封装，但没说它放在哪。于是 `sendText` 也没有任何调用点——**清单第 7 条（iOS 发送到 Mac）不是"未验证"，是根本无法触发**。已把它放进 History 页面的底部安全区，并在下方显示上一次发送的结果。
+
+顺带修了尺寸：`UIViewRepresentable` 不实现 `sizeThatFits` 的话，SwiftUI 会把提议宽度整个给它，按钮会横跨整屏。
+
+**二、`AppContainerStorageLocations` 从未被使用。** Task 3 的整个产出是死代码：它写在 HypoiOS 里，而 `StorageManager.shared` 在 HypoCore 里，默认参数是 `CachesStorageLocations()`，HypoCore 够不到 HypoiOS 的类型。**iOS 会在存储压力下清空 Caches——历史条目还在，它们指向的图片文件没了。** 这正是 Task 3 当初要避免的事，而 Task 3 的提交信息写的是"store blobs in Application Support, not Caches"。
+
+已把类型搬进 HypoCore，`StorageManager` 的默认值改成 `PlatformStorageLocations.current()`（iOS 用 Application Support，其余仍用 Caches，老 macOS 装机不受影响）。
+
+**为什么原来的测试没发现**：它断言的是 `AppContainerStorageLocations().imagesDirectory` 包含 "Application Support"——这在单例用着另一个实现的整段时间里一直是通过的。**测工厂函数返回什么，不等于测真正被使用的那个对象是什么。** 现在 `StorageManager` 暴露 `imagesDirectoryURL`，测试直接断言单例解析出的路径。
+
+这两处共同的形状是：**一个组件有测试、有文档、编译得过，却没有接入产品路径**。单元测试天然测不出"没人调用我"。能发现它们的只有两件事——把整条链路从入口走一遍，以及在提交前问一句"谁调用它"。
+
+
 ## Task 11: CI 构建 app target
 
 **Files:**

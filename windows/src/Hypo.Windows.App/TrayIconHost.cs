@@ -51,6 +51,12 @@ public sealed class TrayIconHost : IDisposable
     /// <summary>Recomputes the icon and tooltip now, rather than on the next tick.</summary>
     public void Refresh() => UpdateStatus();
 
+    /// <summary>The history window while it is open, and null once it is closed.</summary>
+    public Window? OpenHistoryWindow => _historyWindow;
+
+    /// <summary>The pairing window while it is open.</summary>
+    public Window? OpenPairingWindow => _pairingWindow;
+
     /// <param name="client">
     /// Optional, and only so the pairing window can watch for peers arriving
     /// while it is open. Everything else the tray needs comes through

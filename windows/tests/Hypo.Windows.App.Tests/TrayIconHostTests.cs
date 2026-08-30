@@ -194,11 +194,10 @@ public class TrayIconHostTests : IDisposable
                 .Single(item => item.Text!.Contains("history", StringComparison.OrdinalIgnoreCase))
                 .PerformClick();
 
-            // The window is the tray's own; finding it by title is how a test
-            // sees what a click produced.
-            var window = System.Windows.Application.Current.Windows
-                .OfType<HistoryWindow>()
-                .SingleOrDefault();
+            // Asking the tray what it opened, rather than WPF's global window
+            // list: Application.Current belongs to whichever thread made it, and
+            // reading its state from anywhere else fails.
+            var window = tray.OpenHistoryWindow;
 
             Assert.NotNull(window);
             window!.Settle();

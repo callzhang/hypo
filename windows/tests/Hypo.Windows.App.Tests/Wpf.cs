@@ -25,37 +25,58 @@ internal static class Wpf
         Environment.GetEnvironmentVariable("HYPO_SCREENSHOT_DIR")
             ?? Path.Combine(AppContext.BaseDirectory, "screenshots"));
 
-    /// <summary>Runs <paramref name="action"/> on an STA thread with a live dispatcher.</summary>
+    private static readonly Lazy<Dispatcher> Ui = new(StartUiThread, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on the one STA thread all WPF tests share.
+    ///
+    /// <para>One thread, not one per test. <c>Application.Current</c> is
+    /// process-wide and belongs to whichever thread created it, so a second
+    /// thread touching anything it owns fails with "a different thread owns
+    /// it" -- which is what happens the moment a test asks the application
+    /// what windows are open.</para>
+    /// </summary>
     public static void Run(Action action)
     {
         Exception? failure = null;
 
-        var thread = new Thread(() =>
+        Ui.Value.Invoke(() =>
         {
             try
             {
-                // One Application per process; a second constructor call throws.
-                _ = System.Windows.Application.Current ?? new System.Windows.Application();
                 action();
             }
             catch (Exception ex)
             {
                 failure = ex;
             }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-
-        if (!thread.Join(TimeSpan.FromMinutes(2)))
-        {
-            throw new TimeoutException("The WPF thread did not finish. A modal dialog is the usual cause.");
-        }
+        }, DispatcherPriority.Normal);
 
         if (failure is not null)
         {
             throw failure;
         }
+    }
+
+    private static Dispatcher StartUiThread()
+    {
+        var ready = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var thread = new Thread(() =>
+        {
+            _ = System.Windows.Application.Current ?? new System.Windows.Application();
+            ready.SetResult(Dispatcher.CurrentDispatcher);
+            Dispatcher.Run();
+        })
+        {
+            IsBackground = true,
+            Name = "hypo-wpf-tests",
+        };
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        return ready.Task.GetAwaiter().GetResult();
     }
 
     /// <summary>

@@ -8,10 +8,15 @@ import HypoCore
 /// APNs-driven delivery through a notification service extension, which needs
 /// a paid developer account.
 public final class UserNotificationScheduler: ClipboardNotificationScheduling, @unchecked Sendable {
-    private let center: UNUserNotificationCenter
+    /// nil when there is no notification centre to talk to.
+    /// `UNUserNotificationCenter.current()` raises outside an app bundle,
+    /// because it resolves the running process to an installed application and
+    /// a plain test bundle is not one. Tests pass nil explicitly; the default
+    /// argument is only evaluated when the app builds this for real.
+    private let center: UNUserNotificationCenter?
     private weak var handler: ClipboardNotificationHandling?
 
-    public init(center: UNUserNotificationCenter = .current()) {
+    public init(center: UNUserNotificationCenter? = .current()) {
         self.center = center
     }
 
@@ -20,7 +25,7 @@ public final class UserNotificationScheduler: ClipboardNotificationScheduling, @
     }
 
     public func requestAuthorizationIfNeeded() {
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        center?.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
     public func deliverNotification(for entry: ClipboardEntry) {
@@ -34,7 +39,7 @@ public final class UserNotificationScheduler: ClipboardNotificationScheduling, @
             content: content,
             trigger: nil
         )
-        center.add(request, withCompletionHandler: nil)
+        center?.add(request, withCompletionHandler: nil)
     }
 
     public func deliverStatusNotification(deviceId: String, title: String, body: String) {
@@ -47,6 +52,6 @@ public final class UserNotificationScheduler: ClipboardNotificationScheduling, @
             content: content,
             trigger: nil
         )
-        center.add(request, withCompletionHandler: nil)
+        center?.add(request, withCompletionHandler: nil)
     }
 }

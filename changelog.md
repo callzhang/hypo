@@ -5,6 +5,7 @@ All notable changes to the Hypo project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Android Brand Icons**: Adaptive launcher icons now use the full Hypo blue-to-purple background with only the layered oval mark in the foreground, and the Quick Settings tile uses the matching monochrome Hypo silhouette instead of a generic clipboard glyph.
 - **Cross-Device Clipboard Echo Loop**: Duplicate LAN/cloud deliveries are discarded on Android without replaying history rows, repeated remote content already at the top no longer triggers delete/reinsert flicker, and macOS no longer rebroadcasts identical content when only the pasteboard generation changes.
 - **macOS Isolated Build Relay Auth**: `build-macos.sh` now actually injects `RELAY_WS_AUTH_TOKEN` supplied through the environment, so isolated worktrees can build an authenticated Cloud Relay client without copying `.env` secrets.
 - **Android Private Relay Auth**: Android can load the relay secret from the app-private `files/relay_ws_auth_token` file before falling back to the build-time value, allowing local device deployment without embedding the shared secret in an extractable APK.

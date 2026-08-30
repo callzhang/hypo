@@ -5,25 +5,14 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:pathData="M27,27 h54 a15.3,15.3 0 0 1 15.3,15.3 v23.4 a15.3,15.3 0 0 1 -15.3,15.3 h-54 a15.3,15.3 0 0 1 -15.3,-15.3 v-23.4 a15.3,15.3 0 0 1 15.3,-15.3 z">
-        <gradient
-            android:type="linear"
-            android:startX="27"
-            android:startY="27"
-            android:endX="81"
-            android:endY="81"
-            android:startColor="#5EB1FF"
-            android:endColor="#8458FF" />
-    </path>
-    <path
         android:fillColor="#FFFFFF"
         android:fillAlpha="0.12"
-        android:pathData="M34.1,61.2 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+        android:pathData="M34,63 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
     <path
         android:fillColor="#FFFFFF"
         android:fillAlpha="0.25"
-        android:pathData="M34.1,54.9 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+        android:pathData="M34,55 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M34.1,48.6 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+        android:pathData="M34,47 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
 </vector>

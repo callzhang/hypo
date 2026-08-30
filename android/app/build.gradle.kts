@@ -177,6 +177,10 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             all {
+                it.systemProperty(
+                    "hypo.drawable.dir",
+                    project.layout.projectDirectory.dir("src/main/res/drawable").asFile.absolutePath
+                )
                 it.extensions.configure(JacocoTaskExtension::class.java) {
                     isIncludeNoLocationClasses = true
                     excludes = listOf("jdk.internal.*")

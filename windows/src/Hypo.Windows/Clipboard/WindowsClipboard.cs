@@ -41,6 +41,21 @@ public static class WindowsClipboard
     /// <summary>Reads the registered PNG format, or null when there is no image.</summary>
     public static byte[]? ReadPng() => Read(ClipboardFormats.PngFormat);
 
+    /// <summary>Reads the paths of files on the clipboard; empty when there are none.</summary>
+    public static IReadOnlyList<string> ReadFilePaths()
+    {
+        var raw = Read(ClipboardFormats.CfHdrop);
+        return raw is null ? [] : ClipboardFiles.Decode(raw);
+    }
+
+    /// <summary>Publishes files on the clipboard, returning the new sequence number.</summary>
+    public static uint WriteFilePaths(IReadOnlyList<string> paths)
+    {
+        Write(ClipboardFormats.CfHdrop, ClipboardFiles.Encode(paths));
+
+        return NativeMethods.GetClipboardSequenceNumber();
+    }
+
     private static byte[]? Read(uint format)
     {
         using var _ = Open();

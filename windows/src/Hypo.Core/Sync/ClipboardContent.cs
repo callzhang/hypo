@@ -18,6 +18,31 @@ public sealed record ClipboardContent
     public required byte[] Data { get; init; }
 
     /// <summary>
+    /// Type-specific fields travelling with the content -- a file's name, an
+    /// image's dimensions.
+    ///
+    /// <para>Deliberately outside <see cref="Hash"/>: two copies of the same file
+    /// under different names are the same clipboard item, and a peer that
+    /// normalises the name differently should not defeat duplicate suppression.</para>
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Metadata { get; init; }
+
+    /// <summary>
+    /// The original file name, or null.
+    ///
+    /// <para>Two keys are checked because the clients disagree: protocol.md
+    /// documents <c>filename</c>, and the Android client writes <c>file_name</c>
+    /// and reads it first. Preferring <c>file_name</c> matches what Android does,
+    /// so a file that round-trips through it keeps its name.</para>
+    /// </summary>
+    public string? FileName =>
+        Metadata?.TryGetValue("file_name", out var snake) == true && !string.IsNullOrWhiteSpace(snake)
+            ? snake
+            : Metadata?.TryGetValue("filename", out var flat) == true && !string.IsNullOrWhiteSpace(flat)
+                ? flat
+                : null;
+
+    /// <summary>
     /// SHA-256 over the content type and the bytes. The type is included
     /// because a text item and a file item that happen to share bytes are not
     /// the same clipboard entry, and treating them as one would silently drop

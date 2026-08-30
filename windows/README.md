@@ -7,9 +7,9 @@ network and through the relay.
 
 ## Status
 
-Working: text and images sync in both directions, over the LAN and the relay,
-verified against a real phone. There is no graphical interface yet — the client
-is a console program.
+Working: text, links, images and files sync in both directions, over the LAN and
+the relay. There is no graphical interface yet — the client is a console
+program.
 
 | Layer | State |
 |-------|-------|
@@ -18,16 +18,20 @@ is a console program.
 | LAN transport (listens, advertises, dials) | Done |
 | Relay transport, keepalive, reconnect | Done |
 | Clipboard history (SQLite) and content dedup | Done |
-| Windows clipboard: text, links, images | Done |
-| Windows clipboard: files | Not implemented — see below |
+| Windows clipboard: text, links, images, files | Done |
 | Tray icon, history window, settings | Not started |
 | MSIX packaging and winget | Not started |
 
-Files are the one content type the protocol carries that this client does not.
-An incoming file is kept in the history and reported; it is not placed on the
-clipboard, because that needs somewhere for it to land on disk and a `CF_HDROP`
-pointing at it. It is refused deliberately rather than written into a text
-format as mojibake.
+A file from a peer is written under `%LOCALAPPDATA%\Hypo\received` and its path
+put on the clipboard as `CF_HDROP`, so pasting it into Explorer works. Existing
+files are never overwritten — a peer resending `report.pdf` gets a timestamped
+name rather than replacing one the user may not have opened. The peer-supplied
+name is reduced to a leaf and stripped of characters Windows forbids before
+anything is created; `..\..\autorun.inf` becomes a filename, not a traversal.
+
+The protocol carries one file per message, so a multi-file selection sends the
+first. Content types this client cannot place on the clipboard are kept in the
+history and reported rather than lost.
 
 ## What is verified, and how
 

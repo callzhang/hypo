@@ -81,6 +81,7 @@ public sealed class SyncCoordinator
             {
                 ContentType = content.ContentType,
                 Data = content.Data,
+                Metadata = content.Metadata,
                 Compressed = true,
             },
             ProtocolJson.Options));
@@ -164,7 +165,12 @@ public sealed class SyncCoordinator
             return;
         }
 
-        var content = new ClipboardContent { ContentType = payload.ContentType, Data = payload.Data };
+        var content = new ClipboardContent
+        {
+            ContentType = payload.ContentType,
+            Data = payload.Data,
+            Metadata = payload.Metadata,
+        };
 
         if (!_dedup.ShouldAccept(content))
         {

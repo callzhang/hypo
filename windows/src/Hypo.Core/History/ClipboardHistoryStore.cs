@@ -93,11 +93,36 @@ public sealed class ClipboardHistoryStore : IDisposable
                 data               BLOB NOT NULL,
                 copied_at          TEXT NOT NULL,
                 source_device_id   TEXT NULL,
-                source_device_name TEXT NULL
+                source_device_name TEXT NULL,
+                metadata           TEXT NULL
             );
             CREATE INDEX IF NOT EXISTS history_copied_at ON history (copied_at DESC);
             """;
         command.ExecuteNonQuery();
+
+        AddMetadataColumnIfMissing();
+    }
+
+    /// <summary>
+    /// Adds the metadata column to a database created before it existed.
+    ///
+    /// <para>An existing history is a user's data, not a cache. Recreating the
+    /// table would silently throw away everything they had copied, which is a
+    /// worse outcome than the missing feature.</para>
+    /// </summary>
+    private void AddMetadataColumnIfMissing()
+    {
+        using var columns = _connection.CreateCommand();
+        columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('history') WHERE name = 'metadata';";
+
+        if (Convert.ToInt64(columns.ExecuteScalar()) > 0)
+        {
+            return;
+        }
+
+        using var alter = _connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE history ADD COLUMN metadata TEXT NULL;";
+        alter.ExecuteNonQuery();
     }
 
     /// <summary>
@@ -113,12 +138,13 @@ public sealed class ClipboardHistoryStore : IDisposable
 
         using var command = _connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO history (hash, content_type, data, copied_at, source_device_id, source_device_name)
-            VALUES ($hash, $type, $data, $at, $deviceId, $deviceName)
+            INSERT INTO history (hash, content_type, data, copied_at, source_device_id, source_device_name, metadata)
+            VALUES ($hash, $type, $data, $at, $deviceId, $deviceName, $metadata)
             ON CONFLICT(hash) DO UPDATE SET
                 copied_at          = excluded.copied_at,
                 source_device_id   = excluded.source_device_id,
-                source_device_name = excluded.source_device_name;
+                source_device_name = excluded.source_device_name,
+                metadata           = excluded.metadata;
             """;
         command.Parameters.AddWithValue("$hash", Convert.ToHexString(entry.Content.Hash));
         command.Parameters.AddWithValue("$type", entry.Content.ContentType.ToString());
@@ -126,6 +152,11 @@ public sealed class ClipboardHistoryStore : IDisposable
         command.Parameters.AddWithValue("$at", entry.CopiedAt.UtcDateTime.ToString("O"));
         command.Parameters.AddWithValue("$deviceId", (object?)entry.SourceDeviceId ?? DBNull.Value);
         command.Parameters.AddWithValue("$deviceName", (object?)entry.SourceDeviceName ?? DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$metadata",
+            entry.Content.Metadata is { Count: > 0 } metadata
+                ? System.Text.Json.JsonSerializer.Serialize(metadata)
+                : (object)DBNull.Value);
         command.ExecuteNonQuery();
 
         Trim();
@@ -137,7 +168,7 @@ public sealed class ClipboardHistoryStore : IDisposable
 
         using var command = _connection.CreateCommand();
         command.CommandText = """
-            SELECT content_type, data, copied_at, source_device_id, source_device_name
+            SELECT content_type, data, copied_at, source_device_id, source_device_name, metadata
             FROM history ORDER BY copied_at DESC LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$limit", limit);
@@ -152,6 +183,10 @@ public sealed class ClipboardHistoryStore : IDisposable
                 {
                     ContentType = Enum.Parse<ContentType>(reader.GetString(0)),
                     Data = (byte[])reader[1],
+                    Metadata = reader.IsDBNull(5)
+                        ? null
+                        : System.Text.Json.JsonSerializer
+                            .Deserialize<Dictionary<string, string>>(reader.GetString(5)),
                 },
                 CopiedAt = DateTimeOffset.Parse(reader.GetString(2), null, System.Globalization.DateTimeStyles.RoundtripKind),
                 SourceDeviceId = reader.IsDBNull(3) ? null : reader.GetString(3),

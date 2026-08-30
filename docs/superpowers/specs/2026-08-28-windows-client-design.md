@@ -288,6 +288,16 @@ available. See `ContentDeduplicator`.
    an application that publishes a bitmap and no PNG, and none has been observed.
    Writes verify the PNG signature first, so a peer sending JPEG is refused
    rather than advertised as something it is not.*
+1. **Files arrive as bytes and have to become a path.** `CF_HDROP` carries paths,
+   not contents, so an inbound file is written under
+   `%LOCALAPPDATA%\Hypo\received` first. The name comes from a peer: it is
+   reduced to a leaf and stripped of characters Windows forbids before anything
+   is created, and the reserved device names (`CON`, `NUL`, `COM1`…) are escaped,
+   because creating one of those does not fail — it opens a device. The
+   sanitising rules are written out rather than taken from
+   `Path.GetInvalidFileNameChars`, which answers for the *host*: on Unix a
+   backslash is an ordinary character, so those APIs sanitise nothing when the
+   code is tested anywhere but Windows.
 2. **The clipboard is a globally exclusive resource.** `OpenClipboard` fails when
    another process holds it, which on a desktop with Office, a browser and any
    clipboard manager is routine rather than exceptional. Access goes through a

@@ -43,10 +43,18 @@ public sealed class ClipboardListener : IClipboard, IDisposable
     /// <summary>A private message asking the pump to drain <see cref="_work"/>.</summary>
     private const uint WmRunWork = 0x0400 + 1;
 
+    /// <summary>
+    /// Above the protocol's 20 MB envelope ceiling there is no point reading the
+    /// file at all -- the send would be refused after the copy.
+    /// </summary>
+    private const long MaxFileBytes = 20L * 1024 * 1024;
+
     private readonly Thread _pump;
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly WindowProcedure _procedure;
     private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _work = new();
+
+    private readonly string _receivedFiles;
 
     private nint _hwnd;
 
@@ -61,8 +69,18 @@ public sealed class ClipboardListener : IClipboard, IDisposable
 
     private volatile bool _disposed;
 
-    public ClipboardListener()
+    /// <param name="receivedFilesDirectory">
+    /// Where a file from a peer is written before being put on the clipboard.
+    /// The clipboard carries paths, not bytes, so the bytes have to land
+    /// somewhere real first.
+    /// </param>
+    public ClipboardListener(string? receivedFilesDirectory = null)
     {
+        _receivedFiles = receivedFilesDirectory ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Hypo",
+            "received");
+
         _procedure = WindowProc;
 
         // The window and its message loop must live on one thread: a
@@ -98,8 +116,60 @@ public sealed class ClipboardListener : IClipboard, IDisposable
             return new ClipboardContent { ContentType = ContentType.Image, Data = png };
         }
 
+        // Files before text: copying a file in Explorer also puts its path on the
+        // clipboard as text, and syncing the path string to another machine gives
+        // the peer something it cannot open.
+        var paths = WindowsClipboard.ReadFilePaths();
+        if (paths.Count > 0)
+        {
+            var file = ReadFile(paths[0]);
+            if (file is not null)
+            {
+                return file;
+            }
+        }
+
         var text = WindowsClipboard.ReadText();
         return text is null ? null : ClipboardFormats.FromText(text);
+    }
+
+    /// <summary>
+    /// Loads one file's bytes for sending.
+    ///
+    /// <para>The protocol carries a single file per message, so a multi-file
+    /// selection sends the first. Sending several as one blob would need a
+    /// container format the other clients do not read.</para>
+    /// </summary>
+    private static ClipboardContent? ReadFile(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length > MaxFileBytes)
+            {
+                return null;
+            }
+
+            return new ClipboardContent
+            {
+                ContentType = ContentType.File,
+                Data = File.ReadAllBytes(path),
+                // Both spellings: protocol.md documents "filename" and the Android
+                // client writes and prefers "file_name", so a file that passes
+                // through either keeps its name.
+                Metadata = new Dictionary<string, string>
+                {
+                    ["file_name"] = Path.GetFileName(path),
+                    ["filename"] = Path.GetFileName(path),
+                    ["size"] = info.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                },
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A file we cannot read is not a reason to stop syncing text.
+            return null;
+        }
     }
 
     public Task SetAsync(ClipboardContent content, CancellationToken ct = default)
@@ -108,11 +178,7 @@ public sealed class ClipboardListener : IClipboard, IDisposable
 
         if (content.ContentType is ContentType.File)
         {
-            // Files need somewhere to land on disk and a CF_HDROP pointing at it.
-            // Refusing loudly beats writing the payload into a text format and
-            // producing mojibake; SyncCoordinator keeps the item in history and
-            // says so, rather than losing it.
-            throw new NotSupportedException("Files cannot be placed on the clipboard yet.");
+            return WriteFileAsync(content);
         }
 
         if (content.ContentType is ContentType.Image && !ClipboardFormats.LooksLikePng(content.Data))
@@ -132,6 +198,46 @@ public sealed class ClipboardListener : IClipboard, IDisposable
             _ownSequences.Enqueue(text is null
                 ? WindowsClipboard.WritePng(content.Data)
                 : WindowsClipboard.WriteText(text));
+            while (_ownSequences.Count > 8)
+            {
+                _ownSequences.Dequeue();
+            }
+
+            return null;
+        });
+    }
+
+    /// <summary>
+    /// Writes a peer's file to disk and puts its path on the clipboard.
+    ///
+    /// <para>The name comes from another device, so it is reduced to a leaf and
+    /// stripped of characters Windows forbids before anything is created --
+    /// otherwise a peer could name a file <c>..\..\autorun.inf</c> and choose
+    /// where it lands.</para>
+    /// </summary>
+    private Task WriteFileAsync(ClipboardContent content)
+    {
+        Directory.CreateDirectory(_receivedFiles);
+
+        var name = ClipboardFiles.SafeFileName(content.FileName);
+        var path = Path.Combine(_receivedFiles, name);
+
+        // Never overwrite: a peer resending "report.pdf" must not replace the one
+        // already sitting there, which the user may not have opened yet.
+        if (File.Exists(path))
+        {
+            var stem = Path.GetFileNameWithoutExtension(name);
+            var extension = Path.GetExtension(name);
+            path = Path.Combine(
+                _receivedFiles,
+                $"{stem}-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}{extension}");
+        }
+
+        File.WriteAllBytes(path, content.Data);
+
+        return OnPump<object?>(() =>
+        {
+            _ownSequences.Enqueue(WindowsClipboard.WriteFilePaths([path]));
             while (_ownSequences.Count > 8)
             {
                 _ownSequences.Dequeue();

@@ -1,11 +1,156 @@
 import SwiftUI
 import HypoCore
 
+/// The app's root screen, laid out like Android's: one row holding the search
+/// field, a connection status icon and a settings button, then the list.
+///
+/// No title and no clear-all button — Android has neither, and a large
+/// navigation title costs a third of the screen to say what the app already is.
 public struct HistoryListView: View {
     @ObservedObject private var viewModel: HistoryListViewModel
+    @ObservedObject private var transportManager: TransportManager
+    private let onOpenSettings: () -> Void
 
-    public init(viewModel: HistoryListViewModel) {
+    public init(
+        viewModel: HistoryListViewModel,
+        transportManager: TransportManager,
+        onOpenSettings: @escaping () -> Void
+    ) {
         self.viewModel = viewModel
+        self.transportManager = transportManager
+        self.onOpenSettings = onOpenSettings
+    }
+
+    public var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 4) {
+                searchField
+
+                // Status, not a control — the same non-interactive icon
+                // Android shows in this position.
+                connectionIcon
+                    .frame(width: 44, height: 44)
+                    .accessibilityIdentifier("ConnectionStatus")
+                    .accessibilityLabel(connectionDescription)
+
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityIdentifier("Settings")
+                .accessibilityLabel("Settings")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            list
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 6) {
+                if let message = sendStatusMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                // The system paste control is the only way to read the
+                // clipboard on iOS without interrupting the user with a
+                // permission prompt, so sending starts here rather than from a
+                // background poll the way Android does it. Its label is drawn
+                // by the system and cannot be changed, so the caption has to
+                // carry the meaning.
+                PasteButton { text in
+                    Task { await viewModel.sendText(text) }
+                }
+                Text("Send what you copied to your other devices")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(.bar)
+        }
+        .task { await viewModel.load() }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search", text: $viewModel.searchText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .background(Color(.secondarySystemBackground), in: Capsule())
+    }
+
+    private var list: some View {
+        List {
+            ForEach(viewModel.visibleEntries, id: \.id) { entry in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.content.previewDescription)
+                        .lineLimit(2)
+                    Text(entry.originDeviceName ?? entry.deviceId)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .swipeActions {
+                    Button("Delete", role: .destructive) {
+                        Task { await viewModel.remove(id: entry.id) }
+                    }
+                    Button(entry.isPinned ? "Unpin" : "Pin") {
+                        Task { await viewModel.togglePin(id: entry.id) }
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .overlay {
+            if viewModel.visibleEntries.isEmpty {
+                ContentUnavailableView(
+                    viewModel.searchText.isEmpty ? "No history yet" : "No matches",
+                    systemImage: viewModel.searchText.isEmpty ? "doc.on.clipboard" : "magnifyingglass"
+                )
+            }
+        }
+    }
+
+    /// Mirrors Android's ConnectionStatusIcon: Wifi on LAN, Cloud on relay,
+    /// a spinner while connecting, CloudOff when there is nothing.
+    private var connectionIcon: some View {
+        Image(systemName: connectionSymbol)
+            .foregroundStyle(connectionTint)
+    }
+
+    private var connectionSymbol: String {
+        switch transportManager.connectionState {
+        case .connectedLan: return "wifi"
+        case .connectedCloud: return "cloud.fill"
+        case .connectingLan, .connectingCloud: return "arrow.triangle.2.circlepath"
+        case .error: return "exclamationmark.arrow.triangle.2.circlepath"
+        case .disconnected: return "cloud.slash"
+        }
+    }
+
+    private var connectionTint: Color {
+        switch transportManager.connectionState {
+        case .connectedLan: return .primary
+        case .connectedCloud: return .accentColor
+        case .error: return .orange
+        case .connectingLan, .connectingCloud, .disconnected: return .secondary
+        }
+    }
+
+    private var connectionDescription: String {
+        switch transportManager.connectionState {
+        case .disconnected: return "Disconnected"
+        case .connectingLan: return "Connecting over LAN"
+        case .connectedLan: return "Connected over LAN"
+        case .connectingCloud: return "Connecting to relay"
+        case .connectedCloud: return "Connected via relay"
+        case .error(let message): return message
+        }
     }
 
     /// Says what became of the last send. Entries are written to local history
@@ -25,73 +170,6 @@ public struct HistoryListView: View {
             return "Could not reach \(count) device\(count == 1 ? "" : "s")"
         case .partial(let sent, let failed):
             return "Sent to \(sent), failed for \(failed)"
-        }
-    }
-
-    public var body: some View {
-        NavigationStack {
-            List {
-                ForEach(viewModel.visibleEntries, id: \.id) { entry in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.content.previewDescription)
-                            .lineLimit(2)
-                        Text(entry.originDeviceName ?? entry.deviceId)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .swipeActions {
-                        Button("Delete", role: .destructive) {
-                            Task { await viewModel.remove(id: entry.id) }
-                        }
-                        Button(entry.isPinned ? "Unpin" : "Pin") {
-                            Task { await viewModel.togglePin(id: entry.id) }
-                        }
-                    }
-                }
-            }
-            .overlay {
-                if viewModel.visibleEntries.isEmpty {
-                    ContentUnavailableView(
-                        viewModel.searchText.isEmpty ? "No history yet" : "No matches",
-                        systemImage: viewModel.searchText.isEmpty ? "doc.on.clipboard" : "magnifyingglass"
-                    )
-                }
-            }
-            .searchable(text: $viewModel.searchText)
-            .navigationTitle("History")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Clear") {
-                        Task { await viewModel.clearAll() }
-                    }
-                    .disabled(viewModel.entries.isEmpty)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 6) {
-                    if let message = sendStatusMessage {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    // The system paste button is the only way to read the
-                    // clipboard on iOS without interrupting the user with a
-                    // permission prompt, so sending starts here rather than
-                    // from a poll the way Android does it. Its label is drawn
-                    // by the system and cannot be changed, so the caption below
-                    // has to carry the meaning.
-                    PasteButton { text in
-                        Task { await viewModel.sendText(text) }
-                    }
-                    Text("Send what you copied to your other devices")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity)
-                .background(.bar)
-            }
-            .task { await viewModel.load() }
         }
     }
 }

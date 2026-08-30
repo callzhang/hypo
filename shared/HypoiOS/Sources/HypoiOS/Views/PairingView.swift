@@ -1,6 +1,7 @@
 import SwiftUI
 import HypoCore
 
+/// Pushed from the devices section of Settings, the way Android reaches it.
 public struct PairingView: View {
     @ObservedObject private var viewModel: RemotePairingViewModel
     private let relayHint: URL?
@@ -24,36 +25,34 @@ public struct PairingView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                Text(viewModel.statusMessage)
-                    .multilineTextAlignment(.center)
+        VStack(spacing: 20) {
+            Text(viewModel.statusMessage)
+                .multilineTextAlignment(.center)
 
-                if let code = visibleCode {
-                    Text(code)
-                        .font(.system(size: 44, weight: .bold, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-
-                if let countdown = viewModel.countdownText {
-                    Text(countdown)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                // port 0: iOS never listens, so there is no port to announce.
-                // PairingSession forwards the value to the peer untouched, so a
-                // zero tells the other device not to expect inbound connections.
-                Button("Request pairing code") {
-                    viewModel.start(service: "_hypo._tcp.", port: 0, relayHint: relayHint)
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button("Reset") { viewModel.reset() }
-                    .buttonStyle(.bordered)
+            if let code = visibleCode {
+                Text(code)
+                    .font(.system(size: 44, weight: .bold, design: .monospaced))
+                    .textSelection(.enabled)
             }
-            .padding()
-            .navigationTitle("Pair a device")
+
+            if let countdown = viewModel.countdownText {
+                Text(countdown)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // port 0: iOS never listens, so there is no port to announce.
+            // PairingSession forwards the value to the peer untouched, so a
+            // zero tells the other device not to expect inbound connections.
+            Button("Request pairing code") {
+                viewModel.start(service: "_hypo._tcp.", port: 0, relayHint: relayHint)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button("Reset") { viewModel.reset() }
+                .buttonStyle(.bordered)
         }
+        .padding()
+        .navigationTitle("Pair a device")
     }
 }

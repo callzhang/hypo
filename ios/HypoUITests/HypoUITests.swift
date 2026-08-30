@@ -24,35 +24,35 @@ final class HypoUITests: XCTestCase {
         return app
     }
 
-    func testBothTabsOpen() {
+    /// One screen with a gear, the way Android works — no tab bar, no title,
+    /// no clear-all button.
+    func testSettingsOpensFromTheGear() {
         let app = launch()
 
-        XCTAssertTrue(app.staticTexts["History"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["Search"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Clear"].exists)
 
         app.buttons["Settings"].tap()
-        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
-
-        app.buttons["History"].tap()
-        XCTAssertTrue(app.staticTexts["History"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 5))
     }
 
-    /// Pairing lives inside Settings, the way it does on Android, rather than
-    /// in a tab of its own.
+    /// Pairing is pushed from the devices section of Settings, the way it is
+    /// on Android, rather than living in navigation of its own.
     func testPairingIsReachedFromSettings() {
         let app = launch()
         app.buttons["Settings"].tap()
 
-        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
         app.buttons["Pair a device"].tap()
 
-        XCTAssertTrue(app.staticTexts["Pair a device"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Request pairing code"].waitForExistence(timeout: 5))
     }
 
     func testSettingsShowsARealDeviceName() {
         let app = launch()
         app.buttons["Settings"].tap()
 
-        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
         // Assert the row rendered before asserting what is not in it, or the
         // absence check would also pass on a screen that failed to load.
         XCTAssertTrue(app.staticTexts["Name"].waitForExistence(timeout: 5))
@@ -69,7 +69,7 @@ final class HypoUITests: XCTestCase {
     func testRequestingAPairingCodeReachesTheRelay() throws {
         let app = launch()
         app.buttons["Settings"].tap()
-        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
         app.buttons["Pair a device"].tap()
         XCTAssertTrue(app.buttons["Request pairing code"].waitForExistence(timeout: 10))
 
@@ -94,7 +94,7 @@ final class HypoUITests: XCTestCase {
     func testHistoryOffersASendControl() {
         let app = launch()
 
-        XCTAssertTrue(app.staticTexts["History"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["Search"].waitForExistence(timeout: 10))
         // The system paste control is how sending is invoked at all.
         XCTAssertTrue(app.buttons["Paste"].waitForExistence(timeout: 5))
     }

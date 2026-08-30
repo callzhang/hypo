@@ -586,6 +586,42 @@ git commit -m "feat(ios): implement SystemClipboard over UIPasteboard"
 
 ---
 
+
+### 执行记录：`UIPasteboard` 的读取会阻塞主线程
+
+**按原计划实现会挂死，而且挂的是真实代码路径，不只是测试。** 记录在此，因为这一条会改变 `SystemClipboard` 在 iOS 上的语义。
+
+第一次跑 `xcodebuild test` 时，`writeText then currentText round-trips` 永不返回。对挂住的进程 `sample` 之后拿到确切位置：
+
+```
+主线程 (com.apple.main-thread)
+  UIKitClipboard.currentText()
+    -[_UIConcretePasteboard string]
+      _coerceItemToClass
+        dispatch_semaphore_wait → semaphore_wait_trap
+
+com.apple.Pasteboard.notification-queue
+  +[PBServerConnection beginListeningToPasteboardChangeNotifications]
+    -[NSNotificationCenter postNotificationName:]
+      -[NSOperation waitUntilFinished] → __psynch_cvwait
+```
+
+看上去像两条线程互等：读取阻塞主线程，而变更通知的投递要等主线程。**但这个解释是不完整的。** 加了写穿缓存之后往返测试 0.039 秒通过，可专门测"读取外部写入内容"的用例照样挂死，`sample` 显示只有主线程卡在同一个信号量上，通知队列根本没参与。
+
+真实结论更简单也更严重：**`-[UIPasteboard string]` 会阻塞调用线程等 pasteboard 服务返回，在没有宿主 app 的 xctest 包里这个等待永远不返回。** `SystemClipboard` 协议是 `@MainActor` 的，没有别的线程可以挪。
+
+**因此 iOS 版的 `currentText()` / `containsImage()` 只回答自己写进去的内容，未命中返回 `nil` / `false`，绝不回落到读取 pasteboard。** 这不是为了绕开测试环境，而是本来就更对：
+
+- 唯一的读取调用方是 `IncomingClipboardHandler.matchesCurrentClipboard`，用途是回声抑制——判断收到的内容是不是剪贴板上已有的，是则跳过。
+- 回声抑制关心的永远是本 app 刚写进去的内容，缓存对这一档回答得精确。
+- 缓存未命中意味着用户在别的 app 里复制过东西。为了一次后台去重判断去读它，代价是阻塞主线程 **加上给用户弹一个 iOS 16+ 的粘贴授权框**。
+- 而 `nil` 落到去重逻辑上就是"不匹配 → 照常写入"，正是安全的一侧。
+
+写穿缓存靠 `changeCount` 判活：写入后记下 `pasteboard.changeCount`，读取时比对，不等则说明别人写过。`changeCount` 本身不阻塞也不弹框（挂死发生在 `_coerceItemToClass`，即内容取值那一步）。
+
+**留给 Task 10 的验证项**：真实 app 外壳里有前台窗口，读取外部内容会弹粘贴框而不是永久阻塞。届时要确认端到端流程里用户看不到任何非预期的粘贴授权框。
+
+
 ## Task 5: AppLifecycleObserving 与通知的 iOS 实现
 
 **Files:**
@@ -773,7 +809,7 @@ public final class UserNotificationScheduler: ClipboardNotificationScheduling, @
     public func deliverNotification(for entry: ClipboardEntry) {
         let content = UNMutableNotificationContent()
         content.title = "Clipboard received"
-        content.body = entry.previewDescription
+        content.body = entry.content.previewDescription
         content.sound = .default
 
         let request = UNNotificationRequest(
@@ -799,7 +835,7 @@ public final class UserNotificationScheduler: ClipboardNotificationScheduling, @
 }
 ```
 
-（`previewDescription` 是 `ClipboardEntry` 上唯一 public 的摘要属性，已实测确认；同名的 `previewText` 是 internal，跨模块取不到。）
+（**`previewDescription` 定义在 `ClipboardContent` 上，不在 `ClipboardEntry` 上**——所以要写 `entry.content.previewDescription`。`ClipboardEntry` 本身没有任何 public 摘要属性；文件里那个 `previewText` 属于 `CGSizeValue` 且是 internal。这处最初写错了，是因为按 grep 到的行号推断归属，而那个文件里定义了三个以上类型。）
 
 - [ ] **Step 5: 确认全部通过并提交**
 
@@ -826,9 +862,54 @@ sed -n "$(grep -n 'public init(' ../HypoCore/Sources/HypoCore/Transport/Transpor
 
 **必填参数**（无默认值）：`provider`、`webSocketServer`、`notificationController`、`clipboard`。其余有默认值。
 
-**`webSocketServer` 是非可选的，但 iOS 绝不能启动它。** 第 1 期定的设计是 iOS 只做 LAN 发起端：iOS 会挂起后台进程，监听端口会让对端看到设备频繁上下线。已实测确认 `LanWebSocketServer` 的构造不创建 `NWListener`——只有 `start(port:)` 会。所以构造它、传进去、**永远不调用 `start(port:)`**。
+**`webSocketServer` 是非可选的，但 iOS 绝不能启动它。** 第 1 期定的设计是 iOS 只做 LAN 发起端：iOS 会挂起后台进程，监听端口会让对端看到设备频繁上下线。已实测确认 `LanWebSocketServer` 的构造不创建 `NWListener`——只有 `start(port:)` 会。
 
-- [ ] **Step 2: 写失败测试**
+**但光"不主动调 `start(port:)`"是不够的。** 实测 `TransportManager.init` 的最后一个参数是 `autoStartLanServices: Bool = true`，默认为真；它在非 AppKit 平台上会立刻 `Task { await activateLanServices() }`，而 `activateLanServices()` 第一件事就是 `try webSocketServer.start(port: lanConfiguration.port)`，第二件事是 `publisher.start(with:)`。也就是说**按原计划写的 `HypoiOSContext` 一构造就会在 iOS 上开监听并广播 Bonjour**，正好是设计要禁止的行为，而且多半会在测试包里触发第 1 期见过的 `SO_NECP_LISTENUUID` 失败。
+
+传 `autoStartLanServices: false` 也不对——`activateLanServices()` 一共做五件事：
+
+| # | 动作 | iOS 是否需要 |
+|---|---|---|
+| 1 | `webSocketServer.start(port:)` | ✘ 禁止 |
+| 2 | `publisher.start(with:)` 广播 Bonjour | ✘ 禁止 |
+| 3 | `browser.start()` + 发现事件流 | ✔ 必需（要发现对端才能发起连接） |
+| 4 | prune / health-check / network-monitor 任务 | ✔ 需要 |
+| 5 | `startAutoConnect()` 云端中转 | ✔ 需要 |
+
+关掉整个开关会连 3–5 一起丢掉，iOS 就发现不了任何对端。需要的是"只做客户端"这一档。
+
+代码里恰好有个暗门：启动监听的守卫是 `port >= 0`，广播的守卫是 `port > 0`，所以传一个负数端口正好跳过 1 和 2 而保留 3–5。**不要用这个暗门**——它把一个载荷很重的设计决策藏在一个魔数里，哪天有人把 `>= 0` 顺手"修"成 `> 0`，iOS 就会静默开始监听，而且没有任何测试会红。这个决策要写在类型里。
+
+- [ ] **Step 2: 给 HypoCore 加一个显式的 LAN 角色**
+
+在 `TransportManager.swift` 里加：
+
+```swift
+/// Whether this device offers a LAN listener that peers can dial.
+///
+/// macOS and Windows do. iOS does not: the system suspends the app in the
+/// background, so an advertised listener would make peers see the device
+/// flapping online and offline. A client-only manager still browses for
+/// peers, prunes them, health-checks them and connects to the cloud relay —
+/// it just never binds a socket or advertises one.
+public enum LanRole: Sendable {
+    case peer
+    case clientOnly
+}
+```
+
+初始化器加 `lanRole: LanRole = .peer`（默认值让 macOS 与 Windows 的所有调用点原样通过），`activateLanServices()` 里给前两步加守卫：
+
+```swift
+if lanRole == .peer, !isServerRunning, lanConfiguration.port >= 0 {
+```
+```swift
+if lanRole == .peer, !isAdvertising, lanConfiguration.port > 0 {
+```
+
+改完先跑 macOS 全量，确认 56 + 143 仍然全绿再往下走。
+
+- [ ] **Step 3: 写失败测试**
 
 ```swift
 import Foundation
@@ -859,9 +940,9 @@ struct HypoiOSContextTests {
 
 （`listeningPort` 实测是 `public var listeningPort: NWEndpoint.Port? { listener?.port }` —— 未调用 `start(port:)` 时 `listener` 为 nil，所以返回 nil。这个断言直接证明"没有在监听"。）
 
-- [ ] **Step 3: 确认失败**，期望 `cannot find 'HypoiOSContext' in scope`。
+- [ ] **Step 4: 确认失败**，期望 `cannot find 'HypoiOSContext' in scope`。
 
-- [ ] **Step 4: 实现**
+- [ ] **Step 5: 实现**
 
 ```swift
 import Foundation
@@ -904,7 +985,8 @@ public final class HypoiOSContext {
             webSocketServer: webSocketServer,
             notificationController: notificationScheduler,
             clipboard: clipboard,
-            lifecycleObserver: lifecycleObserver
+            lifecycleObserver: lifecycleObserver,
+            lanRole: .clientOnly
         )
     }
 }
@@ -912,7 +994,7 @@ public final class HypoiOSContext {
 
 （实测签名是 `init(localDeviceId: String? = nil, heartbeatInterval: TimeInterval = 60, enableHeartbeat: Bool = true)` —— **没有 `port:` 参数**，端口是 `start(port:)` 时才指定的，这也正是构造不会绑定监听器的原因。）
 
-- [ ] **Step 5: 确认通过并提交**
+- [ ] **Step 6: 确认通过并提交**
 
 ```bash
 git add shared/HypoiOS
@@ -1029,7 +1111,7 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
     public var visibleEntries: [ClipboardEntry] {
         guard !searchText.isEmpty else { return entries }
         let needle = searchText.lowercased()
-        return entries.filter { $0.previewDescription.lowercased().contains(needle) }
+        return entries.filter { $0.content.previewDescription.lowercased().contains(needle) }
     }
 
     public func load() async {
@@ -1056,7 +1138,7 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
 }
 ```
 
-`visibleEntries` 用 `previewDescription` 过滤——实测确认这是 `ClipboardEntry` 上唯一 public 的摘要属性（`previewText` 是 internal，跨模块不可见）。
+`visibleEntries` 用 `content.previewDescription` 过滤——该属性属于 `ClipboardContent` 而非 `ClipboardEntry`，必须经 `.content` 取用。
 
 - [ ] **Step 4: 确认通过并提交**
 
@@ -1095,7 +1177,7 @@ public struct HistoryListView: View {
             List {
                 ForEach(viewModel.visibleEntries, id: \.id) { entry in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.previewDescription)
+                        Text(entry.content.previewDescription)
                             .lineLimit(2)
                         Text(entry.originDeviceName ?? entry.deviceId)
                             .font(.caption)

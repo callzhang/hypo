@@ -13,6 +13,7 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
     /// worked.
     @Published public private(set) var lastSendOutcome: SendOutcome?
 
+    private let logger = HypoLogger(category: "HistoryListViewModel")
     private let store: HistoryStore
     private let transportManager: TransportManager?
     private let identity: DeviceIdentityProviding?
@@ -37,7 +38,18 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
     /// the background. Does nothing when this app wrote the current contents,
     /// so an entry that just arrived is not sent straight back.
     public func sendClipboardIfChanged() async {
-        guard let clipboard, let text = await clipboard.readForegroundText() else { return }
+        guard let clipboard else {
+            logger.debug("⏭️ [HistoryListViewModel] No clipboard attached; nothing to send")
+            return
+        }
+        // Logged because the read can stall on the iOS paste prompt, and a
+        // silent return is indistinguishable from "nothing was copied".
+        logger.debug("📋 [HistoryListViewModel] Reading clipboard for foreground send")
+        guard let text = await clipboard.readForegroundText() else {
+            logger.debug("⏭️ [HistoryListViewModel] Nothing new on the clipboard")
+            return
+        }
+        logger.debug("📤 [HistoryListViewModel] Sending \(text.count) characters")
         await sendText(text)
     }
 

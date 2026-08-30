@@ -49,6 +49,7 @@ macos/.derived/
 macos/.spm-cache/
 macos/Package.resolved
 shared/**/.build/
+tools/**/.build/
 shared/**/Package.resolved
 
 # CocoaPods (if used)

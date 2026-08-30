@@ -74,22 +74,6 @@ func runShow() async throws {
     }
 
     let client = PairingRelayClient(baseURL: relayURL)
-    let code = try await client.createPairingCode(
-        initiatorDeviceId: payload.peerDeviceId,
-        initiatorDeviceName: deviceName,
-        initiatorPublicKey: payload.peerPublicKey
-    )
-
-    print("")
-    print("  Pairing code: \(code.code)")
-    print("  Enter it on the other device. Expires \(code.expiresAt).")
-    // Written out so an automated driver can pick it up; a human just reads
-    // the line above.
-    if let path = ProcessInfo.processInfo.environment["HYPO_CODE_FILE"] {
-        try? code.code.write(toFile: path, atomically: true, encoding: .utf8)
-        print("  (also written to \(path))")
-    }
-    print("")
 
     // Start listening before pairing finishes: the other device may dial the
     // moment it has a key, and a listener that appears late is a race.
@@ -114,42 +98,60 @@ func runShow() async throws {
     }
     print("Advertising _hypo._tcp as \"\(deviceName)\"")
 
-    let inbox = await MainActor.run { () -> HarnessInbox in
+    _ = await MainActor.run { () -> HarnessInbox in
         let inbox = HarnessInbox(deviceId: deviceId, keyProvider: keyProvider)
         server.delegate = inbox
+        InboxBox.shared.keep(inbox)
         return inbox
     }
-    _ = inbox
 
-    // Answer the challenge when it arrives.
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
 
-    for _ in 0..<120 {
-        if pairedPeer.withLock({ $0 }) != nil { break }
-        do {
-            let json = try await client.pollChallenge(
-                code: code.code,
-                initiatorDeviceId: payload.peerDeviceId
-            )
-            let message = try decoder.decode(PairingChallengeMessage.self, from: Data(json.utf8))
-            guard let ack = await session.handleChallenge(message) else {
-                print("Challenge rejected.")
-                break
+    // Codes expire in about a minute. Rather than showing one and giving up,
+    // mint a new one whenever the relay says the old is gone — a person who
+    // walks away mid-pairing should not have to restart the process, and an
+    // automated driver should not have to race the clock.
+    codeLoop: while pairedPeer.withLock({ $0 }) == nil {
+        let code = try await client.createPairingCode(
+            initiatorDeviceId: payload.peerDeviceId,
+            initiatorDeviceName: deviceName,
+            initiatorPublicKey: payload.peerPublicKey
+        )
+        print("")
+        print("  Pairing code: \(code.code)")
+        print("  Enter it on the other device. Expires \(code.expiresAt).")
+        if let path = ProcessInfo.processInfo.environment["HYPO_CODE_FILE"] {
+            try? code.code.write(toFile: path, atomically: true, encoding: .utf8)
+            print("  (also written to \(path))")
+        }
+        print("")
+
+        while pairedPeer.withLock({ $0 }) == nil {
+            do {
+                let json = try await client.pollChallenge(
+                    code: code.code,
+                    initiatorDeviceId: payload.peerDeviceId
+                )
+                let message = try decoder.decode(PairingChallengeMessage.self, from: Data(json.utf8))
+                guard let ack = await session.handleChallenge(message) else {
+                    print("Challenge rejected.")
+                    break codeLoop
+                }
+                try await client.submitAck(
+                    code: code.code,
+                    initiatorDeviceId: payload.peerDeviceId,
+                    ackJSON: String(decoding: try encoder.encode(ack), as: UTF8.self)
+                )
+                print("Paired with the device that claimed \(code.code)")
+            } catch PairingRelayClient.Error.challengeNotReady {
+                try? await Task.sleep(for: .milliseconds(1000))
+            } catch {
+                print("Code \(code.code) is no longer usable (\(error.localizedDescription)); issuing another.")
+                continue codeLoop
             }
-            try await client.submitAck(
-                code: code.code,
-                initiatorDeviceId: payload.peerDeviceId,
-                ackJSON: String(decoding: try encoder.encode(ack), as: UTF8.self)
-            )
-            print("Paired with \(ack.responderDeviceName) (\(ack.responderDeviceId.uuidString.lowercased()))")
-        } catch PairingRelayClient.Error.challengeNotReady {
-            try? await Task.sleep(for: .milliseconds(1000))
-        } catch {
-            print("Pairing failed: \(error.localizedDescription)")
-            break
         }
     }
 
@@ -217,6 +219,14 @@ func sendWhenConnected(
 
 enum HarnessError: Error { case noPayload }
 
+/// Keeps the inbox alive; the server holds its delegate weakly.
+@MainActor
+final class InboxBox {
+    static let shared = InboxBox()
+    private var inboxes: [AnyObject] = []
+    func keep(_ inbox: AnyObject) { inboxes.append(inbox) }
+}
+
 /// Keeps the Bonjour publisher alive. Top-level code cannot hold main-actor
 /// globals, and a publisher that gets deallocated stops advertising.
 @MainActor
@@ -274,6 +284,11 @@ final class PrintingClipboard: SystemClipboard {
     func writeText(_ text: String) {
         changeCount += 1
         print("RECEIVED text: \(text)")
+        // Written out so an automated driver can see it; a human reads the
+        // line above.
+        if let path = ProcessInfo.processInfo.environment["HYPO_RECEIVED_FILE"] {
+            try? text.write(toFile: path, atomically: true, encoding: .utf8)
+        }
     }
     func writeImageData(_ data: Data) -> Bool {
         changeCount += 1

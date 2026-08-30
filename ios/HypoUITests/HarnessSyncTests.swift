@@ -18,9 +18,7 @@ final class HarnessSyncTests: XCTestCase {
     }
 
     func testPairsWithHarnessAndReceivesWhatItSends() throws {
-        guard let code = try? String(contentsOfFile: codePath, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !code.isEmpty else {
+        guard FileManager.default.fileExists(atPath: codePath) else {
             throw XCTSkip("no pairing code at \(codePath); start HypoHarness first")
         }
 
@@ -43,6 +41,13 @@ final class HarnessSyncTests: XCTestCase {
         let field = app.textFields["PairingCodeField"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()
+        // Read the code now, not at the start: it expires in about a minute
+        // and launching plus navigating spends most of that. The harness
+        // reissues, so the file holds whichever code is currently live.
+        let code = try XCTUnwrap(
+            try? String(contentsOfFile: codePath, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         field.typeText(code)
         app.buttons["Enter this code"].tap()
 
@@ -66,5 +71,51 @@ final class HarnessSyncTests: XCTestCase {
             app.staticTexts["hello from the Mac harness"].waitForExistence(timeout: 90),
             "the harness's clipboard entry never arrived"
         )
+
+        // The other direction: copy on the phone, and the Mac should get it.
+        // Sending happens when the app becomes active, so this backgrounds the
+        // app and brings it back — what a user does after copying elsewhere.
+        guard let receivedPath = ProcessInfo.processInfo.environment["HYPO_RECEIVED_FILE"] else {
+            return
+        }
+        try? FileManager.default.removeItem(atPath: receivedPath)
+
+        let sentFromPhone = "copied on the phone \(UUID().uuidString.prefix(8))"
+        UIPasteboard.general.string = sentFromPhone
+
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 2)
+        app.activate()
+
+        // Reading a clipboard this app did not write raises the iOS paste
+        // prompt. Interruption monitors only fire when the test interacts with
+        // something, so poke the app to give the monitor its chance.
+        Thread.sleep(forTimeInterval: 2)
+        app.tap()
+        for label in ["Allow Paste", "Allow", "Paste"] {
+            let button = springboardAlertButton(label)
+            if button.exists { button.tap(); break }
+        }
+
+        XCTAssertTrue(
+            pollForFile(at: receivedPath, containing: sentFromPhone, timeout: 90),
+            "the phone's clipboard never reached the harness"
+        )
+    }
+
+    private func springboardAlertButton(_ label: String) -> XCUIElement {
+        XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons[label]
+    }
+
+    private func pollForFile(at path: String, containing text: String, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let contents = try? String(contentsOfFile: path, encoding: .utf8),
+               contents.contains(text) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        return false
     }
 }

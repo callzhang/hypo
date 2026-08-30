@@ -80,32 +80,58 @@ public sealed class ClipboardListener : IClipboard, IDisposable
 
     public event EventHandler<ClipboardContent>? ContentChanged;
 
-    public Task<ClipboardContent?> GetAsync(CancellationToken ct = default) =>
-        OnPump(() =>
+    public Task<ClipboardContent?> GetAsync(CancellationToken ct = default) => OnPump(ReadCurrent);
+
+    /// <summary>
+    /// Reads whatever the clipboard holds that we understand.
+    ///
+    /// <para>Images are checked first. An application that copies a picture
+    /// usually also puts a text representation alongside it -- a filename, a
+    /// URL -- and taking the text would sync the label instead of the
+    /// picture.</para>
+    /// </summary>
+    private static ClipboardContent? ReadCurrent()
+    {
+        var png = WindowsClipboard.ReadPng();
+        if (png is { Length: > 0 })
         {
-            var text = WindowsClipboard.ReadText();
-            return text is null ? null : ClipboardFormats.FromText(text);
-        });
+            return new ClipboardContent { ContentType = ContentType.Image, Data = png };
+        }
+
+        var text = WindowsClipboard.ReadText();
+        return text is null ? null : ClipboardFormats.FromText(text);
+    }
 
     public Task SetAsync(ClipboardContent content, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(content);
 
-        if (content.ContentType is not (ContentType.Text or ContentType.Link))
+        if (content.ContentType is ContentType.File)
         {
-            // Images and files are a later plan; refusing loudly beats writing
-            // raw bytes into CF_UNICODETEXT and producing mojibake.
-            throw new NotSupportedException($"{content.ContentType} cannot be written yet.");
+            // Files need somewhere to land on disk and a CF_HDROP pointing at it.
+            // Refusing loudly beats writing the payload into a text format and
+            // producing mojibake; SyncCoordinator keeps the item in history and
+            // says so, rather than losing it.
+            throw new NotSupportedException("Files cannot be placed on the clipboard yet.");
         }
 
-        var text = Encoding.UTF8.GetString(content.Data);
+        if (content.ContentType is ContentType.Image && !ClipboardFormats.LooksLikePng(content.Data))
+        {
+            throw new NotSupportedException("Only PNG images can be placed on the clipboard.");
+        }
+
+        var text = content.ContentType is ContentType.Image
+            ? null
+            : Encoding.UTF8.GetString(content.Data);
 
         return OnPump<object?>(() =>
         {
             // Both statements on the pump thread, so the WM_CLIPBOARDUPDATE the
             // write causes is dispatched afterwards, by which time the sequence
             // number it must be compared against is already recorded.
-            _ownSequences.Enqueue(WindowsClipboard.WriteText(text));
+            _ownSequences.Enqueue(text is null
+                ? WindowsClipboard.WritePng(content.Data)
+                : WindowsClipboard.WriteText(text));
             while (_ownSequences.Count > 8)
             {
                 _ownSequences.Dequeue();
@@ -195,10 +221,10 @@ public sealed class ClipboardListener : IClipboard, IDisposable
             return;
         }
 
-        string? text;
+        ClipboardContent? content;
         try
         {
-            text = WindowsClipboard.ReadText();
+            content = ReadCurrent();
         }
         catch (Win32Exception)
         {
@@ -207,9 +233,9 @@ public sealed class ClipboardListener : IClipboard, IDisposable
             return;
         }
 
-        if (text is not null)
+        if (content is not null)
         {
-            ContentChanged?.Invoke(this, ClipboardFormats.FromText(text));
+            ContentChanged?.Invoke(this, content);
         }
     }
 

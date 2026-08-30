@@ -271,4 +271,27 @@ public class SyncCoordinatorTests : IDisposable
 
         Assert.Null(f.History.Recent()[0].SourceDeviceId);
     }
+
+    [Fact]
+    public async Task KeepsAnItemTheClipboardCannotHoldAndKeepsWorking()
+    {
+        // The phone can send images; a text-only clipboard build would throw
+        // from SetAsync inside a fire-and-forget task, where the exception is
+        // never observed and the inbound path silently stops.
+        var f = Build();
+        f.Clipboard.RefuseWrites = true;
+
+        f.Transport.Deliver(Inbound("something this clipboard refuses"));
+        await Settle();
+
+        Assert.Single(f.History.Recent());
+        Assert.Contains(f.Drops, d => d.Contains("cannot hold", StringComparison.Ordinal));
+
+        // Still alive: the next item, which it can hold, goes through.
+        f.Clipboard.RefuseWrites = false;
+        f.Transport.Deliver(Inbound("and this one it can"));
+        await Settle();
+
+        Assert.Equal("and this one it can", Encoding.UTF8.GetString(f.Clipboard.Current!.Data));
+    }
 }

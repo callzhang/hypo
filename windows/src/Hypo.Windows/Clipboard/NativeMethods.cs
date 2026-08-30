@@ -38,6 +38,16 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll")]
     internal static partial uint GetClipboardSequenceNumber();
 
+    /// <summary>
+    /// Registers (or looks up) a named clipboard format. "PNG" is the name every
+    /// browser and image editor on Windows uses for lossless bitmap interchange,
+    /// which is what makes it the right carrier for a format the protocol already
+    /// speaks.
+    /// </summary>
+    [LibraryImport("user32.dll", EntryPoint = "RegisterClipboardFormatW", SetLastError = true,
+        StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial uint RegisterClipboardFormat(string lpszFormat);
+
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool AddClipboardFormatListener(nint hwnd);

@@ -34,14 +34,23 @@ public static class WindowsClipboard
     /// <summary>Reads CF_UNICODETEXT, or null when the clipboard holds no text.</summary>
     public static string? ReadText()
     {
+        var bytes = Read(ClipboardFormats.CfUnicodeText);
+        return bytes is null ? null : ClipboardFormats.DecodeUnicodeText(bytes);
+    }
+
+    /// <summary>Reads the registered PNG format, or null when there is no image.</summary>
+    public static byte[]? ReadPng() => Read(ClipboardFormats.PngFormat);
+
+    private static byte[]? Read(uint format)
+    {
         using var _ = Open();
 
-        if (!NativeMethods.IsClipboardFormatAvailable(ClipboardFormats.CfUnicodeText))
+        if (!NativeMethods.IsClipboardFormatAvailable(format))
         {
             return null;
         }
 
-        var handle = NativeMethods.GetClipboardData(ClipboardFormats.CfUnicodeText);
+        var handle = NativeMethods.GetClipboardData(format);
         if (handle == 0)
         {
             return null;
@@ -58,12 +67,12 @@ public static class WindowsClipboard
             var size = (int)NativeMethods.GlobalSize(handle);
             if (size <= 0)
             {
-                return string.Empty;
+                return [];
             }
 
             var buffer = new byte[size];
             Marshal.Copy(pointer, buffer, 0, size);
-            return ClipboardFormats.DecodeUnicodeText(buffer);
+            return buffer;
         }
         finally
         {
@@ -80,9 +89,7 @@ public static class WindowsClipboard
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        var bytes = ClipboardFormats.EncodeUnicodeText(text);
-
-        Write(bytes);
+        Write(ClipboardFormats.CfUnicodeText, ClipboardFormats.EncodeUnicodeText(text));
 
         // Read *after* the session closes. The sequence number advances when the
         // change is committed at CloseClipboard, so reading it inside the open
@@ -92,7 +99,28 @@ public static class WindowsClipboard
         return NativeMethods.GetClipboardSequenceNumber();
     }
 
-    private static void Write(byte[] bytes)
+    /// <summary>
+    /// Publishes PNG bytes on the clipboard, returning the sequence number the
+    /// listener uses to recognise its own write.
+    /// </summary>
+    public static uint WritePng(byte[] png)
+    {
+        ArgumentNullException.ThrowIfNull(png);
+
+        if (!ClipboardFormats.LooksLikePng(png))
+        {
+            // Advertising non-PNG bytes under the PNG format would make whatever
+            // pasted them fail in a way that looks like our bug rather than the
+            // sender's.
+            throw new ArgumentException("These bytes are not a PNG.", nameof(png));
+        }
+
+        Write(ClipboardFormats.PngFormat, png);
+
+        return NativeMethods.GetClipboardSequenceNumber();
+    }
+
+    private static void Write(uint format, byte[] bytes)
     {
         using var _ = Open();
 
@@ -128,7 +156,7 @@ public static class WindowsClipboard
                 NativeMethods.GlobalUnlock(handle);
             }
 
-            if (NativeMethods.SetClipboardData(ClipboardFormats.CfUnicodeText, handle) == 0)
+            if (NativeMethods.SetClipboardData(format, handle) == 0)
             {
                 throw new Win32Exception(
                     Marshal.GetLastPInvokeError(),

@@ -20,6 +20,19 @@ public static class ClipboardFormats
     public const uint CfText = 1;
     public const uint CfUnicodeText = 13;
     public const uint CfHdrop = 15;
+    public const uint CfDib = 8;
+
+    /// <summary>
+    /// The registered "PNG" format, resolved once.
+    ///
+    /// <para>Images travel as PNG in the protocol, and Windows has no built-in
+    /// PNG format -- CF_DIB is a raw bitmap with no compression and no alpha in
+    /// its classic form. Every browser and image editor publishes and accepts the
+    /// registered "PNG" name, so carrying the protocol's bytes through unchanged
+    /// is both simpler and lossless. Converting to CF_DIB would mean decoding and
+    /// re-encoding an image to hand back something worse.</para>
+    /// </summary>
+    public static uint PngFormat { get; } = NativeMethods.RegisterClipboardFormat("PNG");
 
     /// <summary>
     /// Classifies decoded clipboard text.
@@ -73,9 +86,22 @@ public static class ClipboardFormats
     public static uint? FormatFor(ContentType type) => type switch
     {
         ContentType.Text or ContentType.Link => CfUnicodeText,
+        ContentType.Image => PngFormat,
         ContentType.File => CfHdrop,
         _ => null,
     };
+
+    /// <summary>
+    /// True when the bytes begin with the PNG signature.
+    ///
+    /// <para>Checked before publishing an image: another client sending JPEG or a
+    /// truncated file would otherwise be advertised on the clipboard as PNG, and
+    /// whatever pasted it would fail in a way that looks like our bug.</para>
+    /// </summary>
+    public static bool LooksLikePng(ReadOnlySpan<byte> data) =>
+        data.Length >= 8
+        && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47
+        && data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A;
 
     /// <summary>Builds content from decoded text, classifying it on the way.</summary>
     public static ClipboardContent FromText(string text)

@@ -180,8 +180,34 @@ public sealed class SyncCoordinator
             SourceDeviceName = e.Envelope.Payload.DeviceName,
         };
 
+        // Recorded before the clipboard write, deliberately. An item this machine
+        // cannot put on its clipboard is still an item the peer sent, and losing
+        // it from the history as well would make a partial capability look like a
+        // dropped message.
         _history.Add(entry);
-        await _clipboard.SetAsync(content).ConfigureAwait(false);
+
+        try
+        {
+            await _clipboard.SetAsync(content).ConfigureAwait(false);
+        }
+        catch (NotSupportedException ex)
+        {
+            // A clipboard that cannot hold this content type -- images and files
+            // on a build that only does text. It is in the history and the user
+            // can still see it; what must not happen is this escaping into a
+            // fire-and-forget task, where it becomes an unobserved exception and
+            // the inbound path just stops working with nothing in the log.
+            Dropped?.Invoke(
+                this,
+                $"Kept a {content.ContentType} item from {senderId} in history; " +
+                $"this clipboard cannot hold it ({ex.Message}).");
+            return;
+        }
+        catch (Exception ex)
+        {
+            Dropped?.Invoke(this, $"Could not write to the clipboard: {ex.GetType().Name}: {ex.Message}.");
+            return;
+        }
 
         Applied?.Invoke(this, entry);
     }

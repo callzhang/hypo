@@ -17,10 +17,18 @@ internal sealed class FakeClipboard : IClipboard
 
     public List<ClipboardContent> Writes { get; } = [];
 
+    /// <summary>Makes SetAsync refuse, the way a text-only clipboard refuses an image.</summary>
+    public bool RefuseWrites { get; set; }
+
     public Task<ClipboardContent?> GetAsync(CancellationToken ct = default) => Task.FromResult(Current);
 
     public Task SetAsync(ClipboardContent content, CancellationToken ct = default)
     {
+        if (RefuseWrites)
+        {
+            throw new NotSupportedException($"{content.ContentType} cannot be written.");
+        }
+
         Current = content;
         Writes.Add(content);
         return Task.CompletedTask;

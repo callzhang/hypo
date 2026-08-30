@@ -18,6 +18,19 @@ public sealed record PairablePeer
 
     /// <summary>False when this peer advertises no key and so cannot be paired with.</summary>
     public bool CanPair => !AlreadyPaired && Peer.PublicKey is not null;
+
+    /// <summary>
+    /// The peer's state in words, for the list.
+    ///
+    /// <para>The window showed nothing but a name and an id until a screenshot
+    /// made it obvious that an already-paired device looked exactly like a new
+    /// one -- the distinction existed in this class and never reached the
+    /// screen.</para>
+    /// </summary>
+    public string Status =>
+        AlreadyPaired ? "Already paired"
+        : Peer.PublicKey is null ? "Not offering to pair — open Hypo on it"
+        : "Ready to pair";
 }
 
 /// <summary>

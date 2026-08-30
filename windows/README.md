@@ -44,12 +44,23 @@ CI publishes `hypo-console-win-x64`, a self-contained build. Nothing here can
 tell you how the client behaves on a logged-in interactive desktop, alongside a
 real clipboard manager, or over hours — download that artifact and use it.
 
-**The tray application is the one part no test covers.** Its logic — what the
-icon means, how history filters, what a pairing failure says — lives in
-`Hypo.Windows` and is tested; the WPF project binds to that and does nothing
-else, which is why the split exists. But whether the icon appears, the menu
-opens, the window is legible or the app survives a display change is not
-established by anything here. Only running it is.
+**The interface is tested, and CI takes pictures of it.** That was written off
+for several plans on the assumption that a runner has no interactive desktop.
+It does: `windows-latest` shows windows, renders them, creates a
+notification-area icon and captures the screen. The Win32 clipboard tests
+passing there had been evidence against the assumption the whole time, and
+nobody checked.
+
+So the history and pairing windows are opened for real, asserted on through
+their controls, and captured. Every green build publishes
+`hypo-ui-screenshots` — download it to see the interface without a Windows
+machine. Two defects surfaced within minutes of looking at the first set: the
+search box had no label, and an already-paired device looked identical to a new
+one.
+
+What is still open is what a runner cannot be: a person using it. Whether the
+window is legible at your DPI, survives a second monitor, or behaves after a
+session lock is not established here.
 
 Two defects found by Windows CI that a Mac cannot reproduce are worth knowing
 about if you touch this code:

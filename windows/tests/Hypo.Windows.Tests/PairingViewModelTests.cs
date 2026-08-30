@@ -147,6 +147,39 @@ public class PairingViewModelTests
         Assert.Contains("Paired with", model.LastMessage!, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void SaysWhetherAPeerIsAlreadyPaired()
+    {
+        // This existed on the model and never reached the screen: the pairing
+        // window showed a paired device and a new one identically until a
+        // screenshot made it obvious.
+        var store = new InMemorySecretStore();
+        store.Write(PeerId.ToString(), new byte[32]);
+
+        var model = Build(store);
+        model.Observe(Peer(PeerId.ToString(), publicKey: new byte[32]));
+
+        Assert.Equal("Already paired", Assert.Single(model.Peers).Status);
+    }
+
+    [Fact]
+    public void SaysWhenAPeerIsReadyToPair()
+    {
+        var model = Build(new InMemorySecretStore());
+        model.Observe(Peer(PeerId.ToString(), publicKey: new byte[32]));
+
+        Assert.Equal("Ready to pair", Assert.Single(model.Peers).Status);
+    }
+
+    [Fact]
+    public void SaysWhatToDoAboutAPeerOfferingNoKey()
+    {
+        var model = Build(new InMemorySecretStore());
+        model.Observe(Peer(PeerId.ToString()));
+
+        Assert.Contains("open Hypo on it", Assert.Single(model.Peers).Status, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class NullClipboard : Core.Sync.IClipboard
     {
         public event EventHandler<Core.Sync.ClipboardContent>? ContentChanged;

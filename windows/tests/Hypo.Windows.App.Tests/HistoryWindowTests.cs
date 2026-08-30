@@ -147,6 +147,36 @@ public class HistoryWindowTests : IDisposable
     }
 
     [SkippableFact]
+    public void TheSearchBoxSaysWhatItIsFor()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        Add("something", 1);
+
+        Wpf.Run(() =>
+        {
+            var window = new HistoryWindow(Model());
+            window.Show();
+            window.Settle();
+
+            var hint = (System.Windows.Controls.TextBlock)window.FindName("FilterHint");
+            var filter = (System.Windows.Controls.TextBox)window.FindName("FilterBox");
+
+            // An unlabelled box tells the user nothing, which only looking at it
+            // made obvious.
+            Assert.Equal(Visibility.Visible, hint.Visibility);
+
+            filter.Text = "typing";
+            window.Settle();
+
+            // And it has to get out of the way once there is text behind it.
+            Assert.Equal(Visibility.Collapsed, hint.Visibility);
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
     public void HasAWindowThatIsActuallySized()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");

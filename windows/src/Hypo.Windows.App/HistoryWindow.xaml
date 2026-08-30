@@ -11,11 +11,19 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <TextBox x:Name="FilterBox"
-             Grid.Row="0"
-             Padding="6"
-             TextChanged="OnFilterChanged"
-             ToolTip="Search the history" />
+    <Grid Grid.Row="0">
+      <TextBox x:Name="FilterBox"
+               Padding="6"
+               TextChanged="OnFilterChanged" />
+      <!-- WPF has no placeholder; an unlabelled box tells the user nothing about
+           what it does, which a screenshot made plain. -->
+      <TextBlock x:Name="FilterHint"
+                 Margin="8,0,0,0"
+                 VerticalAlignment="Center"
+                 Foreground="#FF9A9A9A"
+                 IsHitTestVisible="False"
+                 Text="Search your clipboard history" />
+    </Grid>
 
     <ListBox x:Name="Rows"
              Grid.Row="1"

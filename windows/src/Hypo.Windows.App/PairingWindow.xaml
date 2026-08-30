@@ -24,8 +24,9 @@
       <ListBox.ItemTemplate>
         <DataTemplate>
           <StackPanel Margin="2,6">
-            <TextBlock Text="{Binding DisplayName}" />
-            <TextBlock Foreground="#FF6B6B6B" FontSize="11" Text="{Binding DeviceId}" />
+            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+            <TextBlock Foreground="#FF3A7D44" FontSize="11" Text="{Binding Status}" />
+            <TextBlock Foreground="#FF9A9A9A" FontSize="10" Text="{Binding DeviceId}" />
           </StackPanel>
         </DataTemplate>
       </ListBox.ItemTemplate>

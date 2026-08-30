@@ -24,6 +24,7 @@ public partial class HistoryWindow : Window
     {
         Rows.ItemsSource = _model.Rows;
         Hint.Visibility = _model.IsEmpty ? Visibility.Visible : Visibility.Collapsed;
+        FilterHint.Visibility = FilterBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnFilterChanged(object sender, TextChangedEventArgs e)

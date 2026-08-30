@@ -138,6 +138,24 @@ does not republish it; the pairing list, its already-paired marking, and the
 wording of every outcome. Plus everything underneath: the Win32 clipboard,
 transports, pairing, history.
 
+**Correction, after actually measuring it.** The claim below — and in Plan 6,
+and in two READMEs — that CI cannot see the interface was wrong. A GitHub-hosted
+`windows-latest` runner is a fully interactive session: `Environment.UserInteractive`
+is true, windows show and render, a `NotifyIcon` appears, the screen captures. It
+was asserted across several plans without ever being tested, while the Win32
+clipboard tests passing on that same runner were evidence against it.
+
+The interface now has ten tests that open the real windows and capture PNGs,
+published as `hypo-ui-screenshots`. Looking at the first set found two defects
+immediately: an unlabelled search box, and an already-paired device rendering
+identically to a new one — the distinction existed in the view model, was
+tested, and never reached the screen.
+
+What remains unverified is genuinely smaller: DPI, multiple monitors, session
+locks, and a person's judgement about whether any of it is pleasant.
+
+**The original text follows, wrong where it says CI cannot look.**
+
 **What it does not.** Nothing here has seen the application. Not whether the
 icon appears in the notification area, whether the menu opens, whether either
 window is legible at a normal DPI or survives being dragged to a second monitor,

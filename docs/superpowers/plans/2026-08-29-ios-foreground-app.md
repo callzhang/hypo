@@ -1773,6 +1773,23 @@ Task 10 收尾时复查发现两个组件按计划写完了、测试也绿了，
 这两处共同的形状是：**一个组件有测试、有文档、编译得过，却没有接入产品路径**。单元测试天然测不出"没人调用我"。能发现它们的只有两件事——把整条链路从入口走一遍，以及在提交前问一句"谁调用它"。
 
 
+
+### 执行记录：本地工具链比 CI 新，本地绿不等于 CI 绿
+
+`SettingsView` 里这行在本机 Xcode 26.5 上编译通过，在 CI 的 `macos-15` runner 上直接失败：
+
+```
+error: non-sendable result type 'UNNotificationSettings' cannot be sent from
+nonisolated context in call to instance method 'notificationSettings()'
+```
+
+`await UNUserNotificationCenter.current().notificationSettings()` 返回的是设置对象本身，它不是 `Sendable`。两个工具链对这件事的判定不同。
+
+**没有用 `@preconcurrency import` 压掉。** 那只是把错误降级成警告，问题原样留在代码里。改成用完成回调 + `withCheckedContinuation`，在回调内部就把状态映射成字符串，**只有 `String` 跨越边界**——这样结论不依赖于谁来编译。
+
+本机只装了一个 Xcode，无法本地复现 CI 的工具链。**因此 iOS 的编译结论以 CI 为准，本地绿只是必要条件。** 这也是本期第二次出现"验证手段本身有盲区"：上一次是 `xcodebuild` 吞掉测试失败，这一次是本地工具链比 CI 宽松。
+
+
 ## Task 11: CI 构建 app target
 
 **Files:**

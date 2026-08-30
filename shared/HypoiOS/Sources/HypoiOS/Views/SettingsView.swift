@@ -14,6 +14,33 @@ public struct SettingsView: View {
         self.deviceId = deviceId
     }
 
+    /// Reads the authorization status without letting UNNotificationSettings
+    /// cross an isolation boundary.
+    ///
+    /// `await ...notificationSettings()` returns the settings object itself,
+    /// which is not Sendable. Xcode 26.5 accepts that; the CI toolchain rejects
+    /// it, which is how this was found. Mapping to a String inside the
+    /// completion handler means only a Sendable value is ever resumed, and it
+    /// does not depend on which toolchain compiles it.
+    private static func notificationStatusText() async -> String {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                let text: String
+                switch settings.authorizationStatus {
+                case .authorized, .provisional, .ephemeral:
+                    text = "Granted"
+                case .denied:
+                    text = "Denied — background delivery will not work"
+                case .notDetermined:
+                    text = "Not requested"
+                @unknown default:
+                    text = "Unknown"
+                }
+                continuation.resume(returning: text)
+            }
+        }
+    }
+
     public var body: some View {
         NavigationStack {
             List {
@@ -43,13 +70,7 @@ public struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .task {
-                let settings = await UNUserNotificationCenter.current().notificationSettings()
-                notificationStatus = switch settings.authorizationStatus {
-                case .authorized, .provisional, .ephemeral: "Granted"
-                case .denied: "Denied — background delivery will not work"
-                case .notDetermined: "Not requested"
-                @unknown default: "Unknown"
-                }
+                notificationStatus = await Self.notificationStatusText()
             }
         }
     }

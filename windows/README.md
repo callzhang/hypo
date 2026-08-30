@@ -19,7 +19,8 @@ the relay, from a notification-area application.
 | Clipboard history (SQLite) and content dedup | Done |
 | Windows clipboard: text, links, images, files | Done |
 | Tray icon, history window, pairing window | Done |
-| MSIX packaging and winget | Not started |
+| MSIX packaging | Packs unsigned; signing needs a certificate |
+| winget | Not started — needs a signed package first |
 
 A file from a peer is written under `%LOCALAPPDATA%\Hypo\received` and its path
 put on the clipboard as `CF_HDROP`, so pasting it into Explorer works. Existing
@@ -96,6 +97,10 @@ an icon in the notification area:
 
 The icon is a coloured dot: green when a device is reachable on this network,
 amber when only the relay is, red when nothing is, grey when paused.
+
+CI also packs an unsigned MSIX (`hypo-msix-unsigned-win-x64`). Windows will not
+install it as it stands — see [`packaging/README.md`](packaging/README.md) for
+signing, which is the step that is genuinely blocked on having a certificate.
 
 There is also a console client, which is what CI tests against and what to reach
 for when something is wrong:

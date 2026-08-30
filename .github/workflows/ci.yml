@@ -225,3 +225,19 @@ jobs:
           name: hypo-app-win-x64
           path: artifacts/hypo-app-win-x64
           if-no-files-found: error
+      # Unsigned on purpose: Windows will not install an unsigned MSIX, and
+      # working around that is not something a build should do. What this proves
+      # is that the manifest and layout are valid -- the part that silently rots.
+      - name: Pack an MSIX
+        shell: pwsh
+        working-directory: windows
+        run: >
+          ./scripts/package-msix.ps1
+          -PublishDirectory ../artifacts/hypo-app-win-x64
+          -OutputPath ../artifacts/msix/Hypo.msix
+      - name: Upload the MSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypo-msix-unsigned-win-x64
+          path: artifacts/msix
+          if-no-files-found: error

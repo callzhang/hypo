@@ -13,6 +13,7 @@ import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
@@ -57,8 +58,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.SearchBar
-import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -66,6 +65,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import android.graphics.BitmapFactory
 import java.util.Base64
 import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -73,7 +73,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -85,6 +84,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hypo.clipboard.R
 import com.hypo.clipboard.domain.model.ClipboardItem
@@ -141,10 +141,6 @@ fun HistoryScreen(
             clipboardManager = clipboardManager
         )
     }
-    
-    
-    var searchActive by rememberSaveable { mutableStateOf(false) }
-
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -155,22 +151,17 @@ fun HistoryScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(modifier = Modifier.weight(1f)) {
-                SearchBar(
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                CompactHistorySearchField(
                     query = query,
                     onQueryChange = onQueryChange,
-                    onSearch = { searchActive = false },
-                    active = searchActive,
-                    onActiveChange = { searchActive = it },
-                    placeholder = { Text(text = stringResource(id = R.string.history_search_hint)) },
-                    leadingIcon = { Icon(imageVector = Icons.Filled.Search, contentDescription = null) },
                     modifier = Modifier
                         .widthIn(max = historySearchBarMaxWidthDp.dp)
-                        .height(historySearchBarHeightDp.dp),
-                    colors = SearchBarDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) { }
+                        .height(historySearchBarHeightDp.dp)
+                )
             }
             IconButton(onClick = {}) {
                 ConnectionStatusIcon(
@@ -270,9 +261,65 @@ internal fun historyTopBarActions(): List<HistoryTopBarAction> = listOf(
     HistoryTopBarAction.SETTINGS
 )
 
-internal const val historySearchBarHeightDp: Int = 48
+internal const val historySearchBarHeightDp: Int = 40
 internal const val historySearchBarMaxWidthDp: Int = 240
+internal const val historySearchFieldSingleLine: Boolean = true
 internal const val historyShowsTitle: Boolean = false
+
+@Composable
+private fun CompactHistorySearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    BasicTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        singleLine = historySearchFieldSingleLine,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(
+            color = MaterialTheme.colorScheme.onSurface
+        ),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        modifier = modifier,
+        decorationBox = { innerTextField ->
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = stringResource(id = R.string.history_search_hint),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
+            }
+        }
+    )
+}
 
 @Composable
 private fun EmptyHistory() {

@@ -5,6 +5,7 @@ All notable changes to the Hypo project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Android History Window Chrome**: Replaced the vertically clipped Material search bar with a 40dp single-line compact field, and extended the themed Scaffold background behind transparent system bars while preserving safe content insets to remove the separate white navigation strip.
 - **Android Brand Icons**: Adaptive launcher icons now use the full Hypo blue-to-purple background with only the layered oval mark in the foreground, and the Quick Settings tile uses the matching monochrome Hypo silhouette instead of a generic clipboard glyph.
 - **Cross-Device Clipboard Echo Loop**: Duplicate LAN/cloud deliveries are discarded on Android without replaying history rows, repeated remote content already at the top no longer triggers delete/reinsert flicker, and macOS no longer rebroadcasts identical content when only the pasteboard generation changes.
 - **macOS Isolated Build Relay Auth**: `build-macos.sh` now actually injects `RELAY_WS_AUTH_TOKEN` supplied through the environment, so isolated worktrees can build an authenticated Cloud Relay client without copying `.env` secrets.

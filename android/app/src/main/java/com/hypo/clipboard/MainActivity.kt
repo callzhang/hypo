@@ -12,12 +12,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.toArgb
 import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -80,27 +80,22 @@ class MainActivity : ComponentActivity() {
             }
         }
         
-        // Configure status bar for white background: use dark icons and text
-        // This makes status bar icons dark (visible on white background)
+        configureEdgeToEdgeWindow(window)
+
+        // Use dark system-bar icons on the current light application theme.
         val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
         windowInsetsController.isAppearanceLightStatusBars = true
         windowInsetsController.isAppearanceLightNavigationBars = true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.isNavigationBarContrastEnforced = false
-        }
         
         ClipboardServiceStarter.start(this, ClipboardServiceStartReason.APP_LAUNCH)
 
         setContent {
             HypoTheme {
-                val appBackgroundColor = MaterialTheme.colorScheme.background.toArgb()
-                SideEffect {
-                    window.navigationBarColor = appBackgroundColor
-                }
                 val navController = rememberNavController()
 
                 Scaffold(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = MaterialTheme.colorScheme.background,
+                    contentWindowInsets = WindowInsets.safeDrawing
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,

@@ -135,8 +135,8 @@ publishing the marker formats Windows looks for.
 
 Two, both deliberate:
 
-- The history window is 520×620 and the pairing window 460×560, not the 360×480
-  the design took from macOS. The
+- The history window is 520×620, and the pairing window is 460 wide and as tall
+  as its contents — not the 360×480 the design took from macOS. The
   Windows list shows a content type and a source device under every entry, which
   360 points cannot hold without trimming the entry itself.
 - The theme is seven brushes rather than the WPF-UI Fluent dictionary, which

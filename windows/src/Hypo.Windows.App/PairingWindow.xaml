@@ -2,8 +2,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="Hypo.Windows.App.Shell.PairingWindow"
         Title="Hypo — Pair a Device"
-        Width="460" Height="560"
-        MinHeight="520"
+        Width="460"
+        SizeToContent="Height"
         WindowStartupLocation="CenterScreen">
   <Grid Margin="12">
     <Grid.RowDefinitions>
@@ -18,8 +18,19 @@
                Foreground="{DynamicResource SecondaryTextBrush}"
                Text="Devices running Hypo on this network. Open Hypo on the other device first." />
 
+    <!-- SizeToContent above, so the window is as tall as its contents rather
+         than a number that has to be guessed against whatever the title bar and
+         borders come to. A fixed height had the six-digit code row -- the whole
+         point of the lower half -- below the bottom edge, and it took a
+         screenshot to notice because clicking a control that is off-screen works
+         perfectly well in code.
+
+         The list needs a floor of its own: with the window sizing to content, an
+         empty list would otherwise collapse to nothing while it is still
+         looking for devices, which is exactly when someone is watching it. -->
     <ListBox x:Name="Peers"
              Grid.Row="1"
+             MinHeight="280"
              Margin="0,10"
              HorizontalContentAlignment="Stretch"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled">

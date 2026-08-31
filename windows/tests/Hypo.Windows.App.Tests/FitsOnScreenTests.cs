@@ -149,17 +149,42 @@ public class FitsOnScreenTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// Asserts the control was actually painted, by looking at the pixels where
+    /// it says it is.
+    ///
+    /// <para>Measuring the layout was not enough: WPF reported the pairing
+    /// window's code row as comfortably inside its Grid while the screenshot
+    /// showed the window ending above it. The bitmap is the thing a user
+    /// sees, so the bitmap is what this asks.</para>
+    /// </summary>
     private static void AssertInside(Window window, string name)
     {
         var element = (FrameworkElement)window.FindName(name);
-        var content = (FrameworkElement)window.Content;
 
-        var bottom = element
-            .TransformToAncestor(content)
-            .Transform(new System.Windows.Point(0, element.ActualHeight)).Y;
+        Assert.True(element.ActualHeight > 0, $"{name} has no height, so it was never laid out");
 
-        Assert.True(
-            bottom <= content.ActualHeight,
-            $"{name} ends {bottom - content.ActualHeight:F0}px below the window's {content.ActualHeight:F0}px of room");
+        var top = (int)element.TransformToAncestor(window).Transform(default).Y;
+        var bottom = (int)(top + element.ActualHeight);
+
+        var width = (int)window.ActualWidth;
+        var height = (int)window.ActualHeight;
+        var pixels = window.Capture($"fits-{name}");
+
+        Assert.True(bottom <= height, $"{name} ends {bottom - height}px past the bottom of the window");
+
+        var colours = new HashSet<uint>();
+        for (var y = Math.Max(top, 0); y < Math.Min(bottom, height); y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var i = ((y * width) + x) * 4;
+                colours.Add(BitConverter.ToUInt32(pixels, i));
+            }
+        }
+
+        // One colour across the control's whole band means nothing was drawn
+        // there -- the row fell off the window, or the window ended above it.
+        Assert.True(colours.Count > 1, $"{name} occupies rows {top}-{bottom}, and nothing was painted there");
     }
 }

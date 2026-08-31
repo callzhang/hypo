@@ -11,6 +11,7 @@ public struct RootView: View {
     @StateObject private var historyViewModel: HistoryListViewModel
     @StateObject private var pairingViewModel: RemotePairingViewModel
     @StateObject private var claimViewModel: ClaimPairingCodeViewModel
+    @StateObject private var lanViewModel: LanPairingViewModel
     @State private var showingSettings = false
 
     public init(context: HypoiOSContext) {
@@ -27,6 +28,24 @@ public struct RootView: View {
         _claimViewModel = StateObject(wrappedValue: ClaimPairingCodeViewModel(
             identity: context.identity,
             onDevicePaired: { device in manager.registerPairedDevice(device) }
+        ))
+        let identity = context.identity
+        let coordinator = LanPairingCoordinator(
+            deviceId: identity.deviceIdString,
+            deviceName: identity.deviceName
+        )
+        let keyProvider = KeychainDeviceKeyProvider()
+        _lanViewModel = StateObject(wrappedValue: LanPairingViewModel(
+            discoveredPeers: { manager.lanDiscoveredPeers() },
+            pairedDeviceIds: { Set(manager.pairedDevices.map { $0.id.lowercased() }) },
+            pairWithPeer: { peer in
+                let result = try await coordinator.pair(with: peer)
+                // Key first: a device registered without one is worse than one
+                // not registered yet — everything it sends would be undecryptable.
+                try keyProvider.store(key: result.sharedKey, for: result.peer.id)
+                await MainActor.run { manager.registerPairedDevice(result.peer) }
+                return result.peer
+            }
         ))
     }
 
@@ -54,7 +73,8 @@ public struct RootView: View {
                 SettingsView(
                     context: context,
                     pairingViewModel: pairingViewModel,
-                    claimViewModel: claimViewModel
+                    claimViewModel: claimViewModel,
+                    lanViewModel: lanViewModel
                 )
             }
         }

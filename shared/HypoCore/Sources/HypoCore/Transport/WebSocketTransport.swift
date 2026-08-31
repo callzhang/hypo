@@ -269,6 +269,35 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
     }
 
+    /// Sends bytes exactly as given, outside the envelope protocol.
+    ///
+    /// LAN pairing has to exchange a plain JSON challenge before either side
+    /// holds a shared key, so it cannot go through send(_ envelope:), which
+    /// frames and encrypts. The peer's server recognises a bare pairing
+    /// message by its keys.
+    public func sendRaw(_ data: Data) async throws {
+        let task: WebSocketTasking? = stateLock.withLock {
+            if case .connected(let task) = state { return task }
+            return nil
+        }
+        guard let task else {
+            throw NSError(
+                domain: "WebSocketTransport",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Not connected"]
+            )
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
+            task.send(.data(data)) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
     public func send(_ envelope: SyncEnvelope) async throws {
         // Encode message - WebSocket will automatically fragment if needed (up to 1GB)
         let encodedData = try frameCodec.encode(envelope)

@@ -12,6 +12,7 @@ public struct SettingsView: View {
     @ObservedObject private var transportManager: TransportManager
     private let pairingViewModel: RemotePairingViewModel
     private let claimViewModel: ClaimPairingCodeViewModel
+    private let lanViewModel: LanPairingViewModel
 
     @State private var notificationStatus: String = "Checking…"
     @State private var historyLimit: Double = 200
@@ -19,12 +20,14 @@ public struct SettingsView: View {
     public init(
         context: HypoiOSContext,
         pairingViewModel: RemotePairingViewModel,
-        claimViewModel: ClaimPairingCodeViewModel
+        claimViewModel: ClaimPairingCodeViewModel,
+        lanViewModel: LanPairingViewModel
     ) {
         self.context = context
         self.transportManager = context.transportManager
         self.pairingViewModel = pairingViewModel
         self.claimViewModel = claimViewModel
+        self.lanViewModel = lanViewModel
     }
 
     public var body: some View {
@@ -61,7 +64,9 @@ public struct SettingsView: View {
                     PairingView(
                         viewModel: pairingViewModel,
                         claimViewModel: claimViewModel,
-                        relayHint: transportManager.pairingParameters().relayHint
+                        lanViewModel: lanViewModel,
+                        relayHint: transportManager.pairingParameters().relayHint,
+                        onPairOverLan: { peer in lanViewModel.pair(with: peer) }
                     )
                 }
             }

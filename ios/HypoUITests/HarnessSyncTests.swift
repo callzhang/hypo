@@ -38,6 +38,10 @@ final class HarnessSyncTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
         app.buttons["Pair a device"].tap()
 
+        XCTAssertTrue(app.buttons["Code"].waitForExistence(timeout: 10))
+        app.buttons["Code"].tap()
+        XCTAssertTrue(app.buttons["Enter a code"].waitForExistence(timeout: 10))
+        app.buttons["Enter a code"].tap()
         let field = app.textFields["PairingCodeField"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()

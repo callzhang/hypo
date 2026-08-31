@@ -28,9 +28,11 @@ final class PairingEndToEndTests: XCTestCase {
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
         app.buttons["Pair a device"].tap()
-        XCTAssertTrue(app.buttons["Request pairing code"].waitForExistence(timeout: 10))
-
-        app.buttons["Request pairing code"].tap()
+        // Code pairing is one of two modes now, and asks which half you want.
+        XCTAssertTrue(app.buttons["Code"].waitForExistence(timeout: 10))
+        app.buttons["Code"].tap()
+        XCTAssertTrue(app.buttons["Show a code"].waitForExistence(timeout: 10))
+        app.buttons["Show a code"].tap()
 
         let code = try waitForPairingCode(in: app)
 

@@ -1,46 +1,36 @@
 import Foundation
 import CryptoKit
 
-/// Claims a pairing code that another device is showing, and completes the
-/// handshake with it.
+/// Claims a pairing code that another device is showing, over the relay.
 ///
-/// This is the counterpart to `PairingSession`, which shows a code and answers
-/// challenges. Until now only Android and the .NET harness could take this
-/// side, so two Swift clients could never pair with each other: both would sit
-/// showing a code with nobody to claim it.
+/// The counterpart to `PairingSession`, which shows a code and answers
+/// challenges. Until this existed only Android and the .NET harness could take
+/// this side, so two Swift clients could never pair: both would sit showing a
+/// code with nobody to claim it.
 ///
-/// Naming is unavoidably confusing because the two layers disagree. The relay
-/// calls the code's owner the "initiator" and the claimer the "responder";
-/// `PairingChallengeMessage` uses those words the other way round, because
-/// there the initiator is whoever initiates the challenge. This type speaks in
-/// terms of "us" and "the peer" to stay out of it.
+/// Naming is unavoidably confusing because the layers disagree. The relay calls
+/// the code's owner the "initiator" and the claimer the "responder";
+/// `PairingChallengeMessage` uses those words the other way round. This type
+/// speaks in terms of "us" and "the peer" to stay out of it.
 public struct PairingCodeClaimer: Sendable {
-    /// Not Sendable: PairedDevice is not, and making it so is a wider change
-    /// than this needs.
-    public struct Result {
+    public struct Result: Sendable {
         public let peer: PairedDevice
         public let sharedKey: SymmetricKey
     }
 
     public enum Error: Swift.Error, LocalizedError {
         case ackNeverArrived
-        case ackMismatch
-        case invalidPeerKey
 
         public var errorDescription: String? {
             switch self {
             case .ackNeverArrived:
                 return "The other device did not answer the pairing challenge"
-            case .ackMismatch:
-                return "The other device answered with the wrong challenge response"
-            case .invalidPeerKey:
-                return "The other device published an unusable public key"
             }
         }
     }
 
     private let relayClient: PairingRelayClient
-    private let cryptoService: CryptoService
+    private let builder: PairingChallengeBuilder
     private let deviceId: String
     private let deviceName: String
     private let clock: @Sendable () -> Date
@@ -53,22 +43,29 @@ public struct PairingCodeClaimer: Sendable {
         clock: @escaping @Sendable () -> Date = Date.init
     ) {
         self.relayClient = relayClient
-        self.cryptoService = cryptoService
         self.deviceId = deviceId.lowercased()
         self.deviceName = deviceName
         self.clock = clock
+        self.builder = PairingChallengeBuilder(
+            cryptoService: cryptoService,
+            deviceId: deviceId,
+            deviceName: deviceName,
+            clock: clock
+        )
     }
 
     /// Claims `code`, sends a challenge, and waits for the answer.
     ///
-    /// `pollInterval` and `timeout` bound the wait for the ack: the other
-    /// device answers as soon as its poll loop notices the challenge, which is
-    /// on its own timer, so this cannot be instant.
+    /// The other device answers when its own poll loop notices the challenge,
+    /// which is on its own timer, so this cannot be instant.
     public func claim(
         code: String,
         pollInterval: Duration = .milliseconds(1500),
         timeout: Duration = .seconds(60)
     ) async throws -> Result {
+        // One ephemeral key for both calls. The peer derives against the key
+        // carried in the challenge, so announcing a different one in the claim
+        // would leave the relay holding a key nobody uses.
         let ephemeral = Curve25519.KeyAgreement.PrivateKey()
 
         let claimed = try await relayClient.claimPairingCode(
@@ -77,11 +74,11 @@ public struct PairingCodeClaimer: Sendable {
             responderDeviceName: deviceName,
             responderPublicKey: ephemeral.publicKey.rawRepresentation
         )
-
-        let challenge = try await makeChallenge(
+        let challenge = try await builder.makeChallenge(
             peerPublicKey: claimed.peerPublicKey,
             ephemeral: ephemeral
         )
+
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let challengeJSON = String(
@@ -95,13 +92,12 @@ public struct PairingCodeClaimer: Sendable {
             challengeJSON: challengeJSON
         )
 
-        let ack = try await waitForAck(
-            code: code,
-            pollInterval: pollInterval,
-            timeout: timeout
+        let ack = try await waitForAck(code: code, pollInterval: pollInterval, timeout: timeout)
+        try await builder.verifyAck(
+            ack,
+            answers: challenge.challengeBytes,
+            sharedKey: challenge.sharedKey
         )
-
-        try await verifyAck(ack, answers: challenge.challengeBytes, sharedKey: challenge.sharedKey)
 
         let peer = PairedDevice(
             id: ack.responderDeviceId.uuidString.lowercased(),
@@ -111,59 +107,6 @@ public struct PairingCodeClaimer: Sendable {
             isOnline: true
         )
         return Result(peer: peer, sharedKey: challenge.sharedKey)
-    }
-
-    /// The crypto half, separated from the relay half so it can be tested
-    /// against a real `PairingSession` without a network in the way. That
-    /// round trip is the only thing that proves the contract: the peer has to
-    /// decrypt what this produces, and its ack has to verify here.
-    public func makeChallenge(
-        peerPublicKey peerPublicKeyData: Data,
-        ephemeral: Curve25519.KeyAgreement.PrivateKey = Curve25519.KeyAgreement.PrivateKey()
-    ) async throws -> (message: PairingChallengeMessage, sharedKey: SymmetricKey, challengeBytes: Data) {
-        guard let peerPublicKey = try? Curve25519.KeyAgreement.PublicKey(
-            rawRepresentation: peerPublicKeyData
-        ) else {
-            throw Error.invalidPeerKey
-        }
-
-        let sharedKey = try await cryptoService.deriveKey(
-            privateKey: ephemeral,
-            publicKey: peerPublicKey
-        )
-
-        // 32 bytes the peer has to hand back the SHA-256 of, which is what
-        // proves it holds the same shared key.
-        var challengeBytes = Data(count: 32)
-        challengeBytes.withUnsafeMutableBytes { buffer in
-            guard let base = buffer.baseAddress else { return }
-            _ = SecRandomCopyBytes(kSecRandomDefault, buffer.count, base)
-        }
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let challengePayload = PairingChallengePayload(
-            challenge: challengeBytes,
-            timestamp: clock()
-        )
-        let sealed = try await cryptoService.encrypt(
-            plaintext: try encoder.encode(challengePayload),
-            key: sharedKey,
-            // The peer decrypts with our device id as the AAD, so it has to be
-            // the same string that goes into the message below.
-            aad: Data(deviceId.utf8)
-        )
-
-        let message = PairingChallengeMessage(
-            challengeId: UUID(),
-            initiatorDeviceId: deviceId,
-            initiatorDeviceName: deviceName,
-            initiatorPublicKey: ephemeral.publicKey.rawRepresentation,
-            nonce: sealed.nonce,
-            ciphertext: sealed.ciphertext,
-            tag: sealed.tag
-        )
-        return (message, sharedKey, challengeBytes)
     }
 
     private func waitForAck(
@@ -188,26 +131,5 @@ public struct PairingCodeClaimer: Sendable {
             }
         }
         throw Error.ackNeverArrived
-    }
-
-    public func verifyAck(
-        _ ack: PairingAckMessage,
-        answers challengeBytes: Data,
-        sharedKey: SymmetricKey
-    ) async throws {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        // The peer sealed the ack with its own device id as the AAD.
-        let plaintext = try await cryptoService.decrypt(
-            ciphertext: ack.ciphertext,
-            key: sharedKey,
-            nonce: ack.nonce,
-            tag: ack.tag,
-            aad: Data(ack.responderDeviceId.uuidString.lowercased().utf8)
-        )
-        let payload = try decoder.decode(PairingAckPayload.self, from: plaintext)
-        guard payload.responseHash == Data(SHA256.hash(data: challengeBytes)) else {
-            throw Error.ackMismatch
-        }
     }
 }

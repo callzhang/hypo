@@ -33,13 +33,11 @@ struct PairingCodeClaimerTests {
         return (session, payload)
     }
 
-    private func makeClaimer(deviceId: String = UUID().uuidString.lowercased()) -> PairingCodeClaimer {
-        PairingCodeClaimer(
-            // Never dialled: this test exercises the crypto, not the relay.
-            relayClient: PairingRelayClient(baseURL: URL(string: "https://unused.invalid")!),
-            deviceId: deviceId,
-            deviceName: "Test iPhone"
-        )
+    /// The crypto, with no transport attached — which is the point: both the
+    /// relay path and the LAN path go through this, so testing it here covers
+    /// the contract for both.
+    private func makeClaimer(deviceId: String = UUID().uuidString.lowercased()) -> PairingChallengeBuilder {
+        PairingChallengeBuilder(deviceId: deviceId, deviceName: "Test iPhone")
     }
 
     @Test("the peer accepts our challenge and its ack verifies")
@@ -104,7 +102,7 @@ struct PairingCodeClaimerTests {
 
         // Verifying against bytes we never sent must fail, or the check is
         // decorative and a replayed ack would sail through.
-        await #expect(throws: PairingCodeClaimer.Error.self) {
+        await #expect(throws: PairingChallengeBuilder.Error.self) {
             try await claimer.verifyAck(
                 ack,
                 answers: Data(repeating: 0xAB, count: 32),

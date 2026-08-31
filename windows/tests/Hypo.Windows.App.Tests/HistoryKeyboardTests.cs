@@ -215,6 +215,52 @@ public class HistoryKeyboardTests : IDisposable
     }
 
     [SkippableFact]
+    public void TheCloseButtonLeavesWithoutTakingAnything()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        // WindowStyle="None" removes the system close button, so the window
+        // supplies its own. Without one, anyone who has not discovered Escape is
+        // stuck with a floating rectangle.
+        Wpf.Run(() =>
+        {
+            var window = Open();
+            var handedBack = false;
+            window.EntryUsed += (_, _) => handedBack = true;
+
+            ((System.Windows.Controls.Button)window.FindName("CloseButton")).RaiseEvent(
+                new System.Windows.RoutedEventArgs(
+                    System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            window.Settle();
+
+            Assert.False(window.IsVisible);
+            Assert.Empty(_clipboard.Written);
+            Assert.True(handedBack);
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void ItHasNoSystemTitleBar()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        Wpf.Run(() =>
+        {
+            var window = Open();
+
+            // A list a keystroke summons should not look like an application you
+            // switched to. It says what it is in its own header instead.
+            Assert.Equal(System.Windows.WindowStyle.None, window.WindowStyle);
+            Assert.NotNull(window.FindName("TitleBar"));
+
+            window.Capture("history-window-popup");
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
     public void ItStaysOnTopAndOutOfAltTab()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");

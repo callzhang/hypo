@@ -88,6 +88,18 @@ like a window whose bottom fell off. The test that measures the code row builds
 a model that can pair by code, and asserts the control is visible before asking
 where it was painted.
 
+`Hypo.Core` — the protocol, the crypto and the transports — is measured on every
+run and CI fails below 80%. It sits around 89%. The number is there to notice a
+fall, not to celebrate a rise.
+
+`scripts/test-sync-matrix.sh` runs the tests that read the shared fixtures under
+`tests/` in all three clients: Swift, Kotlin and .NET each encode a frame,
+derive a key and decompress a payload from the same bytes. That is the mechanism
+stopping three independent implementations from drifting, and a client that
+quietly stopped reading them would look exactly like a client that agrees. What
+the script cannot do is put a real clipboard on one device and watch it appear
+on another; that needs two machines and a person.
+
 What is still open is what a runner cannot be: a second monitor, a session lock,
 and a person's judgement about whether any of it is pleasant to use.
 

@@ -211,6 +211,31 @@ jobs:
           # take, so they can be collected below.
           HYPO_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/screenshots
         run: dotnet test --no-build --configuration Release --verbosity normal
+      # Hypo.Core is where the protocol, the crypto and the transports live, and
+      # it has no UI and no Win32 dependency, so there is no excuse for a gap in
+      # it. The gate is the repository's 80%; it sits around 89% today, and the
+      # point of the number is to notice a fall rather than to celebrate a rise.
+      - name: Measure Hypo.Core coverage
+        working-directory: windows
+        shell: bash
+        run: |
+          dotnet test tests/Hypo.Core.Tests --no-build --configuration Release \
+            --collect:"XPlat Code Coverage" --results-directory coverage
+          python3 - <<'PY'
+          import glob
+          import sys
+          import xml.etree.ElementTree as ET
+
+          reports = glob.glob("coverage/**/coverage.cobertura.xml", recursive=True)
+          if not reports:
+              sys.exit("No coverage report was produced.")
+
+          rate = float(ET.parse(reports[0]).getroot().get("line-rate")) * 100
+          print(f"Hypo.Core line coverage: {rate:.1f}%")
+
+          if rate < 80:
+              sys.exit(f"Coverage fell to {rate:.1f}%, below the repository's 80% floor.")
+          PY
       # The runner is a fully interactive session -- it shows windows and renders
       # them -- so these are the only way anyone without a Windows machine sees
       # the interface at all.
@@ -236,8 +261,9 @@ jobs:
           name: hypo-console-win-x64
           path: artifacts/hypo-win-x64
           if-no-files-found: error
-      # The tray application is the one thing here CI cannot judge -- it has no
-      # interactive desktop. Publishing it is how a person on Windows can.
+      # The tray application runs here and is screenshotted above. What is still
+      # out of reach is a second monitor, a session lock, and a day of someone
+      # using it. Publishing it is how a person on Windows judges that.
       - name: Publish the tray application
         working-directory: windows
         run: >

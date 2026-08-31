@@ -232,6 +232,26 @@ public partial class HistoryWindow : Window
 
     private System.Windows.Point _dragFrom;
 
+    /// <summary>
+    /// Lets the window be moved by its own title bar.
+    ///
+    /// <para>WindowStyle="None" takes the system one away, and with it the only
+    /// way to move a window that has landed somewhere inconvenient.</para>
+    /// </summary>
+    private void OnTitleBarDrag(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ButtonState is MouseButtonState.Pressed)
+        {
+            DragMove();
+        }
+    }
+
+    private void OnClose(object sender, RoutedEventArgs e)
+    {
+        Hide();
+        EntryUsed?.Invoke(this, EventArgs.Empty);
+    }
+
     private void OnRowMouseDown(object sender, MouseButtonEventArgs e) =>
         _dragFrom = e.GetPosition(this);
 

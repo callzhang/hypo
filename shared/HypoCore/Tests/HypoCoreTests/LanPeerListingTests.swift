@@ -25,6 +25,31 @@ struct LanPeerListingTests {
         #expect(manager.discoveredLanPeers.isEmpty)
     }
 
+    /// Peers restored from the discovery cache have to be published at once. They
+    /// are already known, so no discovery event is coming to reveal them, and the
+    /// pairing list would sit empty next to a device that is plainly on the network.
+    @Test @MainActor
+    func testCachedPeersArePublishedBeforeAnyDiscoveryEvent() async throws {
+        let cache = InMemoryLanDiscoveryCache()
+        cache.peerStorage["peer-one"] = DiscoveredPeer(
+            serviceName: "peer-one",
+            endpoint: LanEndpoint(
+                host: "peer.local",
+                port: 7010,
+                deviceId: "aaaa1111",
+                deviceName: "Peer One",
+                fingerprint: nil,
+                metadata: ["device_id": "aaaa1111", "pub_key": "cHVibGljLWtleQ=="]
+            ),
+            lastSeen: Date(timeIntervalSince1970: 1_000)
+        )
+
+        let manager = makeManager(driver: MockBonjourDriver(), cache: cache)
+        defer { Task { await manager.deactivateLanServices() } }
+
+        #expect(manager.discoveredLanPeers.map(\.serviceName) == ["peer-one"])
+    }
+
     @Test @MainActor
     func testPairedPeersAreRecognisedRegardlessOfIdCasing() async throws {
         let driver = MockBonjourDriver()
@@ -50,12 +75,12 @@ struct LanPeerListingTests {
     // MARK: - Helpers
 
     @MainActor
-    private func makeManager(driver: MockBonjourDriver) -> TransportManager {
+    private func makeManager(driver: MockBonjourDriver, cache: LanDiscoveryCache = InMemoryLanDiscoveryCache()) -> TransportManager {
         TransportManager(
             provider: MockTransportProvider(),
             browser: BonjourBrowser(driver: driver, clock: { Date(timeIntervalSince1970: 1_000) }),
             publisher: MockBonjourPublisher(),
-            discoveryCache: InMemoryLanDiscoveryCache(),
+            discoveryCache: cache,
             lanConfiguration: BonjourPublisher.Configuration(
                 serviceName: "local-device",
                 port: 0,

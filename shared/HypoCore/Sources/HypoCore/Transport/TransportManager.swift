@@ -30,6 +30,9 @@ public final class TransportManager: ObservableObject {
     private let incomingHandler: IncomingClipboardHandler?
     private weak var historyViewModel: (any RemoteEntryReceiving)?
     private var connectionStatusProber: ConnectionStatusProber?
+#if canImport(Network)
+    private var debugStatusServer: DebugStatusServer?
+#endif
     private var lanConnectedDeviceIds = Set<String>()
     private var cloudConnectedDeviceIds = Set<String>()
     private var connectionDeviceIds: [UUID: String] = [:]
@@ -132,6 +135,10 @@ public final class TransportManager: ObservableObject {
         // Restore persisted peers from cache
         let cachedPeers = discoveryCache.loadPeers()
         self.lanPeers = cachedPeers
+        // Publish them straight away. Refreshing only on discovery events left the
+        // pairing list empty until a peer happened to appear or disappear, which for
+        // an already-known peer can be never.
+        self.discoveredLanPeers = TransportManager.peersExcludingSelf(in: cachedPeers)
         self.webSocketServer = webSocketServer
         self.dispatcher = dispatcher ?? ClipboardEventDispatcher()
         self.notificationController = notificationController
@@ -467,8 +474,86 @@ public final class TransportManager: ObservableObject {
         } else {
             logger.info("🔧 [TransportManager] ConnectionStatusProber already initialized")
         }
+        startDebugStatusServer()
         #endif
     }
+
+    /// Current state as a debugging snapshot. Also served over loopback HTTP.
+    public func debugStatus() -> DebugStatus {
+        let identity = DeviceIdentity()
+        let bundleToken = Bundle.main.object(forInfoDictionaryKey: "RelayWsAuthToken") as? String
+        let envToken = ProcessInfo.processInfo.environment["RELAY_WS_AUTH_TOKEN"]
+        let hasToken = (bundleToken?.isEmpty == false) || (envToken?.isEmpty == false)
+
+        return DebugStatus(
+            generatedAt: dateProvider(),
+            version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            deviceId: identity.deviceIdString,
+            deviceName: identity.deviceName,
+            platform: identity.platform.rawValue,
+            hasRelayToken: hasToken,
+            connectionState: String(describing: connectionState),
+            lanServerPort: lanConfiguration.port > 0 ? lanConfiguration.port : nil,
+            pairedDevices: pairedDevices.map { device in
+                DebugStatus.Device(
+                    id: device.id,
+                    name: device.name,
+                    platform: device.platform,
+                    isOnline: device.isOnline,
+                    lastSeen: device.lastSeen,
+                    bonjourHost: device.bonjourHost,
+                    bonjourPort: device.bonjourPort
+                )
+            },
+            discoveredPeers: lanDiscoveredPeers().map { peer in
+                DebugStatus.Peer(
+                    serviceName: peer.serviceName,
+                    host: peer.endpoint.host,
+                    port: peer.endpoint.port,
+                    deviceId: peer.endpoint.metadata["device_id"],
+                    advertisesPairingKey: !(peer.endpoint.metadata["pub_key"] ?? "").isEmpty,
+                    isPaired: isPaired(peer),
+                    lastSeen: peer.lastSeen
+                )
+            }
+        )
+    }
+
+#if canImport(Network)
+    private func startDebugStatusServer() {
+        guard debugStatusServer == nil else { return }
+        // On by default: it is loopback-only and carries nothing secret. Turn it off
+        // with `defaults write com.hypo.clipboard hypo_debug_api_enabled -bool false`.
+        if defaults.object(forKey: "hypo_debug_api_enabled") != nil,
+           !defaults.bool(forKey: "hypo_debug_api_enabled") {
+            logger.info("🩺 [TransportManager] Debug status API disabled by preference")
+            return
+        }
+        let configuredPort = defaults.integer(forKey: "hypo_debug_api_port")
+        let port = configuredPort > 0 ? configuredPort : DebugStatusServer.defaultPort
+        let server = DebugStatusServer(port: port) { [weak self] in
+            self?.debugStatus() ?? DebugStatus(
+                generatedAt: Date(),
+                version: "unknown",
+                deviceId: "",
+                deviceName: "",
+                platform: "",
+                hasRelayToken: false,
+                connectionState: "unavailable",
+                lanServerPort: nil,
+                pairedDevices: [],
+                discoveredPeers: []
+            )
+        }
+        do {
+            try server.start()
+            debugStatusServer = server
+        } catch {
+            // A debug aid must never take the app down with it.
+            logger.warning("⚠️ [TransportManager] Debug status API unavailable: \(error.localizedDescription)")
+        }
+    }
+#endif
     
     /// Update the connection state (used by ConnectionStatusProber)
     @MainActor
@@ -554,6 +639,10 @@ public final class TransportManager: ObservableObject {
     }
 
     private func peersExcludingSelf() -> [DiscoveredPeer] {
+        TransportManager.peersExcludingSelf(in: lanPeers)
+    }
+
+    private static func peersExcludingSelf(in lanPeers: [String: DiscoveredPeer]) -> [DiscoveredPeer] {
         let allPeers = lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
         
         // Filter out self

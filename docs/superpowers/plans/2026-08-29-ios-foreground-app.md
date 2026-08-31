@@ -2027,3 +2027,24 @@ harness 原本每 4 秒重发一次(为绕过更早的一个竞态)。每收到�
 | **6 对端 → iOS** | **✅** |
 | **7 iOS → 对端** | **✅** |
 | 8 跨网段经 relay | ❌ `/Applications/Hypo.app` 缺 relay 令牌,macOS 需在有 `.env` 的环境重新构建 |
+
+
+## 第 8 条:经 relay 的配对通了,同步没通（2026-08-30）
+
+`tools/HypoHarness relay` 是一个**没有 LAN 监听、不发 Bonjour 广播**的对端——所以 iOS 找不到本地路由,任何送达的东西都只能是经 hypo.fly.dev 来的。这正是 relay 存在的意义:两台看不见彼此的设备。
+
+它不需要重装 `/Applications/Hypo.app`,所以验证第 8 条不用替换你在用的 Mac 客户端。
+
+### 结果
+
+| | 结果 |
+|---|---|
+| harness 用令牌连上 relay | ✅ `Connected to the relay.` |
+| **经 relay 配对** | ✅ iOS 输入配对码 → 双方完成握手 |
+| 经 relay 同步内容(两个方向) | ❌ 都没送达 |
+
+配对走的是 relay 的 **HTTP 端点**(`/pairing/*`),内容走的是 **WebSocket**(`/ws`)。前者通了说明令牌和后端都是好的;后者没通,说明 iOS 的云端 WebSocket 连接本身还没建立起来。下一步是确认 app 的连接状态是否到达 `.connectedCloud`。
+
+### 顺带修掉的 UI bug
+
+配对成功页传的是 `deviceName: nil`,所以只显示 "Paired" 而不带设备名。用户看不出是和哪台设备配上的,自动化也无从断言。现在从 `statusMessage`(`"Paired with X"`)里取名字。这一处修完,**经 relay 的配对断言当场从红变绿**——之前它一直失败,原因不是配对没成功,而是界面没说是谁。

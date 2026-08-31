@@ -158,12 +158,15 @@ public struct PairingView: View {
     @ViewBuilder
     private var codeContent: some View {
         if case .completed = viewModel.state {
-            successView(deviceName: nil) {
+            // The name comes from the status line, which is where the session
+            // puts it. Saying only "Paired" leaves the user to guess which
+            // device answered.
+            successView(deviceName: pairedName(from: viewModel.statusMessage)) {
                 viewModel.reset()
                 codeStep = .choosing
             }
-        } else if case .completed = claimViewModel.state {
-            successView(deviceName: nil) {
+        } else if case .completed(let deviceName) = claimViewModel.state {
+            successView(deviceName: deviceName) {
                 claimViewModel.reset()
                 codeStep = .choosing
             }
@@ -289,6 +292,14 @@ public struct PairingView: View {
                 .buttonStyle(.bordered)
         }
         .padding(.top, 40)
+    }
+
+    /// Pulls the device name out of "Paired with X", which is how both view
+    /// models phrase it.
+    private func pairedName(from status: String) -> String? {
+        let prefix = "Paired with "
+        guard status.hasPrefix(prefix) else { return nil }
+        return String(status.dropFirst(prefix.count))
     }
 
     private var visibleCode: String? {

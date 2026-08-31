@@ -13,6 +13,7 @@
 		1A00000000000000000000E5 /* PairingEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000E4 /* PairingEndToEndTests.swift */; };
 		1A00000000000000000000E7 /* HarnessSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000E6 /* HarnessSyncTests.swift */; };
 		1A00000000000000000000F6 /* PairingUXTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000F5 /* PairingUXTests.swift */; };
+		1A00000000000000000000F8 /* RelaySyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000F7 /* RelaySyncTests.swift */; };
 		1A00000000000000000000E2 /* HypoCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000000E1 /* HypoCore */; };
 /* End PBXBuildFile section */
 
@@ -25,6 +26,7 @@
 		1A00000000000000000000E4 /* PairingEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingEndToEndTests.swift; sourceTree = "<group>"; };
 		1A00000000000000000000E6 /* HarnessSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessSyncTests.swift; sourceTree = "<group>"; };
 		1A00000000000000000000F5 /* PairingUXTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingUXTests.swift; sourceTree = "<group>"; };
+		1A00000000000000000000F7 /* RelaySyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySyncTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -81,6 +83,7 @@
 				1A00000000000000000000E4 /* PairingEndToEndTests.swift */,
 				1A00000000000000000000E6 /* HarnessSyncTests.swift */,
 				1A00000000000000000000F5 /* PairingUXTests.swift */,
+				1A00000000000000000000F7 /* RelaySyncTests.swift */,
 			);
 			path = HypoUITests;
 			sourceTree = "<group>";
@@ -216,6 +219,7 @@
 				1A00000000000000000000E5 /* PairingEndToEndTests.swift in Sources */,
 				1A00000000000000000000E7 /* HarnessSyncTests.swift in Sources */,
 				1A00000000000000000000F6 /* PairingUXTests.swift in Sources */,
+				1A00000000000000000000F8 /* RelaySyncTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

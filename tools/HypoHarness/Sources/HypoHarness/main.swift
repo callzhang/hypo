@@ -7,7 +7,10 @@ import HypoCore
 // memory and vanish on exit, which is why pairing and listening are one
 // command rather than two.
 //
-//   show     show a pairing code, then listen for clipboard traffic
+//   show     show a pairing code, then listen for clipboard traffic over LAN
+//   relay    the same, but over the cloud relay only — no listener, no Bonjour,
+//            so the peer has no LAN route and must use the relay. Needs
+//            RELAY_WS_AUTH_TOKEN in the environment.
 //
 // Environment:
 //   HYPO_DEVICE_NAME   what to call this peer (default "Hypo Harness")
@@ -31,15 +34,17 @@ let command = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "show
 
 switch command {
 case "show":
-    try await runShow()
+    try await runShow(overRelay: false)
+case "relay":
+    try await runShow(overRelay: true)
 default:
-    print("usage: HypoHarness show")
+    print("usage: HypoHarness show | relay")
     exit(2)
 }
 
 // MARK: -
 
-func runShow() async throws {
+func runShow(overRelay: Bool) async throws {
     let identity = UUID()
     let deviceId = identity.uuidString.lowercased()
     let keyProvider = InMemoryDeviceKeyProvider()
@@ -78,15 +83,39 @@ func runShow() async throws {
     // Start listening before pairing finishes: the other device may dial the
     // moment it has a key, and a listener that appears late is a race.
     let server = await MainActor.run { LanWebSocketServer(localDeviceId: deviceId) }
-    try await MainActor.run { try server.start(port: lanPort) }
-    let boundPort = try await server.waitForPort(timeout: 5.0)
-    print("Listening on port \(boundPort)")
+    var boundPort: Int = 0
+    if !overRelay {
+        try await MainActor.run { try server.start(port: lanPort) }
+        boundPort = try await server.waitForPort(timeout: 5.0)
+        print("Listening on port \(boundPort)")
+    } else {
+        print("Relay mode: no LAN listener and no Bonjour, so the peer has to use the relay.")
+    }
 
-    await MainActor.run {
+    let cloudTransport: CloudRelayTransport? = overRelay
+        ? await MainActor.run { CloudRelayTransport(configuration: CloudRelayDefaults.production()) }
+        : nil
+    if let cloudTransport {
+        await MainActor.run {
+            cloudTransport.setOnIncomingMessage { data, origin in
+                await RelayInboxBox.shared.handle(data, origin)
+            }
+        }
+        do {
+            try await cloudTransport.connect()
+            print("Connected to the relay.")
+        } catch {
+            print("Could not connect to the relay: \(error.localizedDescription)")
+            print("Is RELAY_WS_AUTH_TOKEN set? Without it the relay answers 401.")
+            exit(1)
+        }
+    }
+
+    if !overRelay { await MainActor.run {
         let publisher = BonjourPublisher()
         publisher.start(with: BonjourPublisher.Configuration(
             serviceName: deviceName,
-            port: Int(boundPort),
+            port: boundPort,
             version: "1.0.0",
             fingerprint: "",
             protocols: ["hypo/1"],
@@ -97,8 +126,9 @@ func runShow() async throws {
         PublisherBox.shared.keep(publisher)
     }
     print("Advertising _hypo._tcp as \"\(deviceName)\"")
+    }
 
-    _ = await MainActor.run { () -> HarnessInbox in
+    let inbox = await MainActor.run { () -> HarnessInbox in
         let inbox = HarnessInbox(
             deviceId: deviceId,
             keyProvider: keyProvider,
@@ -110,6 +140,7 @@ func runShow() async throws {
         InboxBox.shared.keep(inbox)
         return inbox
     }
+    await RelayInboxBox.shared.adopt(inbox)
 
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
@@ -161,7 +192,16 @@ func runShow() async throws {
         }
     }
 
-    if let peer = pairedPeer.withLock({ $0 }), let text = sendText {
+    if let peer = pairedPeer.withLock({ $0 }), let text = sendText, let cloudTransport {
+        print("Waiting to send \"\(text)\" to \(peer) over the relay…")
+        try await sendOverRelay(
+            text: text,
+            to: peer,
+            from: deviceId,
+            transport: cloudTransport,
+            keyProvider: keyProvider
+        )
+    } else if let peer = pairedPeer.withLock({ $0 }), let text = sendText {
         print("Waiting for \(peer) to connect so it can be sent \"\(text)\"…")
         try await sendWhenConnected(
             text: text,
@@ -220,6 +260,57 @@ func sendWhenConnected(
             }
             try? await Task.sleep(for: .seconds(3))
         }
+    }
+}
+
+func sendOverRelay(
+    text: String,
+    to peer: String,
+    from deviceId: String,
+    transport: CloudRelayTransport,
+    keyProvider: InMemoryDeviceKeyProvider
+) async throws {
+    let engine = SyncEngine(
+        transport: transport,
+        keyProvider: keyProvider,
+        localDeviceId: deviceId
+    )
+    await engine.establishConnection()
+
+    let entry = ClipboardEntry(
+        deviceId: deviceId,
+        originDeviceName: deviceName,
+        content: .text(text),
+        transportOrigin: .cloud
+    )
+    let payload = ClipboardPayload(contentType: .text, data: Data(text.utf8))
+
+    for attempt in 1...20 {
+        do {
+            try await engine.transmit(entry: entry, payload: payload, targetDeviceId: peer)
+            print("Sent \"\(text)\" to \(peer) over the relay")
+            return
+        } catch {
+            if attempt == 20 {
+                print("Could not send over the relay after 20 tries: \(error.localizedDescription)")
+                return
+            }
+            try? await Task.sleep(for: .seconds(3))
+        }
+    }
+}
+
+/// Routes relay traffic into the same inbox the LAN server uses, so arriving
+/// content prints the same way whichever route it took.
+actor RelayInboxBox {
+    static let shared = RelayInboxBox()
+    private var inbox: HarnessInbox?
+
+    func adopt(_ inbox: HarnessInbox) { self.inbox = inbox }
+
+    func handle(_ data: Data, _ origin: TransportOrigin) async {
+        guard let inbox else { return }
+        await inbox.handleRelayFrame(data)
     }
 }
 
@@ -302,6 +393,10 @@ final class HarnessInbox: LanWebSocketServerDelegate, @unchecked Sendable {
     }
     func server(_ server: LanWebSocketServer, didReceiveClipboardData data: Data, from connection: UUID) {
         Task { @MainActor in await handler.handle(data) }
+    }
+
+    func handleRelayFrame(_ data: Data) async {
+        await MainActor.run { Task { await self.handler.handle(data) } }
     }
 }
 

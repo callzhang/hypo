@@ -32,6 +32,7 @@ the relay, from a notification-area application.
 | Notification when something arrives | Done |
 | Oversized images compressed before sending | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
+| Explorer "Copy to Hypo" menu | Not built — needs the MSIX manifest |
 | x64 and ARM64 builds | Done |
 
 A file from a peer is written under `%LOCALAPPDATA%\Hypo\received` and its path
@@ -171,17 +172,20 @@ publishing the marker formats Windows looks for.
 
 ### Divergences from the design
 
-Two, both deliberate:
+All deliberate:
 
 - The history window is 520×620, not the 360×480 the design took from macOS. The
-  Windows list shows a content type and a source device under every entry, which
-  360 points cannot hold without trimming the entry itself.
+  Windows list shows a content type, a source device and a transport under every
+  entry, which 360 points cannot hold without trimming the entry itself.
 - The theme is seven brushes rather than the WPF-UI Fluent dictionary, which
   would have restyled every control in the screenshot suite to get them.
 - Notifications are notification-area balloons, not the Windows App SDK's
   `AppNotificationManager` the design named. That one requires the application
   to be packaged, and Hypo ships as a zip. A balloon is a real toast on Windows
   10 and 11.
+- The Explorer "Copy to Hypo" context menu is not built. It is declared through
+  the MSIX manifest, and there is no MSIX; the classic `shellex` alternative is
+  what the design's own open items flag as unconfirmed on the Windows 10 floor.
 
 ### Light and dark
 

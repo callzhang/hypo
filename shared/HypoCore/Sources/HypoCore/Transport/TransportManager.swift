@@ -52,9 +52,13 @@ public final class TransportManager: ObservableObject {
     @Published public private(set) var connectionState: ConnectionState = .disconnected
     // Peer state managed by TransportManager
     @Published public private(set) var pairedDevices: [PairedDevice] = []
+    /// Peers currently advertising on the LAN, minus this device. Published so the
+    /// pairing UI updates as devices come and go rather than polling for them.
+    @Published public private(set) var discoveredLanPeers: [DiscoveredPeer] = []
 #else
     public private(set) var connectionState: ConnectionState = .disconnected
     public private(set) var pairedDevices: [PairedDevice] = []
+    public private(set) var discoveredLanPeers: [DiscoveredPeer] = []
 #endif
 
     // Cache for synchronous name lookup
@@ -533,6 +537,23 @@ public final class TransportManager: ObservableObject {
     }
 
     public func lanDiscoveredPeers() -> [DiscoveredPeer] {
+        let peers = peersExcludingSelf()
+        if discoveredLanPeers != peers {
+            discoveredLanPeers = peers
+        }
+        return peers
+    }
+
+    /// Recomputes the published peer list. Called whenever `lanPeers` changes so the
+    /// pairing UI sees additions, removals and prunes without polling.
+    private func refreshDiscoveredLanPeers() {
+        let peers = peersExcludingSelf()
+        if discoveredLanPeers != peers {
+            discoveredLanPeers = peers
+        }
+    }
+
+    private func peersExcludingSelf() -> [DiscoveredPeer] {
         let allPeers = lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
         
         // Filter out self
@@ -557,6 +578,32 @@ public final class TransportManager: ObservableObject {
         return filteredPeers
     }
 
+    /// True when this peer has already been paired, so the pairing UI can leave it out.
+    public func isPaired(_ peer: DiscoveredPeer) -> Bool {
+        guard let peerDeviceId = peer.endpoint.metadata["device_id"], !peerDeviceId.isEmpty else {
+            return false
+        }
+        return pairedDevices.contains { $0.id.caseInsensitiveCompare(peerDeviceId) == .orderedSame }
+    }
+
+    /// Pairs with a peer discovered on the LAN, as the initiator.
+    ///
+    /// The mirror of `handlePairingChallenge`, which covers the case where the other
+    /// device starts. On success the key is stored and the device joins `pairedDevices`.
+    @discardableResult
+    public func pairOverLan(with peer: DiscoveredPeer, timeout: TimeInterval = 30) async throws -> PairedDevice {
+        let initiator = LanPairingInitiator()
+        let device = try await initiator.pair(with: peer, timeout: timeout)
+        registerPairedDevice(device)
+        logger.info("✅ [TransportManager] LAN pairing complete: \(device.name) (\(device.id.prefix(8)))")
+
+        // Pick the new peer up for clipboard sync without waiting for the next discovery tick.
+        if let provider = provider as? DefaultTransportProvider {
+            await provider.syncPeerConnections()
+        }
+        return device
+    }
+
     public func currentLanConfiguration() -> BonjourPublisher.Configuration {
         lanConfiguration
     }
@@ -576,6 +623,7 @@ public final class TransportManager: ObservableObject {
         guard interval > 0 else { return }
         let threshold = dateProvider().addingTimeInterval(-interval)
         lanPeers = lanPeers.filter { $0.value.lastSeen >= threshold }
+        refreshDiscoveredLanPeers()
         lastSeen = lastSeen.filter { $0.value >= threshold }
         discoveryCache.save(lastSeen)
     }
@@ -1269,6 +1317,7 @@ public final class TransportManager: ObservableObject {
             lastSeen[peer.serviceName] = peer.lastSeen
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
+            refreshDiscoveredLanPeers()
 
             if let peerDeviceId = peer.endpoint.metadata["device_id"] {
                 if let device = pairedDevices.first(where: { $0.id.caseInsensitiveCompare(peerDeviceId) == .orderedSame }) {
@@ -1288,6 +1337,7 @@ public final class TransportManager: ObservableObject {
             lanPeers.removeValue(forKey: serviceName)
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
+            refreshDiscoveredLanPeers()
             
             // Sync peer connections in LanSyncTransport (remove disconnected peer)
             if let provider = provider as? DefaultTransportProvider {

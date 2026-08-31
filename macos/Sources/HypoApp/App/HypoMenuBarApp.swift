@@ -2128,7 +2128,7 @@ private struct SettingsSectionView: View {
     
     var body: some View {
         if isPresentingPairing {
-            PairDeviceSheet(viewModel: viewModel, isPresented: $isPresentingPairing)
+            PairDeviceSheet(viewModel: viewModel, transportManager: transportManager, isPresented: $isPresentingPairing)
         } else {
             ScrollView {
                 Form {
@@ -2860,14 +2860,28 @@ private struct AccessibilityPermissionSection: View {
 }
 #endif
 
+private enum PairingMode: String, CaseIterable, Identifiable {
+    case nearby = "Nearby"
+    case code = "Pairing code"
+
+    var id: String { rawValue }
+}
+
 private struct PairDeviceSheet: View {
     @ObservedObject var viewModel: ClipboardHistoryViewModel
+    @ObservedObject var transportManager: TransportManager
     @Binding var isPresented: Bool
     @StateObject private var remoteViewModel: RemotePairingViewModel
     @State private var hasStarted = false
+    @State private var mode: PairingMode = .nearby
+    /// Service name of the peer currently being paired with, if any.
+    @State private var pairingPeer: String?
+    @State private var lanFailure: String?
+    @State private var lanPairedName: String?
 
-    init(viewModel: ClipboardHistoryViewModel, isPresented: Binding<Bool>) {
+    init(viewModel: ClipboardHistoryViewModel, transportManager: TransportManager, isPresented: Binding<Bool>) {
         self._viewModel = ObservedObject(initialValue: viewModel)
+        self._transportManager = ObservedObject(initialValue: transportManager)
         self._isPresented = isPresented
         _remoteViewModel = StateObject(wrappedValue: viewModel.makeRemotePairingViewModel())
     }
@@ -2877,9 +2891,21 @@ private struct PairDeviceSheet: View {
             Text("Pair New Device")
                 .font(.title2.bold())
 
-            statusSection
+            Picker("Pairing method", selection: $mode) {
+                ForEach(PairingMode.allCases) { option in
+                    Text(option.rawValue).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
 
-            content
+            switch mode {
+            case .nearby:
+                nearbyContent
+            case .code:
+                statusSection
+                remoteContent
+            }
 
             Divider()
             
@@ -2902,9 +2928,111 @@ private struct PairDeviceSheet: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { startIfNeeded() }
-
+        .onAppear {
+            // The menu bar app browses continuously, but make sure of it: an empty
+            // list should mean "nothing out there", not "we never started looking".
+            Task { await transportManager.ensureLanDiscoveryActive() }
+        }
+        .onChange(of: mode) { newMode in
+            // The code flow asks the relay for a code, so only start it if asked for.
+            if newMode == .code { startIfNeeded() }
+        }
     }
+
+    // MARK: - Nearby devices
+
+    private var pairablePeers: [DiscoveredPeer] {
+        // One device advertising on two interfaces shows up twice, under service names
+        // that differ only by a " (2)" suffix. Key by device_id so it is offered once.
+        var seen = Set<String>()
+        return transportManager.discoveredLanPeers.filter { peer in
+            guard !transportManager.isPaired(peer) else { return false }
+            let key = peer.endpoint.metadata["device_id"].flatMap { $0.isEmpty ? nil : $0.lowercased() }
+                ?? peer.serviceName
+            return seen.insert(key).inserted
+        }
+    }
+
+    @ViewBuilder
+    private var nearbyContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let lanPairedName {
+                Label("Paired with \(lanPairedName)", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+            }
+            if let lanFailure {
+                Label(lanFailure, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            let peers = pairablePeers
+            if peers.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Looking for devices on this network…")
+                    }
+                    Text("Both devices need Hypo running and to be on the same Wi-Fi. If one is elsewhere, use a pairing code instead.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(peers, id: \.serviceName) { peer in
+                            peerRow(peer)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func peerRow(_ peer: DiscoveredPeer) -> some View {
+        let isPairing = pairingPeer == peer.serviceName
+        HStack(spacing: 12) {
+            Image(systemName: "desktopcomputer.and.arrow.down")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(peer.endpoint.deviceName ?? peer.serviceName)
+                    .font(.body)
+                Text("\(peer.endpoint.host):\(peer.endpoint.port)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if isPairing {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Pair") { pair(with: peer) }
+                    .disabled(pairingPeer != nil)
+            }
+        }
+        .padding(10)
+        .background(Color(nsColor: .textBackgroundColor))
+        .cornerRadius(8)
+    }
+
+    private func pair(with peer: DiscoveredPeer) {
+        pairingPeer = peer.serviceName
+        lanFailure = nil
+        lanPairedName = nil
+        Task { @MainActor in
+            do {
+                let device = try await transportManager.pairOverLan(with: peer)
+                lanPairedName = device.name
+            } catch {
+                lanFailure = error.localizedDescription
+            }
+            pairingPeer = nil
+        }
+    }
+
+    // MARK: - Pairing code
 
     @ViewBuilder
     private var statusSection: some View {
@@ -2916,11 +3044,6 @@ private struct PairDeviceSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        remoteContent
     }
 
     private var isComplete: Bool {
@@ -2944,7 +3067,7 @@ private struct PairDeviceSheet: View {
                     .frame(maxWidth: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
                     .cornerRadius(12)
-                Text("Enter this code on your Android device")
+                Text("Enter this code on your other device")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2985,7 +3108,6 @@ private struct PairDeviceSheet: View {
     }
 
     private func startIfNeeded(force: Bool = false) {
-        guard let transportManager = viewModel.transportManager else { return }
         let params = transportManager.pairingParameters()
         if force || (!hasStarted && remoteViewModel.state == .idle) {
             remoteViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)

@@ -551,6 +551,7 @@ public final class TransportManager: ObservableObject {
                 discoveredPeers: []
             )
         }
+        server.localDeviceId = DeviceIdentity().deviceIdString
         do {
             try server.start()
             debugStatusServer = server
@@ -688,8 +689,13 @@ public final class TransportManager: ObservableObject {
         // One device advertising on two interfaces shows up twice, under service names
         // that differ only by a " (2)" suffix. Key by device_id so it is offered once.
         var seen = Set<String>()
+        let localAddresses = LocalAddresses.current()
         return discoveredLanPeers.filter { peer in
             guard !isPaired(peer) else { return false }
+            // Services on this Mac are not devices to pair with, and a sandboxed app
+            // cannot open a LAN connection back to its own host in any case -- the
+            // offer could only ever end in "could not reach the device".
+            guard !LocalAddresses.isLocal(peer.endpoint.host, addresses: localAddresses) else { return false }
             let key = peer.endpoint.metadata["device_id"].flatMap { $0.isEmpty ? nil : $0.lowercased() }
                 ?? peer.serviceName
             return seen.insert(key).inserted

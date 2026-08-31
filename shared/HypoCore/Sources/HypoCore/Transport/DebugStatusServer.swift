@@ -55,6 +55,73 @@ public struct DebugStatus: Codable, Sendable {
     public let discoveredPeers: [Peer]
 }
 
+/// The result of asking the app to open a WebSocket to a peer, in its own words.
+///
+/// Whether a connection works from a terminal says little about whether it works
+/// from inside the app: sandboxing, entitlements and the local-network permission
+/// all apply to one and not the other. This makes the app answer for itself.
+public struct DebugProbeResult: Codable, Sendable {
+    public let url: String
+    public let reachable: Bool
+    public let error: String?
+    public let errorDomain: String?
+    public let errorCode: Int?
+
+    public init(url: String, reachable: Bool, error: String? = nil, errorDomain: String? = nil, errorCode: Int? = nil) {
+        self.url = url
+        self.reachable = reachable
+        self.error = error
+        self.errorDomain = errorDomain
+        self.errorCode = errorCode
+    }
+}
+
+/// Opens a WebSocket to a peer exactly the way LAN pairing does, and reports what
+/// happened rather than a friendly summary of it.
+public enum LanReachabilityProbe {
+    public static func probe(host: String, port: Int, deviceId: String) async -> DebugProbeResult {
+        var components = URLComponents()
+        components.scheme = "ws"
+        components.host = host
+        components.port = port
+        components.path = "/"
+        components.queryItems = [URLQueryItem(name: "device_id", value: deviceId)]
+        guard let url = components.url else {
+            return DebugProbeResult(url: "\(host):\(port)", reachable: false, error: "could not build a URL")
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue(deviceId, forHTTPHeaderField: "X-Device-Id")
+        let session = URLSession(configuration: .ephemeral)
+        let task: URLSessionWebSocketTask = session.webSocketTask(with: request)
+        task.resume()
+        defer { task.cancel(with: .goingAway, reason: nil) }
+
+        do {
+            // A ping is the cheapest thing that fails when the handshake did.
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                task.sendPing { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+            return DebugProbeResult(url: url.absoluteString, reachable: true)
+        } catch {
+            let nsError = error as NSError
+            return DebugProbeResult(
+                url: url.absoluteString,
+                reachable: false,
+                error: nsError.localizedDescription,
+                errorDomain: nsError.domain,
+                errorCode: nsError.code
+            )
+        }
+    }
+}
+
 #if canImport(Network)
 /// Serves `DebugStatus` as JSON over HTTP on the loopback interface.
 ///
@@ -112,6 +179,9 @@ public final class DebugStatusServer {
         listener = nil
     }
 
+    /// Set by the owner so `/probe` can use the app's own identity.
+    public var localDeviceId: String = ""
+
     private func handle(_ connection: NWConnection) {
         connection.start(queue: .main)
         connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, _, _ in
@@ -121,8 +191,12 @@ public final class DebugStatusServer {
                     return
                 }
                 let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                let path = Self.requestPath(from: request)
-                self.respond(to: path, on: connection)
+                let target = Self.requestTarget(from: request)
+                if target?.path == "/probe" {
+                    await self.respondToProbe(query: target?.query ?? [:], on: connection)
+                } else {
+                    self.respond(to: target?.path, on: connection)
+                }
             }
         }
     }
@@ -143,7 +217,7 @@ public final class DebugStatusServer {
         default:
             response = Self.httpResponse(
                 status: "404 Not Found",
-                body: Data(#"{"error":"try /status"}"#.utf8)
+                body: Data(#"{"error":"try /status or /probe?host=&port="}"#.utf8)
             )
         }
         connection.send(content: response, completion: .contentProcessed { _ in
@@ -151,11 +225,34 @@ public final class DebugStatusServer {
         })
     }
 
-    private static func requestPath(from request: String) -> String? {
+    private func respondToProbe(query: [String: String], on connection: NWConnection) async {
+        guard let host = query["host"], !host.isEmpty, let port = query["port"].flatMap(Int.init) else {
+            let body = Data(#"{"error":"try /probe?host=10.0.0.5&port=7010"}"#.utf8)
+            connection.send(content: Self.httpResponse(status: "400 Bad Request", body: body), completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+            return
+        }
+        let result = await LanReachabilityProbe.probe(host: host, port: port, deviceId: localDeviceId)
+        let body = (try? encoder.encode(result)) ?? Data(#"{"error":"could not encode result"}"#.utf8)
+        connection.send(content: Self.httpResponse(status: "200 OK", body: body), completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    private static func requestTarget(from request: String) -> (path: String, query: [String: String])? {
         guard let line = request.split(separator: "\r\n", maxSplits: 1).first else { return nil }
         let parts = line.split(separator: " ")
         guard parts.count >= 2, parts[0] == "GET" else { return nil }
-        return String(parts[1].split(separator: "?").first ?? "")
+        let target = String(parts[1])
+        guard let components = URLComponents(string: "http://localhost" + target) else {
+            return (path: target, query: [:])
+        }
+        var query: [String: String] = [:]
+        for item in components.queryItems ?? [] {
+            query[item.name] = item.value ?? ""
+        }
+        return (path: components.path, query: query)
     }
 
     private static func httpResponse(status: String, body: Data) -> Data {

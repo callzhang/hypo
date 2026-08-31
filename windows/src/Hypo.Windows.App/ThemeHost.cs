@@ -87,6 +87,7 @@ public static class ThemeHost
         Set(application, "ControlBorderBrush", palette.ControlBorder);
 
         application.Resources["IsDarkTheme"] = palette.IsDark;
+        Current = palette;
 
         lock (Windows)
         {
@@ -118,11 +119,23 @@ public static class ThemeHost
             Windows.Add(new WeakReference<Window>(window));
         }
 
-        Dress(window, ThemePalette.For(SystemPrefersDark()));
+        // What is in force, not what the system says: a caller that applied a
+        // palette explicitly would otherwise have it undone by the next window.
+        Dress(window, Current);
     }
+
+    /// <summary>The palette last applied, or the system's if none has been.</summary>
+    private static ThemePalette Current { get; set; } = ThemePalette.Light;
 
     private static void Dress(Window window, ThemePalette palette)
     {
+        // Set on the window rather than left to an implicit Style: a Style
+        // TargetType="Window" is the weakest way to colour a window -- any
+        // window that sets its own Background silently wins, and the whole theme
+        // then depends on a resource dictionary being reachable.
+        window.Background = Brush(palette.WindowBackground);
+        window.Foreground = Brush(palette.Text);
+
         var handle = new WindowInteropHelper(window).Handle;
         if (handle == 0)
         {
@@ -143,7 +156,10 @@ public static class ThemeHost
     }
 
     private static void Set(System.Windows.Application application, string key, string colour) =>
-        application.Resources[key] = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(colour)!);
+        application.Resources[key] = Brush(colour);
+
+    private static SolidColorBrush Brush(string colour) =>
+        new((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(colour)!);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);

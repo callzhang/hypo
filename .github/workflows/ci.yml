@@ -210,17 +210,21 @@ jobs:
           # Somewhere predictable for the interface screenshots the WPF tests
           # take, so they can be collected below.
           HYPO_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/screenshots
-        run: dotnet test --no-build --configuration Release --verbosity normal
+        run: >
+          dotnet test --no-build --configuration Release --verbosity normal
+          --collect:"XPlat Code Coverage" --results-directory coverage
       # Hypo.Core is where the protocol, the crypto and the transports live, and
       # it has no UI and no Win32 dependency, so there is no excuse for a gap in
       # it. The gate is the repository's 80%; it sits around 89% today, and the
       # point of the number is to notice a fall rather than to celebrate a rise.
-      - name: Measure Hypo.Core coverage
+      #
+      # Reading the run above rather than running the suite again: a second run
+      # doubles the exposure to anything flaky, and it cost a green build the
+      # first time this existed.
+      - name: Check Hypo.Core coverage
         working-directory: windows
         shell: bash
         run: |
-          dotnet test tests/Hypo.Core.Tests --no-build --configuration Release \
-            --collect:"XPlat Code Coverage" --results-directory coverage
           python3 - <<'PY'
           import glob
           import sys
@@ -230,7 +234,20 @@ jobs:
           if not reports:
               sys.exit("No coverage report was produced.")
 
-          rate = float(ET.parse(reports[0]).getroot().get("line-rate")) * 100
+          # The best any single suite manages, not the union of all of them.
+          # Merging would need another tool; the best is never higher than the
+          # union, so this gate can only be too strict, never too lax.
+          rates = [
+              float(package.get("line-rate")) * 100
+              for report in reports
+              for package in ET.parse(report).getroot().iter("package")
+              if package.get("name") == "Hypo.Core"
+          ]
+
+          if not rates:
+              sys.exit("No report covered Hypo.Core.")
+
+          rate = max(rates)
           print(f"Hypo.Core line coverage: {rate:.1f}%")
 
           if rate < 80:

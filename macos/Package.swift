@@ -18,7 +18,9 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-testing.git", from: "0.5.0"),
+        // swift-testing is part of the toolchain from Swift 6 on, and the
+        // standalone package's 0.x tags no longer exist -- depending on it here
+        // made every push fail at dependency resolution.
         .package(path: "../shared/HypoCore")
     ],
     targets: [
@@ -46,8 +48,7 @@ let package = Package(
         .testTarget(
             name: "HypoAppTests",
             dependencies: [
-                "HypoApp",
-                .product(name: "Testing", package: "swift-testing")
+                "HypoApp"
             ],
             path: "Tests/HypoAppTests",
             swiftSettings: [

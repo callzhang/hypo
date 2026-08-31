@@ -39,6 +39,58 @@ public partial class PairingWindow : Window
     {
         Peers.ItemsSource = _model.Peers;
         Message.Text = _model.LastMessage ?? string.Empty;
+
+        // Hidden rather than disabled-and-mysterious when there are no relay
+        // credentials: an unusable control invites a bug report.
+        var codeVisibility = _model.CanPairByCode ? Visibility.Visible : Visibility.Collapsed;
+        CodeBox.Visibility = codeVisibility;
+        UseCodeButton.Visibility = codeVisibility;
+        ShowCodeButton.Visibility = codeVisibility;
+    }
+
+    private async void OnShowCode(object sender, RoutedEventArgs e)
+    {
+        ShowCodeButton.IsEnabled = false;
+        UseCodeButton.IsEnabled = false;
+
+        try
+        {
+            // Waits for someone to type it, which is why the buttons go away:
+            // starting a second exchange while one is open would leave a code
+            // on screen that nothing is listening for.
+            await _model.ShowCodeAsync();
+        }
+        catch (Exception ex)
+        {
+            Message.Text = $"Could not get a code: {ex.Message}";
+        }
+        finally
+        {
+            ShowCodeButton.IsEnabled = true;
+            UseCodeButton.IsEnabled = true;
+            Bind();
+        }
+    }
+
+    private async void OnUseCode(object sender, RoutedEventArgs e)
+    {
+        UseCodeButton.IsEnabled = false;
+        ShowCodeButton.IsEnabled = false;
+
+        try
+        {
+            await _model.UseCodeAsync(CodeBox.Text);
+        }
+        catch (Exception ex)
+        {
+            Message.Text = $"Could not use that code: {ex.Message}";
+        }
+        finally
+        {
+            UseCodeButton.IsEnabled = true;
+            ShowCodeButton.IsEnabled = true;
+            Bind();
+        }
     }
 
     private async void OnPair(object sender, RoutedEventArgs e)

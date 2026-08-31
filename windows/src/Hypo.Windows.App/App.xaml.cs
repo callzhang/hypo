@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net.Http;
 using System.Threading;
 using System.Windows;
 using Hypo.Core.Abstractions;
@@ -69,7 +70,12 @@ public partial class App : System.Windows.Application
             new ClientStatusSource(_client),
             new HistoryViewModel(_history, _clipboard),
             () => new PairingViewModel(
-                store, new LanPairingCoordinator(store), deviceId, Environment.MachineName, _client.Coordinator),
+                store,
+                new LanPairingCoordinator(store),
+                deviceId,
+                Environment.MachineName,
+                _client.Coordinator,
+                new RemotePairingCoordinator(new RelayPairingClient(new HttpClient()), store)),
             Shutdown,
             _client,
             HypoSettings.Load(settingsPath),

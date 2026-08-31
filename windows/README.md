@@ -20,7 +20,7 @@ the relay, from a notification-area application.
 | Windows clipboard: text, links, images, files | Done |
 | Tray icon, history window, pairing window | Done |
 | Clipboard sharing settings (both default off) | Done |
-| Remote pairing by six-digit code | Done (console) |
+| Remote pairing by six-digit code | Done |
 | Oversized images compressed before sending | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
 | x64 and ARM64 builds | Done |
@@ -116,7 +116,8 @@ an icon in the notification area:
 
 - **Clipboard history…** — search, and double-click an entry to put it back;
   focus returns to whatever you were in, so the next paste lands there
-- **Pair a device…** — devices running Hypo on this network
+- **Pair a device…** — devices on this network, or a six-digit code for one
+  that is not
 - **Pause syncing** — distinct from being disconnected, and the icon says which
 - Two sharing switches, **both off by default**
 

@@ -37,11 +37,40 @@
                Margin="0,0,0,10"
                TextWrapping="Wrap" />
 
-    <Button x:Name="PairButton"
-            Grid.Row="3"
-            Padding="12,6"
-            HorizontalAlignment="Right"
-            Content="Pair"
-            Click="OnPair" />
+    <StackPanel Grid.Row="3">
+      <Button x:Name="PairButton"
+              Padding="12,6"
+              HorizontalAlignment="Right"
+              Content="Pair with selected device"
+              Click="OnPair" />
+
+      <Separator Margin="0,14,0,10" />
+
+      <TextBlock TextWrapping="Wrap"
+                 Foreground="#FF6B6B6B"
+                 Text="Not on this network? Use a six-digit code instead." />
+
+      <Grid Margin="0,8,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <TextBox x:Name="CodeBox" Grid.Column="0" Padding="6" MaxLength="6" />
+        <Button x:Name="UseCodeButton"
+                Grid.Column="1"
+                Margin="8,0,0,0"
+                Padding="12,6"
+                Content="Use code"
+                Click="OnUseCode" />
+        <Button x:Name="ShowCodeButton"
+                Grid.Column="2"
+                Margin="8,0,0,0"
+                Padding="12,6"
+                Content="Show a code"
+                Click="OnShowCode" />
+      </Grid>
+    </StackPanel>
   </Grid>
 </Window>

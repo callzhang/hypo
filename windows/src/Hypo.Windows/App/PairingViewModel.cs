@@ -48,7 +48,8 @@ public sealed class PairingViewModel(
     LanPairingCoordinator coordinator,
     string localDeviceId,
     string localDeviceName,
-    SyncCoordinator? sync = null)
+    SyncCoordinator? sync = null,
+    RemotePairingCoordinator? remote = null)
 {
     private readonly ISecretStore _store = store ?? throw new ArgumentNullException(nameof(store));
 
@@ -61,6 +62,96 @@ public sealed class PairingViewModel(
 
     /// <summary>The last outcome, in words a person can act on.</summary>
     public string? LastMessage { get; private set; }
+
+    /// <summary>The code this device is currently showing, if any.</summary>
+    public PairingCode? ShownCode { get; private set; }
+
+    /// <summary>Whether pairing by code is available at all.</summary>
+    public bool CanPairByCode => remote is not null;
+
+    /// <summary>
+    /// Shows a code for a device that is not on this network.
+    ///
+    /// <para>Offered alongside the LAN list rather than instead of it: the LAN
+    /// path involves no third party and nothing to carry between the devices,
+    /// so it stays the front door and this is the way round when it cannot be
+    /// used.</para>
+    /// </summary>
+    public async Task<PairingResult> ShowCodeAsync(CancellationToken ct = default)
+    {
+        if (remote is null)
+        {
+            LastMessage = "Pairing by code needs relay credentials, which this build has none of.";
+            return new PairingResult(PairingOutcome.PeerAdvertisesNoKey);
+        }
+
+        try
+        {
+            var result = await remote.ShowCodeAsync(
+                Guid.Parse(localDeviceId),
+                localDeviceName,
+                code =>
+                {
+                    ShownCode = code;
+                    LastMessage = $"Enter {code.Code} on the other device.";
+                    CodeShown?.Invoke(this, code);
+                },
+                ct).ConfigureAwait(false);
+
+            Adopt(result, "the device that used the code");
+            return result;
+        }
+        finally
+        {
+            // The code is dead either way once this returns, and leaving it on
+            // screen invites someone to type an expired one.
+            ShownCode = null;
+        }
+    }
+
+    /// <summary>Uses a code shown on another device.</summary>
+    public async Task<PairingResult> UseCodeAsync(string code, CancellationToken ct = default)
+    {
+        if (remote is null)
+        {
+            LastMessage = "Pairing by code needs relay credentials, which this build has none of.";
+            return new PairingResult(PairingOutcome.PeerAdvertisesNoKey);
+        }
+
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            LastMessage = "Type the code shown on the other device.";
+            return new PairingResult(PairingOutcome.NoReply);
+        }
+
+        var result = await remote
+            .UseCodeAsync(code.Trim(), localDeviceId, localDeviceName, ct)
+            .ConfigureAwait(false);
+
+        Adopt(result, "the device showing that code");
+        return result;
+    }
+
+    /// <summary>Raised when a code is ready to read out.</summary>
+    public event EventHandler<PairingCode>? CodeShown;
+
+    private void Adopt(PairingResult result, string who)
+    {
+        LastMessage = result.Outcome switch
+        {
+            PairingOutcome.Paired => $"Paired with {result.PeerDeviceName ?? who}.",
+            PairingOutcome.NoReply =>
+                $"No answer from {who}. The code may have expired, or been typed wrong.",
+            _ => "The reply did not verify. Something answered that could not have known the key.",
+        };
+
+        if (result.Succeeded && result.PeerDeviceId is { } paired)
+        {
+            sync?.Peers.Add(paired);
+        }
+
+        Rebuild();
+    }
 
     /// <summary>Records a discovered peer, ignoring this device's own advertisement.</summary>
     public void Observe(DiscoveredPeer peer)

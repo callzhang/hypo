@@ -173,4 +173,66 @@ public class TrayAndPairingTests
             File.Exists(Path.Combine(Wpf.ScreenshotDirectory, "screenshot-mechanism.png")),
             $"no screenshot in {Wpf.ScreenshotDirectory}");
     }
+
+    [SkippableFact]
+    public void TheCodeControlsAreHiddenWhenThereIsNoRelay()
+    {
+        RequireWindows();
+
+        // Hidden rather than disabled-and-mysterious: a control that does
+        // nothing invites a bug report.
+        var store = new InMemorySecretStore();
+        var model = new PairingViewModel(store, new LanPairingCoordinator(store), LocalId, "Test PC");
+
+        Wpf.Run(() =>
+        {
+            var window = new PairingWindow(model);
+            window.Show();
+            window.Settle();
+
+            Assert.Equal(
+                System.Windows.Visibility.Collapsed,
+                ((System.Windows.Controls.Button)window.FindName("ShowCodeButton")).Visibility);
+
+            window.Capture("pairing-window-no-relay");
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void TheCodeControlsAppearWhenPairingByCodeIsPossible()
+    {
+        RequireWindows();
+
+        var store = new InMemorySecretStore();
+        var model = new PairingViewModel(
+            store,
+            new LanPairingCoordinator(store),
+            LocalId,
+            "Test PC",
+            sync: null,
+            remote: new RemotePairingCoordinator(
+                new RelayPairingClient(new System.Net.Http.HttpClient()), store));
+
+        model.Observe(Peer("OPPO PLP110", PeerId.ToString()));
+
+        Wpf.Run(() =>
+        {
+            var window = new PairingWindow(model);
+            window.Show();
+            window.Settle();
+
+            Assert.Equal(
+                System.Windows.Visibility.Visible,
+                ((System.Windows.Controls.Button)window.FindName("ShowCodeButton")).Visibility);
+            Assert.Equal(
+                System.Windows.Visibility.Visible,
+                ((System.Windows.Controls.TextBox)window.FindName("CodeBox")).Visibility);
+
+            var pixels = window.Capture("pairing-window-with-code");
+            Assert.True(Wpf.HasVisibleContent(pixels), "the window rendered blank");
+
+            window.Close();
+        });
+    }
 }

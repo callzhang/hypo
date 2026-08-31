@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Hypo.Core.Abstractions;
+using System.Net.Http;
 using Hypo.Core.Discovery;
 using Hypo.Core.Pairing;
 using Hypo.Core.Protocol;
@@ -178,6 +179,48 @@ public class PairingViewModelTests
         model.Observe(Peer(PeerId.ToString()));
 
         Assert.Contains("open Hypo on it", Assert.Single(model.Peers).Status, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SaysSoRatherThanFailingWhenThereAreNoRelayCredentials()
+    {
+        // A build with no relay secret can still pair over the LAN. Offering a
+        // code and then throwing would be worse than saying it is unavailable.
+        var model = Build(new InMemorySecretStore());
+
+        Assert.False(model.CanPairByCode);
+
+        var result = await model.UseCodeAsync("123456");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("relay credentials", model.LastMessage!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AsksForACodeBeforeTryingToUseOne()
+    {
+        var store = new InMemorySecretStore();
+        var model = new PairingViewModel(
+            store,
+            new LanPairingCoordinator(store),
+            LocalId,
+            "Test PC",
+            sync: null,
+            remote: new RemotePairingCoordinator(
+                new RelayPairingClient(new HttpClient(new UnreachableRelay())), store));
+
+        var result = await model.UseCodeAsync("   ");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("Type the code", model.LastMessage!, StringComparison.Ordinal);
+    }
+
+    /// <summary>Fails every request, as an unreachable relay does.</summary>
+    private sealed class UnreachableRelay : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken ct) =>
+            throw new HttpRequestException("no relay here");
     }
 
     private sealed class NullClipboard : Core.Sync.IClipboard

@@ -106,6 +106,43 @@ public static class ClipboardFiles
     /// platform this runs on. Sanitising untrusted input must not depend on who
     /// is asking.</para>
     /// </summary>
+    /// <summary>
+    /// Writes bytes into a directory under a name safe to use, and returns the
+    /// path.
+    ///
+    /// <para>Never overwrites: a peer resending <c>report.pdf</c> must not
+    /// replace the one already sitting there, which the user may not have opened
+    /// yet. The second copy gets a timestamp instead.</para>
+    ///
+    /// <para>The name comes from another device, so it is reduced to a leaf and
+    /// stripped of characters Windows forbids before anything is created --
+    /// otherwise a peer could name a file <c>..\..\autorun.inf</c> and choose
+    /// where it lands.</para>
+    /// </summary>
+    public static string Materialise(string directory, string? proposedName, byte[] data)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        ArgumentNullException.ThrowIfNull(data);
+
+        Directory.CreateDirectory(directory);
+
+        var name = SafeFileName(proposedName);
+        var path = Path.Combine(directory, name);
+
+        if (File.Exists(path))
+        {
+            var stem = Path.GetFileNameWithoutExtension(name);
+            var extension = Path.GetExtension(name);
+            path = Path.Combine(
+                directory,
+                $"{stem}-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}{extension}");
+        }
+
+        File.WriteAllBytes(path, data);
+
+        return path;
+    }
+
     public static string SafeFileName(string? proposed, string fallback = "clipboard-file")
     {
         var trimmed = proposed?.Trim() ?? string.Empty;

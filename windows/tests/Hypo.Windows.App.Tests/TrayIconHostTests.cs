@@ -594,6 +594,62 @@ public class TrayIconHostTests : IDisposable
     }
 
     [SkippableFact]
+    public void OneLeftClickOnTheIconOpensTheHistory()
+    {
+        RequireWindows();
+
+        // What every other clipboard tool in the notification area does, and
+        // what the design asks for. It used to need a double click.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.ClickIcon(MouseButtons.Left);
+
+            Assert.NotNull(tray.OpenHistoryWindow);
+            tray.OpenHistoryWindow!.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void ARightClickDoesNotOpenTheHistoryBehindTheMenu()
+    {
+        RequireWindows();
+
+        // NotifyIcon raises the same event for both buttons.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.ClickIcon(MouseButtons.Right);
+
+            Assert.Null(tray.OpenHistoryWindow);
+        });
+    }
+
+    [SkippableFact]
+    public void ClickingANotificationOpensTheHistory()
+    {
+        RequireWindows();
+
+        // A notification about something that arrived, that goes nowhere when
+        // clicked, is a promise of a destination that does not exist.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.Announce(new ArrivalNotice { Title = "Copied from OPPO PLP110", Body = "a link" });
+            tray.ClickNotification();
+
+            Assert.NotNull(tray.OpenHistoryWindow);
+            tray.OpenHistoryWindow!.Close();
+        });
+    }
+
+    [SkippableFact]
     public void SettingsOpensAndShowsWhatTheMenuShows()
     {
         RequireWindows();

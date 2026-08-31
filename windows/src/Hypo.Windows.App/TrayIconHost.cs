@@ -185,7 +185,11 @@ public sealed class TrayIconHost : IDisposable
         menu.Items.Add(new ToolStripMenuItem("Quit Hypo", null, (_, _) => _shutdown()));
 
         _icon.ContextMenuStrip = menu;
-        _icon.DoubleClick += (_, _) => ShowHistory();
+        // A single left click, which is what the design asks for and what every
+        // other clipboard tool in the notification area does. Right click still
+        // opens the menu; NotifyIcon raises MouseClick for both, so the button
+        // has to be checked or the menu would open the window behind itself.
+        _icon.MouseClick += (_, e) => ClickIcon(e.Button);
 
         _poll.Interval = (int)PollInterval.TotalMilliseconds;
         _poll.Tick += (_, _) => UpdateStatus();
@@ -199,6 +203,8 @@ public sealed class TrayIconHost : IDisposable
         UpdateStatus();
         _icon.Visible = true;
         _poll.Start();
+
+        _icon.BalloonTipClicked += (_, _) => OnNotificationClicked();
 
         ShowFirewallNoticeOnce();
         RegisterHotkey();
@@ -279,6 +285,21 @@ public sealed class TrayIconHost : IDisposable
         _icon.BalloonTipText = notice.Body;
         _icon.BalloonTipIcon = ToolTipIcon.Info;
         _icon.ShowBalloonTip(5_000);
+    }
+
+    /// <summary>
+    /// Opens the history when a notification is clicked.
+    ///
+    /// <para>Clicking a notification about something that arrived and having
+    /// nothing happen is worse than not being notified: it is a promise of a
+    /// destination that turns out not to exist.</para>
+    /// </summary>
+    private void OnNotificationClicked()
+    {
+        if (LastAnnouncement is not null)
+        {
+            ShowHistory();
+        }
     }
 
     /// <summary>The hotkey's state, for anyone showing it.</summary>
@@ -388,6 +409,25 @@ public sealed class TrayIconHost : IDisposable
         Surface(_historyWindow);
         _historyWindow.ReadyToType();
     }
+
+    /// <summary>
+    /// What a click on the notification-area icon does.
+    ///
+    /// <para>A method rather than a lambda so a test can call it: nothing can
+    /// move the real mouse to the notification area on a runner. The button
+    /// matters -- NotifyIcon raises the same event for both, and opening the
+    /// history on a right click would put it behind the menu.</para>
+    /// </summary>
+    public void ClickIcon(MouseButtons button)
+    {
+        if (button is MouseButtons.Left)
+        {
+            ShowHistory();
+        }
+    }
+
+    /// <summary>Clicks the last notification, for tests.</summary>
+    public void ClickNotification() => OnNotificationClicked();
 
     /// <summary>The settings window while it is open.</summary>
     public Window? OpenSettingsWindow => _settingsWindow;

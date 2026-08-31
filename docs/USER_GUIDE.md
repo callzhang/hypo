@@ -776,7 +776,18 @@ paused — paused and disconnected look different on purpose.
 - Windows 11 gets a Mica backdrop and a dark title bar; Windows 10 gets a solid
   background
 
+**Clipboard History Window**:
+- **Search** narrows as you type; the two drop-downs filter by type (text,
+  links, images, files) and by when it was copied (today, this week)
+- **Right-click an entry → Pin to the top** keeps it at the top of the list and
+  stops it falling off the end when older entries are trimmed
+- **Drag an entry** into another application to drop it there without touching
+  the clipboard
+- Each row says which device sent it, whether it came over the network or
+  through the relay, and when
+
 **Tray Icon**:
+- **One left click** opens the clipboard history
 - **Clipboard history…**: Search, and double-click an entry to put it back on
   the clipboard. Focus returns to whatever you were typing in, so the next
   <kbd>Ctrl</kbd>+<kbd>V</kbd> lands where you expect

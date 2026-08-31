@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -227,6 +228,84 @@ public partial class HistoryWindow : Window
     {
         _model.SetFilter(FilterBox.Text);
         Bind();
+    }
+
+    private System.Windows.Point _dragFrom;
+
+    private void OnRowMouseDown(object sender, MouseButtonEventArgs e) =>
+        _dragFrom = e.GetPosition(this);
+
+    /// <summary>
+    /// Starts a drag once the pointer has moved far enough to mean it.
+    ///
+    /// <para>The threshold is Windows' own. Below it every click on a row would
+    /// begin a drag, and selecting an entry would become a fight.</para>
+    /// </summary>
+    private void OnRowMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (e.LeftButton is not MouseButtonState.Pressed || Rows.SelectedItem is not HistoryRow row)
+        {
+            return;
+        }
+
+        var moved = e.GetPosition(this) - _dragFrom;
+        if (Math.Abs(moved.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(moved.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        DragOut(row);
+    }
+
+    /// <summary>
+    /// Hands the entry to whatever it is dropped on.
+    ///
+    /// <para>Dragging puts a history entry into another application without
+    /// disturbing the clipboard, which matters when what is on the clipboard now
+    /// is the thing you want to keep.</para>
+    /// </summary>
+    private void DragOut(HistoryRow row)
+    {
+        DragContent payload;
+
+        try
+        {
+            payload = DragContent.For(row.Content, DragContent.DefaultTemporaryDirectory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A file that could not be written has nothing to drag. Failing
+            // silently is right here: the alternative is a message box in the
+            // middle of a mouse gesture.
+            return;
+        }
+
+        if (!payload.HasAnything)
+        {
+            return;
+        }
+
+        var data = new System.Windows.DataObject();
+
+        if (payload.Text is { } text)
+        {
+            data.SetData(System.Windows.DataFormats.UnicodeText, text);
+        }
+
+        if (payload.Png is { } png)
+        {
+            data.SetData("PNG", new MemoryStream(png));
+        }
+
+        if (payload.Files is { Count: > 0 } files)
+        {
+            data.SetData(System.Windows.DataFormats.FileDrop, files.ToArray());
+        }
+
+        // Copy, never Move: the entry stays in the history. A drag that emptied
+        // the list would be a surprising way to lose something.
+        System.Windows.DragDrop.DoDragDrop(Rows, data, System.Windows.DragDropEffects.Copy);
     }
 
     private async void OnUseSelected(object sender, MouseButtonEventArgs e) =>

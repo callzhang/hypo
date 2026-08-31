@@ -24,6 +24,7 @@ the relay, from a notification-area application.
 | Global shortcut (Alt+V), reconfigurable | Done |
 | History usable from the keyboard alone | Done |
 | Type and date filters, pinning, per-row detail | Done |
+| Drag an entry into another application | Done |
 | Light and dark, following the system setting | Done |
 | Version in the tray menu | Done |
 | Settings window: devices, history, startup | Done |
@@ -135,7 +136,9 @@ ARM64, and so is every Copilot+ PC. The x64 build runs there under emulation;
 the ARM64 one does not have to. It puts
 an icon in the notification area:
 
-- **Clipboard history…** — search, and double-click an entry to put it back;
+- **Clipboard history…** — or one left click on the icon. Search, filter by type
+  or date, pin what you want kept at the top, and double-click an entry to put
+  it back;
   focus returns to whatever you were in, so the next paste lands there.
   **Alt+V** opens it from anywhere, and the menu item shows the combination
 - **Pair a device…** — devices on this network, or a six-digit code for one
@@ -208,6 +211,15 @@ The two sharing switches and the notification switch appear both here and in the
 tray menu. They are written by one piece of code either way, and changing one in
 the menu updates an open settings window — two paths writing one setting is how
 a menu ends up disagreeing with a window in front of someone.
+
+### Dragging
+
+An entry can be dragged straight into another application, which puts it there
+without disturbing the clipboard — worth having when what is on the clipboard
+right now is the thing you want to keep. Text goes as text, images as PNG, and a
+file's bytes are written to `%TEMP%\Hypo` first, because a drop target receives
+a path and not bytes. Dragged files go there rather than to the received-files
+folder: a copy made for a drop is not something a peer sent.
 
 ### Arrivals
 

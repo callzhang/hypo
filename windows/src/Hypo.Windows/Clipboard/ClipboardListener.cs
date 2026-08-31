@@ -244,23 +244,7 @@ public sealed class ClipboardListener : IClipboard, IDisposable
     /// </summary>
     private Task WriteFileAsync(ClipboardContent content)
     {
-        Directory.CreateDirectory(_receivedFiles);
-
-        var name = ClipboardFiles.SafeFileName(content.FileName);
-        var path = Path.Combine(_receivedFiles, name);
-
-        // Never overwrite: a peer resending "report.pdf" must not replace the one
-        // already sitting there, which the user may not have opened yet.
-        if (File.Exists(path))
-        {
-            var stem = Path.GetFileNameWithoutExtension(name);
-            var extension = Path.GetExtension(name);
-            path = Path.Combine(
-                _receivedFiles,
-                $"{stem}-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}{extension}");
-        }
-
-        File.WriteAllBytes(path, content.Data);
+        var path = ClipboardFiles.Materialise(_receivedFiles, content.FileName, content.Data);
 
         return OnPump<object?>(() =>
         {

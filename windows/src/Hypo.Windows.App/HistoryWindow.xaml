@@ -69,7 +69,9 @@
              ScrollViewer.CanContentScroll="True"
              VirtualizingPanel.IsVirtualizing="True"
              VirtualizingPanel.VirtualizationMode="Recycling"
-             MouseDoubleClick="OnUseSelected">
+             MouseDoubleClick="OnUseSelected"
+             PreviewMouseLeftButtonDown="OnRowMouseDown"
+             PreviewMouseMove="OnRowMouseMove">
       <ListBox.ItemsPanel>
         <ItemsPanelTemplate>
           <VirtualizingStackPanel />

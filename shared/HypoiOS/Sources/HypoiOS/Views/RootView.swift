@@ -54,6 +54,7 @@ public struct RootView: View {
             HistoryListView(
                 viewModel: historyViewModel,
                 transportManager: context.transportManager,
+                localDeviceId: context.identity.deviceIdString,
                 onOpenSettings: { showingSettings = true }
             )
             // The same trigger Android uses in onResume: neither platform can

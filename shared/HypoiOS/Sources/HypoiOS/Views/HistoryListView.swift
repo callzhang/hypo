@@ -10,14 +10,17 @@ public struct HistoryListView: View {
     @ObservedObject private var viewModel: HistoryListViewModel
     @ObservedObject private var transportManager: TransportManager
     private let onOpenSettings: () -> Void
+    private let localDeviceId: String
 
     public init(
         viewModel: HistoryListViewModel,
         transportManager: TransportManager,
+        localDeviceId: String,
         onOpenSettings: @escaping () -> Void
     ) {
         self.viewModel = viewModel
         self.transportManager = transportManager
+        self.localDeviceId = localDeviceId
         self.onOpenSettings = onOpenSettings
     }
 
@@ -69,6 +72,20 @@ public struct HistoryListView: View {
             .background(.bar)
         }
         .task { await viewModel.load() }
+        .task {
+            // Checked while the screen is visible, not only on foreground.
+            // Copying can happen with Hypo already in front — from a share
+            // sheet, or the other half of a split view — and the offer should
+            // not wait for the app to be backgrounded and brought back.
+            //
+            // Cheap on purpose: this asks whether the clipboard holds text,
+            // which raises no permission prompt and reveals nothing. Reading it
+            // is what the button is for.
+            while !Task.isCancelled {
+                viewModel.refreshClipboardOffer()
+                try? await Task.sleep(for: .milliseconds(1500))
+            }
+        }
     }
 
     private var searchField: some View {
@@ -85,26 +102,27 @@ public struct HistoryListView: View {
     }
 
     private var list: some View {
-        List {
-            ForEach(viewModel.visibleEntries, id: \.id) { entry in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.content.previewDescription)
-                        .lineLimit(2)
-                    Text(entry.originDeviceName ?? entry.deviceId)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .swipeActions {
-                    Button("Delete", role: .destructive) {
-                        Task { await viewModel.remove(id: entry.id) }
-                    }
-                    Button(entry.isPinned ? "Unpin" : "Pin") {
-                        Task { await viewModel.togglePin(id: entry.id) }
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(viewModel.visibleEntries, id: \.id) { entry in
+                    ClipboardEntryRow(
+                        entry: entry,
+                        isLocal: entry.deviceId.lowercased() == localDeviceId.lowercased(),
+                        onCopy: { viewModel.copyToClipboard(entry) }
+                    )
+                    .contextMenu {
+                        Button(entry.isPinned ? "Unpin" : "Pin") {
+                            Task { await viewModel.togglePin(id: entry.id) }
+                        }
+                        Button("Delete", role: .destructive) {
+                            Task { await viewModel.remove(id: entry.id) }
+                        }
                     }
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
         }
-        .listStyle(.plain)
         .overlay {
             if viewModel.visibleEntries.isEmpty {
                 ContentUnavailableView(

@@ -2090,3 +2090,31 @@ harness 原本每 4 秒重发一次(为绕过更早的一个竞态)。每收到�
 **为什么之前没被发现**:macOS↔macOS 和 Swift↔Swift 的往返测试两端都是 Swift,写出的都不带小数秒,所以永远走不到那条分支。只有真的接上 Android 才会踩到。
 
 **注意**:这不一定是用户看到的那一条错误的成因——`PairingChallengePayload` 解码失败会显示 "Unable to decode pairing challenge",不是那句话。所以另外把 `PairingRelayClient` 里四处裸解码也包上了说明,现在任何一处失败都会指出是哪一步、收到了什么。用户复现时那条消息会直接指认位置。
+
+
+## 列表样式与配对卡死（2026-08-31,用户真机反馈）
+
+### 「Pairing with OPPO PLP110...」永远不动
+
+`LanPairingCoordinator` 只给"等 ack"加了 30 秒上限,**没有给整个流程加**。而 `WebSocketTransport.connect()` 本身可以永远挂着——一台广播了服务却不接受连接的设备就会造成这个。界面于是停在「Pairing with …」,既不成功也不失败,也没有退路。
+
+改成整个配对流程一起限时,超时报「That device did not respond in time」。
+
+### 列表样式没有参考 Android
+
+原来是 `List` 里两行纯文本。Android 是卡片:
+
+| 元素 | Android | 现在的 iOS |
+|---|---|---|
+| 容器 | Card,`surfaceVariant` 底色,点击即复制 | 圆角卡片,`secondarySystemBackground`,点击即复制 |
+| 第一行 | 类型图标 + 来源徽章 + 时间戳 | 同 |
+| 来源徽章 | 加密盾牌、云图标(仅云端)、设备名;本机用 `primaryContainer` | 同,本机用强调色 |
+| 第二行 | 预览文字 | 同,最多三行 |
+
+"仅云端才显示图标、LAN 不显示"这一条是照抄 Android 的注释("no icon for LAN, matching macOS")——常见路径不该被装饰。
+
+### 顺带发现:前台复制时按钮不出现
+
+`refreshClipboardOffer()` 原本只在**切回前台**时跑一次。在 app 已经在前台时复制东西(分屏、分享面板回来),按钮不会出现,要切出去再切回来才行。改成界面可见时每 1.5 秒探测一次——`hasStrings` 不弹框、不泄露内容,剪贴板管理器本来就是这么做的。
+
+这一条是测试逼出来的:测试重设剪贴板后没有再切前台,于是暴露了只在前台切换时刷新的缺口。

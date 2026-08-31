@@ -112,9 +112,15 @@ final class HypoUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 2)
         app.activate()
 
-        XCTAssertTrue(
-            app.buttons["Paste"].waitForExistence(timeout: 10),
-            "did not offer to send what was on the clipboard"
-        )
+        // Re-set between checks. A peer pushing entries writes each one to the
+        // clipboard, and the app then correctly sees nothing of the user's to
+        // offer — right behaviour, but it means a live device on the network
+        // can take the clipboard back between setting it and looking.
+        var offered = app.buttons["Paste"].waitForExistence(timeout: 5)
+        for _ in 0..<6 where !offered {
+            UIPasteboard.general.string = "something worth sending \(UUID().uuidString.prefix(6))"
+            offered = app.buttons["Paste"].waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(offered, "did not offer to send what was on the clipboard")
     }
 }

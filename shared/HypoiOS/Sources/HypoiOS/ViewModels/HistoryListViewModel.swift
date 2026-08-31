@@ -65,6 +65,24 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
         entries = await store.togglePin(id: id)
     }
 
+    /// Puts an entry back on the clipboard, which is what tapping a row does
+    /// on Android.
+    public func copyToClipboard(_ entry: ClipboardEntry) {
+        guard let clipboard else { return }
+        switch entry.content {
+        case .text(let text):
+            clipboard.writeText(text)
+        case .link(let url):
+            clipboard.writeText(url.absoluteString)
+        case .image(let metadata):
+            if let data = metadata.data { _ = clipboard.writeImageData(data) }
+        case .file:
+            break
+        }
+        // What we just wrote is ours, so there is nothing new to offer sending.
+        refreshClipboardOffer()
+    }
+
     public func updateLimit(_ newLimit: Int) async {
         entries = await store.updateLimit(newLimit)
     }

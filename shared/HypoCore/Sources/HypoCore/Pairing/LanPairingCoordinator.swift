@@ -19,6 +19,7 @@ public actor LanPairingCoordinator {
         /// "answered with something unreadable" need different fixes and look
         /// identical without this.
         case noAnswer(sawInstead: String?)
+        case timedOut
 
         public var errorDescription: String? {
             switch self {
@@ -27,6 +28,8 @@ public actor LanPairingCoordinator {
             case .noAnswer(let seen):
                 guard let seen else { return "That device did not answer" }
                 return "Could not read the answer from that device: \(seen)"
+            case .timedOut:
+                return "That device did not respond in time"
             }
         }
     }
@@ -53,7 +56,25 @@ public actor LanPairingCoordinator {
         )
     }
 
+    /// Bounds the whole exchange, not just the wait for an answer.
+    ///
+    /// Dialling can hang indefinitely — a phone that advertises but does not
+    /// accept leaves connect() waiting forever — and the screen then sits on
+    /// "Pairing with …" with nothing to report and no way back.
     public func pair(with peer: DiscoveredPeer, timeout: Duration = .seconds(30)) async throws -> Result {
+        try await withThrowingTaskGroup(of: Result.self) { group in
+            group.addTask { try await self.attemptPair(with: peer, ackTimeout: timeout) }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw Error.timedOut
+            }
+            guard let first = try await group.next() else { throw Error.timedOut }
+            group.cancelAll()
+            return first
+        }
+    }
+
+    private func attemptPair(with peer: DiscoveredPeer, ackTimeout timeout: Duration) async throws -> Result {
         guard let advertised = peer.endpoint.metadata["pub_key"],
               let peerPublicKey = Data(base64Encoded: advertised) else {
             throw Error.peerAdvertisesNoKey

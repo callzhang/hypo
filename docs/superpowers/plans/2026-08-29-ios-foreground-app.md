@@ -1976,3 +1976,25 @@ iOS 读取**别的 app 写入**的剪贴板会弹系统授权框。自动化测�
 原先按"和 Android 一样,前台自动发送"实现,实测发现 **iOS 每次回到前台都会弹粘贴授权框**(截图为证)。Android 没有这个代价,iOS 有,这是平台规则。
 
 改为:`hasStrings` 静默探测 → 有内容才显示 `UIPasteControl` → 用户点击时苹果豁免、不弹框。比 Android 多一次点击,换掉每次一个弹窗。已实测确认启动无弹窗、按钮按需出现。
+
+
+### LAN 点击配对打通（2026-08-30）
+
+```
+testTappingANearbyDevicePairsWithIt passed (20.414 seconds)
+```
+
+在列表里点一下同网段的设备就完成配对,对端是 `tools/HypoHarness`——一个真实的独立进程。
+
+这条路 Swift 侧原本不存在:它能**接收** LAN 配对 challenge,但从来不能**发出**。补齐过程中撞到四个问题,全部是"对端答了、发起方听不见":
+
+| 问题 | 为什么难发现 |
+|---|---|
+| 客户端只处理二进制帧,**文本帧只打日志就丢** | ack 故意发成文本(注释:so Android can parse it as JSON string) |
+| `onIncomingMessage` 只在**信封解码成功后**才触发 | 配对 ack 不可能是信封——它在双方有密钥之前就要送达 |
+| 补的转发写在 `catch ... as DecodingError` 里 | **帧解码器抛的是 `TransportFrameError`**,分支永远进不去 |
+| `startDiscovery()` 从 `onAppear` 无条件重置状态 | SwiftUI 会多次调用 onAppear,把进行中的配对冲回列表;`.failed` 也活不过两秒 |
+
+前三个叠在一起的表现是一模一样的:harness 打印「Paired over LAN」,iOS 一动不动。每修掉一层才能看见下一层。第四个把前三个都掩盖了——界面回到列表,看起来像"点击没生效"。
+
+**教训**:把错误做成会说话的。改成"没答复 / 答了但读不懂(附原文)"之后,一次运行就把范围从"整条链路"缩到了"接收侧",这是前面几轮反复试错换来的。

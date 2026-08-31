@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// Drives the real app in the simulator.
 ///
@@ -93,14 +94,27 @@ final class HypoUITests: XCTestCase {
         XCTAssertNotNil(code, "the relay did not produce a pairing code; screen said: \(labels)")
     }
 
-    /// Sending is automatic on foreground now, the way Android does it in
-    /// onResume, so there is no send button to find — and there should not be
-    /// one lying around either.
-    func testHistoryHasNoManualSendButton() {
+    /// The send control appears only when there is something to send.
+    ///
+    /// Detecting that costs no permission prompt; reading does. Showing the
+    /// control unconditionally would be a dead button most of the time, and
+    /// reading unconditionally would ask the user for permission every single
+    /// time they came back to the app.
+    func testSendControlFollowsTheClipboard() {
+        UIPasteboard.general.items = []
+
         let app = launch()
-
         XCTAssertTrue(app.textFields["Search"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["Paste"].exists)
-    }
+        XCTAssertFalse(app.buttons["Paste"].exists, "offered to send an empty clipboard")
 
+        UIPasteboard.general.string = "something worth sending \(UUID().uuidString.prefix(6))"
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 2)
+        app.activate()
+
+        XCTAssertTrue(
+            app.buttons["Paste"].waitForExistence(timeout: 10),
+            "did not offer to send what was on the clipboard"
+        )
+    }
 }

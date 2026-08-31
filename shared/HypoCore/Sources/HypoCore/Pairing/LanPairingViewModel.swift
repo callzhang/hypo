@@ -62,15 +62,24 @@ public final class LanPairingViewModel: ObservableObject {
     /// TransportManager, and a second subscription would be a second source of
     /// truth to keep in step.
     public func startDiscovery() {
-        refreshTask?.cancel()
+        // Idempotent, and never clobbers an outcome. SwiftUI calls onAppear
+        // more than once, and resetting to .discovering there threw away a
+        // pairing that was already under way: the tap sent its challenge, the
+        // peer accepted it, and the screen went back to listing devices as if
+        // nothing had happened.
+        guard refreshTask == nil else { return }
+        if case .discovering = state {} else if case .found = state {} else { return }
+
         state = .discovering
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 let peers = self.discoveredPeers()
                 switch self.state {
-                case .pairing, .paired:
-                    break  // Do not overwrite an in-flight or finished pairing.
+                case .pairing, .paired, .failed:
+                    // Leave outcomes alone. Overwriting .failed also meant an
+                    // error message vanished two seconds after appearing.
+                    break
                 default:
                     self.state = .found(peers)
                 }
@@ -84,14 +93,21 @@ public final class LanPairingViewModel: ObservableObject {
         refreshTask = nil
     }
 
+    /// Starts fresh after an outcome, which is what the Done and Try again
+    /// buttons do.
+    public func restartDiscovery() {
+        stopDiscovery()
+        state = .discovering
+        startDiscovery()
+    }
+
     public func isPaired(_ peer: DiscoveredPeer) -> Bool {
         guard let deviceId = peer.endpoint.metadata["device_id"] else { return false }
         return pairedDeviceIds().contains(deviceId.lowercased())
     }
 
     public func reset() {
-        state = .discovering
-        startDiscovery()
+        restartDiscovery()
     }
 }
 #endif

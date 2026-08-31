@@ -15,14 +15,18 @@ public actor LanPairingCoordinator {
 
     public enum Error: Swift.Error, LocalizedError {
         case peerAdvertisesNoKey
-        case noAnswer
+        /// Carries whatever did arrive, if anything: "did not answer" and
+        /// "answered with something unreadable" need different fixes and look
+        /// identical without this.
+        case noAnswer(sawInstead: String?)
 
         public var errorDescription: String? {
             switch self {
             case .peerAdvertisesNoKey:
                 return "That device is not advertising a key to pair with"
-            case .noAnswer:
-                return "That device did not answer"
+            case .noAnswer(let seen):
+                guard let seen else { return "That device did not answer" }
+                return "Could not read the answer from that device: \(seen)"
             }
         }
     }
@@ -86,7 +90,7 @@ public actor LanPairingCoordinator {
         try await transport.sendRaw(try encoder.encode(challenge.message))
 
         guard let ack = await inbox.waitForAck(timeout: timeout) else {
-            throw Error.noAnswer
+            throw Error.noAnswer(sawInstead: await inbox.unreadable)
         }
         try await builder.verifyAck(
             ack,
@@ -115,13 +119,19 @@ public actor LanPairingCoordinator {
 /// a peer may be mid-conversation about other things when we dial it.
 private actor AckInbox {
     private var ack: PairingAckMessage?
+    /// The last thing that arrived and could not be read as an ack, so a
+    /// timeout can say whether nothing came or something unusable did.
+    private(set) var unreadable: String?
 
     func offer(_ data: Data) {
         guard ack == nil else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        if let decoded = try? decoder.decode(PairingAckMessage.self, from: data) {
-            ack = decoded
+        do {
+            ack = try decoder.decode(PairingAckMessage.self, from: data)
+        } catch {
+            let preview = String(decoding: data.prefix(200), as: UTF8.self)
+            unreadable = "\(error.localizedDescription) — \(preview)"
         }
     }
 

@@ -1341,6 +1341,17 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func handleIncoming(data: Data) {
+        // Checked before decoding, not in a catch. A pairing message has no
+        // frame around it — it travels before either side has a key to build
+        // an envelope with — and the codec rejects it with TransportFrameError,
+        // which is not the DecodingError the recovery path below catches. So
+        // the ack that completes LAN pairing arrived, failed to decode, and
+        // was logged as junk.
+        if looksLikePairingMessage(data), let handler = onIncomingMessage {
+            logger.info("🤝 [WebSocketTransport] Forwarding an unframed pairing message")
+            Task { await handler(data, .lan) }
+            return
+        }
         do {
             // Check for error/control messages before decoding as SyncEnvelope
             if data.count >= 4 {
@@ -1506,15 +1517,6 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                 logger.warning("⚠️ [WebSocketTransport] No onIncomingMessage handler set - message will be dropped!")
             }
         } catch let decodingError as DecodingError {
-            // A pairing ack arrives before any shared key exists, so it is bare
-            // JSON with no frame around it and fails the decode above. Dropping
-            // it here left LAN pairing hanging: the peer answered, and the
-            // answer never reached the side that asked.
-            if looksLikePairingMessage(data), let handler = onIncomingMessage {
-                logger.info("🤝 [WebSocketTransport] Forwarding an unframed pairing message")
-                Task { await handler(data, .lan) }
-                return
-            }
             logger.error("❌ [WebSocketTransport] Failed to decode incoming data: \(decodingError)")
             // Log detailed decoding error information
             switch decodingError {

@@ -2,18 +2,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="Hypo.Windows.App.Shell.PairingWindow"
         Title="Hypo — Pair a Device"
-        Width="460"
-        SizeToContent="Height"
+        Width="460" Height="420"
         WindowStartupLocation="CenterScreen">
   <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
-      <!-- A fixed height, not a star. With SizeToContent the window is exactly
-           as tall as these rows come to, and a star row here was starving the
-           row below it: the six-digit code box and its buttons were arranged
-           with no height at all, so they existed, answered to clicks in tests,
-           and were never drawn. -->
-      <RowDefinition Height="280" />
+      <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>

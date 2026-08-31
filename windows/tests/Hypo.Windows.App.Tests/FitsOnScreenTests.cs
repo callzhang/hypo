@@ -13,13 +13,12 @@ using Hypo.Windows.App.Shell;
 namespace Hypo.Windows.App.Tests;
 
 /// <summary>
-/// Whether the controls are inside the window.
+/// Whether the controls are actually drawn where they say they are.
 ///
-/// <para>Found by looking at a screenshot: the pairing window's six-digit code
-/// box and its two buttons were below the bottom edge, in every capture, light
-/// and dark. Every test still passed -- clicking a control that is off-screen
-/// works perfectly well in code, which is exactly why this needed measuring
-/// rather than exercising.</para>
+/// <para>Layout is not the question. A control can report a sensible position
+/// and size and still never reach a pixel, and every click-it-and-assert test
+/// passes either way -- clicking something invisible works perfectly well in
+/// code. So this reads the bitmap.</para>
 /// </summary>
 [Collection("wpf")]
 public class FitsOnScreenTests : IDisposable
@@ -71,12 +70,7 @@ public class FitsOnScreenTests : IDisposable
 
         Wpf.Run(() =>
         {
-            var store = new InMemorySecretStore();
-            var window = new PairingWindow(new PairingViewModel(
-                store,
-                new LanPairingCoordinator(store),
-                "11111111-2222-3333-4444-555555555555",
-                "Test PC"));
+            var window = new PairingWindow(CodeCapableModel());
 
             window.Show();
             window.Settle();
@@ -97,12 +91,7 @@ public class FitsOnScreenTests : IDisposable
         // most common thing to see in this window.
         Wpf.Run(() =>
         {
-            var store = new InMemorySecretStore();
-            var window = new PairingWindow(new PairingViewModel(
-                store,
-                new LanPairingCoordinator(store),
-                "11111111-2222-3333-4444-555555555555",
-                "Test PC"));
+            var window = new PairingWindow(CodeCapableModel());
 
             window.Show();
             window.Settle();
@@ -158,10 +147,33 @@ public class FitsOnScreenTests : IDisposable
     /// showed the window ending above it. The bitmap is the thing a user
     /// sees, so the bitmap is what this asks.</para>
     /// </summary>
+    /// <summary>
+    /// A model that can pair by code, which is what makes the bottom row of the
+    /// pairing window visible at all.
+    ///
+    /// <para>Without the remote coordinator the window hides that row on
+    /// purpose, and a test that did not know it spent three rounds proving the
+    /// controls were not drawn.</para>
+    /// </summary>
+    private static PairingViewModel CodeCapableModel()
+    {
+        var store = new InMemorySecretStore();
+
+        return new PairingViewModel(
+            store,
+            new LanPairingCoordinator(store),
+            "11111111-2222-3333-4444-555555555555",
+            "Test PC",
+            sync: null,
+            remote: new RemotePairingCoordinator(
+                new RelayPairingClient(new System.Net.Http.HttpClient()), store));
+    }
+
     private static void AssertInside(Window window, string name)
     {
         var element = (FrameworkElement)window.FindName(name);
 
+        Assert.Equal(Visibility.Visible, element.Visibility);
         Assert.True(element.ActualHeight > 0, $"{name} has no height, so it was never laid out");
 
         var top = (int)element.TransformToAncestor(window).Transform(default).Y;

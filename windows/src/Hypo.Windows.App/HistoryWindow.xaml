@@ -125,17 +125,25 @@
 
             <StackPanel Grid.Column="1">
               <TextBlock Text="{Binding Preview}" TextTrimming="CharacterEllipsis" />
-              <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11"
-                         TextTrimming="CharacterEllipsis">
-                <Run Text="{Binding Source, Mode=OneWay}" />
-                <Run Text="·" />
-                <Run Text="{Binding OriginLabel, Mode=OneWay}" />
-                <Run Text="·" />
-                <!-- Every item is encrypted end to end; the glyph says so rather
-                     than a word, because a row that said "encrypted" on every
-                     line would stop being read after the first. -->
-                <Run FontFamily="Segoe MDL2 Assets" Text="&#xE72E;" />
-              </TextBlock>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11"
+                           TextTrimming="CharacterEllipsis">
+                  <Run Text="{Binding Source, Mode=OneWay}" />
+                  <Run Text="·" />
+                  <Run Text="{Binding OriginLabel, Mode=OneWay}" />
+                </TextBlock>
+
+                <!-- A padlock rather than the word: a row that said "encrypted"
+                     on every line would stop being read after the first. Only on
+                     things that travelled, because on an item copied here it
+                     would be claiming a journey that did not happen. -->
+                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11"
+                           FontFamily="Segoe MDL2 Assets"
+                           Margin="6,0,0,0"
+                           ToolTip="Encrypted end to end"
+                           Text="&#xE72E;"
+                           Visibility="{Binding Encrypted, Converter={StaticResource BoolToVisibility}}" />
+              </StackPanel>
             </StackPanel>
 
             <StackPanel Grid.Column="2" Margin="8,0,0,0" HorizontalAlignment="Right">

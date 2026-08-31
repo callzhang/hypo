@@ -158,6 +158,19 @@ public class HistoryFilterTests : IDisposable
     }
 
     [Fact]
+    public void ThePadlockIsOnlyOnThingsThatTravelled()
+    {
+        var model = Model();
+
+        // Everything Hypo sends is encrypted end to end, so the glyph means
+        // "this arrived encrypted". On something copied here, which never went
+        // anywhere, it would be claiming a journey that did not happen.
+        Assert.False(model.Rows.Single(r => r.ContentType is ContentType.Text).Encrypted);
+        Assert.True(model.Rows.Single(r => r.ContentType is ContentType.Image).Encrypted);
+        Assert.True(model.Rows.Single(r => r.ContentType is ContentType.File).Encrypted);
+    }
+
+    [Fact]
     public void EveryContentTypeHasItsOwnGlyph()
     {
         var glyphs = Model().Rows.Select(r => r.Icon).ToArray();

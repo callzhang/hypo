@@ -56,6 +56,16 @@ public sealed record HistoryRow
     };
 
     /// <summary>
+    /// Whether to show the padlock.
+    ///
+    /// <para>Only for things that travelled. Everything Hypo sends is encrypted
+    /// end to end, so the glyph means "this arrived encrypted" -- and on an item
+    /// copied on this machine, which never went anywhere, it would be claiming
+    /// something about a journey that did not happen.</para>
+    /// </summary>
+    public bool Encrypted => Origin is not null;
+
+    /// <summary>
     /// When it was copied, in the form someone reads at a glance.
     ///
     /// <para>A clock for today, a weekday for this week, a date beyond that.

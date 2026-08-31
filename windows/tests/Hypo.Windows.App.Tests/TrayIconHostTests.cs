@@ -148,7 +148,9 @@ public class TrayIconHostTests : IDisposable
                 .Select(item => item.Text!)
                 .ToArray();
 
-            Assert.Contains(labels, l => l.Contains("history", StringComparison.OrdinalIgnoreCase));
+            // Precisely: the sharing setting also has "history" in its label, and a
+            // loose match here is how four tests started matching two items.
+            Assert.Contains(labels, l => l.StartsWith("Clipboard history", StringComparison.Ordinal));
             Assert.Contains(labels, l => l.Contains("Pair", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(labels, l => l.Contains("Pause", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(labels, l => l.Contains("Quit", StringComparison.OrdinalIgnoreCase));
@@ -198,7 +200,7 @@ public class TrayIconHostTests : IDisposable
             tray.Start();
 
             tray.Menu.Items.OfType<ToolStripMenuItem>()
-                .Single(item => item.Text!.Contains("history", StringComparison.OrdinalIgnoreCase))
+                .Single(item => item.Text!.StartsWith("Clipboard history", StringComparison.Ordinal))
                 .PerformClick();
 
             // Asking the tray what it opened, rather than WPF's global window
@@ -300,7 +302,7 @@ public class TrayIconHostTests : IDisposable
             tray.Start();
 
             var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
-                .Single(item => item.Text!.Contains("history", StringComparison.OrdinalIgnoreCase));
+                .Single(item => item.Text!.StartsWith("Clipboard history", StringComparison.Ordinal));
 
             history.PerformClick();
             var first = tray.OpenHistoryWindow;
@@ -327,7 +329,7 @@ public class TrayIconHostTests : IDisposable
             tray.Start();
 
             var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
-                .Single(item => item.Text!.Contains("history", StringComparison.OrdinalIgnoreCase));
+                .Single(item => item.Text!.StartsWith("Clipboard history", StringComparison.Ordinal));
 
             history.PerformClick();
             var first = tray.OpenHistoryWindow;
@@ -357,7 +359,7 @@ public class TrayIconHostTests : IDisposable
             tray.Start();
 
             var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
-                .Single(item => item.Text!.Contains("history", StringComparison.OrdinalIgnoreCase));
+                .Single(item => item.Text!.StartsWith("Clipboard history", StringComparison.Ordinal));
 
             history.PerformClick();
             var window = tray.OpenHistoryWindow!;

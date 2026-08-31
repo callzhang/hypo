@@ -39,6 +39,26 @@ public sealed record HypoSettings
     [JsonIgnore]
     public HotkeyBinding HotkeyBinding => HotkeyBinding.Parse(Hotkey) ?? HotkeyBinding.Default;
 
+    /// <summary>How many entries the history keeps. The design's number.</summary>
+    public int HistoryLimit { get; init; } = DefaultHistoryLimit;
+
+    public const int DefaultHistoryLimit = 200;
+
+    /// <summary>
+    /// Below this the history stops being a history.
+    ///
+    /// <para>Ten is enough to be useful and small enough to be a real answer for
+    /// someone who wants very little of their clipboard on disk. Zero is not
+    /// offered: that is what turning sync off is for, and a history of nothing
+    /// looks like a broken window.</para>
+    /// </summary>
+    public const int MinimumHistoryLimit = 10;
+
+    /// <summary>
+    /// Above this the window is slower to open than the thing it saves.
+    /// </summary>
+    public const int MaximumHistoryLimit = 2000;
+
     /// <summary>
     /// Whether an arrival from another device raises a notification.
     ///

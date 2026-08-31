@@ -25,6 +25,7 @@ the relay, from a notification-area application.
 | History usable from the keyboard alone | Done |
 | Light and dark, following the system setting | Done |
 | Version in the tray menu | Done |
+| Settings window: devices, history, startup | Done |
 | Notification when something arrives | Done |
 | Oversized images compressed before sending | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
@@ -138,6 +139,10 @@ an icon in the notification area:
   **Alt+V** opens it from anywhere, and the menu item shows the combination
 - **Pair a device…** — devices on this network, or a six-digit code for one
   that is not
+- **Settings…** — the paired devices with their names and whether each is on
+  this network, unpairing, how many entries the history keeps, clearing it,
+  whether Hypo starts when you sign in, and what the shortcut is or why it is
+  not working
 - **Pause syncing** — distinct from being disconnected, and the icon says which
 - Two sharing switches, **both off by default**
 
@@ -177,6 +182,31 @@ search hint turned out to be at 2.67:1 — it is darker now.
 The design named the WPF-UI Fluent dictionary for this. It is not used: the
 whole theme is seven brushes, and a UI toolkit would have restyled every control
 in the screenshots for them.
+
+### Settings
+
+Everything with a decision in it is in `SettingsViewModel` and tested on any
+machine; the window is controls bound to it.
+
+Unpairing takes the shared key **and** the remembered name. The key is what
+matters — without it nothing from that device decrypts and nothing goes to it —
+but a name left behind would keep an unpaired device in every list. It asks
+first, because from here it cannot be undone: the two devices have to be
+introduced to each other again.
+
+Lowering the retention limit prunes immediately, and the window says how many
+entries went. Clearing runs `VACUUM` as well as `DELETE`; a history file that
+still holds the rows in its free pages has not done what was asked.
+
+"Start Hypo when I sign in" writes the per-user `Run` key — never the
+machine-wide one, which would start it for people who never installed it and
+would need an administrator. Group policy can lock that key, so the switch shows
+what the registry says afterwards rather than what was asked for.
+
+The two sharing switches and the notification switch appear both here and in the
+tray menu. They are written by one piece of code either way, and changing one in
+the menu updates an open settings window — two paths writing one setting is how
+a menu ends up disagreeing with a window in front of someone.
 
 ### Arrivals
 

@@ -782,6 +782,8 @@ paused — paused and disconnected look different on purpose.
   <kbd>Ctrl</kbd>+<kbd>V</kbd> lands where you expect
 - **Pair a device…**: Devices on this network, or a six-digit code for one that
   is not
+- **Settings…**: Paired devices and unpairing, how many clipboard entries to
+  keep, clearing the history, and whether Hypo starts when you sign in
 - **Pause syncing**: Stops sending and receiving without quitting
 - **Two sharing switches**: See below
 - **Quit**

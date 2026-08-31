@@ -84,7 +84,19 @@ public partial class App : System.Windows.Application
             _client,
             HypoSettings.Load(settingsPath),
             settings => settings.Save(settingsPath),
-            privacy => _clipboard.Privacy = privacy);
+            privacy => _clipboard.Privacy = privacy,
+            // The tray hands in the settings in force and its own writer, so a
+            // switch that appears in both the menu and the window is applied and
+            // saved by one piece of code either way.
+            (current, save) => new SettingsViewModel(
+                store,
+                _history,
+                new ClientStatusSource(_client),
+                current,
+                save,
+                StartupRegistration.IsEnabled,
+                enabled => StartupRegistration.Set(
+                    enabled, Environment.ProcessPath ?? AppContext.BaseDirectory)));
 
         _tray.Start();
     }

@@ -74,7 +74,15 @@ public class TrayIconHostTests : IDisposable
             client: null,
             settings: settings,
             saveSettings: _saved.Add,
-            applyPrivacy: _applied.Add);
+            applyPrivacy: _applied.Add,
+            settingsModel: (current, save) => new SettingsViewModel(
+                store,
+                _history,
+                _status,
+                current,
+                save,
+                () => false,
+                _ => null));
     }
 
     [SkippableFact]
@@ -582,6 +590,78 @@ public class TrayIconHostTests : IDisposable
             tray.Announce(notice);
 
             Assert.Equal(notice, tray.LastAnnouncement);
+        });
+    }
+
+    [SkippableFact]
+    public void SettingsOpensAndShowsWhatTheMenuShows()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build(settings: new HypoSettings { AllowCloudClipboardUpload = true });
+            tray.Start();
+
+            tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Settings", StringComparison.Ordinal))
+                .PerformClick();
+
+            var window = Assert.IsType<SettingsWindow>(tray.OpenSettingsWindow);
+            window.Settle();
+
+            // The same switch appears in both. Two pieces of code writing one
+            // setting is how a menu ends up disagreeing with a window.
+            Assert.True(((System.Windows.Controls.CheckBox)window.FindName("CloudBox")).IsChecked);
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void ChangingASwitchInTheMenuUpdatesAnOpenSettingsWindow()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Settings", StringComparison.Ordinal))
+                .PerformClick();
+
+            var window = Assert.IsType<SettingsWindow>(tray.OpenSettingsWindow);
+            var box = (System.Windows.Controls.CheckBox)window.FindName("CloudBox");
+
+            Assert.False(box.IsChecked);
+
+            tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.Contains("Microsoft account", StringComparison.Ordinal))
+                .PerformClick();
+            window.Settle();
+
+            Assert.True(box.IsChecked, "the open window kept showing the old value");
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void SettingsSaysWhatTheShortcutIs()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            // Whether it registered or not, it says something -- the design puts
+            // a failed registration here rather than nowhere.
+            Assert.NotNull(tray.HotkeyDescription);
+            Assert.Contains("Shortcut:", tray.HotkeyDescription);
         });
     }
 

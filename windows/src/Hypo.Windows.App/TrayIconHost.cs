@@ -30,6 +30,7 @@ public sealed class TrayIconHost : IDisposable
     private readonly HypoClient? _client;
     private readonly HistoryViewModel _history;
     private readonly Func<PairingViewModel> _pairing;
+    private readonly Func<HypoSettings, Action<HypoSettings>, SettingsViewModel>? _settingsModel;
     private readonly Action _shutdown;
 
     private readonly NotifyIcon _icon = new();
@@ -47,6 +48,7 @@ public sealed class TrayIconHost : IDisposable
 
     private HistoryWindow? _historyWindow;
     private PairingWindow? _pairingWindow;
+    private SettingsWindow? _settingsWindow;
     private bool _paused;
 
     /// <summary>What the icon currently says. Exposed so a test can read it.</summary>
@@ -83,6 +85,10 @@ public sealed class TrayIconHost : IDisposable
         _historyItem.Checked = settings.ShareWithWindowsHistory;
         _cloudItem.Checked = settings.AllowCloudClipboardUpload;
         _notifyItem.Checked = settings.NotifyOnArrival;
+
+        // The settings window shows the same three. Leaving it stale is how the
+        // menu and the window end up disagreeing in front of someone.
+        _settingsWindow?.Bind();
     }
 
     /// <summary>The history window while it is open, and null once it is closed.</summary>
@@ -104,7 +110,8 @@ public sealed class TrayIconHost : IDisposable
         HypoClient? client = null,
         HypoSettings? settings = null,
         Action<HypoSettings>? saveSettings = null,
-        Action<ClipboardPrivacy>? applyPrivacy = null)
+        Action<ClipboardPrivacy>? applyPrivacy = null,
+        Func<HypoSettings, Action<HypoSettings>, SettingsViewModel>? settingsModel = null)
     {
         _status = status;
         _client = client;
@@ -113,6 +120,7 @@ public sealed class TrayIconHost : IDisposable
         _applyPrivacy = applyPrivacy ?? (_ => { });
         _history = history;
         _pairing = pairing;
+        _settingsModel = settingsModel;
         _shutdown = shutdown;
 
         _pauseItem = new ToolStripMenuItem("Pause syncing", null, (_, _) => TogglePause());
@@ -153,6 +161,14 @@ public sealed class TrayIconHost : IDisposable
         var menu = new ContextMenuStrip();
         menu.Items.Add(_historyMenuItem);
         menu.Items.Add(new ToolStripMenuItem("Pair a device…", null, (_, _) => ShowPairing()));
+
+        // Only the composition root has the history store and the secret store
+        // the settings window needs, so it is handed in. Without one there is
+        // nothing to show and the item would be a dead end.
+        if (_settingsModel is not null)
+        {
+            menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => ShowSettings()));
+        }
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_historyItem);
         menu.Items.Add(_cloudItem);
@@ -371,6 +387,44 @@ public sealed class TrayIconHost : IDisposable
         Surface(_historyWindow);
         _historyWindow.ReadyToType();
     }
+
+    /// <summary>The settings window while it is open.</summary>
+    public Window? OpenSettingsWindow => _settingsWindow;
+
+    private void ShowSettings()
+    {
+        if (_settingsModel is null)
+        {
+            return;
+        }
+
+        if (_settingsWindow is null)
+        {
+            // Built through the tray's own Update so the switches it shares with
+            // this menu are applied and saved by one piece of code. Two paths
+            // writing the same setting is how a menu ends up disagreeing with a
+            // window.
+            _settingsWindow = new SettingsWindow(_settingsModel(_settings, Update), ShowPairing)
+            {
+                HotkeyStatus = HotkeyDescription,
+            };
+            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        }
+
+        _settingsWindow.Bind();
+        Surface(_settingsWindow);
+    }
+
+    /// <summary>
+    /// The shortcut, or why it is not working -- the design puts this in
+    /// Settings, which is the only place with room to explain it.
+    /// </summary>
+    public string? HotkeyDescription => _hotkey switch
+    {
+        null => null,
+        { Failure: { } failure } => $"Shortcut: {failure} Open the history from the tray menu instead.",
+        var hotkey => $"Shortcut: {hotkey.Binding} opens the clipboard history.",
+    };
 
     private void ShowPairing()
     {

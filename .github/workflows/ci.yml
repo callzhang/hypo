@@ -12,6 +12,18 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Seconds, and it guards the one thing none of the suites below can: each of
+  # them runs its own vector tests, so a client that *disagrees* with the shared
+  # fixtures already fails. A client that stops reading them is green.
+  shared-fixtures:
+    name: Shared Fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Every client still reads the shared fixtures
+        run: ./scripts/check-shared-fixtures.sh
+
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest

@@ -93,6 +93,12 @@ where it was painted.
 run and CI fails below 80%. It sits around 89%. The number is there to notice a
 fall, not to celebrate a rise.
 
+Two things guard the shared fixtures, and they answer different questions.
+`scripts/check-shared-fixtures.sh` runs on every build and asks whether each
+client still reads them — that is the failure nothing else can catch, because a
+client that *disagrees* fails its own suite while a client that quietly stopped
+reading them stays green.
+
 `scripts/test-sync-matrix.sh` runs the tests that read the shared fixtures under
 `tests/` in all three clients: Swift, Kotlin and .NET each encode a frame,
 derive a key and decompress a payload from the same bytes. That is the mechanism

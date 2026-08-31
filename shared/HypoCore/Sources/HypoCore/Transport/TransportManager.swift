@@ -494,6 +494,8 @@ public final class TransportManager: ObservableObject {
             hasRelayToken: hasToken,
             connectionState: String(describing: connectionState),
             lanServerPort: lanConfiguration.port > 0 ? lanConfiguration.port : nil,
+            publishedPeerCount: discoveredLanPeers.count,
+            pairablePeers: pairableLanPeers().map(\.serviceName),
             pairedDevices: pairedDevices.map { device in
                 DebugStatus.Device(
                     id: device.id,
@@ -541,6 +543,8 @@ public final class TransportManager: ObservableObject {
                 hasRelayToken: false,
                 connectionState: "unavailable",
                 lanServerPort: nil,
+                publishedPeerCount: 0,
+                pairablePeers: [],
                 pairedDevices: [],
                 discoveredPeers: []
             )
@@ -665,6 +669,21 @@ public final class TransportManager: ObservableObject {
             return true
         }
         return filteredPeers
+    }
+
+    /// Exactly what the pairing UI offers: discovered, not already paired, and one
+    /// entry per device. Lives here rather than in the view so the debug snapshot
+    /// reports the same list the sheet draws, instead of a lookalike.
+    public func pairableLanPeers() -> [DiscoveredPeer] {
+        // One device advertising on two interfaces shows up twice, under service names
+        // that differ only by a " (2)" suffix. Key by device_id so it is offered once.
+        var seen = Set<String>()
+        return discoveredLanPeers.filter { peer in
+            guard !isPaired(peer) else { return false }
+            let key = peer.endpoint.metadata["device_id"].flatMap { $0.isEmpty ? nil : $0.lowercased() }
+                ?? peer.serviceName
+            return seen.insert(key).inserted
+        }
     }
 
     /// True when this peer has already been paired, so the pairing UI can leave it out.

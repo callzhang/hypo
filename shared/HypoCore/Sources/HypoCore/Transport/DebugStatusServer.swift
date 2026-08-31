@@ -41,6 +41,12 @@ public struct DebugStatus: Codable, Sendable {
     public let hasRelayToken: Bool
     public let connectionState: String
     public let lanServerPort: Int?
+    /// How many peers the pairing UI is actually observing. If this is 0 while
+    /// `discoveredPeers` is not, the published list is stale rather than the
+    /// network being quiet.
+    public let publishedPeerCount: Int
+    /// The list the Nearby sheet draws, by service name.
+    public let pairablePeers: [String]
     public let pairedDevices: [Device]
     public let discoveredPeers: [Peer]
 }

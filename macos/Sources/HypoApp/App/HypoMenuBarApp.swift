@@ -2868,6 +2868,7 @@ private enum PairingMode: String, CaseIterable, Identifiable {
 }
 
 private struct PairDeviceSheet: View {
+    private let logger = HypoLogger(category: "PairDeviceSheet")
     @ObservedObject var viewModel: ClipboardHistoryViewModel
     @ObservedObject var transportManager: TransportManager
     @Binding var isPresented: Bool
@@ -2932,6 +2933,9 @@ private struct PairDeviceSheet: View {
             // The menu bar app browses continuously, but make sure of it: an empty
             // list should mean "nothing out there", not "we never started looking".
             Task { await transportManager.ensureLanDiscoveryActive() }
+            logger.info(
+                "🔍 [PairDeviceSheet] Opened: discovered=\(transportManager.discoveredLanPeers.count) pairable=\(transportManager.pairableLanPeers().count) paired=\(transportManager.pairedDevices.count)"
+            )
         }
         .onChange(of: mode) { newMode in
             // The code flow asks the relay for a code, so only start it if asked for.
@@ -2942,15 +2946,7 @@ private struct PairDeviceSheet: View {
     // MARK: - Nearby devices
 
     private var pairablePeers: [DiscoveredPeer] {
-        // One device advertising on two interfaces shows up twice, under service names
-        // that differ only by a " (2)" suffix. Key by device_id so it is offered once.
-        var seen = Set<String>()
-        return transportManager.discoveredLanPeers.filter { peer in
-            guard !transportManager.isPaired(peer) else { return false }
-            let key = peer.endpoint.metadata["device_id"].flatMap { $0.isEmpty ? nil : $0.lowercased() }
-                ?? peer.serviceName
-            return seen.insert(key).inserted
-        }
+        transportManager.pairableLanPeers()
     }
 
     @ViewBuilder
@@ -2969,9 +2965,21 @@ private struct PairDeviceSheet: View {
             let peers = pairablePeers
             if peers.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("Looking for devices on this network…")
+                    // "Nothing on the network" and "everything here is already paired"
+                    // are different answers, and showing one message for both sends
+                    // people looking for a fault that isn't there.
+                    let discovered = transportManager.discoveredLanPeers.count
+                    if discovered > 0 {
+                        Label(
+                            "^[\(discovered) device](inflect: true) found, all already paired",
+                            systemImage: "checkmark.circle"
+                        )
+                        .foregroundStyle(.secondary)
+                    } else {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Looking for devices on this network…")
+                        }
                     }
                     Text("Both devices need Hypo running and to be on the same Wi-Fi. If one is elsewhere, use a pairing code instead.")
                         .font(.caption)

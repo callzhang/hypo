@@ -51,6 +51,8 @@ struct DebugStatusServerTests {
             hasRelayToken: false,
             connectionState: "connectedCloud",
             lanServerPort: 7010,
+            publishedPeerCount: 1,
+            pairablePeers: [],
             pairedDevices: [
                 DebugStatus.Device(
                     id: "bbbb2222",

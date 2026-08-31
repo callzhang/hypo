@@ -73,6 +73,15 @@ internal static class Wpf
             // windows come and go.
             application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+            // The shipped dictionary, not an approximation of it. Screenshots
+            // taken without it showed dark windows full of white controls, which
+            // is not what the application looks like -- and would have been a
+            // convincing-looking bug report.
+            application.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("pack://application:,,,/Hypo;component/Theme.xaml"),
+            });
+
             ready.SetResult(Dispatcher.CurrentDispatcher);
             Dispatcher.Run();
         })

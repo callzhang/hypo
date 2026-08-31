@@ -534,6 +534,26 @@ public class TrayIconHostTests : IDisposable
     }
 
     [SkippableFact]
+    public void TheMenuSaysWhichVersionThisIs()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            // The first question about any sync bug is what each end is running,
+            // and a tray application has nowhere else to answer it.
+            var version = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Hypo ", StringComparison.Ordinal));
+
+            Assert.Equal($"Hypo {AppVersion.Current}", version.Text);
+            Assert.False(version.Enabled, "the version is a label, not a command");
+        });
+    }
+
+    [SkippableFact]
     public void TheMenuTellsYouTheShortcut()
     {
         RequireWindows();

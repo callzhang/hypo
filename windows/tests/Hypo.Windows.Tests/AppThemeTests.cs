@@ -3,6 +3,25 @@ using Hypo.Windows.App;
 
 namespace Hypo.Windows.Tests;
 
+public class AppVersionTests
+{
+    [Fact]
+    public void TheVersionIsTheRepositorysAndNotAPlaceholder()
+    {
+        var version = AppVersion.Current;
+
+        // 1.0.0 is what an assembly with no <Version> reports, and it is what
+        // every Hypo assembly reported until the version file was wired in.
+        Assert.NotEqual("1.0.0", version);
+        Assert.Matches(@"^\d+\.\d+\.\d+$", version);
+
+        var expected = File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "VERSION")).Trim();
+
+        Assert.Equal(expected, version);
+    }
+}
+
 public class AppThemeTests
 {
     [Fact]

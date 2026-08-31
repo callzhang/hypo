@@ -23,6 +23,7 @@ the relay, from a notification-area application.
 | Remote pairing by six-digit code | Done |
 | Global shortcut (Alt+V), reconfigurable | Done |
 | Light and dark, following the system setting | Done |
+| Version in the tray menu | Done |
 | Oversized images compressed before sending | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
 | x64 and ARM64 builds | Done |
@@ -129,6 +130,16 @@ Windows shares clipboard content in two directions that have nothing to do with
 Hypo: the local Win+V history, and the cloud clipboard that roams to a Microsoft
 account and every machine signed into it. By default Hypo opts out of both by
 publishing the marker formats Windows looks for.
+
+### Divergences from the design
+
+Two, both deliberate:
+
+- The history window is 520×620, not the 360×480 the design took from macOS. The
+  Windows list shows a content type and a source device under every entry, which
+  360 points cannot hold without trimming the entry itself.
+- The theme is seven brushes rather than the WPF-UI Fluent dictionary, which
+  would have restyled every control in the screenshot suite to get them.
 
 ### Light and dark
 

@@ -3,46 +3,12 @@
              x:Class="Hypo.Windows.App.Shell.App"
              ShutdownMode="OnExplicitShutdown">
   <Application.Resources>
-    <!-- Deliberately sparse. The shell's job is to bind, and a stylesheet here
-         would be the first thing to drift from what anyone actually sees.
-
-         The brushes are DynamicResource everywhere and ThemeHost replaces them
-         when Windows switches between light and dark; the literals here are the
-         light palette, so a window rendered before ThemeHost runs still looks
-         like something. Keep them in step with ThemePalette.Light, which is
-         where the values are decided and tested. -->
-    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#FFF9F9F9" />
-    <SolidColorBrush x:Key="TextBrush" Color="#FF1A1A1A" />
-    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#FF6B6B6B" />
-    <SolidColorBrush x:Key="TertiaryTextBrush" Color="#FF8A8A8A" />
-    <SolidColorBrush x:Key="SuccessBrush" Color="#FF3A7D44" />
-    <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#FFFFFFFF" />
-    <SolidColorBrush x:Key="ControlBorderBrush" Color="#FFD0D0D0" />
-
-    <Style TargetType="Window">
-      <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontSize" Value="13" />
-    </Style>
-
-    <!-- TextBlock does not inherit Foreground from the window, so without this
-         every label stays black and the dark theme is unreadable. -->
-    <Style TargetType="TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
-    </Style>
-
-    <Style TargetType="TextBox">
-      <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}" />
-      <Setter Property="CaretBrush" Value="{DynamicResource TextBrush}" />
-    </Style>
-
-    <Style TargetType="ListBox">
-      <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}" />
-    </Style>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!-- Its own file so the tests can merge the same one. A theme the
+             screenshots do not go through is a theme nothing checks. -->
+        <ResourceDictionary Source="pack://application:,,,/Hypo;component/Theme.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
   </Application.Resources>
 </Application>

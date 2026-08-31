@@ -148,6 +148,11 @@ public sealed class TrayIconHost : IDisposable
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_pauseItem);
         menu.Items.Add(new ToolStripSeparator());
+
+        // Disabled on purpose: it is a label, not a command. The first question
+        // anyone asks about a sync bug is which version each end is running, and
+        // a tray application has nowhere else to say it.
+        menu.Items.Add(new ToolStripMenuItem($"Hypo {AppVersion.Current}") { Enabled = false });
         menu.Items.Add(new ToolStripMenuItem("Quit Hypo", null, (_, _) => _shutdown()));
 
         _icon.ContextMenuStrip = menu;

@@ -23,6 +23,28 @@ public struct LanEndpoint: Equatable, Sendable {
     }
 }
 
+/// How long to wait before trying a failed Bonjour browse again.
+///
+/// A browse that fails is not retried by the system. At login the network is
+/// often not up yet, so the first attempt fails and, without this, the app spends
+/// the rest of the session unable to see anything on the LAN.
+public struct BrowseRetryPolicy: Sendable {
+    public let initialDelay: TimeInterval
+    public let maximumDelay: TimeInterval
+
+    public init(initialDelay: TimeInterval = 1, maximumDelay: TimeInterval = 30) {
+        self.initialDelay = initialDelay
+        self.maximumDelay = maximumDelay
+    }
+
+    /// `attempt` counts from 1 for the first retry.
+    public func delay(forAttempt attempt: Int) -> TimeInterval {
+        guard attempt > 0 else { return initialDelay }
+        let doubled = initialDelay * pow(2, Double(attempt - 1))
+        return min(doubled, maximumDelay)
+    }
+}
+
 /// Decodes a DNS-SD TXT record.
 ///
 /// `NetService.dictionary(fromTXTRecord:)` is typed `[String: Data]` in Swift, but
@@ -253,6 +275,11 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
     private let browser: NetServiceBrowser
     private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
     private var services: [ObjectIdentifier: NetService] = [:]
+    private var currentSearch: (serviceType: String, domain: String)?
+    private var retryAttempt = 0
+    private var isStoppingIntentionally = false
+    private let retryPolicy = BrowseRetryPolicy()
+    private let logger = HypoLogger(category: "BonjourBrowser")
 
     public override init() {
         self.browser = NetServiceBrowser()
@@ -265,12 +292,31 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
     }
 
     public func startBrowsing(serviceType: String, domain: String) {
+        currentSearch = (serviceType, domain)
+        retryAttempt = 0
+        isStoppingIntentionally = false
         browser.searchForServices(ofType: serviceType, inDomain: domain)
     }
 
     public func stopBrowsing() {
+        isStoppingIntentionally = true
+        currentSearch = nil
         browser.stop()
         services.removeAll()
+    }
+
+    /// Re-issues a browse that failed or stopped on its own, backing off each time.
+    private func scheduleBrowseRetry(reason: String) {
+        guard let search = currentSearch, !isStoppingIntentionally else { return }
+        retryAttempt += 1
+        let delay = retryPolicy.delay(forAttempt: retryAttempt)
+        logger.warning("⚠️ [BonjourBrowser] Browse \(reason); retrying in \(Int(delay))s (attempt \(retryAttempt))")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, let search = self.currentSearch, !self.isStoppingIntentionally else { return }
+            self.browser.stop()
+            self.browser.searchForServices(ofType: search.serviceType, inDomain: search.domain)
+        }
+        _ = search
     }
 
     private func emitResolved(for service: NetService) {
@@ -305,6 +351,8 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
 
 extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceBrowserDelegate {
     public func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
+        // A browse that is producing results is healthy; forget the earlier failures.
+        retryAttempt = 0
         services[ObjectIdentifier(service)] = service
         service.delegate = self
         service.resolve(withTimeout: 5)
@@ -317,10 +365,14 @@ extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceBrowserDele
 
     public func netServiceBrowserDidStopSearch(_ browser: NetServiceBrowser) {
         services.removeAll()
+        // A browse we did not stop ourselves has died; nothing restarts it but us.
+        scheduleBrowseRetry(reason: "stopped unexpectedly")
     }
 
     public func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String : NSNumber]) {
         services.removeAll()
+        let detail = errorDict.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
+        scheduleBrowseRetry(reason: "failed to start (\(detail))")
     }
 }
 

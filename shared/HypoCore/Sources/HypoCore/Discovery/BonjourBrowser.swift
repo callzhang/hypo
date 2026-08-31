@@ -23,6 +23,41 @@ public struct LanEndpoint: Equatable, Sendable {
     }
 }
 
+/// Decodes a DNS-SD TXT record.
+///
+/// `NetService.dictionary(fromTXTRecord:)` is typed `[String: Data]` in Swift, but
+/// the record format allows an entry to be a bare key with no value, and that
+/// bridges as `NSNull`. The forced bridge inside that call then aborts the whole
+/// process -- a peer advertising one valueless key crashes anything that resolves
+/// it. Parsing the bytes ourselves is a dozen lines and cannot fail that way.
+public enum TXTRecord {
+    public static func parse(_ data: Data) -> [String: String] {
+        var result: [String: String] = [:]
+        var index = data.startIndex
+        while index < data.endIndex {
+            let length = Int(data[index])
+            let entryStart = data.index(after: index)
+            guard length > 0, let entryEnd = data.index(entryStart, offsetBy: length, limitedBy: data.endIndex) else {
+                // A length that runs past the end means the record is malformed;
+                // keep whatever parsed cleanly rather than discarding all of it.
+                break
+            }
+            let entry = data[entryStart..<entryEnd]
+            if let separator = entry.firstIndex(of: UInt8(ascii: "=")) {
+                let key = String(decoding: entry[entry.startIndex..<separator], as: UTF8.self)
+                let value = String(decoding: entry[entry.index(after: separator)...], as: UTF8.self)
+                if !key.isEmpty { result[key] = value }
+            } else {
+                // A key with no value is legal and means "present".
+                let key = String(decoding: entry, as: UTF8.self)
+                if !key.isEmpty { result[key] = "" }
+            }
+            index = entryEnd
+        }
+        return result
+    }
+}
+
 public struct DiscoveredPeer: Equatable, Sendable {
     public let serviceName: String
     public let endpoint: LanEndpoint
@@ -257,11 +292,7 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
         }
         
         let displayHost = ipAddress ?? host
-        let txt = NetService.dictionary(fromTXTRecord: service.txtRecordData() ?? Data())
-        var metadata: [String: String] = [:]
-        for (key, value) in txt {
-            metadata[key] = String(data: value, encoding: .utf8) ?? ""
-        }
+        let metadata = TXTRecord.parse(service.txtRecordData() ?? Data())
         let record = BonjourServiceRecord(
             serviceName: service.name,
             host: displayHost,

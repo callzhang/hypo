@@ -366,31 +366,58 @@ else
     fi
 fi
 
-# Inject RELAY_WS_AUTH_TOKEN from .env if available
-ENV_FILE="$PROJECT_ROOT/.env"
-# Prefer an explicitly supplied environment variable. This keeps isolated
-# worktrees from needing a second copy of the repository's secret-bearing .env.
-AUTH_TOKEN="${RELAY_WS_AUTH_TOKEN:-}"
-if [ -n "$AUTH_TOKEN" ]; then
-    log_info "Using RELAY_WS_AUTH_TOKEN from environment..."
-elif [ -f "$ENV_FILE" ]; then
-    # Load .env variables cleanly
-    set +e
+# Inject RELAY_WS_AUTH_TOKEN into the bundle.
+#
+# The app has no way to read `.env` at runtime — it reads `RelayWsAuthToken` out
+# of Info.plist — so whatever we fail to inject here is simply absent forever,
+# and the relay answers 401 to a build that ships without it.
+#
+# `.env` is gitignored, so it exists only in the main checkout. Relying on the
+# builder to export the token by hand is what produced token-less builds before,
+# so resolve the main checkout ourselves: in a worktree, git's common dir is the
+# main repository's `.git`, and `.env` sits beside it.
+read_env_token() {
+    local env_file="$1"
+    [ -f "$env_file" ] || return 1
+    local key value
     while IFS='=' read -r key value || [ -n "$key" ]; do
-        # Skip comments and empty lines
         [[ "$key" =~ ^#.*$ ]] && continue
         [[ -z "$key" ]] && continue
-        # Trim whitespace
         key=$(echo "$key" | xargs)
         value=$(echo "$value" | xargs)
         if [ "$key" == "RELAY_WS_AUTH_TOKEN" ]; then
-            AUTH_TOKEN="$value"
-            break
+            printf '%s' "$value"
+            return 0
         fi
-    done < "$ENV_FILE"
-    set -e
+    done < "$env_file"
+    return 1
+}
+
+ENV_FILE="$PROJECT_ROOT/.env"
+MAIN_CHECKOUT=""
+if git_common_dir=$(git -C "$PROJECT_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    MAIN_CHECKOUT="$(dirname "$git_common_dir")"
+fi
+
+AUTH_TOKEN="${RELAY_WS_AUTH_TOKEN:-}"
+AUTH_TOKEN_SOURCE="environment"
+if [ -n "$AUTH_TOKEN" ]; then
+    log_info "Using RELAY_WS_AUTH_TOKEN from environment..."
 else
-    log_warn ".env file not found at $ENV_FILE"
+    set +e
+    AUTH_TOKEN="$(read_env_token "$ENV_FILE")"
+    set -e
+    AUTH_TOKEN_SOURCE="$ENV_FILE"
+    if [ -z "$AUTH_TOKEN" ] && [ -n "$MAIN_CHECKOUT" ] && [ "$MAIN_CHECKOUT" != "$PROJECT_ROOT" ]; then
+        # Building from a worktree: fall back to the main checkout's .env.
+        set +e
+        AUTH_TOKEN="$(read_env_token "$MAIN_CHECKOUT/.env")"
+        set -e
+        AUTH_TOKEN_SOURCE="$MAIN_CHECKOUT/.env"
+    fi
+    if [ -n "$AUTH_TOKEN" ]; then
+        log_info "Using RELAY_WS_AUTH_TOKEN from $AUTH_TOKEN_SOURCE"
+    fi
 fi
 
 if [ -n "$AUTH_TOKEN" ]; then
@@ -413,8 +440,15 @@ if [ -n "$AUTH_TOKEN" ]; then
         fi
     fi
     log_success "Injected Auth Token"
+elif [ "${ALLOW_MISSING_RELAY_TOKEN:-0}" = "1" ]; then
+    log_warn "RELAY_WS_AUTH_TOKEN not found, building without it (ALLOW_MISSING_RELAY_TOKEN=1)"
+    log_warn "The relay will answer 401: no cloud sync, and every cloud peer reads as offline."
 else
-    log_warn "RELAY_WS_AUTH_TOKEN not found"
+    log_error "RELAY_WS_AUTH_TOKEN not found (looked in the environment, $ENV_FILE${MAIN_CHECKOUT:+, and $MAIN_CHECKOUT/.env})"
+    log_error "The relay rejects a token-less build with 401, so cloud sync and peer status stay dead."
+    log_info "Add RELAY_WS_AUTH_TOKEN to the main checkout's .env, or export it for this build."
+    log_info "Set ALLOW_MISSING_RELAY_TOKEN=1 to build a relay-less app anyway."
+    exit 1
 fi
 
 # Clean resource forks and extended attributes aggressively before signing

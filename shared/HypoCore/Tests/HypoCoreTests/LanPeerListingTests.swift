@@ -72,6 +72,55 @@ struct LanPeerListingTests {
         #expect(manager.isPaired(peer) == true)
     }
 
+    /// Services this Mac advertises itself are not "devices on this network": the
+    /// count under the device list said "1 other device, already paired" about the
+    /// local test harness, which is neither.
+    @Test @MainActor
+    func testPeersOnThisMachineAreNotCountedAsOthers() async throws {
+        let driver = MockBonjourDriver()
+        let manager = makeManager(driver: driver)
+        defer { Task { await manager.deactivateLanServices() } }
+        await manager.ensureLanDiscoveryActive()
+
+        driver.emit(.resolved(BonjourServiceRecord(
+            serviceName: "local-harness",
+            host: "127.0.0.1",
+            port: 7011,
+            txtRecords: ["device_id": "cccc3333", "pub_key": "cHVibGljLWtleQ=="]
+        )))
+        driver.emit(.resolved(makeRecord(serviceName: "peer-one", deviceId: "aaaa1111")))
+        try await Task.sleep(nanoseconds: 5_000_000)
+
+        #expect(manager.discoveredLanPeers.count == 2)
+        #expect(manager.discoveredPeersOnOtherMachines().map(\.serviceName) == ["peer-one"])
+        #expect(manager.pairableLanPeers().map(\.serviceName) == ["peer-one"])
+    }
+
+    /// A stored Bonjour address outlives the network it was learned on, so "is a LAN
+    /// connection open" has to be asked separately from "do we know an address".
+    @Test @MainActor
+    func testLanConnectionIsTrackedSeparatelyFromKnownAddresses() async throws {
+        let manager = makeManager(driver: MockBonjourDriver())
+        defer { Task { await manager.deactivateLanServices() } }
+
+        manager.registerPairedDevice(PairedDevice(
+            id: "aaaa1111",
+            name: "Peer One",
+            platform: "Android",
+            lastSeen: Date(),
+            isOnline: true,
+            bonjourHost: "10.0.0.137",
+            bonjourPort: 7010
+        ))
+        #expect(manager.isConnectedOverLan("aaaa1111") == false)
+
+        manager.setLanConnection(deviceId: "aaaa1111", isConnected: true)
+        #expect(manager.isConnectedOverLan("AAAA1111"))
+
+        manager.setLanConnection(deviceId: "aaaa1111", isConnected: false)
+        #expect(manager.isConnectedOverLan("aaaa1111") == false)
+    }
+
     // MARK: - Helpers
 
     @MainActor

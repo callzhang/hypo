@@ -457,6 +457,32 @@ log_info "Cleaning extended attributes..."
 xattr -rc "$APP_BUNDLE" 2>/dev/null || true
 dot_clean -m "$APP_BUNDLE" 2>/dev/null || true
 
+# Sign somewhere the file provider cannot follow.
+#
+# This checkout lives under ~/Documents, which iCloud Drive syncs, and its file
+# provider keeps stamping `com.apple.FinderInfo` and `com.apple.fileprovider.fpfs#P`
+# onto the bundle. codesign rejects those outright ("resource fork, Finder
+# information, or similar detritus not allowed"), and cleaning them here is a race
+# the provider wins about half the time -- which is exactly how often signing failed.
+#
+# `ditto --norsrc --noextattr --noqtn` copies the bundle to a scratch directory
+# without any of it, and everything downstream signs and installs from there.
+SIGN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hypo-sign.XXXXXX")"
+cleanup_sign_dir() {
+    if [ -n "$SIGN_DIR" ] && [ -d "$SIGN_DIR" ]; then
+        rm -rf "$SIGN_DIR"
+    fi
+}
+trap 'cleanup_temp_build_dir; cleanup_sign_dir' EXIT
+
+if ditto --norsrc --noextattr --noqtn "$APP_BUNDLE" "$SIGN_DIR/$(basename "$APP_BUNDLE")"; then
+    APP_BUNDLE="$SIGN_DIR/$(basename "$APP_BUNDLE")"
+    APP_BINARY="$APP_BUNDLE/Contents/MacOS/$BINARY_NAME"
+    log_info "Signing from $SIGN_DIR (outside the synced folder)"
+else
+    log_warn "Could not stage the bundle for signing; signing in place"
+fi
+
 # Ensure icon is up to date (check if icon generation script is newer than icon)
 # Icons are generated to Hypo.app
 if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ] && [ -f "$ICON_ICNS" ]; then

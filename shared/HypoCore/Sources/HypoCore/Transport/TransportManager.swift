@@ -689,17 +689,31 @@ public final class TransportManager: ObservableObject {
         // One device advertising on two interfaces shows up twice, under service names
         // that differ only by a " (2)" suffix. Key by device_id so it is offered once.
         var seen = Set<String>()
-        let localAddresses = LocalAddresses.current()
-        return discoveredLanPeers.filter { peer in
+        // Services on this Mac are not devices to pair with, and a sandboxed app
+        // cannot open a LAN connection back to its own host in any case -- the offer
+        // could only ever end in "could not reach the device".
+        return discoveredPeersOnOtherMachines().filter { peer in
             guard !isPaired(peer) else { return false }
-            // Services on this Mac are not devices to pair with, and a sandboxed app
-            // cannot open a LAN connection back to its own host in any case -- the
-            // offer could only ever end in "could not reach the device".
-            guard !LocalAddresses.isLocal(peer.endpoint.host, addresses: localAddresses) else { return false }
             let key = peer.endpoint.metadata["device_id"].flatMap { $0.isEmpty ? nil : $0.lowercased() }
                 ?? peer.serviceName
             return seen.insert(key).inserted
         }
+    }
+
+    /// Peers discovered on the network that are not this machine. What a person
+    /// means by "devices on this network"; the local harness and any other service
+    /// this Mac advertises are not that.
+    public func discoveredPeersOnOtherMachines() -> [DiscoveredPeer] {
+        let localAddresses = LocalAddresses.current()
+        return discoveredLanPeers.filter { !LocalAddresses.isLocal($0.endpoint.host, addresses: localAddresses) }
+    }
+
+    /// True when a LAN connection to this device is open right now.
+    ///
+    /// Distinct from having a stored Bonjour address: that survives the Mac moving
+    /// to another network, where it names somewhere the device certainly is not.
+    public func isConnectedOverLan(_ deviceId: String) -> Bool {
+        lanConnectedDeviceIds.contains(deviceId.lowercased())
     }
 
     /// True when this peer has already been paired, so the pairing UI can leave it out.

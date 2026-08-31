@@ -2715,11 +2715,16 @@ private struct SettingsSectionView: View {
         }
         let isCloudTransport = deviceTransport == .cloud && isServerConnected
         
-        // Use current discovery info if available, otherwise fall back to stored values, then active connection
-        // Priority: current discovery > stored bonjour info > active connection metadata
-        let effectiveHost = discoveredPeerHost ?? device.bonjourHost ?? activeConnectionHost
-        let effectivePort = discoveredPeerPort ?? device.bonjourPort ?? activeConnectionPort
+        // Only what is true now. `device.bonjourHost` is stored from whenever the
+        // device was last discovered and survives this Mac moving to another network,
+        // where it names an address the device is certainly not at -- the row claimed
+        // "Connected via 10.0.0.137:7010" from a Wi-Fi that could not carry a packet
+        // to it. Live discovery and an open connection are the only honest sources.
+        let effectiveHost = discoveredPeerHost ?? activeConnectionHost
+        let effectivePort = discoveredPeerPort ?? activeConnectionPort
+        let isLanConnected = viewModel.transportManager?.isConnectedOverLan(device.id) ?? false
         let hasEffectiveLan = effectiveHost != nil && effectivePort != nil && effectiveHost != "unknown"
+            && (isLanConnected || discoveredPeerHost != nil)
         
         if hasEffectiveLan {
             // We have LAN info - show IP:PORT
@@ -2761,7 +2766,7 @@ private struct SettingsSectionView: View {
     @ViewBuilder
     private var nearbyStatusLine: some View {
         if pairablePeers.isEmpty {
-            let discovered = transportManager.discoveredLanPeers.count
+            let discovered = transportManager.discoveredPeersOnOtherMachines().count
             if discovered > 0 {
                 Text("^[\(discovered) other device](inflect: true) on this network, already paired.")
                     .font(.caption)

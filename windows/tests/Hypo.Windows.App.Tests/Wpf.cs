@@ -143,18 +143,16 @@ internal static class Wpf
     {
         window.Settle();
 
-        // The content, not the window: Window.ActualHeight includes the title bar
-        // Windows draws, so a bitmap that size has a band of nothing along the
-        // bottom -- and content that reaches the real bottom edge looks cut off
-        // in the screenshot when it is not.
-        var visual = window.Content as FrameworkElement ?? (FrameworkElement)(object)window;
-
+        // The window, sized by the window: rendering its content element instead
+        // draws that element at its own offset -- a Margin of 12 puts it 12px in
+        // and clips 12px off the far side. The title bar's worth of unpainted
+        // pixels along the bottom is the cost of not doing that.
         var scale = dpi / 96.0;
-        var width = (int)Math.Max(visual.ActualWidth * scale, 1);
-        var height = (int)Math.Max(visual.ActualHeight * scale, 1);
+        var width = (int)Math.Max(window.ActualWidth * scale, 1);
+        var height = (int)Math.Max(window.ActualHeight * scale, 1);
 
         var bitmap = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
-        bitmap.Render(visual);
+        bitmap.Render(window);
 
         var encoder = new PngEncoder();
         var png = encoder.Encode(bitmap);

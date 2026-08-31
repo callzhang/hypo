@@ -120,6 +120,9 @@ public class FitsOnScreenTests : IDisposable
                 AssertInside(window, name);
             }
 
+            // Captured from the test that measured it, so the screenshot and the
+            // assertion are talking about the same window.
+            window.Capture("pairing-window-with-message");
             window.Close();
         });
     }

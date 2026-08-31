@@ -2120,6 +2120,9 @@ private struct SettingsSectionView: View {
     @State private var lanFailure: String?
     @State private var lanPairedName: String?
     @State private var isRescanning = false
+    /// Set once the search has run long enough that finding nothing is worth
+    /// explaining rather than still being in progress.
+    @State private var searchHasHadTime = false
     @State private var shortcutRecorderMonitor: Any?
     @State private var shortcutErrorMessage: String?
 
@@ -2363,6 +2366,8 @@ private struct SettingsSectionView: View {
                         }
                     }
 
+                    nearbyStatusLine
+
                     if let lanPairedName {
                         Label("Paired with \(lanPairedName)", systemImage: "checkmark.seal.fill")
                             .foregroundStyle(.green)
@@ -2414,7 +2419,13 @@ private struct SettingsSectionView: View {
                 // Someone looking at the device list is asking about now. Bonjour
                 // announces a service once, so a phone whose app was opened while
                 // nobody was browsing will not announce itself again on its own.
-                Task { await transportManager.rescanLanPeers() }
+                searchHasHadTime = false
+                Task {
+                    await transportManager.rescanLanPeers()
+                    // Long enough that a slow answer is not called a silent network.
+                    try? await Task.sleep(nanoseconds: 12_000_000_000)
+                    searchHasHadTime = true
+                }
             }
             .onDisappear {
                 stopShortcutRecording()
@@ -2743,6 +2754,34 @@ private struct SettingsSectionView: View {
         return "Connected"
     }
     
+    /// Says which kind of nothing this is. With paired devices listed above, an
+    /// absent nearby device otherwise shows as no message at all -- and "we are
+    /// looking", "everything here is paired" and "this network does not let devices
+    /// see each other" send people in three different directions.
+    @ViewBuilder
+    private var nearbyStatusLine: some View {
+        if pairablePeers.isEmpty {
+            let discovered = transportManager.discoveredLanPeers.count
+            if discovered > 0 {
+                Text("^[\(discovered) other device](inflect: true) on this network, already paired.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if searchHasHadTime {
+                Text("Nothing on this network answered. Office and public Wi-Fi often stop devices from reaching each other; pair with a code instead.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Looking for devices on this network…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     /// Devices on this network that are not paired yet, offered in the same list as
     /// the paired ones: to a person they are all just "my devices", and having them
     /// in two places meant pairing started with finding the right screen.

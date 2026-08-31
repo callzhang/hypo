@@ -406,7 +406,9 @@ public class TrayIconHostTests : IDisposable
             using var tray = Build();
             tray.Start();
 
+            // Start legitimately saves once, recording the first-run notice.
             _applied.Clear();
+            _saved.Clear();
 
             tray.Menu.Items.OfType<ToolStripMenuItem>()
                 .Single(item => item.Text!.Contains("Microsoft account", StringComparison.Ordinal))

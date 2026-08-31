@@ -192,7 +192,12 @@ public sealed class TrayIconHost : IDisposable
 
         // Written down immediately: shown-and-not-recorded means shown again on
         // every launch, which is worse than not showing it.
-        Update(_settings with { FirewallNoticeShown = true });
+        //
+        // Not through Update: nothing about the sharing settings changed, and
+        // re-applying privacy and rewriting menu checkmarks to record one flag
+        // makes Start do more than it looks like it does.
+        _settings = _settings with { FirewallNoticeShown = true };
+        _saveSettings(_settings);
     }
 
     private void TogglePause()

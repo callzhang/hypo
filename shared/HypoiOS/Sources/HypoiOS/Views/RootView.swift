@@ -12,7 +12,6 @@ public struct RootView: View {
     @StateObject private var pairingViewModel: RemotePairingViewModel
     @StateObject private var claimViewModel: ClaimPairingCodeViewModel
     @State private var showingSettings = false
-    @Environment(\.scenePhase) private var scenePhase
 
     public init(context: HypoiOSContext) {
         self.context = context
@@ -41,8 +40,14 @@ public struct RootView: View {
             // The same trigger Android uses in onResume: neither platform can
             // watch the clipboard from the background, so both check on the way
             // back to the foreground.
-            .onChange(of: scenePhase) { _, phase in
-                guard phase == .active else { return }
+            //
+            // On the notification rather than scenePhase: scenePhase does not
+            // publish the initial .active, and a background-then-foreground
+            // round trip did not reliably produce a change SwiftUI observed —
+            // the send simply never ran.
+            .onReceive(NotificationCenter.default.publisher(
+                for: UIApplication.didBecomeActiveNotification
+            )) { _ in
                 Task { await historyViewModel.sendClipboardIfChanged() }
             }
             .navigationDestination(isPresented: $showingSettings) {

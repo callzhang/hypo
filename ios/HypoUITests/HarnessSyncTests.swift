@@ -97,10 +97,15 @@ final class HarnessSyncTests: XCTestCase {
             if button.exists { button.tap(); break }
         }
 
-        XCTAssertTrue(
-            pollForFile(at: receivedPath, containing: sentFromPhone, timeout: 90),
-            "the phone's clipboard never reached the harness"
-        )
+        let arrived = pollForFile(at: receivedPath, containing: sentFromPhone, timeout: 90)
+        if !arrived {
+            // The screen says what the send did — "Sent to 1 device", "No
+            // paired devices", or nothing at all if the clipboard read never
+            // returned. Cheaper to read than the device log, which does not
+            // reliably survive a simulator session.
+            print("SEND_SCREEN: \(app.staticTexts.allElementsBoundByIndex.map { $0.label })")
+        }
+        XCTAssertTrue(arrived, "the phone's clipboard never reached the harness")
     }
 
     private func springboardAlertButton(_ label: String) -> XCUIElement {

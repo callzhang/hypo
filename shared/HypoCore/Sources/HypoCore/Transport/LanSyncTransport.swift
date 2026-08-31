@@ -15,6 +15,7 @@ public final class LanSyncTransport: SyncTransport {
     private var messageHandlers: [UUID: (Data) async throws -> Void] = [:]
     private var getDiscoveredPeers: (() -> [DiscoveredPeer])?
     private var onIncomingMessage: (@Sendable (Data, TransportOrigin) async -> Void)?
+    private var lastDiscoveredAt: [String: Date] = [:]
     // Persistent connections: one WebSocketTransport per peer (deviceId)
     // Connections are maintained for all discovered peers, mirroring Android's architecture
     private var clientTransports: [String: WebSocketTransport] = [:] // deviceId -> transport
@@ -146,13 +147,26 @@ public final class LanSyncTransport: SyncTransport {
             peer.endpoint.metadata["device_id"] ?? peer.serviceName
         })
         
-        // Remove connections for peers that are no longer discovered
-        let currentDeviceIds = Set(clientTransports.keys)
-        let removedDeviceIds = currentDeviceIds.subtracting(discoveredDeviceIds)
-        for deviceId in removedDeviceIds {
+        // Drop connections only for peers that have been absent for a while.
+        //
+        // Bonjour is not steady: a refresh can briefly return a peer without
+        // its TXT metadata, and the key then falls back to the service name so
+        // the device-id entry looks "no longer discovered". Removing on the
+        // first sync that misses it tore down a working connection seconds
+        // after it opened, which on iOS — where this is the only connection
+        // there is — meant sends failed with nothing to reach.
+        let now = Date()
+        for deviceId in discoveredDeviceIds {
+            lastDiscoveredAt[deviceId] = now
+        }
+        let absenceGrace: TimeInterval = 30
+        for deviceId in Set(clientTransports.keys) where !discoveredDeviceIds.contains(deviceId) {
+            let lastSeen = lastDiscoveredAt[deviceId] ?? .distantPast
+            guard now.timeIntervalSince(lastSeen) > absenceGrace else { continue }
             #if canImport(os)
-            logger.info("🔌 [LanSyncTransport] Removing connection for peer \(deviceId) (no longer discovered)")
+            logger.info("🔌 [LanSyncTransport] Removing connection for peer \(deviceId) (absent for over \(Int(absenceGrace))s)")
             #endif
+            lastDiscoveredAt.removeValue(forKey: deviceId)
             await removePersistentConnection(for: deviceId)
         }
         

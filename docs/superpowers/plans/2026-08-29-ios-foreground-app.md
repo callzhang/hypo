@@ -2029,7 +2029,7 @@ harness 原本每 4 秒重发一次(为绕过更早的一个竞态)。每收到�
 | 8 跨网段经 relay | ❌ `/Applications/Hypo.app` 缺 relay 令牌,macOS 需在有 `.env` 的环境重新构建 |
 
 
-## 第 8 条:经 relay 的配对通了,同步没通（2026-08-30）
+## 第 8 条:经 relay 的双向同步通过（2026-08-30）
 
 `tools/HypoHarness relay` 是一个**没有 LAN 监听、不发 Bonjour 广播**的对端——所以 iOS 找不到本地路由,任何送达的东西都只能是经 hypo.fly.dev 来的。这正是 relay 存在的意义:两台看不见彼此的设备。
 
@@ -2040,10 +2040,14 @@ harness 原本每 4 秒重发一次(为绕过更早的一个竞态)。每收到�
 | | 结果 |
 |---|---|
 | harness 用令牌连上 relay | ✅ `Connected to the relay.` |
-| **经 relay 配对** | ✅ iOS 输入配对码 → 双方完成握手 |
-| 经 relay 同步内容(两个方向) | ❌ 都没送达 |
+| **经 relay 配对** | ✅ |
+| **经 relay 双向同步** | ✅ `testSyncsThroughTheRelayWithNoLocalRoute passed (35.885 seconds)` |
 
-配对走的是 relay 的 **HTTP 端点**(`/pairing/*`),内容走的是 **WebSocket**(`/ws`)。前者通了说明令牌和后端都是好的;后者没通,说明 iOS 的云端 WebSocket 连接本身还没建立起来。下一步是确认 app 的连接状态是否到达 `.connectedCloud`。
+挡在中间的是两个都不在产品里的问题:
+
+**发送早于对方存好密钥。** 配对完成的时刻两边不同步:出示码的一方提交 ack 就认为好了,而认领方还要轮询 ack、校验、写密钥。第一条消息落在这个缝里会因为没有密钥被丢弃,而且无人重试。harness 改成发送前等 8 秒。**这是真实缺陷**——真实对端配对后立刻发送,第一条同样会丢,用户再复制一次才会成功。已记录,未修。
+
+**harness 用两个身份。** `CloudRelayDefaults` 的请求头和鉴权令牌都由它自己的 `DeviceIdentity()` 推导,而 harness 配对时用的是另一个 UUID——于是它以身份 A 握着 relay 连接、以身份 B 完成配对,发给 B 的消息在 relay 上找不到连接。这是 harness 自己的问题,不是 app 的:同一时刻 app 侧日志是 `✅ [DualSyncTransport] Cloud succeeded`,它确实发出去了。改成自己构造 relay 配置、用同一个 ID 和对应的 HMAC 令牌。
 
 ### 顺带修掉的 UI bug
 

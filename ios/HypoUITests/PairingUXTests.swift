@@ -87,4 +87,23 @@ final class PairingUXTests: XCTestCase {
         }
         XCTAssertTrue(paired, "tapping a nearby device did not pair with it")
     }
+
+    /// Reports the connection row. Not an assertion about which state it
+    /// reaches — that depends on the network — but a way to see it.
+    func testReportsConnectionStatus() {
+        let app = XCUIApplication()
+        app.launch()
+        addUIInterruptionMonitor(withDescription: "system alerts") { alert in
+            for label in ["Allow", "Allow Paste", "OK"] where alert.buttons[label].exists {
+                alert.buttons[label].tap(); return true
+            }
+            return false
+        }
+        app.tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15))
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
+        Thread.sleep(forTimeInterval: 15)
+        print("CONNECTION: \(app.staticTexts.allElementsBoundByIndex.map { $0.label }.prefix(6))")
+    }
 }

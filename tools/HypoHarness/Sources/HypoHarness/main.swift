@@ -45,6 +45,13 @@ default:
 // MARK: -
 
 func runShow(overRelay: Bool) async throws {
+    // A fresh identity per run, so repeated runs do not collide on the relay.
+    //
+    // CloudRelayDefaults builds the relay headers from its own DeviceIdentity()
+    // rather than from this, so in relay mode the harness holds the connection
+    // under one id and pairs under another. That mismatch is why a message
+    // addressed to it has no connection to arrive on, and it is a limitation of
+    // this harness rather than of the app.
     let identity = UUID()
     let deviceId = identity.uuidString.lowercased()
     let keyProvider = InMemoryDeviceKeyProvider()
@@ -93,7 +100,7 @@ func runShow(overRelay: Bool) async throws {
     }
 
     let cloudTransport: CloudRelayTransport? = overRelay
-        ? await MainActor.run { CloudRelayTransport(configuration: CloudRelayDefaults.production()) }
+        ? await MainActor.run { CloudRelayTransport(configuration: relayConfiguration(for: deviceId)) }
         : nil
     if let cloudTransport {
         await MainActor.run {
@@ -270,6 +277,13 @@ func sendOverRelay(
     transport: CloudRelayTransport,
     keyProvider: InMemoryDeviceKeyProvider
 ) async throws {
+    // Pairing finishes at different moments on the two sides: this end knows
+    // it is paired once the ack is submitted, while the peer still has to poll
+    // for that ack, verify it and write the key. Sending into that gap gets the
+    // item dropped for want of a key, with nothing to retry it — the same race
+    // that bit the LAN path.
+    try? await Task.sleep(for: .seconds(8))
+
     let engine = SyncEngine(
         transport: transport,
         keyProvider: keyProvider,
@@ -312,6 +326,33 @@ actor RelayInboxBox {
         guard let inbox else { return }
         await inbox.handleRelayFrame(data)
     }
+}
+
+/// Builds the relay configuration for a specific device id.
+///
+/// CloudRelayDefaults derives its headers — and its auth token, which is an
+/// HMAC of the device id — from DeviceIdentity(), which is not the identity
+/// this harness pairs under. Using it would hold the relay connection as one
+/// device and pair as another, so anything addressed to the paired id would
+/// have no connection to arrive on.
+func relayConfiguration(for deviceId: String) -> CloudRelayConfiguration {
+    var headers: [String: String] = [
+        "X-Hypo-Client": "1.0.0",
+        "X-Hypo-Environment": "production",
+        "X-Device-Id": deviceId,
+        "X-Device-Platform": "macos"
+    ]
+    if let secret = ProcessInfo.processInfo.environment["RELAY_WS_AUTH_TOKEN"], !secret.isEmpty {
+        let key = SymmetricKey(data: Data(secret.utf8))
+        let mac = HMAC<SHA256>.authenticationCode(for: Data(deviceId.utf8), using: key)
+        headers["X-Auth-Token"] = Data(mac).base64EncodedString()
+    }
+    return CloudRelayConfiguration(
+        url: URL(string: "wss://hypo.fly.dev/ws")!,
+        fingerprint: nil,
+        headers: headers,
+        idleTimeout: 30
+    )
 }
 
 enum HarnessError: Error { case noPayload }

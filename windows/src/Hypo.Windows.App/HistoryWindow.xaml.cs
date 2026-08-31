@@ -23,6 +23,11 @@ public partial class HistoryWindow : Window
     {
         _model = model;
         InitializeComponent();
+
+        // The dark title bar and the Mica backdrop go through
+        // DwmSetWindowAttribute, which needs a handle -- which this window does
+        // not have until it is shown.
+        SourceInitialized += (_, _) => ThemeHost.Register(this);
         Bind();
     }
 

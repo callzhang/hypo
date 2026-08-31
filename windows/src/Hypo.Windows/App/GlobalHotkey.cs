@@ -23,7 +23,7 @@ public sealed partial class GlobalHotkey : IDisposable
     private const uint WmClose = 0x0010;
     private const int Id = 0xB0B;
 
-    private readonly Thread _pump;
+    private readonly Thread? _pump;
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly WindowProcedure _procedure;
 
@@ -44,7 +44,6 @@ public sealed partial class GlobalHotkey : IDisposable
             // Windows will refuse this one whatever we do, and saying why is
             // more useful than the error code it would produce.
             Failure = $"{binding} is reserved by Windows for its own clipboard history.";
-            _pump = new Thread(() => { }) { IsBackground = true };
             return;
         }
 
@@ -166,7 +165,7 @@ public sealed partial class GlobalHotkey : IDisposable
             _hwnd = 0;
         }
 
-        _pump.Join(TimeSpan.FromSeconds(2));
+        _pump?.Join(TimeSpan.FromSeconds(2));
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

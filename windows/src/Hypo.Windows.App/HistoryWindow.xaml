@@ -20,7 +20,7 @@
       <TextBlock x:Name="FilterHint"
                  Margin="8,0,0,0"
                  VerticalAlignment="Center"
-                 Foreground="#FF9A9A9A"
+                 Foreground="{DynamicResource TertiaryTextBrush}"
                  IsHitTestVisible="False"
                  Text="Search your clipboard history" />
     </Grid>
@@ -39,7 +39,7 @@
         <DataTemplate>
           <StackPanel Margin="2,6">
             <TextBlock Text="{Binding Preview}" TextTrimming="CharacterEllipsis" />
-            <TextBlock Foreground="#FF6B6B6B" FontSize="11">
+            <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11">
               <Run Text="{Binding ContentType, Mode=OneWay}" />
               <Run Text="·" />
               <Run Text="{Binding Source, Mode=OneWay}" />
@@ -53,12 +53,12 @@
                Grid.Row="1"
                HorizontalAlignment="Center"
                VerticalAlignment="Center"
-               Foreground="#FF8A8A8A"
+               Foreground="{DynamicResource TertiaryTextBrush}"
                Text="Nothing here yet. Copy something."
                Visibility="Collapsed" />
 
     <TextBlock Grid.Row="2"
-               Foreground="#FF6B6B6B"
+               Foreground="{DynamicResource SecondaryTextBrush}"
                FontSize="11"
                Text="Double-click an entry to put it back on the clipboard." />
   </Grid>

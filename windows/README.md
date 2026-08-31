@@ -22,6 +22,7 @@ the relay, from a notification-area application.
 | Clipboard sharing settings (both default off) | Done |
 | Remote pairing by six-digit code | Done |
 | Global shortcut (Alt+V), reconfigurable | Done |
+| Light and dark, following the system setting | Done |
 | Oversized images compressed before sending | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
 | x64 and ARM64 builds | Done |
@@ -128,6 +129,23 @@ Windows shares clipboard content in two directions that have nothing to do with
 Hypo: the local Win+V history, and the cloud clipboard that roams to a Microsoft
 account and every machine signed into it. By default Hypo opts out of both by
 publishing the marker formats Windows looks for.
+
+### Light and dark
+
+Hypo follows the Windows app theme (`AppsUseLightTheme`), switches with it while
+running, and gives Windows 11 a Mica backdrop and a dark title bar through
+`DwmSetWindowAttribute`. Windows 10 has no Mica; asking for it there is not an
+error, it simply does nothing, so the solid-colour fallback is chosen explicitly
+rather than being whatever the window happened to look like.
+
+The palettes are in `ThemePalette`, not in XAML, so which colours follow from
+the setting and which backdrop follows from the Windows version can both be
+tested on a Mac. Their contrast is tested too, which is how the light theme's
+search hint turned out to be at 2.67:1 — it is darker now.
+
+The design named the WPF-UI Fluent dictionary for this. It is not used: the
+whole theme is seven brushes, and a UI toolkit would have restyled every control
+in the screenshots for them.
 
 ### The shortcut
 

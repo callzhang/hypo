@@ -39,7 +39,10 @@ public sealed record HotkeyBinding
 
     public required HotkeyModifiers Modifiers { get; init; }
 
-    /// <summary>The virtual-key code. For letters this is the uppercase character.</summary>
+    /// <summary>
+    /// The virtual-key code. For letters and digits this is the character
+    /// itself, which is what Windows uses for them.
+    /// </summary>
     public required int Key { get; init; }
 
     /// <summary>True when Windows will never grant this combination.</summary>
@@ -56,7 +59,12 @@ public sealed record HotkeyBinding
         if (Modifiers.HasFlag(HotkeyModifiers.Shift)) parts.Add("Shift");
         if (Modifiers.HasFlag(HotkeyModifiers.Windows)) parts.Add("Win");
 
-        parts.Add(Key is >= 'A' and <= 'Z' ? ((char)Key).ToString() : $"0x{Key:X2}");
+        parts.Add(Key switch
+        {
+            >= 'A' and <= 'Z' or >= '0' and <= '9' => ((char)Key).ToString(),
+            >= FirstFunctionKey and <= LastFunctionKey => $"F{Key - FirstFunctionKey + 1}",
+            _ => $"0x{Key:X2}",
+        });
 
         return string.Join('+', parts);
     }
@@ -68,6 +76,37 @@ public sealed record HotkeyBinding
     /// file a person may have edited, and a typo there should cost the hotkey,
     /// not the application.</para>
     /// </summary>
+    /// <summary>VK_F1. The function keys run consecutively from here to F24.</summary>
+    private const int FirstFunctionKey = 0x70;
+
+    private const int LastFunctionKey = FirstFunctionKey + 23;
+
+    /// <summary>
+    /// A single key name to its virtual-key code, or null for anything this does
+    /// not recognise.
+    ///
+    /// <para>Letters and digits, plus F1 to F24 -- the combinations someone
+    /// reaching for a spare shortcut would try. Deliberately not the punctuation
+    /// keys, whose codes depend on the keyboard layout.</para>
+    /// </summary>
+    private static int? KeyFrom(string part)
+    {
+        if (part.Length == 1 && part[0] is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9')
+        {
+            return char.ToUpperInvariant(part[0]);
+        }
+
+        if (part.Length is 2 or 3
+            && part[0] is 'F' or 'f'
+            && int.TryParse(part.AsSpan(1), out var number)
+            && number is >= 1 and <= 24)
+        {
+            return FirstFunctionKey + number - 1;
+        }
+
+        return null;
+    }
+
     public static HotkeyBinding? Parse(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -88,7 +127,8 @@ public sealed record HotkeyBinding
                 case "WIN" or "WINDOWS": modifiers |= HotkeyModifiers.Windows; break;
 
                 default:
-                    if (part.Length != 1 || part[0] is not (>= 'a' and <= 'z' or >= 'A' and <= 'Z'))
+                    var parsed = KeyFrom(part);
+                    if (parsed is null)
                     {
                         return null;
                     }
@@ -99,7 +139,7 @@ public sealed record HotkeyBinding
                         return null;
                     }
 
-                    key = char.ToUpperInvariant(part[0]);
+                    key = parsed;
                     break;
             }
         }

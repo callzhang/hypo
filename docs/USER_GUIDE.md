@@ -759,6 +759,12 @@ paused — paused and disconnected look different on purpose.
   notification instead of failing quietly, and you can change the combination
   with a `"Hotkey": "Ctrl+Alt+H"` line in `%LOCALAPPDATA%\Hypo\settings.json`.
 
+**Appearance**:
+- Follows the Windows app theme, and switches with it while running — there is
+  no setting to keep in step
+- Windows 11 gets a Mica backdrop and a dark title bar; Windows 10 gets a solid
+  background
+
 **Tray Icon**:
 - **Clipboard history…**: Search, and double-click an entry to put it back on
   the clipboard. Focus returns to whatever you were typing in, so the next

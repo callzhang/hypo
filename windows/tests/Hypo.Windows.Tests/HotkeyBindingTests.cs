@@ -41,6 +41,24 @@ public class HotkeyBindingTests
     }
 
     [Theory]
+    [InlineData("Ctrl+Alt+Shift+F7", 0x76)]
+    [InlineData("Ctrl+F1", 0x70)]
+    [InlineData("Alt+F12", 0x7B)]
+    [InlineData("Ctrl+Alt+F24", 0x87)]
+    [InlineData("Ctrl+Alt+7", '7')]
+    [InlineData("Alt+F", 'F')]   // one character: the letter, not F-something
+    public void FunctionKeysAndDigitsAreKeysToo(string text, int expected)
+    {
+        // Not decoration: the letters are mostly spoken for, so a spare
+        // combination is usually a function key.
+        var binding = HotkeyBinding.Parse(text);
+
+        Assert.NotNull(binding);
+        Assert.Equal(expected, binding.Key);
+        Assert.Equal(text, binding.ToString());
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData(null)]
     [InlineData("V")]           // no modifier -- would swallow the letter V
@@ -48,6 +66,9 @@ public class HotkeyBindingTests
     [InlineData("Alt+Ctrl")]    // all modifier, no key
     [InlineData("Meta+V")]
     [InlineData("Alt+VV")]
+    [InlineData("Alt+F0")]
+    [InlineData("Alt+F25")]
+    [InlineData("Alt+;")]   // punctuation: the code depends on the layout
     public void NonsenseIsNullRatherThanAnException(string? text)
     {
         // This value comes out of a settings file a person can hand-edit, so a

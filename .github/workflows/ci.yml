@@ -88,7 +88,13 @@ jobs:
           # across toolchains. No restore-keys on purpose: a partially stale
           # DerivedData is a well-known source of baffling build failures, and
           # a cold build is better than a poisoned one.
-          key: macos-spm-${{ runner.os }}-${{ env.XCODE_BUILD }}-${{ hashFiles('macos/Package.resolved') }}
+          #
+          # The manifests, not Package.resolved: this repository has never
+          # committed one, so hashFiles found nothing, every run shared one key,
+          # and DerivedData built against a dependency that had since been
+          # removed was restored on top of the new manifest. That is the
+          # poisoned cache this comment warns about, arriving through the key.
+          key: macos-spm-${{ runner.os }}-${{ env.XCODE_BUILD }}-${{ hashFiles('macos/Package.swift', 'macos/Package.resolved', 'shared/HypoCore/Package.swift') }}
       - name: List Schemes
         working-directory: macos
         run: xcodebuild -list

@@ -32,6 +32,10 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Before anything can put a window on screen, including the
+        // already-running message box below.
+        ThemeHost.Follow(this);
+
         _instance = new Mutex(initiallyOwned: true, AppStartup.MutexNameFor(Environment.UserName), out var isFirst);
         if (!isFirst)
         {

@@ -160,6 +160,39 @@ public sealed class TrayIconHost : IDisposable
         UpdateStatus();
         _icon.Visible = true;
         _poll.Start();
+
+        ShowFirewallNoticeOnce();
+    }
+
+    /// <summary>
+    /// Explains the firewall prompt, once, on the first run.
+    ///
+    /// <para>Windows asks which networks to allow the moment a LAN port is
+    /// bound, and the answer decides whether local sync works at all. Someone
+    /// who dismisses it, or picks "Public networks" on their home Wi-Fi, ends up
+    /// with a client that silently only ever uses the relay.</para>
+    ///
+    /// <para>A balloon rather than a dialog: this is worth reading and not worth
+    /// interrupting anyone for, and a modal box on first launch is how an
+    /// application teaches people to dismiss its messages unread.</para>
+    /// </summary>
+    private void ShowFirewallNoticeOnce()
+    {
+        if (_settings.FirewallNoticeShown)
+        {
+            return;
+        }
+
+        _icon.BalloonTipTitle = "Hypo is starting";
+        _icon.BalloonTipText =
+            "Windows may ask which networks to allow. Choose Private networks, or "
+            + "devices on this network will not be able to reach this PC.";
+        _icon.BalloonTipIcon = ToolTipIcon.Info;
+        _icon.ShowBalloonTip(10_000);
+
+        // Written down immediately: shown-and-not-recorded means shown again on
+        // every launch, which is worse than not showing it.
+        Update(_settings with { FirewallNoticeShown = true });
     }
 
     private void TogglePause()

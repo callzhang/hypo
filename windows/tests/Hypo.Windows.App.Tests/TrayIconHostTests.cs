@@ -530,4 +530,57 @@ public class TrayIconHostTests : IDisposable
             window.Close();
         });
     }
+
+    [SkippableFact]
+    public void TheFirewallNoticeIsShownOnceAndRecorded()
+    {
+        RequireWindows();
+
+        // Someone who dismisses the Windows Firewall prompt, or picks "Public
+        // networks" on their home Wi-Fi, gets a client that silently only ever
+        // uses the relay. One sentence beforehand is worth it; the same sentence
+        // on every launch is not.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            Assert.True(tray.Settings.FirewallNoticeShown);
+            Assert.Contains(_saved, s => s.FirewallNoticeShown);
+        });
+    }
+
+    [SkippableFact]
+    public void TheFirewallNoticeIsNotShownAgain()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build(settings: new HypoSettings { FirewallNoticeShown = true });
+            _saved.Clear();
+
+            tray.Start();
+
+            // Nothing saved means nothing changed, which means it was not shown.
+            Assert.Empty(_saved);
+        });
+    }
+
+    [SkippableFact]
+    public void ShowingTheNoticeDoesNotDisturbTheSharingSettings()
+    {
+        RequireWindows();
+
+        // It is written through the same path the switches use, and carrying the
+        // wrong values along would silently widen what gets shared.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            Assert.False(tray.Settings.ShareWithWindowsHistory);
+            Assert.False(tray.Settings.AllowCloudClipboardUpload);
+        });
+    }
 }

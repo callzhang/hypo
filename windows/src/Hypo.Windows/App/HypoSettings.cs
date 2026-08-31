@@ -14,6 +14,18 @@ namespace Hypo.Windows.App;
 /// </summary>
 public sealed record HypoSettings
 {
+    /// <summary>
+    /// Whether the first-run note about the Windows Firewall prompt has been
+    /// shown.
+    ///
+    /// <para>Binding a LAN port makes Windows ask which networks to allow, and
+    /// the answer decides whether local sync works at all. Someone who dismisses
+    /// it, or picks "Public networks" on a home Wi-Fi, gets a client that only
+    /// ever uses the relay and no indication why -- so it is worth one sentence
+    /// beforehand, exactly once.</para>
+    /// </summary>
+    public bool FirewallNoticeShown { get; init; }
+
     /// <summary>Whether synced items may appear in this machine's Win+V history.</summary>
     public bool ShareWithWindowsHistory { get; init; }
 

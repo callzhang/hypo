@@ -80,4 +80,22 @@ public class HypoSettingsTests : IDisposable
         Assert.True(settings.ShareWithWindowsHistory);
         Assert.False(settings.AllowCloudClipboardUpload);
     }
+
+    [Fact]
+    public void TheFirewallNoticeStartsUnshown()
+    {
+        Assert.False(new HypoSettings().FirewallNoticeShown);
+    }
+
+    [Fact]
+    public void RecordingTheNoticeDoesNotChangeWhatIsShared()
+    {
+        // It goes through the same record as the sharing switches, and carrying
+        // the wrong values along would widen sharing without anyone asking.
+        var settings = new HypoSettings() with { FirewallNoticeShown = true };
+
+        Assert.True(settings.FirewallNoticeShown);
+        Assert.False(settings.ShareWithWindowsHistory);
+        Assert.False(settings.AllowCloudClipboardUpload);
+    }
 }

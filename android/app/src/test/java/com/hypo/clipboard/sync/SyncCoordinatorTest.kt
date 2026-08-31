@@ -15,6 +15,9 @@ import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -273,20 +276,28 @@ class SyncCoordinatorTest {
     }
 
     /**
-     * Waits for [coordinator]'s targets to settle on [expected].
+     * Waits, in *real* time, for [coordinator]'s targets to settle on [expected].
      *
-     * The budget is generous on purpose. The old 2.5s was enough on a developer
-     * machine and not on a loaded CI runner, where this went red on a commit
-     * that touched no Android code at all -- a flake that costs more attention
-     * than the seconds it saves, because every red build has to be read before
-     * it can be dismissed. A passing run still returns as soon as the value
-     * arrives, so the ceiling only applies to genuine failures.
+     * The real time is the whole point. `runTest` runs on a virtual scheduler
+     * where `delay` returns immediately, so a polling loop written inside it
+     * spins through every iteration instantly and asserts against whatever
+     * happened to be there. An earlier attempt at fixing this flake raised the
+     * iteration count from 50 to 200 and changed nothing at all, because the
+     * loop never waited in the first place.
+     *
+     * What it is waiting for is genuinely off the test scheduler:
+     * SyncCoordinator refreshes its paired-device cache on `Dispatchers.Default`,
+     * which is real threads and real time.
      */
     private suspend fun awaitTargets(coordinator: SyncCoordinator, expected: Set<String>) {
-        repeat(200) {
-            if (coordinator.targets.value == expected) return
-            delay(50)
+        withContext(Dispatchers.Default) {
+            withTimeoutOrNull(10_000) {
+                while (coordinator.targets.value != expected) {
+                    delay(25)
+                }
+            }
         }
+
         assertEquals(expected, coordinator.targets.value, "Targets did not reach expected state")
     }
 
@@ -294,12 +305,15 @@ class SyncCoordinatorTest {
      * Asserts targets *stay* [expected] rather than merely reaching it, for the
      * cases where the point is that something was filtered out and must not
      * appear. A bare delay-then-assert would pass for the wrong reason if the
-     * unwanted value simply had not arrived yet.
+     * unwanted value simply had not arrived yet -- and on the virtual scheduler
+     * it would not even wait.
      */
     private suspend fun assertTargetsRemain(coordinator: SyncCoordinator, expected: Set<String>) {
-        repeat(10) {
-            assertEquals(expected, coordinator.targets.value)
-            delay(30)
+        withContext(Dispatchers.Default) {
+            repeat(10) {
+                assertEquals(expected, coordinator.targets.value)
+                delay(30)
+            }
         }
     }
 

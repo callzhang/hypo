@@ -38,6 +38,12 @@ if [ -f "$PROJECT_ROOT/backend/Cargo.toml" ]; then
     echo "✅ Updated backend/Cargo.lock"
 fi
 
+# The Windows client needs no edit: windows/Directory.Build.props reads the
+# VERSION file above at build time, so its assemblies and the version in its
+# tray menu follow from it. Said here because the absence of a step is
+# indistinguishable from a forgotten one.
+echo "ℹ️  Windows reads VERSION at build time; nothing to update there"
+
 echo ""
 echo "Version updated to $NEW_VERSION"
 echo ""

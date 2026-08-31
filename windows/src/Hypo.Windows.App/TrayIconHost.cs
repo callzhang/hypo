@@ -369,6 +369,7 @@ public sealed class TrayIconHost : IDisposable
         _handoff.Capture();
 
         Surface(_historyWindow);
+        _historyWindow.ReadyToType();
     }
 
     private void ShowPairing()
@@ -396,8 +397,17 @@ public sealed class TrayIconHost : IDisposable
         }
 
         window.Activate();
-        window.Topmost = true;
+
+        // The false-then-true toggle is what pulls a window in front of whatever
+        // had the foreground. Ending on the value the window declared matters:
+        // the history window asks to stay on top, and finishing on false took
+        // that away from it every time it was opened.
+        var stayOnTop = window.Topmost;
+
         window.Topmost = false;
+        window.Topmost = true;
+        window.Topmost = stayOnTop;
+
         window.Focus();
     }
 

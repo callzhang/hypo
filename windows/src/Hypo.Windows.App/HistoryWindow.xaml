@@ -3,7 +3,10 @@
         x:Class="Hypo.Windows.App.Shell.HistoryWindow"
         Title="Hypo — Clipboard History"
         Width="520" Height="620"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="False"
+        Topmost="True"
+        KeyDown="OnWindowKeyDown">
   <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -14,7 +17,8 @@
     <Grid Grid.Row="0">
       <TextBox x:Name="FilterBox"
                Padding="6"
-               TextChanged="OnFilterChanged" />
+               TextChanged="OnFilterChanged"
+               PreviewKeyDown="OnFilterKeyDown" />
       <!-- WPF has no placeholder; an unlabelled box tells the user nothing about
            what it does, which a screenshot made plain. -->
       <TextBlock x:Name="FilterHint"

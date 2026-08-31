@@ -110,6 +110,10 @@ public sealed class LanPairingCoordinator(ISecretStore store)
 
         _store.Write(completed.PeerDeviceId, completed.SharedKey);
 
+        // Beside the key, so anything showing a list of paired devices has
+        // something to show. Without it the only handle on a peer is its GUID.
+        PairedDevices.Remember(_store, completed.PeerDeviceId, completed.PeerDeviceName);
+
         return new PairingResult(
             PairingOutcome.Paired, completed.PeerDeviceId, completed.PeerDeviceName);
     }

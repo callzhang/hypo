@@ -23,7 +23,7 @@ public sealed record HistoryEntry
 public sealed class ClipboardHistoryStore : IDisposable
 {
     private readonly SqliteConnection _connection;
-    private readonly int _capacity;
+    private int _capacity;
 
     /// <param name="path">The database file, or ":memory:" for a transient store.</param>
     /// <param name="capacity">How many entries to keep; the oldest go first.</param>
@@ -195,6 +195,44 @@ public sealed class ClipboardHistoryStore : IDisposable
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// How many entries to keep. Lowering it takes effect at once.
+    ///
+    /// <para>Someone who has just decided they want less of their clipboard kept
+    /// on disk means now, not from the next copy onwards.</para>
+    /// </summary>
+    public int Capacity
+    {
+        get => _capacity;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value);
+
+            _capacity = value;
+            Trim();
+        }
+    }
+
+    /// <summary>
+    /// Forgets everything.
+    ///
+    /// <para>VACUUM as well as DELETE: a clipboard history holds whatever was
+    /// copied, and a file that still contains the rows in its free pages has not
+    /// honoured what was asked.</para>
+    /// </summary>
+    public void Clear()
+    {
+        using (var command = _connection.CreateCommand())
+        {
+            command.CommandText = "DELETE FROM history;";
+            command.ExecuteNonQuery();
+        }
+
+        using var vacuum = _connection.CreateCommand();
+        vacuum.CommandText = "VACUUM;";
+        vacuum.ExecuteNonQuery();
     }
 
     private void Trim()

@@ -21,6 +21,62 @@ public class ClipboardHistoryStoreTests : IDisposable
     };
 
     [Fact]
+    public void ClearingForgetsEverythingAndShrinksTheFile()
+    {
+        var path = Path();
+
+        using (var store = new ClipboardHistoryStore(path))
+        {
+            for (var i = 0; i < 40; i++)
+            {
+                store.Add(Entry(new string('x', 4096) + i, DateTimeOffset.UnixEpoch.AddMinutes(i)));
+            }
+        }
+
+        var full = new FileInfo(path).Length;
+
+        using (var store = new ClipboardHistoryStore(path))
+        {
+            store.Clear();
+            Assert.Empty(store.Recent());
+        }
+
+        // Not pedantry: a history file that still holds the rows in its free
+        // pages has not done what "clear my clipboard history" asked for.
+        Assert.True(new FileInfo(path).Length < full, "the file did not shrink, so the rows are still in it");
+
+        using var reopened = new ClipboardHistoryStore(path);
+        Assert.Empty(reopened.Recent());
+    }
+
+    [Fact]
+    public void LoweringTheCapacityTakesEffectAtOnce()
+    {
+        using var store = new ClipboardHistoryStore(Path(), capacity: 100);
+
+        for (var i = 0; i < 20; i++)
+        {
+            store.Add(Entry($"entry {i}", DateTimeOffset.UnixEpoch.AddMinutes(i)));
+        }
+
+        // Someone who has just decided they want less kept on disk means now,
+        // not from the next copy onwards.
+        store.Capacity = 5;
+
+        var kept = store.Recent();
+        Assert.Equal(5, kept.Count);
+        Assert.Equal("entry 19", Encoding.UTF8.GetString(kept[0].Content.Data));
+    }
+
+    [Fact]
+    public void ACapacityOfNothingIsRefused()
+    {
+        using var store = new ClipboardHistoryStore(Path());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.Capacity = 0);
+    }
+
+    [Fact]
     public void SurvivesReopening()
     {
         var path = Path();

@@ -83,6 +83,10 @@ public sealed class RemotePairingCoordinator(RelayPairingClient relay, ISecretSt
 
         _store.Write(accepted.PeerDeviceId, accepted.SharedKey);
 
+        // Beside the key, so anything showing a list of paired devices has
+        // something to show. Without it the only handle on a peer is its GUID.
+        PairedDevices.Remember(_store, accepted.PeerDeviceId, accepted.PeerDeviceName);
+
         return new PairingResult(PairingOutcome.Paired, accepted.PeerDeviceId, accepted.PeerDeviceName);
     }
 
@@ -149,6 +153,8 @@ public sealed class RemotePairingCoordinator(RelayPairingClient relay, ISecretSt
         }
 
         _store.Write(completed.PeerDeviceId, completed.SharedKey);
+
+        PairedDevices.Remember(_store, completed.PeerDeviceId, completed.PeerDeviceName);
 
         return new PairingResult(PairingOutcome.Paired, completed.PeerDeviceId, completed.PeerDeviceName);
     }

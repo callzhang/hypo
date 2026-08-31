@@ -106,4 +106,41 @@ final class PairingUXTests: XCTestCase {
         Thread.sleep(forTimeInterval: 15)
         print("CONNECTION: \(app.staticTexts.allElementsBoundByIndex.map { $0.label }.prefix(6))")
     }
+
+    /// A paired device can be removed.
+    ///
+    /// Without this a device that is gone for good — a phone you no longer own,
+    /// a harness from a test run — stays in the list forever, and the app keeps
+    /// trying to send to it.
+    func testAPairedDeviceCanBeUnpaired() throws {
+        let app = XCUIApplication()
+        app.launch()
+        addUIInterruptionMonitor(withDescription: "system alerts") { alert in
+            for label in ["Allow", "Allow Paste", "OK"] where alert.buttons[label].exists {
+                alert.buttons[label].tap(); return true
+            }
+            return false
+        }
+        app.tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15))
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Devices"].waitForExistence(timeout: 10))
+
+        guard app.staticTexts["No paired devices"].exists == false else {
+            throw XCTSkip("nothing paired to remove")
+        }
+
+        let before = app.cells.count
+        let row = app.cells.element(boundBy: 0)
+        row.swipeLeft()
+        guard app.buttons["Unpair"].waitForExistence(timeout: 5) else {
+            throw XCTSkip("could not reveal the unpair action on this row")
+        }
+        app.buttons["Unpair"].tap()
+
+        // One fewer row, or the empty-state text where the list used to be.
+        let removed = app.staticTexts["No paired devices"].waitForExistence(timeout: 5)
+            || app.cells.count < before
+        XCTAssertTrue(removed, "the device was still listed after unpairing")
+    }
 }

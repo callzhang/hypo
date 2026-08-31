@@ -48,14 +48,21 @@ public struct SettingsView: View {
                 } else {
                     ForEach(transportManager.pairedDevices) { device in
                         LabeledContent {
-                            Text(device.isOnline ? "Online" : "Offline")
-                                .foregroundStyle(device.isOnline ? .green : .secondary)
+                            let state = status(of: device)
+                            Text(state.label)
+                                .font(.caption)
+                                .foregroundStyle(state.tint)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(device.name)
                                 Text(device.platform)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions {
+                            Button("Unpair", role: .destructive) {
+                                unpair(device)
                             }
                         }
                     }
@@ -109,6 +116,29 @@ public struct SettingsView: View {
             notificationStatus = await Self.notificationStatusText()
             historyLimit = Double(await context.historyStore.limit())
         }
+    }
+
+    /// What is actually known about a device, rather than a bare online flag.
+    ///
+    /// isOnline only becomes true once a connection is established, so a device
+    /// sitting right there on the network reads as "Offline" until something
+    /// has been sent — which is both true and useless. Bonjour already knows it
+    /// is nearby; say so.
+    private func status(of device: PairedDevice) -> (label: String, tint: Color) {
+        if device.isOnline { return ("Connected", .green) }
+        let onThisNetwork = transportManager.lanDiscoveredPeers().contains { peer in
+            peer.endpoint.metadata["device_id"]?.lowercased() == device.id.lowercased()
+        }
+        if onThisNetwork { return ("On this network", .secondary) }
+        return ("Not reachable", .secondary)
+    }
+
+    /// Forgets a device: key first, the way Android does it.
+    ///
+    /// A device left in the list with no key cannot decrypt anything it is
+    /// sent, which looks like a broken peer rather than one that was removed.
+    private func unpair(_ device: PairedDevice) {
+        context.unpair(device)
     }
 
     private var connectionDescription: String {

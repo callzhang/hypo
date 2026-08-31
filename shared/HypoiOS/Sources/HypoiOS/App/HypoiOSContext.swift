@@ -16,6 +16,7 @@ public final class HypoiOSContext {
     public let historyStore: HistoryStore
     public let transportManager: TransportManager
     public let historyViewModel: HistoryListViewModel
+    public let deviceKeyProvider: KeychainDeviceKeyProvider
 
     public init(
         notificationScheduler: UserNotificationScheduler = UserNotificationScheduler(),
@@ -43,6 +44,8 @@ public final class HypoiOSContext {
         // local-device-id filter and gives LanSyncTransport a way to resolve
         // discovered peers — which is how this device dials out. Omitting it
         // disables receiving and outbound LAN connections at once, silently.
+        self.deviceKeyProvider = KeychainDeviceKeyProvider()
+
         let manager = TransportManager(
             provider: provider,
             webSocketServer: webSocketServer,
@@ -63,5 +66,27 @@ public final class HypoiOSContext {
         self.historyViewModel = viewModel
         manager.setHistoryViewModel(viewModel)
         notificationScheduler.requestAuthorizationIfNeeded()
+    }
+
+    /// Forgets a device: its key first, then the device itself.
+    ///
+    /// The order matters. A device left listed with no key cannot decrypt
+    /// anything sent to it, which reads as a broken peer rather than one that
+    /// was removed — Android deletes the key first for the same reason.
+    ///
+    /// Uses the container's own key provider rather than building one on the
+    /// spot, so this deletes from the same keychain the app reads.
+    @discardableResult
+    public func unpair(_ device: PairedDevice) -> Bool {
+        var deletedKey = true
+        do {
+            try deviceKeyProvider.delete(deviceId: device.id)
+        } catch {
+            // Removing the device is still worth doing: a stale key alone
+            // decrypts nothing, but a stale device keeps being dialled.
+            deletedKey = false
+        }
+        transportManager.removePairedDevice(device)
+        return deletedKey
     }
 }

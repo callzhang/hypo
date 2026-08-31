@@ -23,6 +23,7 @@ the relay, from a notification-area application.
 | Remote pairing by six-digit code | Done |
 | Global shortcut (Alt+V), reconfigurable | Done |
 | History usable from the keyboard alone | Done |
+| Type and date filters, pinning, per-row detail | Done |
 | Light and dark, following the system setting | Done |
 | Version in the tray menu | Done |
 | Settings window: devices, history, startup | Done |

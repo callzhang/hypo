@@ -7,6 +7,10 @@
         ShowInTaskbar="False"
         Topmost="True"
         KeyDown="OnWindowKeyDown">
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+  </Window.Resources>
+
   <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -15,6 +19,26 @@
     </Grid.RowDefinitions>
 
     <Grid Grid.Row="0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <ComboBox x:Name="TypeFilterBox"
+                Grid.Column="1"
+                Margin="8,0,0,0"
+                Padding="6,4"
+                Width="90"
+                SelectionChanged="OnTypeFilterChanged" />
+
+      <ComboBox x:Name="DateFilterBox"
+                Grid.Column="2"
+                Margin="8,0,0,0"
+                Padding="6,4"
+                Width="100"
+                SelectionChanged="OnDateFilterChanged" />
+
       <TextBox x:Name="FilterBox"
                Padding="6"
                TextChanged="OnFilterChanged"
@@ -22,6 +46,7 @@
       <!-- WPF has no placeholder; an unlabelled box tells the user nothing about
            what it does, which a screenshot made plain. -->
       <TextBlock x:Name="FilterHint"
+                 Grid.Column="0"
                  Margin="8,0,0,0"
                  VerticalAlignment="Center"
                  Foreground="{DynamicResource TertiaryTextBrush}"
@@ -33,24 +58,73 @@
          With it enabled the list grows to fit the longest entry, the ellipsis
          never appears, and a long copy pushes a scrollbar under everything,
          which a screenshot at 200% made obvious and one at 100% did not. -->
+    <!-- Virtualising, and recycling the containers: two hundred rows each with a
+         glyph and three lines of text is enough that building them all up front
+         is visible as a pause when the window opens. -->
     <ListBox x:Name="Rows"
              Grid.Row="1"
              Margin="0,10,0,10"
              HorizontalContentAlignment="Stretch"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             ScrollViewer.CanContentScroll="True"
+             VirtualizingPanel.IsVirtualizing="True"
+             VirtualizingPanel.VirtualizationMode="Recycling"
              MouseDoubleClick="OnUseSelected">
+      <ListBox.ItemsPanel>
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </ListBox.ItemsPanel>
       <ListBox.ItemTemplate>
         <DataTemplate>
-          <StackPanel Margin="2,6">
-            <TextBlock Text="{Binding Preview}" TextTrimming="CharacterEllipsis" />
-            <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11">
-              <Run Text="{Binding ContentType, Mode=OneWay}" />
-              <Run Text="·" />
-              <Run Text="{Binding Source, Mode=OneWay}" />
-            </TextBlock>
-          </StackPanel>
+          <Grid Margin="2,6">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Margin="0,0,8,0"
+                       VerticalAlignment="Top"
+                       FontFamily="Segoe MDL2 Assets"
+                       FontSize="14"
+                       Foreground="{DynamicResource SecondaryTextBrush}"
+                       Text="{Binding Icon}" />
+
+            <StackPanel Grid.Column="1">
+              <TextBlock Text="{Binding Preview}" TextTrimming="CharacterEllipsis" />
+              <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11"
+                         TextTrimming="CharacterEllipsis">
+                <Run Text="{Binding Source, Mode=OneWay}" />
+                <Run Text="·" />
+                <Run Text="{Binding OriginLabel, Mode=OneWay}" />
+                <Run Text="·" />
+                <!-- Every item is encrypted end to end; the glyph says so rather
+                     than a word, because a row that said "encrypted" on every
+                     line would stop being read after the first. -->
+                <Run FontFamily="Segoe MDL2 Assets" Text="&#xE72E;" />
+              </TextBlock>
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Margin="8,0,0,0" HorizontalAlignment="Right">
+              <TextBlock Foreground="{DynamicResource TertiaryTextBrush}" FontSize="11"
+                         HorizontalAlignment="Right"
+                         Text="{Binding When}" />
+              <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="11"
+                         HorizontalAlignment="Right"
+                         Foreground="{DynamicResource SecondaryTextBrush}"
+                         Text="&#xE718;"
+                         Visibility="{Binding Pinned, Converter={StaticResource BoolToVisibility}}" />
+            </StackPanel>
+          </Grid>
         </DataTemplate>
       </ListBox.ItemTemplate>
+      <ListBox.ContextMenu>
+        <ContextMenu>
+          <MenuItem x:Name="PinItem" Header="Pin to the top" Click="OnTogglePin" />
+        </ContextMenu>
+      </ListBox.ContextMenu>
     </ListBox>
 
     <TextBlock x:Name="Hint"
@@ -64,6 +138,6 @@
     <TextBlock Grid.Row="2"
                Foreground="{DynamicResource SecondaryTextBrush}"
                FontSize="11"
-               Text="Double-click an entry to put it back on the clipboard." />
+               Text="Double-click an entry to put it back on the clipboard. Right-click to pin it." />
   </Grid>
 </Window>

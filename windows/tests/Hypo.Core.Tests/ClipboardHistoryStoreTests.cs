@@ -21,6 +21,120 @@ public class ClipboardHistoryStoreTests : IDisposable
     };
 
     [Fact]
+    public void RemembersWhichChannelCarriedAnEntry()
+    {
+        using var store = new ClipboardHistoryStore(Path());
+
+        store.Add(Entry("over the wire", DateTimeOffset.UnixEpoch, from: "peer") with
+        {
+            Origin = Hypo.Core.Transport.TransportOrigin.Cloud,
+        });
+        store.Add(Entry("copied here", DateTimeOffset.UnixEpoch.AddMinutes(1)));
+
+        var entries = store.Recent();
+
+        Assert.Null(entries.Single(e => e.SourceDeviceId is null).Origin);
+        Assert.Equal(
+            Hypo.Core.Transport.TransportOrigin.Cloud,
+            entries.Single(e => e.SourceDeviceId == "peer").Origin);
+    }
+
+    [Fact]
+    public void PinnedEntriesComeFirstHoweverOldTheyAre()
+    {
+        using var store = new ClipboardHistoryStore(Path());
+
+        var old = Entry("pinned and ancient", DateTimeOffset.UnixEpoch);
+        store.Add(old);
+        store.Add(Entry("newer", DateTimeOffset.UnixEpoch.AddHours(1)));
+
+        Assert.True(store.SetPinned(old.Content, pinned: true));
+
+        var entries = store.Recent();
+        Assert.Equal("pinned and ancient", Encoding.UTF8.GetString(entries[0].Content.Data));
+        Assert.True(entries[0].Pinned);
+        Assert.False(entries[1].Pinned);
+    }
+
+    [Fact]
+    public void RecopyingAPinnedEntryLeavesItPinned()
+    {
+        using var store = new ClipboardHistoryStore(Path());
+
+        var entry = Entry("keep me", DateTimeOffset.UnixEpoch);
+        store.Add(entry);
+        store.SetPinned(entry.Content, pinned: true);
+
+        // The copy path has no opinion about pinning, and must not express one.
+        store.Add(Entry("keep me", DateTimeOffset.UnixEpoch.AddHours(2)));
+
+        Assert.True(store.Recent()[0].Pinned);
+    }
+
+    [Fact]
+    public void PinnedEntriesAreTheLastToFallOffTheEnd()
+    {
+        using var store = new ClipboardHistoryStore(Path(), capacity: 3);
+
+        var keep = Entry("the one that matters", DateTimeOffset.UnixEpoch);
+        store.Add(keep);
+        store.SetPinned(keep.Content, pinned: true);
+
+        for (var i = 1; i <= 5; i++)
+        {
+            store.Add(Entry($"filler {i}", DateTimeOffset.UnixEpoch.AddMinutes(i)));
+        }
+
+        // Otherwise pinning is a decoration: the entry someone asked to keep is
+        // the oldest, so ordinary trimming would take it first.
+        Assert.Contains(store.Recent(), e => Encoding.UTF8.GetString(e.Content.Data) == "the one that matters");
+        Assert.Equal(3, store.Recent().Count);
+    }
+
+    [Fact]
+    public void PinningSomethingNotInTheHistorySaysSo()
+    {
+        using var store = new ClipboardHistoryStore(Path());
+
+        Assert.False(store.SetPinned(Entry("never added", DateTimeOffset.UnixEpoch).Content, pinned: true));
+    }
+
+    [Fact]
+    public void AHistoryFromBeforeTheseColumnsStillOpens()
+    {
+        var path = Path("legacy.db");
+
+        // The shape the table had two releases ago. An existing history is a
+        // user's data, not a cache: it has to survive the upgrade.
+        using (var legacy = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path}"))
+        {
+            legacy.Open();
+            using var create = legacy.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE history (
+                    hash               TEXT PRIMARY KEY,
+                    content_type       TEXT NOT NULL,
+                    data               BLOB NOT NULL,
+                    copied_at          TEXT NOT NULL,
+                    source_device_id   TEXT NULL,
+                    source_device_name TEXT NULL
+                );
+                INSERT INTO history VALUES ('AB', 'Text', X'6869', '1970-01-01T00:00:00.0000000Z', NULL, NULL);
+                """;
+            create.ExecuteNonQuery();
+        }
+
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        using var store = new ClipboardHistoryStore(path);
+        var entry = Assert.Single(store.Recent());
+
+        Assert.Equal("hi", Encoding.UTF8.GetString(entry.Content.Data));
+        Assert.Null(entry.Origin);
+        Assert.False(entry.Pinned);
+    }
+
+    [Fact]
     public void ClearingForgetsEverythingAndShrinksTheFile()
     {
         var path = Path();

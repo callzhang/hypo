@@ -37,6 +37,7 @@ public partial class HistoryWindow : Window
         };
 
         Deactivated += (_, _) => HideIfAllowed();
+        FillFilters();
         Bind();
     }
 
@@ -138,11 +139,88 @@ public partial class HistoryWindow : Window
         Rows.ScrollIntoView(Rows.SelectedItem);
     }
 
+    /// <summary>
+    /// Fills the two filter drop-downs.
+    ///
+    /// <para>Once, from the enums, so a filter added to the model appears here
+    /// without anyone remembering to add it.</para>
+    /// </summary>
+    private void FillFilters()
+    {
+        TypeFilterBox.ItemsSource = new[]
+        {
+            new FilterChoice<TypeFilter>(TypeFilter.All, "All types"),
+            new FilterChoice<TypeFilter>(TypeFilter.Text, "Text"),
+            new FilterChoice<TypeFilter>(TypeFilter.Link, "Links"),
+            new FilterChoice<TypeFilter>(TypeFilter.Image, "Images"),
+            new FilterChoice<TypeFilter>(TypeFilter.File, "Files"),
+        };
+        TypeFilterBox.DisplayMemberPath = nameof(FilterChoice<TypeFilter>.Label);
+        TypeFilterBox.SelectedIndex = 0;
+
+        DateFilterBox.ItemsSource = new[]
+        {
+            new FilterChoice<DateFilter>(DateFilter.All, "Any time"),
+            new FilterChoice<DateFilter>(DateFilter.Today, "Today"),
+            new FilterChoice<DateFilter>(DateFilter.ThisWeek, "This week"),
+        };
+        DateFilterBox.DisplayMemberPath = nameof(FilterChoice<DateFilter>.Label);
+        DateFilterBox.SelectedIndex = 0;
+    }
+
+    /// <summary>One entry in a filter drop-down.</summary>
+    public sealed record FilterChoice<T>(T Value, string Label);
+
+    private void OnTypeFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (TypeFilterBox.SelectedItem is FilterChoice<TypeFilter> choice)
+        {
+            _model.SetType(choice.Value);
+            Bind();
+        }
+    }
+
+    private void OnDateFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DateFilterBox.SelectedItem is FilterChoice<DateFilter> choice)
+        {
+            _model.SetAge(choice.Value);
+            Bind();
+        }
+    }
+
+    /// <summary>
+    /// Pins the selected row, or unpins it.
+    ///
+    /// <para>One item rather than two, reading as what it will do: a menu with
+    /// both Pin and Unpin on it makes the reader work out which applies.</para>
+    /// </summary>
+    private void OnTogglePin(object sender, RoutedEventArgs e)
+    {
+        if (Rows.SelectedItem is not HistoryRow row)
+        {
+            return;
+        }
+
+        _model.SetPinned(row, !row.Pinned);
+        Bind();
+    }
+
     private void Bind()
     {
         Rows.ItemsSource = _model.Rows;
         Hint.Visibility = _model.IsEmpty ? Visibility.Visible : Visibility.Collapsed;
         FilterHint.Visibility = FilterBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        // The empty message has to say which emptiness this is. "Copy something"
+        // is wrong advice for a list that is empty because of a filter.
+        Hint.Text = _model.Rows.Count == 0 && _model.HasNarrowedList
+            ? "Nothing matches. Try a different filter."
+            : "Nothing here yet. Copy something.";
+
+        PinItem.Header = Rows.SelectedItem is HistoryRow { Pinned: true }
+            ? "Unpin"
+            : "Pin to the top";
     }
 
     private void OnFilterChanged(object sender, TextChangedEventArgs e)

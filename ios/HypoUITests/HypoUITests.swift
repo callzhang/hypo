@@ -6,6 +6,7 @@ import UIKit
 /// This exists because the phase-2 acceptance is about what the app does, not
 /// about what its pieces do in isolation, and nothing else here can press a
 /// button. `xcrun simctl` has no tap command.
+@MainActor
 final class HypoUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
@@ -202,6 +203,7 @@ final class HypoUITests: XCTestCase {
 /// the fold — and a SwiftUI List leaves off-screen rows out of the
 /// accessibility tree entirely, which reads as "does not exist" rather than
 /// "not visible yet".
+@MainActor
 @discardableResult
 func revealElement(_ element: XCUIElement, in app: XCUIApplication, attempts: Int = 6) -> Bool {
     for _ in 0..<attempts {
@@ -217,6 +219,7 @@ func revealElement(_ element: XCUIElement, in app: XCUIApplication, attempts: In
 /// correctly has nothing of the user's left to offer. A single wait loses that
 /// race against any live device on the network, so the text is put back before
 /// each look. The app samples the clipboard about every 1.5s.
+@MainActor
 @discardableResult
 func waitForSendControl(in app: XCUIApplication, resettingTo text: String, attempts: Int = 12) -> Bool {
     let paste = app.buttons["Paste"]
@@ -233,6 +236,7 @@ func waitForSendControl(in app: XCUIApplication, resettingTo text: String, attem
 /// others, and which one it is has changed with the surrounding view. Asking
 /// both is cheaper than pinning down which, and the question — is this device
 /// paired — is the same either way.
+@MainActor
 func isPaired(_ deviceName: String, in app: XCUIApplication, timeout: TimeInterval = 60) -> Bool {
     let identifier = "PairedDevice-\(deviceName)"
     return app.cells[identifier].waitForExistence(timeout: timeout)

@@ -2245,3 +2245,16 @@ Android 的历史卡片在内容被截断、或条目是图片/文件时,提供�
 - `revealElement` —— **SwiftUI 的 List 不会把屏幕外的行放进可访问性树**,所以被挤到折叠线以下的行报的是"不存在",不是"看不见"。Devices 区变长后 `Pair with code` 就落到了那里。
 - `waitForSendControl` —— 活跃对端推送的每一条都会被写进剪贴板,此后 app 正确地认为没有用户的新内容可发。一次性等待会输掉这场竞争。
 - `isPaired` —— 可访问性标识符在不同 SwiftUI 布局下会落到 cell、staticText 或 button 上,且随外层视图变化。三个都问一遍,比钉死其中一个可靠。
+
+
+### 又一次:本机工具链比 CI 宽松
+
+提出去的三个共享测试辅助是文件级函数,它们访问 `XCUIApplication` 的成员——那些成员是 MainActor 隔离的。本机 Xcode 26.5 编译通过,CI 直接报错:
+
+```
+error: main actor-isolated property 'staticTexts' can not be referenced from a nonisolated autoclosure
+```
+
+修法是给三个函数和 `HypoUITests` 类都标上 `@MainActor`(另外三个测试类本来就标了,只有这个漏了)。这样在两个工具链下都成立,不依赖谁更宽松。
+
+**这是本期第二次因为同一个原因被 CI 拦下**(第一次是 `UNNotificationSettings` 跨隔离边界)。结论没变:**本机只装了一个 Xcode,iOS 的编译结论必须以 CI 为准,本地绿只是必要条件。**

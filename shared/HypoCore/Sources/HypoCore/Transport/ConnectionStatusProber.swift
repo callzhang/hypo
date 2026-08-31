@@ -122,20 +122,22 @@ public final class ConnectionStatusProber {
         if let transportProvider = transportProvider as? DefaultTransportProvider {
             let cloudTransport = transportProvider.getCloudTransport()
             cloudTransportConnected = cloudTransport.isConnected()
-            if cloudTransportConnected {
-                do {
-                    let connectedPeers = try await withTimeout(seconds: 3.0) {
-                        await cloudTransport.queryConnectedPeers(peerIds: pairedDeviceIds)
-                    }
-                    cloudConnectedDeviceIds = Set(connectedPeers.map { $0.deviceId })
-                    let preview = connectedPeers.prefix(5).map { $0.deviceId }.joined(separator: ",")
-                    let suffix = connectedPeers.count > 5 ? ", …(+\(connectedPeers.count - 5))" : ""
-                    logger.debug("☁️", "Cloud query returned \(connectedPeers.count) devices [\(preview)\(suffix)]")
-                } catch {
-                    logger.warning("☁️", "Cloud query timeout or error: \(error.localizedDescription)")
+            if !cloudTransportConnected {
+                // Presence is a plain HTTP endpoint, so peer status stays accurate even
+                // while our own relay socket is down (rejected auth, relay restart, etc.).
+                // Skipping the query here would report every cloud peer as offline.
+                logger.debug("☁️", "Cloud transport is NOT connected, querying presence over HTTP anyway")
+            }
+            do {
+                let connectedPeers = try await withTimeout(seconds: 3.0) {
+                    await cloudTransport.queryConnectedPeers(peerIds: pairedDeviceIds)
                 }
-            } else {
-                logger.debug("☁️", "Cloud transport is NOT connected")
+                cloudConnectedDeviceIds = Set(connectedPeers.map { $0.deviceId })
+                let preview = connectedPeers.prefix(5).map { $0.deviceId }.joined(separator: ",")
+                let suffix = connectedPeers.count > 5 ? ", …(+\(connectedPeers.count - 5))" : ""
+                logger.debug("☁️", "Cloud query returned \(connectedPeers.count) devices [\(preview)\(suffix)]")
+            } catch {
+                logger.warning("☁️", "Cloud query timeout or error: \(error.localizedDescription)")
             }
         }
         

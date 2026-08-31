@@ -2074,3 +2074,19 @@ harness 原本每 4 秒重发一次(为绕过更早的一个竞态)。每收到�
 弹窗本身仍然只能真机验。
 
 测试规模:HypoCore 158、macOS 56、iOS 30 单元 + 11 UI。
+
+
+## Android 与 Swift 之间的时间戳不兼容（2026-08-31）
+
+用户用真机 Android 配对 iOS 时报「The data couldn't be read because it isn't in the correct format.」。查下来是一处两端的格式分歧:
+
+- Android 写时间戳用 `clock.instant().toString()`,Java 的 `Instant.toString()` **在小数秒非零时会带上小数秒**——也就是几乎总是带。
+- Swift 侧读时间戳用的是裸的 `ISO8601DateFormatter()` 和 `JSONDecoder.dateDecodingStrategy = .iso8601`,**两者都不接受小数秒**,遇到就返回 nil / 抛 `DecodingError`。
+
+涉及 `PairingPayload` 的 `issued_at`/`expires_at`、`PairingAckPayload` 的 `issued_at`,以及走 `PairingSession` 解码器的 `PairingChallengePayload.timestamp`——**配对握手里的每一个时间戳**。
+
+修法是解析时同时接受带与不带小数秒两种写法,写出时仍不带(各平台都读得了)。`PairingDateFormat` 收口这件事,四个用例钉住:读 Android 的格式、读不带小数的、自己写的能自己读、垃圾仍然被拒。
+
+**为什么之前没被发现**:macOS↔macOS 和 Swift↔Swift 的往返测试两端都是 Swift,写出的都不带小数秒,所以永远走不到那条分支。只有真的接上 Android 才会踩到。
+
+**注意**:这不一定是用户看到的那一条错误的成因——`PairingChallengePayload` 解码失败会显示 "Unable to decode pairing challenge",不是那句话。所以另外把 `PairingRelayClient` 里四处裸解码也包上了说明,现在任何一处失败都会指出是哪一步、收到了什么。用户复现时那条消息会直接指认位置。

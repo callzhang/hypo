@@ -136,7 +136,7 @@ public struct PairingRelayClient: Sendable {
             throw Error.invalidResponse
         }
         if http.statusCode == 200 {
-            let payload = try decoder.decode(CreatePairingCodeResponse.self, from: data)
+            let payload = try decode(CreatePairingCodeResponse.self, from: data, step: "the new pairing code")
             return PairingCode(code: payload.code, expiresAt: payload.expires_at)
         }
         throw try parseError(data: data, response: http)
@@ -170,7 +170,7 @@ public struct PairingRelayClient: Sendable {
             throw Error.invalidResponse
         }
         if http.statusCode == 200 {
-            let payload = try decoder.decode(ClaimPairingCodeResponse.self, from: data)
+            let payload = try decode(ClaimPairingCodeResponse.self, from: data, step: "the claimed code")
             guard let key = Data(base64Encoded: payload.initiator_public_key) else {
                 throw Error.invalidResponse
             }
@@ -219,7 +219,7 @@ public struct PairingRelayClient: Sendable {
             throw Error.invalidResponse
         }
         if http.statusCode == 200 {
-            let payload = try decoder.decode(ChallengeResponse.self, from: data)
+            let payload = try decode(ChallengeResponse.self, from: data, step: "the challenge from the relay")
             return payload.challenge
         }
         throw try parseError(data: data, response: http)
@@ -253,7 +253,7 @@ public struct PairingRelayClient: Sendable {
             throw Error.invalidResponse
         }
         if http.statusCode == 200 {
-            let payload = try decoder.decode(AckResponse.self, from: data)
+            let payload = try decode(AckResponse.self, from: data, step: "the acknowledgement from the relay")
             return payload.ack
         }
         throw try parseError(data: data, response: http)
@@ -285,6 +285,21 @@ public struct PairingRelayClient: Sendable {
         }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return try await session.data(for: request)
+    }
+
+    /// Decodes, and says which step failed and what arrived when it cannot.
+    ///
+    /// A bare DecodingError surfaces to the user as "The data couldn't be read
+    /// because it isn't in the correct format", which names neither the step
+    /// nor the payload — there are four decodes in a pairing round trip and
+    /// that message cannot tell them apart.
+    private func decode<T: Decodable>(_ type: T.Type, from data: Data, step: String) throws -> T {
+        do {
+            return try decoder.decode(type, from: data)
+        } catch {
+            let preview = String(decoding: data.prefix(300), as: UTF8.self)
+            throw Error.server("Could not read \(step): \(error.localizedDescription) — received: \(preview)")
+        }
     }
 
     private func parseError(data: Data, response: HTTPURLResponse) throws -> Error {

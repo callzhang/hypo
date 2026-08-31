@@ -1,5 +1,29 @@
 import Foundation
 
+/// ISO-8601 dates as the other platforms actually write them.
+///
+/// `ISO8601DateFormatter()` on its own rejects fractional seconds, and Android
+/// sends `Instant.toString()`, which includes them whenever they are non-zero
+/// — which is nearly always. A plain formatter therefore fails to read almost
+/// every timestamp Android produces, and the pairing that carries it dies with
+/// a message about the data not being in the correct format.
+///
+/// Parsing accepts both shapes; writing omits the fraction, which every
+/// platform reads.
+enum PairingDateFormat {
+    static func date(from string: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFraction.date(from: string) { return date }
+        return ISO8601DateFormatter().date(from: string)
+    }
+
+    static func string(from date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+}
+
+
 public struct PairingPayload: Codable, Equatable, Sendable {
     public let version: String
     public let peerDeviceId: UUID
@@ -63,9 +87,8 @@ public struct PairingPayload: Codable, Equatable, Sendable {
         if let relayHint = relayHint {
             try container.encode(relayHint.absoluteString, forKey: .relayHint)
         }
-        let dateFormatter = ISO8601DateFormatter()
-        try container.encode(dateFormatter.string(from: issuedAt), forKey: .issuedAt)
-        try container.encode(dateFormatter.string(from: expiresAt), forKey: .expiresAt)
+        try container.encode(PairingDateFormat.string(from: issuedAt), forKey: .issuedAt)
+        try container.encode(PairingDateFormat.string(from: expiresAt), forKey: .expiresAt)
         try container.encode(signature.base64EncodedString(), forKey: .signature)
     }
     
@@ -100,15 +123,14 @@ public struct PairingPayload: Codable, Equatable, Sendable {
         port = try container.decode(Int.self, forKey: .port)
         relayHint = try container.decodeIfPresent(String.self, forKey: .relayHint).flatMap { URL(string: $0) }
         
-        let dateFormatter = ISO8601DateFormatter()
         let issuedAtString = try container.decode(String.self, forKey: .issuedAt)
-        guard let issuedAtDate = dateFormatter.date(from: issuedAtString) else {
+        guard let issuedAtDate = PairingDateFormat.date(from: issuedAtString) else {
             throw DecodingError.dataCorruptedError(forKey: .issuedAt, in: container, debugDescription: "Invalid ISO8601 date string for issued_at")
         }
         issuedAt = issuedAtDate
         
         let expiresAtString = try container.decode(String.self, forKey: .expiresAt)
-        guard let expiresAtDate = dateFormatter.date(from: expiresAtString) else {
+        guard let expiresAtDate = PairingDateFormat.date(from: expiresAtString) else {
             throw DecodingError.dataCorruptedError(forKey: .expiresAt, in: container, debugDescription: "Invalid ISO8601 date string for expires_at")
         }
         expiresAt = expiresAtDate
@@ -330,8 +352,7 @@ public struct PairingAckPayload: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         // Convert Data to Base64 string and Date to ISO8601 string
         try container.encode(responseHash.base64EncodedString(), forKey: .responseHash)
-        let formatter = ISO8601DateFormatter()
-        try container.encode(formatter.string(from: issuedAt), forKey: .issuedAt)
+        try container.encode(PairingDateFormat.string(from: issuedAt), forKey: .issuedAt)
     }
     
     // Custom decoder to handle Base64 string and ISO8601 date
@@ -344,8 +365,7 @@ public struct PairingAckPayload: Codable, Equatable, Sendable {
         self.responseHash = responseHashData
         
         let issuedAtString = try container.decode(String.self, forKey: .issuedAt)
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: issuedAtString) else {
+        guard let date = PairingDateFormat.date(from: issuedAtString) else {
             throw DecodingError.dataCorruptedError(forKey: .issuedAt, in: container, debugDescription: "Invalid ISO8601 date string for issued_at")
         }
         self.issuedAt = date

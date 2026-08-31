@@ -2158,7 +2158,7 @@ Android 的 `removeDevice` 是四步,其中**先删密钥再忘掉设备**这个
 | `testPairsOverLanAndSyncsBothWays` | **通过** —— LAN 配对 + 双向同步 |
 | `testTappingANearbyDevicePairsWithIt` | **通过**(需全新对端身份,见下) |
 | `testAPairedDeviceCanBeUnpaired` | 仍 skip;行为已由 `UnpairTests` 三个单测覆盖 |
-| `testSyncsThroughTheRelayWithNoLocalRoute` | 仍 skip;需要 relay 模式的 harness |
+| `testSyncsThroughTheRelayWithNoLocalRoute` | **通过** —— 经中转服务器配对 + 双向同步 |
 
 `testPairsOverLanAndSyncsBothWays` 通过意味着最初验收清单里的第 6、7 条(Mac→iOS、iOS→Mac)真的成立了。
 
@@ -2187,3 +2187,23 @@ swift run HypoHarness show
 ### 已配对的设备不能再配一次
 
 `testTappingANearbyDevicePairsWithIt` 在同一轮里跑第二次会失败,因为 iPhone 已经和这个 harness 配过了,重复的 challenge 会被 `PairingSession` 判为 duplicate 拒掉。换一个全新身份的 harness(每次启动都会生成新的 device id)即通过。这是正确行为,但意味着**这个测试对运行顺序敏感**。
+
+
+### relay 模式的两个前置条件
+
+1. **`RELAY_WS_AUTH_TOKEN` 必须传给 harness**,否则中转服务器回 401,harness 连不上、也就永远不会生成配对码,测试只会看到"没有配对码"然后 skip。取自仓库根的 `.env`。
+2. **`HYPO_CODE_FILE`** 要设,harness 才会把配对码写盘给测试读。
+
+完整起法:
+
+```bash
+RELAY_WS_AUTH_TOKEN="$(grep -m1 '^RELAY_WS_AUTH_TOKEN=' .env | cut -d= -f2-)" \
+HYPO_DEVICE_NAME="Relay Harness" HYPO_LAN_PORT=7012 \
+HYPO_CODE_FILE=/tmp/hypo-code.txt HYPO_RECEIVED_FILE=/tmp/hypo-received.txt \
+HYPO_SEND_TEXT="hello over the relay" \
+swift run HypoHarness relay
+```
+
+### 发送按钮的等待必须能重试
+
+`RelaySyncTests` 第一次失败在"没有出现发送按钮",而它上一行的断言(relay → 手机的内容已到达)是通过的。原因和 `HypoUITests` 里那个一样:**任何活跃对端推送的每一条内容都会被写进剪贴板**,此后 app 正确地认为没有用户的新内容可发。一次性等待会输掉这场竞争,必须边重设剪贴板边多次采样。

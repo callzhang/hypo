@@ -79,8 +79,16 @@ final class RelaySyncTests: XCTestCase {
         Thread.sleep(forTimeInterval: 2)
         app.activate()
 
+        // Re-set between checks: every entry a peer pushes is written to the
+        // clipboard, after which the app correctly has nothing of the user's to
+        // offer. Any live device competes for the clipboard the whole time.
         let paste = app.buttons["Paste"]
-        XCTAssertTrue(paste.waitForExistence(timeout: 15), "no send control offered")
+        var offered = false
+        for _ in 0..<12 where !offered {
+            UIPasteboard.general.string = fromPhone
+            offered = paste.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(offered, "no send control offered")
         paste.tap()
 
         XCTAssertTrue(

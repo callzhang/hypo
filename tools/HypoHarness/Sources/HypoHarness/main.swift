@@ -99,7 +99,13 @@ func runShow() async throws {
     print("Advertising _hypo._tcp as \"\(deviceName)\"")
 
     _ = await MainActor.run { () -> HarnessInbox in
-        let inbox = HarnessInbox(deviceId: deviceId, keyProvider: keyProvider)
+        let inbox = HarnessInbox(
+            deviceId: deviceId,
+            keyProvider: keyProvider,
+            session: session,
+            server: server,
+            onPaired: { peerId in pairedPeer.withLock { $0 = peerId } }
+        )
         server.delegate = inbox
         InboxBox.shared.keep(inbox)
         return inbox
@@ -239,9 +245,21 @@ final class PublisherBox {
 /// Prints whatever arrives, which is the whole point of the listening side.
 final class HarnessInbox: LanWebSocketServerDelegate, @unchecked Sendable {
     private let handler: IncomingClipboardHandler
+    private let session: PairingSession
+    private let server: LanWebSocketServer
+    private let onPaired: @Sendable (String) -> Void
 
     @MainActor
-    init(deviceId: String, keyProvider: InMemoryDeviceKeyProvider) {
+    init(
+        deviceId: String,
+        keyProvider: InMemoryDeviceKeyProvider,
+        session: PairingSession,
+        server: LanWebSocketServer,
+        onPaired: @escaping @Sendable (String) -> Void
+    ) {
+        self.session = session
+        self.server = server
+        self.onPaired = onPaired
         let engine = SyncEngine(
             transport: SilentTransport(),
             keyProvider: keyProvider,
@@ -255,7 +273,24 @@ final class HarnessInbox: LanWebSocketServerDelegate, @unchecked Sendable {
         )
     }
 
-    func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {}
+    /// Answers a challenge that arrived over the LAN, which is how a device
+    /// pairs with this one by tapping it in a list rather than typing a code.
+    func server(_ server: LanWebSocketServer, didReceivePairingChallenge challenge: PairingChallengeMessage, from connection: UUID) {
+        print("Pairing challenge over LAN from \(challenge.initiatorDeviceName)")
+        Task { @MainActor in
+            guard let ack = await self.session.handleChallenge(challenge) else {
+                print("Rejected the LAN pairing challenge.")
+                return
+            }
+            do {
+                try self.server.sendPairingAck(ack, to: connection)
+                self.onPaired(challenge.initiatorDeviceId)
+                print("Paired over LAN with \(challenge.initiatorDeviceName)")
+            } catch {
+                print("Could not send the pairing ack: \(error.localizedDescription)")
+            }
+        }
+    }
     func server(_ server: LanWebSocketServer, didAcceptConnection id: UUID) {
         print("A device connected.")
     }

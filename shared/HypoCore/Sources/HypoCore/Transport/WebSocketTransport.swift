@@ -269,6 +269,16 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
     }
 
+    /// Whether these bytes are a pairing handshake message rather than a
+    /// clipboard envelope. Recognised by its keys, the same way the LAN server
+    /// recognises one arriving from the other direction.
+    private func looksLikePairingMessage(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return object["responder_device_id"] != nil || object["initiator_pub_key"] != nil
+    }
+
     /// Sends bytes exactly as given, outside the envelope protocol.
     ///
     /// LAN pairing has to exchange a plain JSON challenge before either side
@@ -1244,6 +1254,11 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                     self.handleIncoming(data: data)
                 } else if case .string(let str) = message {
                     self.logger.info("📝 [WebSocketTransport] Received text message: \(str.prefix(100))")
+                    // Text frames were logged and thrown away. The LAN server
+                    // sends a pairing ack as text on purpose — so Android can
+                    // read it as a JSON string — which meant a Swift client
+                    // asking to pair over the LAN never heard the answer.
+                    self.handleIncoming(data: Data(str.utf8))
                 }
                 self.receiveNext(on: task)
             case .failure(let error):
@@ -1491,6 +1506,15 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                 logger.warning("⚠️ [WebSocketTransport] No onIncomingMessage handler set - message will be dropped!")
             }
         } catch let decodingError as DecodingError {
+            // A pairing ack arrives before any shared key exists, so it is bare
+            // JSON with no frame around it and fails the decode above. Dropping
+            // it here left LAN pairing hanging: the peer answered, and the
+            // answer never reached the side that asked.
+            if looksLikePairingMessage(data), let handler = onIncomingMessage {
+                logger.info("🤝 [WebSocketTransport] Forwarding an unframed pairing message")
+                Task { await handler(data, .lan) }
+                return
+            }
             logger.error("❌ [WebSocketTransport] Failed to decode incoming data: \(decodingError)")
             // Log detailed decoding error information
             switch decodingError {

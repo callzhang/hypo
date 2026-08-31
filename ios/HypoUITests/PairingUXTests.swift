@@ -61,4 +61,30 @@ final class PairingUXTests: XCTestCase {
         print("LAN_LIST: \(app.staticTexts.allElementsBoundByIndex.map { $0.label })")
         XCTAssertTrue(app.cells.count > 0 || app.buttons.count > 2)
     }
+
+    /// Pairs by tapping a device in the list — no code typed anywhere.
+    ///
+    /// Needs a peer advertising on this network; tools/HypoHarness is one.
+    /// Skipped when nothing named "Harness Mac" turns up, so the suite stays
+    /// runnable without it.
+    func testTappingANearbyDevicePairsWithIt() throws {
+        let app = openPairing()
+
+        guard app.staticTexts["Harness Mac"].waitForExistence(timeout: 30) else {
+            throw XCTSkip("no harness on this network; start HypoHarness to exercise this")
+        }
+        // The row is a Button; tapping the label inside it does not always
+        // reach the button in a SwiftUI List.
+        let row = app.buttons.containing(.staticText, identifier: "Harness Mac").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "the device row is not tappable")
+        row.tap()
+
+        let paired = app.staticTexts["Paired with Harness Mac"].waitForExistence(timeout: 45)
+        if !paired {
+            // The screen carries the reason — pairing, failed with a message,
+            // or still listing — which the device log does not reliably keep.
+            print("LAN_PAIR_SCREEN: \(app.staticTexts.allElementsBoundByIndex.map { $0.label })")
+        }
+        XCTAssertTrue(paired, "tapping a nearby device did not pair with it")
+    }
 }

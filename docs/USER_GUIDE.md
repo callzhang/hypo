@@ -752,7 +752,12 @@ it says whether sync is connected, over the LAN or the relay, and whether it is
 paused — paused and disconnected look different on purpose.
 
 **Global Shortcut**:
-- <kbd>Alt</kbd>+<kbd>V</kbd>: Open clipboard history from anywhere
+- <kbd>Alt</kbd>+<kbd>V</kbd>: Open clipboard history from anywhere, with the
+  caret already in the search box
+- Type to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to choose without leaving
+  the box, <kbd>Enter</kbd> to put the entry back on the clipboard —
+  <kbd>Ctrl</kbd>+<kbd>V</kbd> then pastes it where you were
+- <kbd>Esc</kbd>, or clicking anywhere else, closes it without taking anything
 
   <kbd>Win</kbd>+<kbd>V</kbd> belongs to the Windows clipboard history and
   cannot be taken. If another application already holds Alt+V, Hypo says so in a

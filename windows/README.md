@@ -22,6 +22,7 @@ the relay, from a notification-area application.
 | Clipboard sharing settings (both default off) | Done |
 | Remote pairing by six-digit code | Done |
 | Global shortcut (Alt+V), reconfigurable | Done |
+| History usable from the keyboard alone | Done |
 | Light and dark, following the system setting | Done |
 | Version in the tray menu | Done |
 | Notification when something arrives | Done |
@@ -190,6 +191,12 @@ menu; it is the only one of the three switches that starts on, because it
 shares nothing beyond the screen already in front of you.
 
 ### The shortcut
+
+Alt+V opens the history with the caret already in the search box: type to
+narrow, ↑ and ↓ to choose without leaving the box, Enter to put the entry back
+and return focus to whatever you were in, Escape to leave with nothing. Clicking
+away closes it, and it stays out of Alt+Tab — it is a list a keystroke summons,
+not a window to switch to.
 
 Alt+V, because Win+V belongs to the Windows clipboard history and cannot be
 taken. Change it with a `"Hotkey": "Ctrl+Alt+H"` line in `settings.json`; the

@@ -21,6 +21,7 @@ the relay, from a notification-area application.
 | Tray icon, history window, pairing window | Done |
 | Clipboard sharing settings (both default off) | Done |
 | Remote pairing by six-digit code | Done |
+| Global shortcut (Alt+V), reconfigurable | Done |
 | Oversized images compressed before sending | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
 | x64 and ARM64 builds | Done |
@@ -115,7 +116,8 @@ the ARM64 one does not have to. It puts
 an icon in the notification area:
 
 - **Clipboard history…** — search, and double-click an entry to put it back;
-  focus returns to whatever you were in, so the next paste lands there
+  focus returns to whatever you were in, so the next paste lands there.
+  **Alt+V** opens it from anywhere, and the menu item shows the combination
 - **Pair a device…** — devices on this network, or a six-digit code for one
   that is not
 - **Pause syncing** — distinct from being disconnected, and the icon says which
@@ -126,6 +128,19 @@ Windows shares clipboard content in two directions that have nothing to do with
 Hypo: the local Win+V history, and the cloud clipboard that roams to a Microsoft
 account and every machine signed into it. By default Hypo opts out of both by
 publishing the marker formats Windows looks for.
+
+### The shortcut
+
+Alt+V, because Win+V belongs to the Windows clipboard history and cannot be
+taken. Change it with a `"Hotkey": "Ctrl+Alt+H"` line in `settings.json`; the
+spellings `Ctrl`/`Control` and `Win`/`Windows` are all understood, case does not
+matter, and a value that makes no sense falls back to Alt+V rather than stopping
+the application.
+
+If another application already holds the combination, Windows refuses it. Hypo
+says so in a notification and drops the combination from the menu item, so the
+menu never advertises a shortcut that will not fire — a shortcut that silently
+does nothing is indistinguishable from a broken application.
 
 They are off because Hypo carries whatever was copied on another device, and a
 password from a phone's password manager silently roaming to a Microsoft account

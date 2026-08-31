@@ -35,12 +35,14 @@ public sealed class TrayIconHost : IDisposable
     private readonly NotifyIcon _icon = new();
     private readonly System.Windows.Forms.Timer _poll = new();
     private readonly ToolStripMenuItem _pauseItem;
+    private ToolStripMenuItem _historyMenuItem = null!;
     private readonly ToolStripMenuItem _historyItem;
     private readonly ToolStripMenuItem _cloudItem;
     private readonly Action<HypoSettings> _saveSettings;
     private HypoSettings _settings;
 
     private readonly ForegroundHandoff _handoff = new();
+    private GlobalHotkey? _hotkey;
 
     private HistoryWindow? _historyWindow;
     private PairingWindow? _pairingWindow;
@@ -116,6 +118,9 @@ public sealed class TrayIconHost : IDisposable
         // Both start off. The labels say what turning them on does rather than
         // naming a feature, because "Share with Windows clipboard history" is
         // only meaningful if you already know what that is.
+        _historyMenuItem = new ToolStripMenuItem(
+            "Clipboard history…", null, (_, _) => ShowHistory());
+
         _historyItem = new ToolStripMenuItem(
             "Show synced items in Windows clipboard history (Win+V)",
             null,
@@ -135,7 +140,7 @@ public sealed class TrayIconHost : IDisposable
         };
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add(new ToolStripMenuItem("Clipboard history…", null, (_, _) => ShowHistory()));
+        menu.Items.Add(_historyMenuItem);
         menu.Items.Add(new ToolStripMenuItem("Pair a device…", null, (_, _) => ShowPairing()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_historyItem);
@@ -162,7 +167,44 @@ public sealed class TrayIconHost : IDisposable
         _poll.Start();
 
         ShowFirewallNoticeOnce();
+        RegisterHotkey();
     }
+
+    /// <summary>
+    /// Claims the key combination that opens the history, and says so in the
+    /// menu either way.
+    ///
+    /// <para>A hotkey that silently does nothing is indistinguishable from a
+    /// broken application, so a refusal -- almost always another application
+    /// already holding the combination -- goes where the user will look.</para>
+    /// </summary>
+    private void RegisterHotkey()
+    {
+        // Pressed arrives on the hotkey's own message pump. Everything ShowHistory
+        // touches is WPF, so it has to be handed back here -- and asynchronously,
+        // so holding the keys down cannot block that pump.
+        var ui = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+
+        _hotkey = new GlobalHotkey(_settings.HotkeyBinding);
+        _hotkey.Pressed += (_, _) => ui.BeginInvoke(ShowHistory);
+
+        _historyMenuItem.Text = _hotkey.IsRegistered
+            ? $"Clipboard history…\t{_hotkey.Binding}"
+            : "Clipboard history…";
+
+        if (_hotkey.Failure is { } failure)
+        {
+            _icon.BalloonTipTitle = "Hypo's shortcut is unavailable";
+            _icon.BalloonTipText = $"{failure} Open the history from this menu instead.";
+            _icon.BalloonTipIcon = ToolTipIcon.Warning;
+            _icon.ShowBalloonTip(10_000);
+        }
+    }
+
+    /// <summary>The hotkey's state, for anyone showing it.</summary>
+    public string? HotkeyFailure => _hotkey?.Failure;
+
+    public bool HotkeyRegistered => _hotkey?.IsRegistered ?? false;
 
     /// <summary>
     /// Explains the firewall prompt, once, on the first run.
@@ -298,6 +340,10 @@ public sealed class TrayIconHost : IDisposable
 
     public void Dispose()
     {
+        // Left registered, the combination stays claimed for the session and the
+        // next launch cannot have it.
+        _hotkey?.Dispose();
+
         _poll.Stop();
         _poll.Dispose();
         _icon.Visible = false;

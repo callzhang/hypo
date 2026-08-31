@@ -26,6 +26,19 @@ public sealed record HypoSettings
     /// </summary>
     public bool FirewallNoticeShown { get; init; }
 
+    /// <summary>
+    /// The key combination that opens the history, written the way it reads:
+    /// "Alt+V".
+    ///
+    /// <para>Text rather than an enum pair so the file stays legible to whoever
+    /// opens it, and an unparseable value falls back to the default rather than
+    /// stopping the application.</para>
+    /// </summary>
+    public string Hotkey { get; init; } = HotkeyBinding.Default.ToString();
+
+    [JsonIgnore]
+    public HotkeyBinding HotkeyBinding => HotkeyBinding.Parse(Hotkey) ?? HotkeyBinding.Default;
+
     /// <summary>Whether synced items may appear in this machine's Win+V history.</summary>
     public bool ShareWithWindowsHistory { get; init; }
 
@@ -42,7 +55,13 @@ public sealed record HypoSettings
         AllowCloudUpload = AllowCloudClipboardUpload,
     };
 
-    private static readonly JsonSerializerOptions Format = new() { WriteIndented = true };
+    // Indented and case-insensitive because this file is meant to be opened and
+    // edited by hand, and "hotkey" should not quietly mean nothing.
+    private static readonly JsonSerializerOptions Format = new()
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true,
+    };
 
     /// <summary>
     /// Reads the settings, falling back to the defaults for anything missing.
@@ -59,7 +78,7 @@ public sealed record HypoSettings
         try
         {
             return File.Exists(path)
-                ? JsonSerializer.Deserialize<HypoSettings>(File.ReadAllText(path)) ?? new HypoSettings()
+                ? JsonSerializer.Deserialize<HypoSettings>(File.ReadAllText(path), Format) ?? new HypoSettings()
                 : new HypoSettings();
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)

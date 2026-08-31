@@ -534,6 +534,58 @@ public class TrayIconHostTests : IDisposable
     }
 
     [SkippableFact]
+    public void TheMenuTellsYouTheShortcut()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            Skip.IfNot(tray.HotkeyRegistered, tray.HotkeyFailure ?? "the shortcut did not register");
+
+            // Nothing else on screen ever says what the combination is, so the
+            // menu is where anyone would find it.
+            var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Clipboard history", StringComparison.Ordinal));
+
+            Assert.Contains("Alt+V", history.Text);
+        });
+    }
+
+    [SkippableFact]
+    public void ATakenShortcutIsSaidOutLoudAndTheMenuStillWorks()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            var binding = HotkeyBinding.Parse("Ctrl+Alt+Shift+F8")!;
+            using var squatter = new GlobalHotkey(binding);
+            Skip.IfNot(squatter.IsRegistered, "something else on this machine already holds the combination");
+
+            using var tray = Build(settings: new HypoSettings { Hotkey = binding.ToString() });
+            tray.Start();
+
+            // A shortcut that silently does nothing is indistinguishable from a
+            // broken application.
+            Assert.False(tray.HotkeyRegistered);
+            Assert.Contains("already taken", tray.HotkeyFailure);
+
+            // ...and the menu must not advertise a shortcut that will not fire.
+            var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Clipboard history", StringComparison.Ordinal));
+
+            Assert.DoesNotContain("F8", history.Text);
+
+            history.PerformClick();
+            Assert.NotNull(tray.OpenHistoryWindow);
+            tray.OpenHistoryWindow!.Close();
+        });
+    }
+
+    [SkippableFact]
     public void TheFirewallNoticeIsShownOnceAndRecorded()
     {
         RequireWindows();

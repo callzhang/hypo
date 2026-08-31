@@ -33,20 +33,20 @@ final class HarnessSyncTests: XCTestCase {
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15))
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
-        app.buttons["Pair a device"].tap()
-
-        guard app.staticTexts["Harness Mac"].waitForExistence(timeout: 30) else {
-            throw XCTSkip("no harness on this network; start HypoHarness to exercise this")
+        // Nearby devices are listed in the devices section itself, so pairing
+        // with something visible needs no code screen and no code.
+        let nearby = app.buttons["NearbyDevice-Harness Mac"]
+        guard revealElement(nearby, in: app) else {
+            throw XCTSkip("no unpaired harness on this network; start HypoHarness to exercise this")
         }
-        app.buttons.containing(.staticText, identifier: "Harness Mac").firstMatch.tap()
+        nearby.tap()
         XCTAssertTrue(
-            app.staticTexts["Paired with Harness Mac"].waitForExistence(timeout: 45),
+            isPaired("Harness Mac", in: app),
             "pairing over the LAN did not complete"
         )
 
         // Back to the list. What the harness sends should appear there: a Mac
         // copying something and a phone showing it, which is the app's point.
-        app.navigationBars.buttons.element(boundBy: 0).tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(
             app.staticTexts["hello from the Mac harness"].waitForExistence(timeout: 120),
@@ -64,13 +64,11 @@ final class HarnessSyncTests: XCTestCase {
 
         // The paste control appears because there is something to send, and
         // reads without a prompt because the user pressed it.
-        let paste = app.buttons["Paste"]
-        if !paste.waitForExistence(timeout: 15) {
-            print("SEND_SCREEN: \(app.staticTexts.allElementsBoundByIndex.map { $0.label })")
-            print("SEND_BUTTONS: \(app.buttons.allElementsBoundByIndex.map { $0.label })")
-        }
-        XCTAssertTrue(paste.exists, "no send control offered")
-        paste.tap()
+        XCTAssertTrue(
+            waitForSendControl(in: app, resettingTo: fromPhone),
+            "no send control offered"
+        )
+        app.buttons["Paste"].tap()
 
         XCTAssertTrue(
             pollForFile(at: receivedPath, containing: fromPhone, timeout: 90),

@@ -18,29 +18,43 @@ final class PairingUXTests: XCTestCase {
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15))
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
-        app.buttons["Pair a device"].tap()
+        XCTAssertTrue(revealElement(app.buttons["Pair with code"], in: app), "no way in to code pairing")
+        app.buttons["Pair with code"].tap()
         return app
     }
 
-    func testOffersLanAndCodeAsSeparateModes() {
-        let app = openPairing()
-
-        XCTAssertTrue(app.buttons["LAN"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Code"].exists)
-
-        // LAN is the default: pairing with something already visible should not
-        // require typing six digits.
-        XCTAssertTrue(
-            app.staticTexts["Looking for devices…"].waitForExistence(timeout: 5)
-                || app.staticTexts["Nearby devices"].waitForExistence(timeout: 20)
-                || app.staticTexts["No devices found"].waitForExistence(timeout: 5),
-            "LAN mode showed none of its three states"
-        )
+    @discardableResult
+    private func openSettings() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launch()
+        addUIInterruptionMonitor(withDescription: "system alerts") { alert in
+            for label in ["Allow", "Allow Paste", "OK"] where alert.buttons[label].exists {
+                alert.buttons[label].tap()
+                return true
+            }
+            return false
+        }
+        app.tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15))
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
+        return app
     }
 
-    func testCodeModeAsksWhichHalfBeforeShowingEither() {
+    /// Pairing with something already visible must not require typing six
+    /// digits, so the nearby devices sit in the devices section itself rather
+    /// than behind the code screen.
+    func testNearbyDevicesLiveInTheDevicesSection() {
+        let app = openSettings()
+
+        XCTAssertTrue(app.staticTexts["Devices"].waitForExistence(timeout: 10))
+        XCTAssertTrue(revealElement(app.buttons["Pair with code"], in: app))
+        // Typing a code is the fallback, so it must not be the only route.
+        XCTAssertFalse(app.buttons["LAN"].exists)
+    }
+
+    func testCodeScreenAsksWhichHalfBeforeShowingEither() {
         let app = openPairing()
-        app.buttons["Code"].tap()
 
         XCTAssertTrue(app.buttons["Show a code"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Enter a code"].exists)
@@ -54,8 +68,8 @@ final class PairingUXTests: XCTestCase {
     }
 
     func testLanModeListsADiscoveredPeer() throws {
-        let app = openPairing()
-        guard app.staticTexts["Nearby devices"].waitForExistence(timeout: 30) else {
+        let app = openSettings()
+        guard app.staticTexts["On this network"].waitForExistence(timeout: 30) else {
             throw XCTSkip("no peer advertising on this network; start HypoHarness to exercise this")
         }
         print("LAN_LIST: \(app.staticTexts.allElementsBoundByIndex.map { $0.label })")
@@ -68,21 +82,19 @@ final class PairingUXTests: XCTestCase {
     /// Skipped when nothing named "Harness Mac" turns up, so the suite stays
     /// runnable without it.
     func testTappingANearbyDevicePairsWithIt() throws {
-        let app = openPairing()
+        let app = openSettings()
 
-        guard app.staticTexts["Harness Mac"].waitForExistence(timeout: 30) else {
+        // Identifiers rather than the label text: a nearby device and a paired
+        // one both show the same name, and after pairing the row moves from one
+        // group to the other, which is exactly what this asserts.
+        let nearby = app.buttons["NearbyDevice-Harness Mac"]
+        guard revealElement(nearby, in: app) else {
             throw XCTSkip("no harness on this network; start HypoHarness to exercise this")
         }
-        // The row is a Button; tapping the label inside it does not always
-        // reach the button in a SwiftUI List.
-        let row = app.buttons.containing(.staticText, identifier: "Harness Mac").firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "the device row is not tappable")
-        row.tap()
+        nearby.tap()
 
-        let paired = app.staticTexts["Paired with Harness Mac"].waitForExistence(timeout: 45)
+        let paired = isPaired("Harness Mac", in: app)
         if !paired {
-            // The screen carries the reason — pairing, failed with a message,
-            // or still listing — which the device log does not reliably keep.
             print("LAN_PAIR_SCREEN: \(app.staticTexts.allElementsBoundByIndex.map { $0.label })")
         }
         XCTAssertTrue(paired, "tapping a nearby device did not pair with it")

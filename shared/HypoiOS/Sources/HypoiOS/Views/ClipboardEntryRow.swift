@@ -8,36 +8,54 @@ struct ClipboardEntryRow: View {
     let entry: ClipboardEntry
     let isLocal: Bool
     let onCopy: () -> Void
+    let onOpenDetail: () -> Void
 
     var body: some View {
-        Button(action: onCopy) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 12) {
-                    Image(systemName: typeSymbol)
-                        .font(.system(size: 16))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20)
+        // A tap gesture rather than wrapping the row in a Button: the preview
+        // control is itself a Button, and SwiftUI does not reliably deliver
+        // taps to a button nested inside another one — the row swallowed them,
+        // so the preview could be seen but not opened.
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: typeSymbol)
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
 
-                    originBadge
+                originBadge
 
-                    Spacer(minLength: 8)
+                Spacer(minLength: 8)
 
-                    Text(entry.timestamp, format: .dateTime.hour().minute())
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Text(entry.timestamp, format: .dateTime.hour().minute())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                // Only when there is more to see than the row shows, the
+                // way Android decides it: images and files always have
+                // more, text only when the preview had to cut it.
+                if hasMoreToShow {
+                    Button(action: onOpenDetail) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Preview")
+                    .accessibilityIdentifier("Preview-\(entry.id.uuidString)")
                 }
-
-                Text(entry.content.previewDescription)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(16)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+
+            Text(entry.content.previewDescription)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
+        .padding(16)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onCopy)
     }
 
     private var originBadge: some View {
@@ -64,6 +82,17 @@ struct ClipboardEntryRow: View {
             isLocal ? Color.accentColor.opacity(0.12) : Color(.tertiarySystemBackground),
             in: Capsule()
         )
+    }
+
+    private var hasMoreToShow: Bool {
+        switch entry.content {
+        case .image, .file:
+            return true
+        case .text(let text):
+            return text != entry.content.previewDescription || text.count > 120
+        case .link:
+            return false
+        }
     }
 
     private var typeSymbol: String {

@@ -752,6 +752,47 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 
 ---
 
+---
+
+## iOS
+
+<a id="ios"></a>
+
+iOS works differently from the other clients in two ways that are worth knowing before you use it, both because Apple does not allow what the other platforms do.
+
+### Sending is a button, not automatic
+
+On macOS, Android and Windows, Hypo notices when you copy something and sends it. iOS does not permit that: an app cannot watch the clipboard in the background, and reading content another app put there raises a system prompt every single time.
+
+So iOS does the closest thing that does not interrupt you:
+
+- It checks *whether* there is text on the clipboard, which raises no prompt and does not reveal the content.
+- If there is, a **Paste** button appears at the bottom of the history list.
+- Pressing it sends what you copied. Apple exempts that button from the prompt, so pressing it is the whole interaction.
+
+If nothing new has been copied, no button appears. Receiving is unaffected — entries from your other devices arrive on their own.
+
+### Pairing
+
+Open **Settings → Devices**. Devices found on your network are listed there; tap one to pair. That is the short path and it needs no code.
+
+**Pair with code** is the fallback for devices that cannot see each other — different networks, or a network that blocks device discovery. One side shows a six-digit code, the other types it.
+
+Swipe left on a paired device to unpair. Its encryption key is deleted with it.
+
+### The local network permission
+
+The first time Hypo looks for devices, iOS asks for permission to find devices on your local network. **If you decline, LAN sync stops working and nothing will say so** — discovery simply returns nothing. Sync then falls back to the cloud relay, which still works but is slower.
+
+To change it later: **iOS Settings → Privacy & Security → Local Network → Hypo**. The app's Settings screen has an *Open Settings* button that takes you there.
+
+### What iOS does not do
+
+- **No background sync.** Entries arrive while Hypo is open. Notification-driven background delivery needs a paid Apple developer account and is not part of this version.
+- **No LAN listening.** iOS only ever dials out. The system suspends apps in the background, so an iPhone that advertised itself would appear to flap on and offline to your other devices. This is deliberate.
+
+---
+
 ## 🔧 Troubleshooting
 
 ### Common Issues

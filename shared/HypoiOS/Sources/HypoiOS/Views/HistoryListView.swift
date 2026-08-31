@@ -24,6 +24,8 @@ public struct HistoryListView: View {
         self.onOpenSettings = onOpenSettings
     }
 
+    @State private var detailEntry: ClipboardEntry?
+
     public var body: some View {
         VStack(spacing: 12) {
             HStack(spacing: 4) {
@@ -71,6 +73,11 @@ public struct HistoryListView: View {
             .frame(maxWidth: .infinity)
             .background(.bar)
         }
+        .sheet(item: $detailEntry) { entry in
+            ClipboardEntryDetailView(entry: entry) {
+                viewModel.copyToClipboard(entry)
+            }
+        }
         .task { await viewModel.load() }
         .task {
             // Checked while the screen is visible, not only on foreground.
@@ -108,7 +115,8 @@ public struct HistoryListView: View {
                     ClipboardEntryRow(
                         entry: entry,
                         isLocal: entry.deviceId.lowercased() == localDeviceId.lowercased(),
-                        onCopy: { viewModel.copyToClipboard(entry) }
+                        onCopy: { viewModel.copyToClipboard(entry) },
+                        onOpenDetail: { detailEntry = entry }
                     )
                     .contextMenu {
                         Button(entry.isPinned ? "Unpin" : "Pin") {

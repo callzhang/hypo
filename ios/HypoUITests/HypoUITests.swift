@@ -44,9 +44,10 @@ final class HypoUITests: XCTestCase {
         app.buttons["Settings"].tap()
 
         XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
-        app.buttons["Pair a device"].tap()
+        XCTAssertTrue(revealElement(app.buttons["Pair with code"], in: app), "no way in to code pairing")
+        app.buttons["Pair with code"].tap()
 
-        XCTAssertTrue(app.buttons["Code"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Show a code"].waitForExistence(timeout: 5))
     }
 
     func testSettingsShowsARealDeviceName() {
@@ -71,10 +72,10 @@ final class HypoUITests: XCTestCase {
         let app = launch()
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
-        app.buttons["Pair a device"].tap()
+        XCTAssertTrue(revealElement(app.buttons["Pair with code"], in: app), "no way in to code pairing")
+        app.buttons["Pair with code"].tap()
         // Code pairing is one of two modes now, and asks which half you want.
-        XCTAssertTrue(app.buttons["Code"].waitForExistence(timeout: 10))
-        app.buttons["Code"].tap()
+        XCTAssertTrue(app.buttons["Show a code"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Show a code"].waitForExistence(timeout: 10))
         app.buttons["Show a code"].tap()
 
@@ -121,11 +122,10 @@ final class HypoUITests: XCTestCase {
         // writes each one to the clipboard, after which the app correctly has
         // nothing of the user's to offer — right behaviour, but it means a live
         // device on the network competes for the clipboard the whole time.
-        var offered = false
-        for _ in 0..<12 where !offered {
-            UIPasteboard.general.string = "something worth sending \(UUID().uuidString.prefix(6))"
-            offered = app.buttons["Paste"].waitForExistence(timeout: 4)
-        }
+        let offered = waitForSendControl(
+            in: app,
+            resettingTo: "something worth sending \(UUID().uuidString.prefix(6))"
+        )
         XCTAssertTrue(offered, "did not offer to send what was on the clipboard")
     }
 
@@ -147,11 +147,10 @@ final class HypoUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 2)
         app.activate()
 
-        var offered = false
-        for _ in 0..<12 where !offered {
-            UIPasteboard.general.string = "foreign text \(UUID().uuidString.prefix(6))"
-            offered = app.buttons["Paste"].waitForExistence(timeout: 4)
-        }
+        let offered = waitForSendControl(
+            in: app,
+            resettingTo: "foreign text \(UUID().uuidString.prefix(6))"
+        )
         XCTAssertTrue(offered, "never offered to send, so the no-prompt claim is untested")
 
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -165,4 +164,78 @@ final class HypoUITests: XCTestCase {
             "a paste prompt appeared inside the app"
         )
     }
+
+    /// A row shows a preview; the entry itself has to be reachable.
+    ///
+    /// Android opens a detail sheet for anything the row had to cut off, and
+    /// for every image and file. Without it a long clipboard entry can be seen
+    /// but not read, which for a clipboard app is the part you wanted.
+    func testALongEntryCanBeOpenedInFull() throws {
+        let app = launch()
+        XCTAssertTrue(app.textFields["Search"].waitForExistence(timeout: 15))
+
+        let long = "a long entry that the row cannot show in full " + String(repeating: "x", count: 300)
+        UIPasteboard.general.string = long
+        guard waitForSendControl(in: app, resettingTo: long) else {
+            throw XCTSkip("could not put anything in the history to open")
+        }
+        app.buttons["Paste"].tap()
+
+        // The preview control only appears on entries with more to show.
+        let preview = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'Preview-'")).firstMatch
+        guard preview.waitForExistence(timeout: 20) else {
+            throw XCTSkip("no entry with more to show landed in the history")
+        }
+        preview.tap()
+
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 10), "the preview did not open")
+        // The full text, not the three lines the row had room for.
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'xxxxx'")).firstMatch.exists,
+                      "the preview did not show the whole entry")
+        app.buttons["Done"].tap()
+    }
+}
+
+/// Scrolls until the element is on screen.
+///
+/// The devices section lists nearby devices now, so rows below it can sit past
+/// the fold — and a SwiftUI List leaves off-screen rows out of the
+/// accessibility tree entirely, which reads as "does not exist" rather than
+/// "not visible yet".
+@discardableResult
+func revealElement(_ element: XCUIElement, in app: XCUIApplication, attempts: Int = 6) -> Bool {
+    for _ in 0..<attempts {
+        if element.exists && element.isHittable { return true }
+        app.swipeUp()
+    }
+    return element.exists && element.isHittable
+}
+
+/// Waits for the send control, re-setting the clipboard between checks.
+///
+/// Every entry a peer pushes is written to the clipboard, after which the app
+/// correctly has nothing of the user's left to offer. A single wait loses that
+/// race against any live device on the network, so the text is put back before
+/// each look. The app samples the clipboard about every 1.5s.
+@discardableResult
+func waitForSendControl(in app: XCUIApplication, resettingTo text: String, attempts: Int = 12) -> Bool {
+    let paste = app.buttons["Paste"]
+    for _ in 0..<attempts {
+        UIPasteboard.general.string = text
+        if paste.waitForExistence(timeout: 4) { return true }
+    }
+    return false
+}
+
+/// Whether a device shows up in the paired list.
+///
+/// The identifier lands on a cell in some SwiftUI layouts and on the label in
+/// others, and which one it is has changed with the surrounding view. Asking
+/// both is cheaper than pinning down which, and the question — is this device
+/// paired — is the same either way.
+func isPaired(_ deviceName: String, in app: XCUIApplication, timeout: TimeInterval = 60) -> Bool {
+    let identifier = "PairedDevice-\(deviceName)"
+    return app.cells[identifier].waitForExistence(timeout: timeout)
+        || app.staticTexts[identifier].waitForExistence(timeout: 5)
+        || app.buttons[identifier].waitForExistence(timeout: 5)
 }

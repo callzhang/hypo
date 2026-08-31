@@ -65,15 +65,48 @@ public struct SettingsView: View {
                                 unpair(device)
                             }
                         }
+                        .accessibilityIdentifier("PairedDevice-\(device.name)")
                     }
                 }
-                NavigationLink("Pair a device") {
+
+                // Devices found on this network that are not paired yet, listed
+                // here rather than behind a separate screen: this section is
+                // already about devices, and a device you can see is the
+                // shortest path to pairing with it. Typing a code is the
+                // fallback for devices that cannot see each other.
+                ForEach(nearbyUnpaired, id: \.serviceName) { peer in
+                    Button {
+                        lanViewModel.pair(with: peer)
+                    } label: {
+                        LabeledContent {
+                            Text(pairingLabel(for: peer))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(peer.serviceName)
+                                    .foregroundStyle(.primary)
+                                Text("On this network")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .disabled(isPairing)
+                    .accessibilityIdentifier("NearbyDevice-\(peer.serviceName)")
+                }
+
+                if case .failed(let message) = lanViewModel.state {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                NavigationLink("Pair with code") {
                     PairingView(
                         viewModel: pairingViewModel,
                         claimViewModel: claimViewModel,
-                        lanViewModel: lanViewModel,
-                        relayHint: transportManager.pairingParameters().relayHint,
-                        onPairOverLan: { peer in lanViewModel.pair(with: peer) }
+                        relayHint: transportManager.pairingParameters().relayHint
                     )
                 }
             }
@@ -112,6 +145,10 @@ public struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        // Discovery runs while this screen is open, because the nearby list
+        // lives here now rather than behind the pairing screen.
+        .onAppear { lanViewModel.startDiscovery() }
+        .onDisappear { lanViewModel.stopDiscovery() }
         .task {
             notificationStatus = await Self.notificationStatusText()
             historyLimit = Double(await context.historyStore.limit())
@@ -124,6 +161,31 @@ public struct SettingsView: View {
     /// sitting right there on the network reads as "Offline" until something
     /// has been sent — which is both true and useless. Bonjour already knows it
     /// is nearby; say so.
+    /// Discovered peers that are not paired yet.
+    ///
+    /// A device already in the paired list above would otherwise appear twice,
+    /// once as something to manage and once as something to pair with.
+    private var nearbyUnpaired: [DiscoveredPeer] {
+        guard case .found(let peers) = lanViewModel.state else { return [] }
+        let paired = Set(transportManager.pairedDevices.map { $0.id.lowercased() })
+        return peers.filter { peer in
+            guard let id = peer.endpoint.metadata["device_id"]?.lowercased() else { return true }
+            return !paired.contains(id)
+        }
+    }
+
+    private var isPairing: Bool {
+        if case .pairing = lanViewModel.state { return true }
+        return false
+    }
+
+    private func pairingLabel(for peer: DiscoveredPeer) -> String {
+        if case .pairing(let name) = lanViewModel.state, name == peer.serviceName {
+            return "Pairing…"
+        }
+        return "Pair"
+    }
+
     private func status(of device: PairedDevice) -> (label: String, tint: Color) {
         if device.isOnline { return ("Connected", .green) }
         let onThisNetwork = transportManager.lanDiscoveredPeers().contains { peer in

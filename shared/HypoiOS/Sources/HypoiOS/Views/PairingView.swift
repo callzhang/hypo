@@ -1,19 +1,16 @@
 import SwiftUI
 import HypoCore
 
-/// Pairing, shaped like Android's: pick how you want to pair first, then see
-/// only that flow.
+/// Pairing by code, for devices that cannot see each other on a network.
 ///
-/// The previous version put both halves of a mutually exclusive choice on one
-/// screen — request a code *and* enter a code, with a Reset button that did
-/// nothing yet — and offered no way to pair with a device already visible on
-/// the network.
+/// Devices that *are* visible are listed and tapped in the devices section of
+/// Settings instead — that section is already about devices, and putting the
+/// nearby ones behind a second screen with a mode toggle made the shorter path
+/// the harder one to find.
+///
+/// Within this screen the two halves stay mutually exclusive: show a code, or
+/// enter one, never both at once.
 public struct PairingView: View {
-    public enum Mode: String, CaseIterable {
-        case lan = "LAN"
-        case code = "Code"
-    }
-
     /// Which half of code pairing the user chose. Neither is shown until they
     /// pick, because showing both is what made this confusing.
     private enum CodeStep {
@@ -24,133 +21,28 @@ public struct PairingView: View {
 
     @ObservedObject private var viewModel: RemotePairingViewModel
     @ObservedObject private var claimViewModel: ClaimPairingCodeViewModel
-    @ObservedObject private var lanViewModel: LanPairingViewModel
     private let relayHint: URL?
-    private let onPairOverLan: (DiscoveredPeer) -> Void
 
-    @State private var mode: Mode = .lan
     @State private var codeStep: CodeStep = .choosing
 
     public init(
         viewModel: RemotePairingViewModel,
         claimViewModel: ClaimPairingCodeViewModel,
-        lanViewModel: LanPairingViewModel,
-        relayHint: URL?,
-        onPairOverLan: @escaping (DiscoveredPeer) -> Void
+        relayHint: URL?
     ) {
         self.viewModel = viewModel
         self.claimViewModel = claimViewModel
-        self.lanViewModel = lanViewModel
         self.relayHint = relayHint
-        self.onPairOverLan = onPairOverLan
     }
 
     public var body: some View {
         VStack(spacing: 20) {
-            Picker("How to pair", selection: $mode) {
-                ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-
-            switch mode {
-            case .lan: lanContent
-            case .code: codeContent
-            }
-
+            codeContent
             Spacer(minLength: 0)
         }
         .padding(.top)
-        .navigationTitle("Pair a device")
+        .navigationTitle("Pair with code")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { lanViewModel.startDiscovery() }
-        .onDisappear { lanViewModel.stopDiscovery() }
-        .onChange(of: mode) { _, newMode in
-            // One flow at a time, so leaving a mode abandons whatever it had
-            // started rather than leaving it running out of sight.
-            if newMode == .lan {
-                viewModel.reset()
-                claimViewModel.reset()
-                codeStep = .choosing
-            } else {
-                lanViewModel.stopDiscovery()
-            }
-        }
-    }
-
-    // MARK: - Nearby devices
-
-    @ViewBuilder
-    private var lanContent: some View {
-        switch lanViewModel.state {
-        case .discovering:
-            VStack(spacing: 12) {
-                ProgressView()
-                Text("Looking for devices…")
-                Text("Both devices need to be on the same network.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.top, 40)
-
-        case .found(let peers) where peers.isEmpty:
-            VStack(spacing: 12) {
-                Image(systemName: "wifi.exclamationmark")
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-                Text("No devices found")
-                Text("Make sure Hypo is open on the other device and both are on the same network. If that is right, try the Code tab.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-            .padding(.top, 40)
-
-        case .found(let peers):
-            List {
-                Section("Nearby devices") {
-                    ForEach(peers, id: \.serviceName) { peer in
-                        Button {
-                            onPairOverLan(peer)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(peer.serviceName)
-                                        .foregroundStyle(.primary)
-                                    Text(peer.endpoint.host)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if lanViewModel.isPaired(peer) {
-                                    Text("Paired").font(.caption).foregroundStyle(.secondary)
-                                } else {
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .listStyle(.insetGrouped)
-
-        case .pairing(let name):
-            VStack(spacing: 12) {
-                ProgressView()
-                Text("Pairing with \(name)…")
-            }
-            .padding(.top, 40)
-
-        case .paired(let name):
-            successView(deviceName: name) { lanViewModel.reset() }
-
-        case .failed(let message):
-            failureView(message) { lanViewModel.reset() }
-        }
     }
 
     // MARK: - Pairing code

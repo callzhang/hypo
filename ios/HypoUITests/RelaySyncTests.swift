@@ -21,8 +21,15 @@ final class RelaySyncTests: XCTestCase {
     }
 
     func testSyncsThroughTheRelayWithNoLocalRoute() throws {
-        guard FileManager.default.fileExists(atPath: codePath) else {
-            throw XCTSkip("no pairing code at \(codePath); start HypoHarness in relay mode")
+        // Age matters, not just existence. The harness leaves the file behind
+        // when it exits, and a stale code fails to pair rather than skipping —
+        // which reads as broken relay pairing instead of a harness that is not
+        // running. Relay codes are short-lived anyway.
+        let attributes = try? FileManager.default.attributesOfItem(atPath: codePath)
+        let writtenAt = attributes?[.modificationDate] as? Date
+        let isFresh = writtenAt.map { Date().timeIntervalSince($0) < 300 } ?? false
+        guard FileManager.default.fileExists(atPath: codePath), isFresh else {
+            throw XCTSkip("no fresh pairing code at \(codePath); start HypoHarness in relay mode")
         }
 
         let app = XCUIApplication()
@@ -39,10 +46,10 @@ final class RelaySyncTests: XCTestCase {
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15))
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
-        app.buttons["Pair a device"].tap()
+        XCTAssertTrue(revealElement(app.buttons["Pair with code"], in: app), "no way in to code pairing")
+        app.buttons["Pair with code"].tap()
 
-        XCTAssertTrue(app.buttons["Code"].waitForExistence(timeout: 10))
-        app.buttons["Code"].tap()
+        XCTAssertTrue(app.buttons["Enter a code"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Enter a code"].waitForExistence(timeout: 10))
         app.buttons["Enter a code"].tap()
 
@@ -79,17 +86,11 @@ final class RelaySyncTests: XCTestCase {
         Thread.sleep(forTimeInterval: 2)
         app.activate()
 
-        // Re-set between checks: every entry a peer pushes is written to the
-        // clipboard, after which the app correctly has nothing of the user's to
-        // offer. Any live device competes for the clipboard the whole time.
-        let paste = app.buttons["Paste"]
-        var offered = false
-        for _ in 0..<12 where !offered {
-            UIPasteboard.general.string = fromPhone
-            offered = paste.waitForExistence(timeout: 4)
-        }
-        XCTAssertTrue(offered, "no send control offered")
-        paste.tap()
+        XCTAssertTrue(
+            waitForSendControl(in: app, resettingTo: fromPhone),
+            "no send control offered"
+        )
+        app.buttons["Paste"].tap()
 
         XCTAssertTrue(
             pollForFile(at: receivedPath, containing: fromPhone, timeout: 120),

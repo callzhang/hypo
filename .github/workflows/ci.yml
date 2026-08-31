@@ -196,6 +196,14 @@ jobs:
             -skipMacroValidation \
             -enableCodeCoverage NO \
             CODE_SIGNING_ALLOWED=NO
+      # The local network permission prompt cannot be tested on a simulator,
+      # which does not enforce it. What can be checked is the declaration it
+      # depends on: without these keys iOS refuses Bonjour with no error and no
+      # prompt, and devices simply never appear.
+      - name: Check the iOS app declares local network access
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData/Hypo-* -name Hypo.app -path '*iphonesimulator*' | head -1)
+          ./scripts/check-ios-local-network.sh "$APP"
   windows-tests:
     name: Windows Core Tests
     runs-on: windows-latest

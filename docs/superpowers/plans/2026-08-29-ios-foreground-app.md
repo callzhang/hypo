@@ -2069,4 +2069,8 @@ harness 原本每 4 秒重发一次(为绕过更早的一个竞态)。每收到�
 
 第 4 条不是没做,是**模拟器上不存在**:iOS 模拟器不强制本地网络权限,那个系统弹窗只在真机上出现。装到 iPhone 上首次浏览 Bonjour 时就会看到。
 
+不过这一条里**真正会坏的部分是可以守住的**。缺了 `NSLocalNetworkUsageDescription` 或 `NSBonjourServices`,iOS 会拒绝 Bonjour 且**不报错、不弹窗、不留日志**——设备就是永远不出现,看上去像网络故障而不是缺声明。`scripts/check-ios-local-network.sh` 检查构建产物里这两个键,CI 在构建 app 之后跑它。已双向验证:两个键任缺其一都会判红。
+
+弹窗本身仍然只能真机验。
+
 测试规模:HypoCore 158、macOS 56、iOS 30 单元 + 11 UI。

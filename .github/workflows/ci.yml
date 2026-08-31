@@ -155,7 +155,12 @@ jobs:
   ios-core-build:
     name: HypoCore iOS Build
     runs-on: macos-15
-    timeout-minutes: 15
+    # 15 was inside the job's own running time: it builds for the simulator, for
+    # macOS, and then runs the tests on a simulator, compiling swift-syntax from
+    # scratch on the way because nothing here is cached. It finished at 14
+    # minutes on a good run and was cancelled at 15 on the next, which reads as
+    # a broken build rather than a tight limit.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout

@@ -181,7 +181,7 @@ public class FitsOnScreenTests : IDisposable
 
         var width = (int)window.ActualWidth;
         var height = (int)window.ActualHeight;
-        var pixels = window.Capture($"fits-{name}");
+        var pixels = window.Capture(name: null);
 
         Assert.True(bottom <= height, $"{name} ends {bottom - height}px past the bottom of the window");
 

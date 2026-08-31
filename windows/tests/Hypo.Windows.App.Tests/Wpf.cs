@@ -139,7 +139,7 @@ internal static class Wpf
     /// gets caught without a second machine -- which is most of what "we cannot
     /// test DPI here" was hiding.
     /// </param>
-    public static byte[] Capture(this Window window, string name, double dpi = 96)
+    public static byte[] Capture(this Window window, string? name, double dpi = 96)
     {
         window.Settle();
 
@@ -154,11 +154,16 @@ internal static class Wpf
         var bitmap = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
         bitmap.Render(window);
 
-        var encoder = new PngEncoder();
-        var png = encoder.Encode(bitmap);
+        // A null name asks for the pixels without adding to the artifact. Tests
+        // that read the bitmap rather than look at it would otherwise leave a
+        // pile of near-identical images for someone to search through.
+        if (name is not null)
+        {
+            var png = new PngEncoder().Encode(bitmap);
 
-        Directory.CreateDirectory(ScreenshotDirectory);
-        File.WriteAllBytes(Path.Combine(ScreenshotDirectory, $"{name}.png"), png);
+            Directory.CreateDirectory(ScreenshotDirectory);
+            File.WriteAllBytes(Path.Combine(ScreenshotDirectory, $"{name}.png"), png);
+        }
 
         var pixels = new byte[width * height * 4];
         bitmap.CopyPixels(pixels, width * 4, 0);

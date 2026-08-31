@@ -66,7 +66,21 @@ one.
 
 Display scaling is covered too: the history window is captured at 100%, 150%
 and 200%, which catches a layout that only holds together at 100% without a
-second machine.
+second machine. Both themes are captured as well, and the colours are checked
+for contrast rather than looked at.
+
+The shortcut is tested by pressing it: the test synthesises Ctrl+Alt+Shift+F7
+with `SendInput` and waits for the event, because a registration that succeeds
+is a weaker claim than a key that works. Registering the same combination twice
+and disposing between the two are tested for the same reason — a shortcut that
+leaks stays claimed for the session and the next launch cannot have it.
+
+One caution about reading these pictures. Some controls are hidden on purpose:
+the six-digit code row is not shown when the view model cannot pair by code, and
+a window that is correctly not showing a row it has no use for looks exactly
+like a window whose bottom fell off. The test that measures the code row builds
+a model that can pair by code, and asserts the control is visible before asking
+where it was painted.
 
 What is still open is what a runner cannot be: a second monitor, a session lock,
 and a person's judgement about whether any of it is pleasant to use.

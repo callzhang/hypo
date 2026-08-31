@@ -87,6 +87,43 @@ public class FitsOnScreenTests : IDisposable
         });
     }
 
+    [SkippableFact]
+    public void TheCodeRowSurvivesAMessageAppearingAboveIt()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        // The message row is the one thing above the code row that grows: it is
+        // empty until something goes wrong, and "Choose a device first." is the
+        // most common thing to see in this window.
+        Wpf.Run(() =>
+        {
+            var store = new InMemorySecretStore();
+            var window = new PairingWindow(new PairingViewModel(
+                store,
+                new LanPairingCoordinator(store),
+                "11111111-2222-3333-4444-555555555555",
+                "Test PC"));
+
+            window.Show();
+            window.Settle();
+
+            // Pairing with nothing selected is what puts a message there.
+            ((System.Windows.Controls.Button)window.FindName("PairButton")).RaiseEvent(
+                new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            window.Settle();
+
+            var message = (System.Windows.Controls.TextBlock)window.FindName("Message");
+            Assert.False(string.IsNullOrEmpty(message.Text), "no message appeared, so this proves nothing");
+
+            foreach (var name in new[] { "CodeBox", "UseCodeButton", "ShowCodeButton" })
+            {
+                AssertInside(window, name);
+            }
+
+            window.Close();
+        });
+    }
+
     [SkippableTheory]
     [InlineData("FilterBox")]
     [InlineData("Rows")]

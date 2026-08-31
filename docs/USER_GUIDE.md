@@ -759,6 +759,12 @@ paused — paused and disconnected look different on purpose.
   notification instead of failing quietly, and you can change the combination
   with a `"Hotkey": "Ctrl+Alt+H"` line in `%LOCALAPPDATA%\Hypo\settings.json`.
 
+**Notifications**:
+- A notification names the device an item came from and shows the first 80
+  characters of it; things you copy on this PC never notify
+- Turn it off from the tray menu if you would rather not have clipboard content
+  appear on screen
+
 **Appearance**:
 - Follows the Windows app theme, and switches with it while running — there is
   no setting to keep in step

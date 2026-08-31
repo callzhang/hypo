@@ -38,6 +38,7 @@ public sealed class TrayIconHost : IDisposable
     private ToolStripMenuItem _historyMenuItem = null!;
     private readonly ToolStripMenuItem _historyItem;
     private readonly ToolStripMenuItem _cloudItem;
+    private readonly ToolStripMenuItem _notifyItem;
     private readonly Action<HypoSettings> _saveSettings;
     private HypoSettings _settings;
 
@@ -81,6 +82,7 @@ public sealed class TrayIconHost : IDisposable
 
         _historyItem.Checked = settings.ShareWithWindowsHistory;
         _cloudItem.Checked = settings.AllowCloudClipboardUpload;
+        _notifyItem.Checked = settings.NotifyOnArrival;
     }
 
     /// <summary>The history window while it is open, and null once it is closed.</summary>
@@ -139,12 +141,22 @@ public sealed class TrayIconHost : IDisposable
             Checked = _settings.AllowCloudClipboardUpload,
         };
 
+        _notifyItem = new ToolStripMenuItem(
+            "Tell me when something arrives from another device",
+            null,
+            (_, _) => Update(_settings with { NotifyOnArrival = !_settings.NotifyOnArrival }))
+        {
+            CheckOnClick = false,
+            Checked = _settings.NotifyOnArrival,
+        };
+
         var menu = new ContextMenuStrip();
         menu.Items.Add(_historyMenuItem);
         menu.Items.Add(new ToolStripMenuItem("Pair a device…", null, (_, _) => ShowPairing()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_historyItem);
         menu.Items.Add(_cloudItem);
+        menu.Items.Add(_notifyItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_pauseItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -173,6 +185,7 @@ public sealed class TrayIconHost : IDisposable
 
         ShowFirewallNoticeOnce();
         RegisterHotkey();
+        AnnounceArrivals();
     }
 
     /// <summary>
@@ -204,6 +217,51 @@ public sealed class TrayIconHost : IDisposable
             _icon.BalloonTipIcon = ToolTipIcon.Warning;
             _icon.ShowBalloonTip(10_000);
         }
+    }
+
+    /// <summary>
+    /// Says when something arrives from another device.
+    ///
+    /// <para>Only remote arrivals: <c>Applied</c> fires for inbound items alone,
+    /// and <see cref="ArrivalNotice"/> checks again, because notifying someone
+    /// about the thing they just copied themselves is noise.</para>
+    /// </summary>
+    private void AnnounceArrivals()
+    {
+        if (_client is null)
+        {
+            return;
+        }
+
+        _client.Coordinator.Applied += (_, entry) =>
+        {
+            if (!_settings.NotifyOnArrival || ArrivalNotice.For(entry) is not { } notice)
+            {
+                return;
+            }
+
+            Announce(notice);
+        };
+    }
+
+    /// <summary>The last thing said, for the tests.</summary>
+    public ArrivalNotice? LastAnnouncement { get; private set; }
+
+    /// <summary>
+    /// Shows a notice.
+    ///
+    /// <para>A balloon rather than the Windows App SDK's AppNotificationManager
+    /// that the design named: that needs the application to be packaged, and
+    /// Hypo ships as a zip. A balloon is a real toast on Windows 10 and 11.</para>
+    /// </summary>
+    public void Announce(ArrivalNotice notice)
+    {
+        LastAnnouncement = notice;
+
+        _icon.BalloonTipTitle = notice.Title;
+        _icon.BalloonTipText = notice.Body;
+        _icon.BalloonTipIcon = ToolTipIcon.Info;
+        _icon.ShowBalloonTip(5_000);
     }
 
     /// <summary>The hotkey's state, for anyone showing it.</summary>

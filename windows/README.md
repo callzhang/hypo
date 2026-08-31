@@ -24,6 +24,7 @@ the relay, from a notification-area application.
 | Global shortcut (Alt+V), reconfigurable | Done |
 | Light and dark, following the system setting | Done |
 | Version in the tray menu | Done |
+| Notification when something arrives | Done |
 | Oversized images compressed before sending | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
 | x64 and ARM64 builds | Done |
@@ -154,6 +155,10 @@ Two, both deliberate:
   360 points cannot hold without trimming the entry itself.
 - The theme is seven brushes rather than the WPF-UI Fluent dictionary, which
   would have restyled every control in the screenshot suite to get them.
+- Notifications are notification-area balloons, not the Windows App SDK's
+  `AppNotificationManager` the design named. That one requires the application
+  to be packaged, and Hypo ships as a zip. A balloon is a real toast on Windows
+  10 and 11.
 
 ### Light and dark
 
@@ -171,6 +176,18 @@ search hint turned out to be at 2.67:1 — it is darker now.
 The design named the WPF-UI Fluent dictionary for this. It is not used: the
 whole theme is seven brushes, and a UI toolkit would have restyled every control
 in the screenshots for them.
+
+### Arrivals
+
+Something copied on another device reaches this machine silently otherwise —
+the only way to find out is to paste and see. A notification says which device
+it came from and shows the first 80 characters. Locally copied items never
+notify.
+
+Eighty, not the 255 a balloon would take: enough to recognise what arrived, not
+enough to read a password over someone's shoulder. Turn it off from the tray
+menu; it is the only one of the three switches that starts on, because it
+shares nothing beyond the screen already in front of you.
 
 ### The shortcut
 

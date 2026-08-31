@@ -534,6 +534,58 @@ public class TrayIconHostTests : IDisposable
     }
 
     [SkippableFact]
+    public void TheArrivalSwitchIsOnAndCanBeTurnedOff()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            var notify = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Tell me when", StringComparison.Ordinal));
+
+            Assert.True(notify.Checked);
+
+            notify.PerformClick();
+
+            Assert.False(notify.Checked);
+            Assert.False(_saved[^1].NotifyOnArrival, "the choice was not written down");
+        });
+    }
+
+    [SkippableFact]
+    public void ANoticeWithAnAbsurdlyLongDeviceNameStillShows()
+    {
+        RequireWindows();
+
+        // NotifyIcon throws rather than truncating, and this runs on the path an
+        // arrival takes -- so an over-long name would lose the notification and
+        // take the arrival with it.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            var notice = ArrivalNotice.For(new Hypo.Core.History.HistoryEntry
+            {
+                Content = new ClipboardContent
+                {
+                    ContentType = ContentType.Text,
+                    Data = Encoding.UTF8.GetBytes(new string('x', 4000)),
+                },
+                CopiedAt = DateTimeOffset.UnixEpoch,
+                SourceDeviceName = new string('D', 300),
+            })!;
+
+            tray.Announce(notice);
+
+            Assert.Equal(notice, tray.LastAnnouncement);
+        });
+    }
+
+    [SkippableFact]
     public void TheMenuSaysWhichVersionThisIs()
     {
         RequireWindows();

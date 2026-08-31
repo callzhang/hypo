@@ -39,6 +39,16 @@ public sealed record HypoSettings
     [JsonIgnore]
     public HotkeyBinding HotkeyBinding => HotkeyBinding.Parse(Hotkey) ?? HotkeyBinding.Default;
 
+    /// <summary>
+    /// Whether an arrival from another device raises a notification.
+    ///
+    /// <para>On by default, unlike the two sharing switches: a copy that reaches
+    /// this machine silently is one you find out about by pasting and seeing,
+    /// and this one shares nothing outside the screen already in front of
+    /// you.</para>
+    /// </summary>
+    public bool NotifyOnArrival { get; init; } = true;
+
     /// <summary>Whether synced items may appear in this machine's Win+V history.</summary>
     public bool ShareWithWindowsHistory { get; init; }
 

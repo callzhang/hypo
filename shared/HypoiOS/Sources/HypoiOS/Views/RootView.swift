@@ -64,10 +64,13 @@ public struct RootView: View {
             // publish the initial .active, and a background-then-foreground
             // round trip did not reliably produce a change SwiftUI observed —
             // the send simply never ran.
+            // Android checks the clipboard in onResume; iOS cannot read it
+            // without asking permission, so it checks whether there is
+            // anything — which is free — and offers a button if so.
             .onReceive(NotificationCenter.default.publisher(
                 for: UIApplication.didBecomeActiveNotification
             )) { _ in
-                Task { await historyViewModel.sendClipboardIfChanged() }
+                historyViewModel.refreshClipboardOffer()
             }
             .navigationDestination(isPresented: $showingSettings) {
                 SettingsView(

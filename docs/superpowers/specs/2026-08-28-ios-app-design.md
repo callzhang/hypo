@@ -165,6 +165,16 @@ iOS 特有配置：`NSLocalNetworkUsageDescription`、`NSBonjourServices: [_hypo
 
 **更正（第 2 期实施时发现）**：本文原先要求设置页展示「本地网络：未授权」——**这做不到，iOS 没有提供读取该权限状态的 API**。设置页只能给出说明文字和跳转系统设置的入口，不能显示实际状态。这是平台限制。
 
+**发送的触发方式（2026-08-30 实测后定稿）**：Android 不能后台监听剪贴板,它在 `onResume` 里检查;iOS 连这个都做不到——**读取别的 app 写入的剪贴板一定会弹系统授权框**,所以"回到前台就自动发送"会变成"每次回到前台都弹一次框",已用截图确认。
+
+最终做法是三段:
+
+1. 回到前台时用 `UIPasteboard.hasStrings` **探测**有没有内容。这是探测类属性,不弹框、不泄露内容。
+2. 有内容才在底部显示 `UIPasteControl`(系统粘贴按钮)。
+3. 用户点它,苹果给一次性豁免——**读取时不弹框**。
+
+比 Android 多一次点击,换掉了每次一个弹窗。若本 app 自己刚写过剪贴板(刚收到的同步内容),探测返回 false,避免把刚收到的东西又发回去。
+
 **另一处 iOS 特有的语义收窄**：`SystemClipboard.currentText()` / `containsImage()` 在 iOS 上只回答本 app 自己写入的内容，未命中返回 `nil` / `false`，不回落到读取 `UIPasteboard`。原因是 `-[UIPasteboard string]` 会阻塞调用线程等 pasteboard 服务，而协议是 `@MainActor` 的、没有别的线程可挪；且 iOS 16+ 对非本 app 写入的内容会弹粘贴授权框。唯一的读取调用方 `IncomingClipboardHandler` 只用它做回声抑制，关心的永远是刚写进去的内容，缓存对这一档回答得精确；未命中时 `nil` 落到去重逻辑上就是"照常写入"，正是安全的一侧。
 
 **iOS 只做发起端是靠类型保证的**：`TransportManager` 新增 `LanRole`（`.peer` / `.clientOnly`），iOS 传 `.clientOnly`，跳过绑定监听器与 Bonjour 广播，保留浏览发现、prune/health-check/network-monitor 与云端自动连接。

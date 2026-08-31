@@ -1954,3 +1954,25 @@ iOS 读取**别的 app 写入**的剪贴板会弹系统授权框。自动化测�
 
 - **对端连上就发的第一帧可能丢失**：设备在**发现**阶段就拨号，早于配对完成，所以第一帧可能在收方还没拿到密钥时到达，然后被静默丢弃、无人重试。用户再复制一次会成功。harness 因此改成周期重发。这是真实缺陷，未修。
 - **329 MB 构建产物进了 git 历史**：`git add -A` 扫进了 `tools/HypoHarness/.build`。已从 HEAD 移除并补进 `.gitignore`，但历史和远端仍在。清理需要重写分支，会影响其他人，没有擅自做。
+
+
+---
+
+## 界面重做（2026-08-30，用户评审后）
+
+用户的评价是"现在的设计反人性",要求对齐 Android。去读 `origin/main` 上的 Android 代码(本分支 fork 之后它又改过三次)之后,确认我做的界面有几处是自己发明的:
+
+| 我做的 | Android 实际 |
+|---|---|
+| 三个 tab(History / Pair / Settings) | **没有 tab bar**。单屏 History,顶部一行「搜索框 + 连接状态图标 + 齿轮」,Settings 从齿轮推入,配对从 Settings 推入 |
+| 大标题 "History" + 全局 Clear 按钮 | 两者都没有 |
+| 配对页把「出示码」和「输入码」两半同时铺开 | 先选 `Show a code` / `Enter a code`,**只显示选中的那一半**,成功后独立成功页 |
+| 只有配对码一种方式 | **LAN / Code 两种模式**,LAN 列出同网段设备,点一下就配对 |
+
+全部已对齐。LAN 那一条需要 Swift 侧原本不存在的能力——它能接收 LAN 配对 challenge,但从来不能发出——补了 `WebSocketTransport.sendRaw` 与 `LanPairingCoordinator`。
+
+### 发送触发方式的定稿
+
+原先按"和 Android 一样,前台自动发送"实现,实测发现 **iOS 每次回到前台都会弹粘贴授权框**(截图为证)。Android 没有这个代价,iOS 有,这是平台规则。
+
+改为:`hasStrings` 静默探测 → 有内容才显示 `UIPasteControl` → 用户点击时苹果豁免、不弹框。比 Android 多一次点击,换掉每次一个弹窗。已实测确认启动无弹窗、按钮按需出现。

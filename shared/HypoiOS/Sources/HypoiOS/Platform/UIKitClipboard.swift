@@ -74,6 +74,20 @@ public final class UIKitClipboard: SystemClipboard {
         cacheIsCurrent ? lastWrittenIsImage : false
     }
 
+    /// Whether there is something worth offering to send, without reading it.
+    ///
+    /// `hasStrings` is a detection property: it answers yes or no without
+    /// revealing the contents and without raising the iOS paste prompt. That
+    /// is what makes it safe to call on every foreground — reading outright
+    /// would ask the user for permission every single time they come back to
+    /// the app, which is the cost Android does not pay and iOS does.
+    ///
+    /// False when this object wrote the current contents, because that is an
+    /// item that just arrived and sending it back is an echo.
+    public var hasTextWorthSending: Bool {
+        !cacheIsCurrent && pasteboard.hasStrings
+    }
+
     /// Reads text this app did not write, for sending it on.
     ///
     /// `currentText()` deliberately refuses to do this: it answers echo

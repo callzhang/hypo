@@ -46,14 +46,27 @@ public struct HistoryListView: View {
             list
         }
         .safeAreaInset(edge: .bottom) {
-            if let message = sendStatusMessage {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(.bar)
+            VStack(spacing: 6) {
+                if let message = sendStatusMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                // Shown only when there is something to send. Detecting that
+                // costs no prompt; reading does, so the read waits for this
+                // button, which is the one way iOS allows it silently.
+                if viewModel.hasClipboardToSend {
+                    PasteButton { text in
+                        Task { await viewModel.sendText(text) }
+                    }
+                    Text("Send what you copied to your other devices")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(.bar)
         }
         .task { await viewModel.load() }
     }

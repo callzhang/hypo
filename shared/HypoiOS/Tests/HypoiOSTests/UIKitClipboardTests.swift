@@ -128,4 +128,30 @@ struct UIKitClipboardTests {
     // exercised here. A test bundle has no host app, so the pasteboard read
     // waits on a prompt that has nowhere to appear and never returns. It is
     // covered by running the app.
+
+    @Test("nothing is offered when we wrote the contents ourselves")
+    @MainActor
+    func offersNothingForOurOwnWrite() {
+        let clipboard = UIKitClipboard()
+
+        clipboard.writeText("something that just arrived from a peer")
+
+        // Otherwise the app would offer to send back the item it just
+        // received, and the user would ping-pong it between devices.
+        #expect(clipboard.hasTextWorthSending == false)
+    }
+
+    @Test("something written from outside is offered")
+    @MainActor
+    func offersForeignText() {
+        let clipboard = UIKitClipboard()
+        clipboard.writeText("ours")
+
+        // The way another app's copy looks from here.
+        UIPasteboard.general.string = "theirs"
+
+        // True without reading, which is the point: checking raises no paste
+        // prompt, so this can run every time the app comes forward.
+        #expect(clipboard.hasTextWorthSending)
+    }
 }

@@ -31,35 +31,18 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
         self.clipboard = clipboard
     }
 
-    /// Sends whatever was copied while the app was away.
+    /// Whether to offer sending what is on the clipboard.
     ///
-    /// Called when the app becomes active, which is the same moment Android
-    /// checks the clipboard in onResume — neither platform can watch it from
-    /// the background. Does nothing when this app wrote the current contents,
-    /// so an entry that just arrived is not sent straight back.
-    public func sendClipboardIfChanged() async {
-        guard let clipboard else {
-            logger.debug("⏭️ [HistoryListViewModel] No clipboard attached; nothing to send")
-            return
-        }
-        // Logged because the read can stall on the iOS paste prompt, and a
-        // silent return is indistinguishable from "nothing was copied".
-        logger.debug("📋 [HistoryListViewModel] Reading clipboard for foreground send")
-        guard let text = await clipboard.readForegroundText() else {
-            logger.debug("⏭️ [HistoryListViewModel] Nothing new on the clipboard")
-            return
-        }
-        logger.debug("📤 [HistoryListViewModel] Sending \(text.count) characters")
-        await sendText(text)
+    /// Checked rather than read: iOS raises a paste prompt for content this
+    /// app did not write, so reading on every foreground would ask permission
+    /// every time. Detecting that something is there costs nothing, and the
+    /// paste control the user then taps reads it without a prompt at all.
+    @Published public private(set) var hasClipboardToSend = false
+
+    public func refreshClipboardOffer() {
+        hasClipboardToSend = clipboard?.hasTextWorthSending ?? false
     }
 
-    /// Filtered through `ClipboardEntry.matches(query:)`, the same predicate the
-    /// macOS list uses, so search behaves identically on both platforms. It
-    /// looks at the device id and the full text, link, image alt text or file
-    /// name — where filtering on `content.previewDescription` would miss any
-    /// match past the 100 characters that preview truncates at, and would match
-    /// images against a formatted "name · PNG · 1.2 MB" string rather than
-    /// their alt text.
     public var visibleEntries: [ClipboardEntry] {
         guard !searchText.isEmpty else { return entries }
         return entries.filter { $0.matches(query: searchText) }
@@ -167,6 +150,7 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
 
         _ = await store.insert(entry)
         entries = await store.all()
+        refreshClipboardOffer()
 
         let outcome: SendOutcome
         switch (sent, failed) {

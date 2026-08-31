@@ -120,6 +120,7 @@ public enum BonjourBrowsingDriverEvent: Equatable, Sendable {
 
 public protocol BonjourBrowsingDriver: AnyObject, Sendable {
     @MainActor func startBrowsing(serviceType: String, domain: String)
+    @MainActor func restartBrowsing()
     @MainActor func stopBrowsing()
     @MainActor func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void)
 }
@@ -179,6 +180,18 @@ public actor BonjourBrowser {
         startDriverEventLoopIfNeeded()
         await MainActor.run {
             driver.startBrowsing(serviceType: serviceType, domain: domain)
+        }
+    }
+
+    /// Re-announces everything currently on the network, for when the user is
+    /// looking at a list and expects it to reflect the moment.
+    public func rescan() async {
+        guard didStart else {
+            await start()
+            return
+        }
+        await MainActor.run {
+            driver.restartBrowsing()
         }
     }
 
@@ -277,6 +290,10 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
     private var services: [ObjectIdentifier: NetService] = [:]
     private var currentSearch: (serviceType: String, domain: String)?
     private var retryAttempt = 0
+    private var resolveAttempts: [ObjectIdentifier: Int] = [:]
+    /// A device that is still advertising deserves more than one attempt, but not
+    /// an unbounded one: five tries spans about half a minute.
+    private let maximumResolveAttempts = 5
     private var isStoppingIntentionally = false
     private let retryPolicy = BrowseRetryPolicy()
     private let logger = HypoLogger(category: "BonjourBrowser")
@@ -298,11 +315,26 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
         browser.searchForServices(ofType: serviceType, inDomain: domain)
     }
 
+    /// Stops and restarts the current browse so that services already announced are
+    /// announced again. Opening the pairing panel should mean "look now", not "show
+    /// me whatever happened to arrive on its own".
+    public func restartBrowsing() {
+        guard let search = currentSearch else { return }
+        logger.info("🔄 [BonjourBrowser] Restarting browse for \(search.serviceType)")
+        browser.stop()
+        services.removeAll()
+        resolveAttempts.removeAll()
+        retryAttempt = 0
+        isStoppingIntentionally = false
+        browser.searchForServices(ofType: search.serviceType, inDomain: search.domain)
+    }
+
     public func stopBrowsing() {
         isStoppingIntentionally = true
         currentSearch = nil
         browser.stop()
         services.removeAll()
+        resolveAttempts.removeAll()
     }
 
     /// Re-issues a browse that failed or stopped on its own, backing off each time.
@@ -353,7 +385,9 @@ extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceBrowserDele
     public func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
         // A browse that is producing results is healthy; forget the earlier failures.
         retryAttempt = 0
+        logger.debug("🔍 [BonjourBrowser] Found \(service.name), resolving")
         services[ObjectIdentifier(service)] = service
+        resolveAttempts[ObjectIdentifier(service)] = 0
         service.delegate = self
         service.resolve(withTimeout: 5)
     }
@@ -378,6 +412,7 @@ extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceBrowserDele
 
 extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceDelegate {
     public func netServiceDidResolveAddress(_ sender: NetService) {
+        resolveAttempts[ObjectIdentifier(sender)] = 0
         emitResolved(for: sender)
     }
 
@@ -386,7 +421,28 @@ extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceDelegate {
     }
 
     public func netService(_ sender: NetService, didNotResolve errorDict: [String : NSNumber]) {
-        services.removeValue(forKey: ObjectIdentifier(sender))
+        // Dropping the service here means it is gone for good: the browser announces
+        // a service once, so nothing offers it to us again while it keeps
+        // advertising. A phone whose app has just been opened routinely misses the
+        // first resolve, and stayed invisible for the rest of the session.
+        let key = ObjectIdentifier(sender)
+        let attempt = (resolveAttempts[key] ?? 0) + 1
+        let detail = errorDict.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
+
+        guard attempt <= maximumResolveAttempts else {
+            logger.warning("⚠️ [BonjourBrowser] Giving up on \(sender.name) after \(attempt - 1) resolve attempts (\(detail))")
+            services.removeValue(forKey: key)
+            resolveAttempts.removeValue(forKey: key)
+            return
+        }
+
+        resolveAttempts[key] = attempt
+        let delay = retryPolicy.delay(forAttempt: attempt)
+        logger.info("🔁 [BonjourBrowser] Could not resolve \(sender.name) (\(detail)); retrying in \(Int(delay))s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak sender] in
+            guard let self, let sender, self.services[key] != nil else { return }
+            sender.resolve(withTimeout: 5)
+        }
     }
 }
 #else
@@ -401,6 +457,7 @@ public final class NetServiceBonjourBrowsingDriver: BonjourBrowsingDriver, @unch
     }
 
     public func startBrowsing(serviceType: String, domain: String) {}
+    public func restartBrowsing() {}
 
     public func stopBrowsing() {}
 }

@@ -615,6 +615,14 @@ public final class TransportManager: ObservableObject {
     public func ensureLanDiscoveryActive() async {
         await activateLanServices()
     }
+
+    /// Asks the network again, rather than reporting what has arrived so far.
+    /// Peers are announced once, so a device that came up while nobody was
+    /// browsing -- or that failed to resolve -- needs a fresh look.
+    public func rescanLanPeers() async {
+        await activateLanServices()
+        await browser.rescan()
+    }
     
     /// Trigger connection status probe to refresh peer status
     public func probeConnectionStatus() async {

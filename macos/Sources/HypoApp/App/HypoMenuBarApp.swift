@@ -2879,6 +2879,7 @@ private struct PairDeviceSheet: View {
     @State private var pairingPeer: String?
     @State private var lanFailure: String?
     @State private var lanPairedName: String?
+    @State private var isRescanning = false
 
     init(viewModel: ClipboardHistoryViewModel, transportManager: TransportManager, isPresented: Binding<Bool>) {
         self._viewModel = ObservedObject(initialValue: viewModel)
@@ -2930,9 +2931,10 @@ private struct PairDeviceSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            // The menu bar app browses continuously, but make sure of it: an empty
-            // list should mean "nothing out there", not "we never started looking".
-            Task { await transportManager.ensureLanDiscoveryActive() }
+            // Someone opening this panel is asking about now, and Bonjour announces a
+            // service once: a phone whose app was opened a minute ago will not
+            // announce itself again just because we started paying attention.
+            Task { await transportManager.rescanLanPeers() }
             logger.info(
                 "🔍 [PairDeviceSheet] Opened: discovered=\(transportManager.discoveredLanPeers.count) pairable=\(transportManager.pairableLanPeers().count) paired=\(transportManager.pairedDevices.count)"
             )
@@ -2960,6 +2962,25 @@ private struct PairDeviceSheet: View {
                 Label(lanFailure, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    isRescanning = true
+                    Task {
+                        await transportManager.rescanLanPeers()
+                        isRescanning = false
+                    }
+                } label: {
+                    if isRescanning {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Scan again", systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.link)
+                .disabled(isRescanning)
             }
 
             let peers = pairablePeers

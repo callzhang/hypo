@@ -44,6 +44,8 @@ public static class Program
         {
             "discover" => await DiscoverAsync(),
             "pair" => await PairAsync(store, deviceId, deviceName, args.ElementAtOrDefault(1)),
+            "code" => await ShowCodeAsync(store, deviceId, deviceName),
+            "enter" => await UseCodeAsync(store, deviceId, deviceName, args.ElementAtOrDefault(1)),
             "run" => await RunAsync(store, deviceId, deviceName),
             var other => Usage(other),
         };
@@ -58,7 +60,7 @@ public static class Program
     public const string DefaultCommand = "run";
 
     /// <summary>The commands it answers to.</summary>
-    public static IReadOnlyList<string> Commands { get; } = ["discover", "pair", "run"];
+    public static IReadOnlyList<string> Commands { get; } = ["discover", "pair", "code", "enter", "run"];
 
     /// <summary>
     /// The device id this program would use, for a test that checks it agrees
@@ -70,7 +72,11 @@ public static class Program
     private static int Usage(string command)
     {
         Console.Error.WriteLine($"Unknown command '{command}'.");
-        Console.Error.WriteLine("usage: hypo [discover | pair <device-id> | run]");
+        Console.Error.WriteLine(
+            "usage: hypo [discover | pair <device-id> | code | enter <code> | run]");
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("  discover, pair   devices on this network");
+        Console.Error.WriteLine("  code, enter      devices anywhere, through a six-digit code");
         return 2;
     }
 
@@ -165,6 +171,70 @@ public static class Program
 
             default:
                 Console.Error.WriteLine("The pairing reply did not verify.");
+                return 1;
+        }
+    }
+
+    /// <summary>
+    /// Shows a code for a device that is not on this network to type.
+    ///
+    /// <para>The LAN path is better when it is available -- no third party, no
+    /// code to carry -- so this is the fallback rather than the front door.</para>
+    /// </summary>
+    private static async Task<int> ShowCodeAsync(ISecretStore store, string deviceId, string deviceName)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        var coordinator = new RemotePairingCoordinator(new RelayPairingClient(http), store);
+
+        var result = await coordinator.ShowCodeAsync(
+            Guid.Parse(deviceId),
+            deviceName,
+            code =>
+            {
+                Console.WriteLine();
+                Console.WriteLine($"  Pairing code: {code.Code}");
+                Console.WriteLine($"  Valid until:  {code.ExpiresAt.ToLocalTime():HH:mm:ss}");
+                Console.WriteLine();
+                Console.WriteLine("Enter it on the other device.");
+            });
+
+        return Report(result, "the device that used the code");
+    }
+
+    private static async Task<int> UseCodeAsync(
+        ISecretStore store, string deviceId, string deviceName, string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            Console.Error.WriteLine("usage: hypo enter <code>   (get one with 'hypo code' on the other device)");
+            return 2;
+        }
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        var coordinator = new RemotePairingCoordinator(new RelayPairingClient(http), store);
+
+        Console.WriteLine($"Pairing with code {code}...");
+
+        return Report(await coordinator.UseCodeAsync(code, deviceId, deviceName), "the other device");
+    }
+
+    private static int Report(PairingResult result, string who)
+    {
+        switch (result.Outcome)
+        {
+            case PairingOutcome.Paired:
+                Console.WriteLine($"Paired with {result.PeerDeviceName} ({result.PeerDeviceId}).");
+                return 0;
+
+            case PairingOutcome.NoReply:
+                Console.Error.WriteLine(
+                    $"No answer from {who}. The code may have expired, or been typed wrong.");
+                return 1;
+
+            default:
+                Console.Error.WriteLine(
+                    "The reply did not verify. That is not a network problem: something answered "
+                    + "the code that could not have known the key.");
                 return 1;
         }
     }

@@ -1,3 +1,5 @@
+using Hypo.Core.Abstractions;
+using Hypo.Core.Pairing;
 using Hypo.Core.Relay;
 using Hypo.Core.Transport;
 
@@ -84,5 +86,47 @@ public class LiveRelayTests
 
         await Assert.ThrowsAnyAsync<Exception>(() => client.ConnectAsync());
         Assert.Equal(TransportState.Faulted, client.State);
+    }
+
+    /// <summary>
+    /// Runs both halves of a code pairing against the deployed relay.
+    ///
+    /// <para>The stub in RemotePairingTests can agree with the client while both
+    /// disagree with the real thing -- a wrong path, a renamed field, a role
+    /// name taken at face value. Only the relay settles that.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task TheRealRelayBrokersACodePairing()
+    {
+        Skip.IfNot(Enabled, "Set HYPO_LIVE_RELAY=1 to pair through wss://hypo.fly.dev.");
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        var relay = new RelayPairingClient(http);
+
+        var showerStore = new InMemorySecretStore();
+        var typerStore = new InMemorySecretStore();
+
+        var shower = new RemotePairingCoordinator(relay, showerStore);
+        var typer = new RemotePairingCoordinator(relay, typerStore);
+
+        var showerId = Guid.NewGuid();
+        var typerId = Guid.NewGuid().ToString();
+
+        var codeReady = new TaskCompletionSource<PairingCode>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var showing = shower.ShowCodeAsync(showerId, "Live Test Phone", codeReady.SetResult);
+
+        var code = await codeReady.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Matches("^[0-9]{6}$", code.Code);
+
+        var used = await typer.UseCodeAsync(code.Code, typerId, "Live Test PC");
+        var shown = await showing.WaitAsync(TimeSpan.FromSeconds(60));
+
+        Assert.True(used.Succeeded, $"typing the code: {used.Outcome}");
+        Assert.True(shown.Succeeded, $"showing the code: {shown.Outcome}");
+
+        // The only thing that matters afterwards: both ended up with the same key.
+        Assert.Equal(
+            Convert.ToHexString(showerStore.Read(typerId)!),
+            Convert.ToHexString(typerStore.Read(showerId.ToString())!));
     }
 }

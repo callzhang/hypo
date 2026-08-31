@@ -139,7 +139,16 @@ public class AppStartupTests : IDisposable
     [Fact]
     public void EveryDocumentedCommandIsOneItAnswersTo()
     {
-        Assert.Equal(["discover", "pair", "run"], Program.Commands);
+        Assert.Equal(["discover", "pair", "code", "enter", "run"], Program.Commands);
+    }
+
+    [Fact]
+    public void ThereIsAWayToPairWithoutASharedNetwork()
+    {
+        // Without these, two devices that are never on one LAN cannot be paired
+        // at all -- a phone on cellular, a laptop somewhere else.
+        Assert.Contains("code", Program.Commands);
+        Assert.Contains("enter", Program.Commands);
     }
 
     /// <summary>

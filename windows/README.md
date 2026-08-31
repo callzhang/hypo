@@ -20,6 +20,7 @@ the relay, from a notification-area application.
 | Windows clipboard: text, links, images, files | Done |
 | Tray icon, history window, pairing window | Done |
 | Clipboard sharing settings (both default off) | Done |
+| Remote pairing by six-digit code | Done (console) |
 | Oversized images compressed before sending | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
 | x64 and ARM64 builds | Done |
@@ -154,6 +155,11 @@ cd windows && dotnet run --project src/Hypo.Windows -- discover
 ```
 
 `discover` lists peers, `pair <device-id>` pairs with one, `run` syncs.
+
+For a device that is not on this network — a phone on cellular, a laptop
+somewhere else — `code` shows a six-digit code and `enter <code>` uses one. The
+LAN path is better when it is available: no third party and nothing to carry
+between the two devices. This is the fallback, not the front door.
 
 State lives in `%LOCALAPPDATA%\Hypo`: keys, this device's id, `history.db`, and
 `received\` for files that arrive from a peer.

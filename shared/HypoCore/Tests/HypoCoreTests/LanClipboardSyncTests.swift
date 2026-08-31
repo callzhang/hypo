@@ -202,3 +202,78 @@ struct LanDialURLTests {
         #expect(url.path == "/socket")
     }
 }
+
+@Suite("Arriving before the key does")
+@MainActor
+struct LateKeyDeliveryTests {
+    @Test("an entry that arrives while pairing is still settling is not lost", .timeLimit(.minutes(1)))
+    func waitsForTheKey() async throws {
+        let senderId = UUID().uuidString.lowercased()
+        let receiverId = UUID().uuidString.lowercased()
+        let sharedKey = SymmetricKey(size: .bits256)
+
+        let keyProvider = InMemoryDeviceKeyProvider()
+        // Deliberately not registered yet: this is the moment after the peer
+        // has answered the pairing challenge and before this side has finished
+        // writing the key it derived.
+        await keyProvider.setKey(sharedKey, for: receiverId)
+
+        let senderProvider = InMemoryDeviceKeyProvider()
+        await senderProvider.setKey(sharedKey, for: senderId)
+        await senderProvider.setKey(sharedKey, for: receiverId)
+
+        let recording = CapturingTransport()
+        let sender = SyncEngine(
+            transport: recording,
+            keyProvider: senderProvider,
+            localDeviceId: senderId
+        )
+        await sender.establishConnection()
+        try await sender.transmit(
+            entry: ClipboardEntry(deviceId: senderId, content: .text("arrived early")),
+            payload: ClipboardPayload(contentType: .text, data: Data("arrived early".utf8)),
+            targetDeviceId: receiverId
+        )
+        let frame = try TransportFrameCodec().encode(try #require(await recording.sent.first))
+
+        let historyStore = HistoryStore(persistence: InMemoryHistoryPersistence())
+        let handler = IncomingClipboardHandler(
+            syncEngine: SyncEngine(
+                transport: InertTransport(),
+                keyProvider: keyProvider,
+                localDeviceId: receiverId
+            ),
+            historyStore: historyStore,
+            dispatcher: ClipboardEventDispatcher(),
+            clipboard: RecordingClipboard()
+        )
+
+        // Hand it the frame first, register the key a moment later — the order
+        // a peer that sends the instant it is paired produces.
+        async let handled: Void = handler.handle(frame)
+        try await Task.sleep(for: .milliseconds(1500))
+        await keyProvider.setKey(sharedKey, for: senderId)
+        await handled
+
+        let arrived = await waitUntil(timeout: .seconds(10)) {
+            await historyStore.all().contains { entry in
+                if case .text(let text) = entry.content { return text == "arrived early" }
+                return false
+            }
+        }
+        #expect(arrived, "the entry was dropped instead of waiting for the key")
+    }
+}
+
+/// Keeps what was sent, so a test can replay the exact frame.
+private actor CapturingTransport: SyncTransport {
+    private var envelopes: [SyncEnvelope] = []
+
+    var sent: [SyncEnvelope] { envelopes }
+
+    func connect() async throws {}
+    func disconnect() async {}
+    func send(_ envelope: SyncEnvelope) async throws {
+        envelopes.append(envelope)
+    }
+}

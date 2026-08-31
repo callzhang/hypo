@@ -277,13 +277,10 @@ func sendOverRelay(
     transport: CloudRelayTransport,
     keyProvider: InMemoryDeviceKeyProvider
 ) async throws {
-    // Pairing finishes at different moments on the two sides: this end knows
-    // it is paired once the ack is submitted, while the peer still has to poll
-    // for that ack, verify it and write the key. Sending into that gap gets the
-    // item dropped for want of a key, with nothing to retry it — the same race
-    // that bit the LAN path.
-    try? await Task.sleep(for: .seconds(8))
-
+    // Sends immediately, on purpose. Pairing finishes at different moments on
+    // the two sides, and the peer is expected to hold an item that arrives
+    // before it has written the key rather than drop it. Waiting here would
+    // hide whether it does.
     let engine = SyncEngine(
         transport: transport,
         keyProvider: keyProvider,

@@ -39,6 +39,30 @@ public sealed record HypoSettings
     [JsonIgnore]
     public HotkeyBinding HotkeyBinding => HotkeyBinding.Parse(Hotkey) ?? HotkeyBinding.Default;
 
+    /// <summary>
+    /// Whether to sync over the local network.
+    ///
+    /// <para>On by default and worth keeping on: it is faster and the content
+    /// never leaves the building. Someone on a network that blocks the
+    /// discovery, or who would rather not advertise the machine, can turn it
+    /// off and use the relay alone.</para>
+    /// </summary>
+    public bool LanEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Whether to sync through the relay when the LAN cannot reach a peer.
+    ///
+    /// <para>Off means devices on different networks stop syncing entirely. The
+    /// content is encrypted end to end either way, so this is about whether it
+    /// leaves the network at all.</para>
+    /// </summary>
+    public bool CloudEnabled { get; init; } = true;
+
+    /// <summary>The port the LAN listener binds. 0 asks Windows for a free one.</summary>
+    public int LanPort { get; init; } = DefaultLanPort;
+
+    public const int DefaultLanPort = 7010;
+
     /// <summary>How many entries the history keeps. The design's number.</summary>
     public int HistoryLimit { get; init; } = DefaultHistoryLimit;
 

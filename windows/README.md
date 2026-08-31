@@ -25,6 +25,7 @@ the relay, from a notification-area application.
 | History usable from the keyboard alone | Done |
 | Type and date filters, pinning, per-row detail | Done |
 | Drag an entry into another application | Done |
+| Transport settings: LAN, relay, port | Done |
 | Light and dark, following the system setting | Done |
 | Version in the tray menu | Done |
 | Settings window: devices, history, startup | Done |
@@ -186,6 +187,21 @@ search hint turned out to be at 2.67:1 — it is darker now.
 The design named the WPF-UI Fluent dictionary for this. It is not used: the
 whole theme is seven brushes, and a UI toolkit would have restyled every control
 in the screenshots for them.
+
+### Transports
+
+Either channel can be switched off, and the LAN port changed. All three are read
+when the client is built and cannot be changed without starting again, which the
+window says rather than pretending otherwise — the alternative is tearing down
+and rebuilding both transports underneath a running application.
+
+Turning the LAN off stops this machine advertising its name and address on the
+network, which is usually the point of asking. Turning both off leaves an
+application that keeps a history and syncs with nobody; that is a choice someone
+is entitled to make, and the window says what it means rather than leaving it to
+be worked out from the icon. Port 0 asks Windows for a free one, which is the
+answer when something else already holds 7010; below 1024 is refused because
+those need administrator rights and the bind would simply fail.
 
 ### Settings
 

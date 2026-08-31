@@ -73,7 +73,9 @@ public sealed class HypoClient : IAsyncDisposable
         RelayOptions relay,
         IPeerDiscovery? discovery = null,
         int lanPort = LanWebSocketServer.DefaultPort,
-        bool ownsHistory = false)
+        bool ownsHistory = false,
+        bool lanEnabled = true,
+        bool cloudEnabled = true)
     {
         ArgumentNullException.ThrowIfNull(clipboard);
         ArgumentNullException.ThrowIfNull(store);
@@ -102,7 +104,11 @@ public sealed class HypoClient : IAsyncDisposable
             coordinator.Peers.Add(peer);
         }
 
-        return new HypoClient(lan, cloud, transport, coordinator, history, ownsHistory);
+        return new HypoClient(lan, cloud, transport, coordinator, history, ownsHistory)
+        {
+            LanEnabled = lanEnabled,
+            CloudEnabled = cloudEnabled,
+        };
     }
 
     /// <summary>
@@ -124,9 +130,30 @@ public sealed class HypoClient : IAsyncDisposable
     /// it and an unreachable relay are different failures, and only both at once
     /// means the client cannot do its job.
     /// </summary>
+    /// <summary>
+    /// Whether the LAN transport is brought up at all.
+    ///
+    /// <para>A transport that is never connected is skipped by everything
+    /// downstream: sending checks each channel's state, so turning one off needs
+    /// no special case anywhere else. Turning both off leaves an application
+    /// that keeps a history and syncs with nobody, which is a choice someone is
+    /// entitled to make.</para>
+    /// </summary>
+    public bool LanEnabled { get; init; } = true;
+
+    public bool CloudEnabled { get; init; } = true;
+
     public async Task StartAsync(CancellationToken ct = default)
     {
-        await _lan.ConnectAsync(ct).ConfigureAwait(false);
+        if (LanEnabled)
+        {
+            await _lan.ConnectAsync(ct).ConfigureAwait(false);
+        }
+
+        if (!CloudEnabled)
+        {
+            return;
+        }
 
         try
         {

@@ -56,6 +56,10 @@ public partial class SettingsWindow : Window
         Devices.ItemsSource = _model.Devices;
 
         LimitBox.Text = _model.Settings.HistoryLimit.ToString(CultureInfo.CurrentCulture);
+        PortBox.Text = _model.Settings.LanPort.ToString(CultureInfo.CurrentCulture);
+        LanBox.IsChecked = _model.Settings.LanEnabled;
+        CloudBox2.IsChecked = _model.Settings.CloudEnabled;
+        RestartNotice.Visibility = _model.NeedsRestart ? Visibility.Visible : Visibility.Collapsed;
         StartupBox.IsChecked = _model.RunsAtLogin;
         NotifyBox.IsChecked = _model.Settings.NotifyOnArrival;
         WindowsHistoryBox.IsChecked = _model.Settings.ShareWithWindowsHistory;
@@ -124,6 +128,30 @@ public partial class SettingsWindow : Window
         }
 
         _model.SetHistoryLimit(limit);
+        Bind();
+    }
+
+    private void OnLanChanged(object sender, RoutedEventArgs e)
+    {
+        _model.SetLanEnabled(LanBox.IsChecked == true);
+        Bind();
+    }
+
+    private void OnCloudTransportChanged(object sender, RoutedEventArgs e)
+    {
+        _model.SetCloudEnabled(CloudBox2.IsChecked == true);
+        Bind();
+    }
+
+    private void OnApplyPort(object sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(PortBox.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out var port))
+        {
+            Message.Text = "That is not a number. Use a port between 1024 and 65535, or 0 to let Windows choose one.";
+            return;
+        }
+
+        _model.SetLanPort(port);
         Bind();
     }
 

@@ -181,8 +181,11 @@ public class HistoryRowTests : IDisposable
 
             Assert.Equal("Pin to the top", pin.Header);
 
+            // MenuItem.ClickEvent, not ButtonBase.ClickEvent: they are different
+            // routed events, and raising the wrong one runs no handler at all
+            // while looking exactly like a test that passed.
             pin.RaiseEvent(new System.Windows.RoutedEventArgs(
-                System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                System.Windows.Controls.MenuItem.ClickEvent));
             window.Settle();
 
             var top = Assert.IsType<HistoryRow>(rows.Items[0]);

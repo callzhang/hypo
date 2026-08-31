@@ -44,6 +44,33 @@
                   Content="Unpair" Click="OnUnpair" />
         </StackPanel>
 
+        <TextBlock Text="Transport" FontWeight="SemiBold" FontSize="15" Margin="0,20,0,0" />
+
+        <CheckBox x:Name="LanBox" Margin="0,8,0,0"
+                  Content="Sync over the local network"
+                  Click="OnLanChanged" />
+
+        <CheckBox x:Name="CloudBox2" Margin="0,10,0,0"
+                  Content="Sync through the relay when a device is elsewhere"
+                  Click="OnCloudTransportChanged" />
+
+        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+          <TextBlock Text="Local network port" VerticalAlignment="Center" />
+          <TextBox x:Name="PortBox" Width="70" Margin="8,0" Padding="6" TextAlignment="Right" />
+          <Button x:Name="ApplyPortButton" Padding="12,6" Content="Apply" Click="OnApplyPort" />
+          <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
+                     Foreground="{DynamicResource TertiaryTextBrush}" FontSize="11"
+                     Text="0 lets Windows choose" />
+        </StackPanel>
+
+        <TextBlock x:Name="RestartNotice"
+                   Margin="0,8,0,0"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   FontSize="11"
+                   Visibility="Collapsed"
+                   Text="These three are read when Hypo starts. Restart it to apply the change." />
+
         <TextBlock Text="History" FontWeight="SemiBold" FontSize="15" Margin="0,20,0,0" />
 
         <StackPanel Orientation="Horizontal" Margin="0,8,0,0">

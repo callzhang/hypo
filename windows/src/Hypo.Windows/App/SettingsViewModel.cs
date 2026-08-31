@@ -189,6 +189,58 @@ public sealed class SettingsViewModel
                 : "Hypo will not start on its own.");
     }
 
+    /// <summary>
+    /// Whether a transport or port change is waiting for a restart.
+    ///
+    /// <para>These three are read once, when the client is built. Saying so is
+    /// the alternative to either lying about when the change takes effect or
+    /// tearing down and rebuilding both transports underneath a running
+    /// application.</para>
+    /// </summary>
+    public bool NeedsRestart { get; private set; }
+
+    public void SetLanEnabled(bool enabled) => UpdateTransport(Settings with { LanEnabled = enabled });
+
+    public void SetCloudEnabled(bool enabled) => UpdateTransport(Settings with { CloudEnabled = enabled });
+
+    /// <summary>
+    /// Changes the port the LAN listener binds.
+    ///
+    /// <para>Zero is allowed and means "ask Windows for a free one", which is
+    /// the answer when something else already holds the default. Below 1024 is
+    /// refused: those need administrator rights on Windows, so the application
+    /// would simply fail to bind.</para>
+    /// </summary>
+    public void SetLanPort(int port)
+    {
+        if (port != 0 && port is < 1024 or > 65535)
+        {
+            LastMessage = "Use a port between 1024 and 65535, or 0 to let Windows choose one.";
+            return;
+        }
+
+        UpdateTransport(Settings with { LanPort = port });
+    }
+
+    private void UpdateTransport(HypoSettings settings)
+    {
+        var changed = settings.LanEnabled != Settings.LanEnabled
+            || settings.CloudEnabled != Settings.CloudEnabled
+            || settings.LanPort != Settings.LanPort;
+
+        Update(settings);
+
+        if (!changed)
+        {
+            return;
+        }
+
+        NeedsRestart = true;
+        LastMessage = settings is { LanEnabled: false, CloudEnabled: false }
+            ? "Saved. Both are off, so nothing will sync until one is back on. Restart Hypo to apply."
+            : "Saved. Restart Hypo to apply.";
+    }
+
     public void SetShareWithWindowsHistory(bool enabled) =>
         Update(Settings with { ShareWithWindowsHistory = enabled });
 

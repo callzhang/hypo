@@ -258,6 +258,76 @@ public class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public void BothTransportsStartOnAndCanBeTurnedOff()
+    {
+        var model = Build();
+
+        Assert.True(model.Settings.LanEnabled);
+        Assert.True(model.Settings.CloudEnabled);
+        Assert.False(model.NeedsRestart);
+
+        model.SetLanEnabled(false);
+
+        Assert.False(_saved[^1].LanEnabled);
+        Assert.True(model.NeedsRestart);
+        Assert.Contains("Restart Hypo", model.LastMessage);
+    }
+
+    [Fact]
+    public void TurningBothOffSaysWhatThatMeans()
+    {
+        // It is a choice someone is entitled to make, and it leaves an
+        // application that keeps a history and syncs with nobody. Saying so
+        // beats letting them work it out from the icon.
+        var model = Build();
+
+        model.SetLanEnabled(false);
+        model.SetCloudEnabled(false);
+
+        Assert.Contains("nothing will sync", model.LastMessage);
+    }
+
+    [Fact]
+    public void SettingATransportToWhatItAlreadyIsDoesNotAskForARestart()
+    {
+        var model = Build();
+
+        model.SetLanEnabled(true);
+
+        Assert.False(model.NeedsRestart);
+    }
+
+    [Theory]
+    [InlineData(0)]      // let Windows choose
+    [InlineData(1024)]
+    [InlineData(7010)]
+    [InlineData(65535)]
+    public void APortThatCanBeBoundIsAccepted(int port)
+    {
+        var model = Build();
+
+        model.SetLanPort(port);
+
+        Assert.Equal(port, _saved[^1].LanPort);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(1023)]   // needs administrator rights on Windows
+    [InlineData(65536)]
+    [InlineData(-1)]
+    public void APortThatCannotBeBoundIsRefused(int port)
+    {
+        var model = Build();
+
+        model.SetLanPort(port);
+
+        Assert.Empty(_saved);
+        Assert.Contains("between 1024 and 65535", model.LastMessage);
+        Assert.False(model.NeedsRestart);
+    }
+
+    [Fact]
     public void TheThreeSwitchesAreWrittenDownWhenChanged()
     {
         var model = Build();

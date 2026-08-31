@@ -135,6 +135,31 @@ public class SettingsWindowTests : IDisposable
     }
 
     [SkippableFact]
+    public void UnpairIsDeadUntilADeviceIsChosenAndAliveAfterwards()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        // Raising a click in a test ignores IsEnabled, so the other unpair tests
+        // would pass with a button nobody could ever press. This one asks the
+        // button.
+        Wpf.Run(() =>
+        {
+            var window = Open();
+            var button = (System.Windows.Controls.Button)window.FindName("UnpairButton");
+            var devices = (System.Windows.Controls.ListBox)window.FindName("Devices");
+
+            Assert.False(button.IsEnabled);
+
+            devices.SelectedIndex = 0;
+            window.Settle();
+
+            Assert.True(button.IsEnabled, "choosing a device left Unpair disabled, so it can never be pressed");
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
     public void UnpairWithNothingChosenSaysSoRatherThanDoingNothing()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");

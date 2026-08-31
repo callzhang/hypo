@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Windows;
+using System.Windows.Controls;
 using Hypo.Windows.App;
 
 namespace Hypo.Windows.App.Shell;
@@ -70,6 +71,17 @@ public partial class SettingsWindow : Window
     }
 
     private void OnPair(object sender, RoutedEventArgs e) => _openPairing();
+
+    /// <summary>
+    /// Enables Unpair once there is something to unpair.
+    ///
+    /// <para>Without this the button is disabled from the moment the window
+    /// binds and never comes back, because nothing is selected then. Raising a
+    /// click in a test goes through whatever IsEnabled says, so the tests were
+    /// happy and the button was dead.</para>
+    /// </summary>
+    private void OnDeviceSelected(object sender, SelectionChangedEventArgs e) =>
+        UnpairButton.IsEnabled = Devices.SelectedItem is not null;
 
     private void OnUnpair(object sender, RoutedEventArgs e)
     {

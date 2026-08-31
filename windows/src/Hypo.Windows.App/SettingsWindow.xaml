@@ -22,7 +22,8 @@
                  Height="150"
                  Margin="0,8,0,0"
                  HorizontalContentAlignment="Stretch"
-                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 SelectionChanged="OnDeviceSelected">
           <ListBox.ItemTemplate>
             <DataTemplate>
               <StackPanel Margin="2,6">

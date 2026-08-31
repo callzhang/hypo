@@ -7,6 +7,12 @@
 
 ---
 
+> **Built, 2026-08-31.** The Windows client implements this specification.
+> Where the implementation differs, the section says so and why — search for
+> **Built differently**. The short version: MSIX was dropped in favour of a zip
+> from GitHub Releases, and three things that depended on it went with it.
+> `windows/README.md` is the current description of what exists.
+
 ## 1. Scope
 
 Ship a Windows client with full feature parity to the macOS menu-bar client: tray
@@ -560,6 +566,10 @@ Hide:  Hide() → SetForegroundWindow(hPrev)
 
 **History panel** (`HistoryWindow`, 360×480, centred)
 
+> **Built differently.** 520×620. Each row shows a content type, a source
+> device and which transport carried it, which 360 points cannot hold without
+> trimming the entry itself.
+
 ```
 WindowStyle=None, ShowInTaskbar=False, Topmost=True
 WS_EX_TOOLWINDOW  → excluded from Alt+Tab
@@ -594,6 +604,13 @@ preview; clicking opens the history panel. Locally originated copies do **not**
 notify — only remote arrivals do (macOS has an explicit suppression branch for
 the local-echo case).
 
+> **Built differently.** Notification-area balloons, not
+> `AppNotificationManager`, which requires the application to be packaged —
+> and there is no MSIX. A balloon is a real toast on Windows 10 and 11. The
+> preview is capped at 80 characters rather than the 255 a balloon would take:
+> enough to recognise what arrived, not enough to read a password over a
+> shoulder. Clicking it opens the history, as specified.
+
 **Global hotkey**: `RegisterHotKey`, default `Alt+V` (macOS uses Option+V),
 reconfigurable. `Win+V` is reserved by the system clipboard history. Registration
 failure — typically another application holding the combination — is surfaced in
@@ -602,7 +619,13 @@ Settings rather than failing silently.
 ### 5.3 Theming
 
 `Hypo.Wpf` uses the WPF-UI Fluent resource dictionary and follows the system
-light/dark setting. On Windows 11, Mica is enabled via `DwmSetWindowAttribute`
+light/dark setting.
+
+> **Built differently.** Seven brushes in a resource dictionary of its own, not
+> WPF-UI. The theme is small enough that a UI toolkit would have restyled every
+> control in the screenshot suite to get it. Following the system setting, Mica
+> on Windows 11 and the explicit solid fallback below it are all as specified,
+> and the palettes' contrast is tested. On Windows 11, Mica is enabled via `DwmSetWindowAttribute`
 (`DWMWA_SYSTEMBACKDROP_TYPE`). On Windows 10 the app falls back to a solid
 background. The fallback is written explicitly; it is not left to chance.
 
@@ -611,6 +634,10 @@ background. The fallback is written explicitly; it is not left to chance.
 ## 6. Windows platform enhancements
 
 ### 6.1 Explorer context menu — "Copy to Hypo"
+
+> **Not built.** It is declared through the MSIX manifest, and there is no
+> MSIX. The classic `shellex` fallback is what §11 flags as unconfirmed on the
+> Windows 10 floor, so it was not attempted blind.
 
 Declared in the MSIX manifest as a `desktop4:FileExplorerContextMenus`
 extension. One implementation serves both the Windows 10 classic menu and the
@@ -705,6 +732,16 @@ aggregator, not correctness vectors.
   macOS↔Android and must be extended with Windows↔macOS, Windows↔Android and
   Windows↔Windows.
 
+> **Built differently.** That script did not exist when this was written. It
+> does now, and it runs the tests that read the shared fixtures in all three
+> clients — Swift, Kotlin and .NET each encode a frame, derive a key and
+> decompress a payload from the same bytes. Device-to-device syncing is not
+> something a script can check; that needs two machines and a person.
+> `scripts/check-shared-fixtures.sh` runs on every build and catches the one
+> thing no suite can: a client that stops reading the fixtures.
+>
+> Coverage is measured on every build and gated at 80%. `Hypo.Core` sits at 91%.
+
 ---
 
 ## 9. Packaging, distribution and CI
@@ -725,6 +762,13 @@ effectively requires package identity, and "Copy to Hypo" is in scope. Run-at-lo
 and clean uninstall are secondary benefits.
 
 ### 9.2 Distribution channels
+
+> **Built differently.** A portable zip from GitHub Releases, for x64 and
+> ARM64, and none of the rest: no MSIX, no winget manifest, no SignPath. The
+> contingency described at the end of this section is what happened, minus the
+> Inno Setup installer. Windows shows a SmartScreen warning on first run, which
+> the user guide explains. §9.1's manifest declarations and §9.3's MSIX
+> packaging are unimplemented for the same reason.
 
 1. **MSIX on GitHub Releases**, signed through **SignPath Foundation**, which
    provides free OV-level code signing to qualifying open-source projects. The
@@ -796,13 +840,15 @@ SignPath approval does not materialise (§9.2).
 
 ## 11. Open items for the implementation plan
 
-- Confirm `desktop4:FileExplorerContextMenus` behaviour on the Windows 10 22H2
+- ~~Confirm `desktop4:FileExplorerContextMenus` behaviour on the Windows 10 22H2
   floor during implementation; adjust to classic `shellex` registration if it
-  proves unavailable there.
+  proves unavailable there.~~ **Moot.** No MSIX, so no manifest to declare it
+  in. Still open if the context menu is ever wanted (§6.1).
 - ~~Determine whether `Makaretu.Dns.Multicast` interoperates with macOS Bonjour
   and Android NSD advertisements in practice.~~ **Done.** Spiked against live
   macOS and Android peers before Plan 2 was written; interoperates in both
   directions. See section 4.2 for the measured TXT schema and the four
   behaviours it settled.
-- Apply to SignPath Foundation early — approval latency is on the critical path
-  for the first signed release.
+- ~~Apply to SignPath Foundation early — approval latency is on the critical
+  path for the first signed release.~~ **Moot.** There is no signed release to
+  be on the critical path of; distribution is an unsigned zip.

@@ -40,6 +40,8 @@ public sealed class TrayIconHost : IDisposable
     private readonly Action<HypoSettings> _saveSettings;
     private HypoSettings _settings;
 
+    private readonly ForegroundHandoff _handoff = new();
+
     private HistoryWindow? _historyWindow;
     private PairingWindow? _pairingWindow;
     private bool _paused;
@@ -217,7 +219,11 @@ public sealed class TrayIconHost : IDisposable
         {
             _historyWindow = new HistoryWindow(_history);
             _historyWindow.Closed += (_, _) => _historyWindow = null;
+            _historyWindow.EntryUsed += (_, _) => _handoff.Return();
         }
+
+        // Before showing: showing is what takes the foreground away.
+        _handoff.Capture();
 
         Surface(_historyWindow);
     }

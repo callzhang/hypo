@@ -457,4 +457,77 @@ public class TrayIconHostTests : IDisposable
                 .Checked);
         });
     }
+
+    [SkippableFact]
+    public void FocusIsNotHandedBackToOneOfOurOwnWindows()
+    {
+        RequireWindows();
+
+        // Returning focus to ourselves would leave the user exactly where they
+        // already are, having done nothing. This needs a window of ours in the
+        // foreground, which is why it lives here rather than beside the class.
+        Wpf.Run(() =>
+        {
+            var window = new System.Windows.Window { Width = 200, Height = 100 };
+            window.Show();
+            window.Activate();
+            window.Settle();
+
+            var handoff = new Hypo.Windows.Clipboard.ForegroundHandoff();
+            handoff.Capture();
+
+            Assert.False(handoff.HasSomewhereToReturn);
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void UsingAnEntryHandsFocusBack()
+    {
+        RequireWindows();
+
+        // The wiring, not the Win32: the window has to tell the tray it is done
+        // so the tray can return focus. Without that link the history window
+        // hides and the paste goes nowhere.
+        _history.Add(new HistoryEntry
+        {
+            Content = new ClipboardContent
+            {
+                ContentType = ContentType.Text,
+                Data = Encoding.UTF8.GetBytes("something to paste"),
+            },
+            CopiedAt = DateTimeOffset.UnixEpoch,
+        });
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Clipboard history", StringComparison.Ordinal))
+                .PerformClick();
+
+            var window = (HistoryWindow)tray.OpenHistoryWindow!;
+
+            var handedBack = false;
+            window.EntryUsed += (_, _) => handedBack = true;
+
+            var list = (System.Windows.Controls.ListBox)window.FindName("Rows");
+            list.SelectedIndex = 0;
+            list.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
+                System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left)
+            {
+                RoutedEvent = System.Windows.Controls.Control.MouseDoubleClickEvent,
+            });
+
+            window.Settle();
+
+            Assert.True(handedBack, "the window hid without telling anyone to restore focus");
+            Assert.False(window.IsVisible);
+
+            window.Close();
+        });
+    }
 }

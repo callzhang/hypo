@@ -13,6 +13,12 @@ public partial class HistoryWindow : Window
 {
     private readonly HistoryViewModel _model;
 
+    /// <summary>
+    /// Raised after an entry has been put on the clipboard and this window has
+    /// hidden itself, so whoever showed it can hand focus back.
+    /// </summary>
+    public event EventHandler? EntryUsed;
+
     public HistoryWindow(HistoryViewModel model)
     {
         _model = model;
@@ -43,9 +49,12 @@ public partial class HistoryWindow : Window
         try
         {
             await _model.UseAsync(row);
-            // Closing is the point: the user picked something to paste, and
-            // leaving the window over their work makes them dismiss it every time.
+
+            // Hidden, then focus goes back to wherever they were. Without the
+            // second half the feature is inert: the point of a clipboard history
+            // is the paste immediately after choosing something.
             Hide();
+            EntryUsed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex)
         {

@@ -113,7 +113,8 @@ ARM64, and so is every Copilot+ PC. The x64 build runs there under emulation;
 the ARM64 one does not have to. It puts
 an icon in the notification area:
 
-- **Clipboard history…** — search, and double-click an entry to put it back
+- **Clipboard history…** — search, and double-click an entry to put it back;
+  focus returns to whatever you were in, so the next paste lands there
 - **Pair a device…** — devices running Hypo on this network
 - **Pause syncing** — distinct from being disconnected, and the icon says which
 - Two sharing switches, **both off by default**

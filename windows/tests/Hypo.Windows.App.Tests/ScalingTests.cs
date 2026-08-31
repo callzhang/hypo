@@ -119,4 +119,55 @@ public class ScalingTests : IDisposable
             window.Close();
         });
     }
+
+    [SkippableTheory]
+    [InlineData(96, "100")]
+    [InlineData(192, "200")]
+    public void ALongEntryIsTrimmedRatherThanPushingAScrollbarUnderEverything(double dpi, string label)
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        // Found by looking at a 200% screenshot: the list was growing to fit its
+        // longest entry, so TextTrimming had nothing to trim to, the ellipsis
+        // never appeared, and a horizontal scrollbar sat under the whole list.
+        Wpf.Run(() =>
+        {
+            var model = new HistoryViewModel(_history, new NullClipboard());
+            model.Refresh();
+
+            var window = new HistoryWindow(model);
+            window.Show();
+            window.Settle();
+
+            var list = (System.Windows.Controls.ListBox)window.FindName("Rows");
+
+            var scroller = FindScrollViewer(list);
+            Assert.NotNull(scroller);
+            Assert.Equal(0, scroller!.ScrollableWidth);
+            Assert.True(list.ActualWidth <= window.ActualWidth, "the list is wider than its window");
+
+            window.Capture($"history-window-trimmed-{label}pc", dpi);
+            window.Close();
+        });
+    }
+
+    private static System.Windows.Controls.ScrollViewer? FindScrollViewer(System.Windows.DependencyObject root)
+    {
+        if (root is System.Windows.Controls.ScrollViewer found)
+        {
+            return found;
+        }
+
+        var children = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+
+        for (var i = 0; i < children; i++)
+        {
+            if (FindScrollViewer(System.Windows.Media.VisualTreeHelper.GetChild(root, i)) is { } scroller)
+            {
+                return scroller;
+            }
+        }
+
+        return null;
+    }
 }

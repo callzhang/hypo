@@ -44,9 +44,15 @@ public partial class PairingWindow : Window
         // credentials: an unusable control invites a bug report.
         var codeVisibility = _model.CanPairByCode ? Visibility.Visible : Visibility.Collapsed;
         CodeBox.Visibility = codeVisibility;
+        CodeHint.Visibility = codeVisibility == Visibility.Visible && CodeBox.Text.Length == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         UseCodeButton.Visibility = codeVisibility;
         ShowCodeButton.Visibility = codeVisibility;
     }
+
+    private void OnCodeChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        CodeHint.Visibility = CodeBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
 
     private async void OnShowCode(object sender, RoutedEventArgs e)
     {

@@ -20,11 +20,13 @@
     <ListBox x:Name="Peers"
              Grid.Row="1"
              Margin="0,10"
-             HorizontalContentAlignment="Stretch">
+             HorizontalContentAlignment="Stretch"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
       <ListBox.ItemTemplate>
         <DataTemplate>
           <StackPanel Margin="2,6">
-            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                       TextTrimming="CharacterEllipsis" />
             <TextBlock Foreground="#FF3A7D44" FontSize="11" Text="{Binding Status}" />
             <TextBlock Foreground="#FF9A9A9A" FontSize="10" Text="{Binding DeviceId}" />
           </StackPanel>
@@ -57,7 +59,15 @@
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
-        <TextBox x:Name="CodeBox" Grid.Column="0" Padding="6" MaxLength="6" />
+        <Grid Grid.Column="0">
+          <TextBox x:Name="CodeBox" Padding="6" MaxLength="6" TextChanged="OnCodeChanged" />
+          <TextBlock x:Name="CodeHint"
+                     Margin="8,0,0,0"
+                     VerticalAlignment="Center"
+                     Foreground="#FF9A9A9A"
+                     IsHitTestVisible="False"
+                     Text="Six-digit code" />
+        </Grid>
         <Button x:Name="UseCodeButton"
                 Grid.Column="1"
                 Margin="8,0,0,0"

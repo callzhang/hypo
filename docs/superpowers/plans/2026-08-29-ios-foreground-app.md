@@ -1998,3 +1998,32 @@ testTappingANearbyDevicePairsWithIt passed (20.414 seconds)
 前三个叠在一起的表现是一模一样的:harness 打印「Paired over LAN」,iOS 一动不动。每修掉一层才能看见下一层。第四个把前三个都掩盖了——界面回到列表,看起来像"点击没生效"。
 
 **教训**:把错误做成会说话的。改成"没答复 / 答了但读不懂(附原文)"之后,一次运行就把范围从"整条链路"缩到了"接收侧",这是前面几轮反复试错换来的。
+
+
+## 第 6、7 条同时通过（2026-08-30）
+
+```
+testPairsOverLanAndSyncsBothWays passed (22.814 seconds)
+RECEIVED text: copied on the phone 7949C9FB
+```
+
+一个测试走完全程:LAN 列表里点一下配对 → harness 复制的内容出现在 iOS 历史里 → 手机上复制的内容送达 harness。对端是 `tools/HypoHarness`,一个真实的独立进程。
+
+**改用 LAN 配对而不是配对码**,因为配对码一分钟就过期,而 app 冷启动加导航就要花掉大半;而且同一网段上本来就该点一下了事。
+
+### 最后一个坑:重发会把发送入口关掉
+
+harness 原本每 4 秒重发一次(为绕过更早的一个竞态)。每收到一条,app 就把它写进剪贴板——于是从 app 的角度看,剪贴板**永远是自己写的**,`hasTextWorthSending` 恒为 false,**发送按钮一直不出现**。
+
+这不是 bug,是设计使然:不重复发送刚收到的东西。但它意味着**一个不停重发的对端会让另一端无法发送**。harness 改成发成功一次就停。
+
+### 当前状态
+
+| 清单项 | 结果 |
+|---|---|
+| 1–3 界面、设备名、通知 | ✅ XCUITest |
+| 4 本地网络权限弹窗 | ⛔ 模拟器不强制,需真机 |
+| 5 配对 | ✅ LAN 点击 + 配对码两条路 |
+| **6 对端 → iOS** | **✅** |
+| **7 iOS → 对端** | **✅** |
+| 8 跨网段经 relay | ❌ `/Applications/Hypo.app` 缺 relay 令牌,macOS 需在有 `.env` 的环境重新构建 |

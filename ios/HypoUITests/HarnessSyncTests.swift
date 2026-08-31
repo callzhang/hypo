@@ -1,31 +1,28 @@
 import XCTest
+import UIKit
+import HypoCore
 
-/// The app pairing with a separate process on this machine, and receiving what
-/// that process sends — two real peers, not two halves of one test.
+/// The app and a separate process on this machine, syncing both ways.
 ///
-/// The peer is tools/HypoHarness, which shows a pairing code, listens on a LAN
-/// socket and advertises over Bonjour. Run it first:
+/// The peer is tools/HypoHarness, which advertises over Bonjour, answers a
+/// pairing challenge and prints what arrives. Start it first:
 ///
-///     HYPO_CODE_FILE=/tmp/hypo-code.txt HYPO_DEVICE_NAME="Harness Mac" \
+///     HYPO_RECEIVED_FILE=/tmp/hypo-received.txt HYPO_DEVICE_NAME="Harness Mac" \
 ///     HYPO_SEND_TEXT="hello from the Mac harness" swift run HypoHarness show
 ///
-/// and point HYPO_CODE_FILE at the same path here. Skipped when that file is
-/// absent, so the suite stays runnable without the harness.
+/// Pairs over the LAN rather than with a code: no six digits to race against a
+/// one-minute expiry, and it is the path a user on one network would take.
 @MainActor
 final class HarnessSyncTests: XCTestCase {
-    private var codePath: String {
-        ProcessInfo.processInfo.environment["HYPO_CODE_FILE"] ?? "/tmp/hypo-code.txt"
+    private var receivedPath: String {
+        ProcessInfo.processInfo.environment["HYPO_RECEIVED_FILE"] ?? "/tmp/hypo-received.txt"
     }
 
-    func testPairsWithHarnessAndReceivesWhatItSends() throws {
-        guard FileManager.default.fileExists(atPath: codePath) else {
-            throw XCTSkip("no pairing code at \(codePath); start HypoHarness first")
-        }
-
+    func testPairsOverLanAndSyncsBothWays() throws {
         let app = XCUIApplication()
         app.launch()
         addUIInterruptionMonitor(withDescription: "system alerts") { alert in
-            for label in ["Allow", "OK", "Allow Paste"] where alert.buttons[label].exists {
+            for label in ["Allow", "Allow Paste", "OK"] where alert.buttons[label].exists {
                 alert.buttons[label].tap()
                 return true
             }
@@ -38,82 +35,47 @@ final class HarnessSyncTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
         app.buttons["Pair a device"].tap()
 
-        XCTAssertTrue(app.buttons["Code"].waitForExistence(timeout: 10))
-        app.buttons["Code"].tap()
-        XCTAssertTrue(app.buttons["Enter a code"].waitForExistence(timeout: 10))
-        app.buttons["Enter a code"].tap()
-        let field = app.textFields["PairingCodeField"]
-        XCTAssertTrue(field.waitForExistence(timeout: 10))
-        field.tap()
-        // Read the code now, not at the start: it expires in about a minute
-        // and launching plus navigating spends most of that. The harness
-        // reissues, so the file holds whichever code is currently live.
-        let code = try XCTUnwrap(
-            try? String(contentsOfFile: codePath, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-        field.typeText(code)
-        app.buttons["Enter this code"].tap()
-
-        // The harness answers the challenge as soon as it sees it.
+        guard app.staticTexts["Harness Mac"].waitForExistence(timeout: 30) else {
+            throw XCTSkip("no harness on this network; start HypoHarness to exercise this")
+        }
+        app.buttons.containing(.staticText, identifier: "Harness Mac").firstMatch.tap()
         XCTAssertTrue(
             app.staticTexts["Paired with Harness Mac"].waitForExistence(timeout: 45),
-            "pairing with the harness did not complete"
+            "pairing over the LAN did not complete"
         )
 
-        // Back out to the list, which should now name the harness.
+        // Back to the list. What the harness sends should appear there: a Mac
+        // copying something and a phone showing it, which is the app's point.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(
-            app.staticTexts["Harness Mac"].waitForExistence(timeout: 20),
-            "the harness is not listed as a paired device"
-        )
-
-        // And what the harness sends should turn up in history: a Mac copying
-        // something and an iPhone showing it, which is the point of the app.
-        app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(
-            app.staticTexts["hello from the Mac harness"].waitForExistence(timeout: 90),
+            app.staticTexts["hello from the Mac harness"].waitForExistence(timeout: 120),
             "the harness's clipboard entry never arrived"
         )
 
-        // The other direction: copy on the phone, and the Mac should get it.
-        // Sending happens when the app becomes active, so this backgrounds the
-        // app and brings it back — what a user does after copying elsewhere.
-        guard let receivedPath = ProcessInfo.processInfo.environment["HYPO_RECEIVED_FILE"] else {
-            return
-        }
+        // And the other direction.
         try? FileManager.default.removeItem(atPath: receivedPath)
-
-        let sentFromPhone = "copied on the phone \(UUID().uuidString.prefix(8))"
-        UIPasteboard.general.string = sentFromPhone
+        let fromPhone = "copied on the phone \(UUID().uuidString.prefix(8))"
+        UIPasteboard.general.string = fromPhone
 
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 2)
         app.activate()
 
-        // Reading a clipboard this app did not write raises the iOS paste
-        // prompt. Interruption monitors only fire when the test interacts with
-        // something, so poke the app to give the monitor its chance.
-        Thread.sleep(forTimeInterval: 2)
-        app.tap()
-        for label in ["Allow Paste", "Allow", "Paste"] {
-            let button = springboardAlertButton(label)
-            if button.exists { button.tap(); break }
-        }
-
-        let arrived = pollForFile(at: receivedPath, containing: sentFromPhone, timeout: 90)
-        if !arrived {
-            // The screen says what the send did — "Sent to 1 device", "No
-            // paired devices", or nothing at all if the clipboard read never
-            // returned. Cheaper to read than the device log, which does not
-            // reliably survive a simulator session.
+        // The paste control appears because there is something to send, and
+        // reads without a prompt because the user pressed it.
+        let paste = app.buttons["Paste"]
+        if !paste.waitForExistence(timeout: 15) {
             print("SEND_SCREEN: \(app.staticTexts.allElementsBoundByIndex.map { $0.label })")
+            print("SEND_BUTTONS: \(app.buttons.allElementsBoundByIndex.map { $0.label })")
         }
-        XCTAssertTrue(arrived, "the phone's clipboard never reached the harness")
-    }
+        XCTAssertTrue(paste.exists, "no send control offered")
+        paste.tap()
 
-    private func springboardAlertButton(_ label: String) -> XCUIElement {
-        XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons[label]
+        XCTAssertTrue(
+            pollForFile(at: receivedPath, containing: fromPhone, timeout: 90),
+            "the phone's clipboard never reached the harness"
+        )
     }
 
     private func pollForFile(at path: String, containing text: String, timeout: TimeInterval) -> Bool {

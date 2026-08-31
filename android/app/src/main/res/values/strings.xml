@@ -46,9 +46,16 @@
     <string name="settings_history">History Settings</string>
     <string name="settings_history_limit">History Limit</string>
     <string name="settings_history_limit_description">Maximum number of clipboard items to store</string>
-    <string name="settings_devices">Paired Devices</string>
+    <string name="settings_devices">Devices</string>
     <string name="settings_add_device">Add Device</string>
-    <string name="settings_devices_empty">No paired devices discovered yet.</string>
+    <string name="settings_devices_empty">No paired devices yet.</string>
+    <string name="settings_devices_paired">Paired devices</string>
+    <string name="settings_devices_nearby">Nearby devices</string>
+    <string name="settings_devices_nearby_searching">Searching for nearby devices…</string>
+    <string name="settings_devices_nearby_hint">Tap a device to pair over the local network</string>
+    <string name="settings_devices_nearby_pairing">Pairing with %1$s…</string>
+    <string name="settings_devices_nearby_paired">Paired with %1$s</string>
+    <string name="settings_devices_nearby_retry">Retry</string>
     <string name="settings_battery">Battery Optimization</string>
     <string name="settings_battery_description">Disable battery optimization for reliable background sync</string>
     <string name="settings_battery_optimize_button">Open Settings</string>
@@ -84,8 +91,8 @@
     <string name="settings_history_limit_value">Storing up to %1$d items</string>
 
     <!-- Pairing Screen -->
-    <string name="pairing_title">Pair Device</string>
-    <string name="pairing_start">Pair New Device</string>
+    <string name="pairing_title">Pair with Code</string>
+    <string name="pairing_start">Pair with Code</string>
     <string name="pairing_enter_code">Or enter pairing code</string>
     <string name="pairing_code_hint">6-digit code</string>
     <string name="pairing_pair">Pair</string>

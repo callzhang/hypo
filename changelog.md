@@ -4,6 +4,9 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Android Devices Section**: Nearby LAN discovery now lives inside the Settings → Devices section — unpaired devices on the same network appear under “Nearby devices” and pair with a single tap, with inline progress, success, and retry states. The pairing screen is code-only and the entry button reads “Pair with Code” instead of “Pair New Device”.
+
 ## [1.2.0] - 2026-08-30
 
 ### Added

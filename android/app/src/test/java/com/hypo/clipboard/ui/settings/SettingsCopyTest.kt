@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.hypo.clipboard.R
 import kotlin.test.Test
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -29,6 +30,21 @@ class SettingsCopyTest {
         assertFalse(
             copy.contains("background updates", ignoreCase = true),
             "Accessibility copy must not imply reliable background clipboard updates."
+        )
+    }
+
+    @Test
+    fun `pair button copy points to code pairing since LAN pairing moved into the devices list`() {
+        val buttonCopy = context.getString(R.string.pairing_start)
+        val titleCopy = context.getString(R.string.pairing_title)
+
+        assertTrue(
+            buttonCopy.contains("code", ignoreCase = true),
+            "The pairing entry button must advertise code pairing; LAN pairing happens inline in the Devices section."
+        )
+        assertTrue(
+            titleCopy.contains("code", ignoreCase = true),
+            "The pairing screen is code-only, so its title must say so."
         )
     }
 

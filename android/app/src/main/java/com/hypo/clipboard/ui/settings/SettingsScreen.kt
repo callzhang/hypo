@@ -12,18 +12,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -31,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -43,7 +48,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.hypo.clipboard.BuildConfig
 import com.hypo.clipboard.R
 import com.hypo.clipboard.data.settings.UserSettings
+import com.hypo.clipboard.pairing.LanPairingUiState
+import com.hypo.clipboard.pairing.LanPairingViewModel
 import com.hypo.clipboard.transport.lan.DiscoveredPeer
+import kotlinx.coroutines.delay
 import com.hypo.clipboard.transport.ConnectionState
 import com.hypo.clipboard.ui.components.DeviceConnectionStatus
 import com.hypo.clipboard.ui.components.DeviceStatusBadge
@@ -57,11 +65,14 @@ fun SettingsRoute(
     onRequestSmsPermission: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onStartPairing: () -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel()
+    viewModel: SettingsViewModel = hiltViewModel(),
+    lanPairingViewModel: LanPairingViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    val lanPairingState by lanPairingViewModel.state.collectAsState()
     SettingsScreen(
         state = state,
+        lanPairingState = lanPairingState,
         onBack = onBack,
         onHistoryLimitChanged = viewModel::onHistoryLimitChanged,
         onOpenBatterySettings = onOpenBatterySettings,
@@ -69,6 +80,8 @@ fun SettingsRoute(
         onRequestNotificationPermission = onRequestNotificationPermission,
         onStartPairing = onStartPairing,
         onRemoveDevice = viewModel::removeDevice,
+        onNearbyDeviceTap = lanPairingViewModel::pairWithDevice,
+        onNearbyReset = lanPairingViewModel::reset,
         onCheckPeerStatus = { viewModel.checkPeerStatus() },
         onOpenAccessibilitySettings = { viewModel.openAccessibilitySettings() }
     )
@@ -78,6 +91,7 @@ fun SettingsRoute(
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
+    lanPairingState: LanPairingUiState,
     onBack: () -> Unit,
     onHistoryLimitChanged: (Int) -> Unit,
     onOpenBatterySettings: () -> Unit,
@@ -85,6 +99,8 @@ fun SettingsScreen(
     onRequestNotificationPermission: () -> Unit,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit,
+    onNearbyDeviceTap: (DiscoveredPeer) -> Unit,
+    onNearbyReset: () -> Unit,
     onCheckPeerStatus: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     modifier: Modifier = Modifier
@@ -157,8 +173,11 @@ fun SettingsScreen(
                     deviceTransports = state.deviceTransports,
                     peerDiscoveryStatus = state.peerDiscoveryStatus,
                     connectionState = state.connectionState,
+                    lanPairingState = lanPairingState,
                     onStartPairing = onStartPairing,
                     onRemoveDevice = onRemoveDevice,
+                    onNearbyDeviceTap = onNearbyDeviceTap,
+                    onNearbyReset = onNearbyReset,
                     onCheckPeerStatus = onCheckPeerStatus,
                     peerDeviceNames = state.peerDeviceNames
                 )
@@ -535,8 +554,11 @@ private fun DevicesSection(
     deviceTransports: Map<String, com.hypo.clipboard.transport.ActiveTransport?>,
     peerDiscoveryStatus: Map<String, Boolean>,
     connectionState: com.hypo.clipboard.transport.ConnectionState,
+    lanPairingState: LanPairingUiState,
     onStartPairing: () -> Unit,
     onRemoveDevice: (DiscoveredPeer) -> Unit,
+    onNearbyDeviceTap: (DiscoveredPeer) -> Unit,
+    onNearbyReset: () -> Unit,
     onCheckPeerStatus: () -> Unit = {},
     peerDeviceNames: Map<String, String?> = emptyMap()
 ) {
@@ -550,6 +572,12 @@ private fun DevicesSection(
                 fontWeight = FontWeight.SemiBold
             )
         }
+        Text(
+            text = stringResource(id = R.string.settings_devices_paired),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         if (peers.isEmpty()) {
             Text(
                 text = stringResource(id = R.string.settings_devices_empty),
@@ -577,8 +605,142 @@ private fun DevicesSection(
                 }
             }
         }
+        NearbyDevicesGroup(
+            state = lanPairingState,
+            onDeviceTap = onNearbyDeviceTap,
+            onReset = onNearbyReset
+        )
         Button(onClick = onStartPairing) {
             Text(text = stringResource(id = R.string.pairing_start))
+        }
+    }
+}
+
+@Composable
+private fun NearbyDevicesGroup(
+    state: LanPairingUiState,
+    onDeviceTap: (DiscoveredPeer) -> Unit,
+    onReset: () -> Unit
+) {
+    // After a successful LAN pairing the device moves to the paired list above;
+    // restart discovery so it disappears from the nearby group.
+    LaunchedEffect(state) {
+        if (state is LanPairingUiState.Success) {
+            delay(2_000)
+            onReset()
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = stringResource(id = R.string.settings_devices_nearby),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        when (state) {
+            is LanPairingUiState.Discovering -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(
+                        text = stringResource(id = R.string.settings_devices_nearby_searching),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            is LanPairingUiState.DevicesFound -> {
+                Text(
+                    text = stringResource(id = R.string.settings_devices_nearby_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                state.devices.forEach { device ->
+                    NearbyDeviceRow(device = device, onClick = { onDeviceTap(device) })
+                }
+            }
+            is LanPairingUiState.Pairing -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(
+                        text = stringResource(id = R.string.settings_devices_nearby_pairing, state.deviceName),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+            is LanPairingUiState.Success -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = stringResource(id = R.string.settings_devices_nearby_paired, state.deviceName),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            is LanPairingUiState.Error -> {
+                Text(
+                    text = state.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                OutlinedButton(onClick = onReset) {
+                    Text(text = stringResource(id = R.string.settings_devices_nearby_retry))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NearbyDeviceRow(
+    device: DiscoveredPeer,
+    onClick: () -> Unit
+) {
+    val displayName = device.attributes["device_name"] ?: device.serviceName
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = displayName,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = "${device.host}:${device.port}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = stringResource(id = R.string.pairing_pair),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }

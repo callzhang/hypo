@@ -20,8 +20,8 @@
 
     <!-- SizeToContent above, so the window is as tall as its contents rather
          than a number that has to be guessed against whatever the title bar and
-         borders come to. A fixed height had the six-digit code row -- the whole
-         point of the lower half -- below the bottom edge, and it took a
+         borders come to. A fixed height put the six-digit code row, the whole
+         point of the lower half, below the bottom edge, and it took a
          screenshot to notice because clicking a control that is off-screen works
          perfectly well in code.
 

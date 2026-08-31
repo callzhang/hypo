@@ -105,6 +105,15 @@ public sealed class ClipboardListener : IClipboard, IDisposable
 
     public event EventHandler<ClipboardContent>? ContentChanged;
 
+    /// <summary>
+    /// Raised when an image was too large to send even after compressing.
+    ///
+    /// <para>Reported rather than dropped: an image that silently fails to sync
+    /// looks exactly like the application being broken, and the user is the only
+    /// one who can do anything about it.</para>
+    /// </summary>
+    public event EventHandler<string>? OversizedImage;
+
     public Task<ClipboardContent?> GetAsync(CancellationToken ct = default) => OnPump(ReadCurrent);
 
     /// <summary>
@@ -115,12 +124,23 @@ public sealed class ClipboardListener : IClipboard, IDisposable
     /// URL -- and taking the text would sync the label instead of the
     /// picture.</para>
     /// </summary>
-    private static ClipboardContent? ReadCurrent()
+    private ClipboardContent? ReadCurrent()
     {
         var png = WindowsClipboard.ReadPng();
         if (png is { Length: > 0 })
         {
-            return new ClipboardContent { ContentType = ContentType.Image, Data = png };
+            // Shrunk here rather than at send time, so what goes into the
+            // history is what the peer will get -- otherwise the local copy and
+            // the synced one quietly differ.
+            var fitted = ImageCompressor.Fit(png);
+
+            if (fitted.Refused)
+            {
+                OversizedImage?.Invoke(this, fitted.Refusal!);
+                return null;
+            }
+
+            return new ClipboardContent { ContentType = ContentType.Image, Data = fitted.Data };
         }
 
         // Files before text: copying a file in Explorer also puts its path on the

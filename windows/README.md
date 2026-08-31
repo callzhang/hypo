@@ -20,6 +20,7 @@ the relay, from a notification-area application.
 | Windows clipboard: text, links, images, files | Done |
 | Tray icon, history window, pairing window | Done |
 | Clipboard sharing settings (both default off) | Done |
+| Oversized images compressed before sending | Done |
 | Installer (MSIX, winget) | Not planned — distributed as a zip |
 | x64 and ARM64 builds | Done |
 

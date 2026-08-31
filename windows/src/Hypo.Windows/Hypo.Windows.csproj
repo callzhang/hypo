@@ -15,6 +15,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The package, not <UseWindowsForms>. The framework reference drags in
+         Microsoft.WindowsDesktop.App, which does not exist off Windows and would
+         stop this project's tests running there at all, and they are how most
+         of this gets verified. -->
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Hypo.Core\Hypo.Core.csproj" />
   </ItemGroup>
 

@@ -241,6 +241,23 @@ public class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public void AdoptingSettingsChangedElsewhereDoesNotSaveThemAgain()
+    {
+        Fill(30);
+        var model = Build();
+        _saved.Clear();
+
+        model.Adopt(new HypoSettings { AllowCloudClipboardUpload = true, HistoryLimit = 15 });
+
+        Assert.True(model.Settings.AllowCloudClipboardUpload);
+        Assert.Equal(15, _history.Recent(2000).Count);
+
+        // Whoever changed them already saved them. A second writer for one
+        // setting is the thing this exists to avoid.
+        Assert.Empty(_saved);
+    }
+
+    [Fact]
     public void TheThreeSwitchesAreWrittenDownWhenChanged()
     {
         var model = Build();

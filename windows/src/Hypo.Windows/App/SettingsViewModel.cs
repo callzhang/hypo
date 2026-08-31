@@ -96,6 +96,22 @@ public sealed class SettingsViewModel
         _ => "Not connected",
     };
 
+    /// <summary>
+    /// Takes settings changed somewhere else -- the tray menu carries three of
+    /// the same switches.
+    ///
+    /// <para>Does not save: whoever changed them already did. Saving here would
+    /// be a second writer for one setting, which is the thing this exists to
+    /// avoid.</para>
+    /// </summary>
+    public void Adopt(HypoSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        Settings = settings;
+        _history.Capacity = settings.HistoryLimit;
+    }
+
     public void Refresh()
     {
         var onLan = _status.LanPeers.ToHashSet(StringComparer.OrdinalIgnoreCase);

@@ -35,6 +35,18 @@ public partial class SettingsWindow : Window
     /// </summary>
     public string? HotkeyStatus { get; set; }
 
+    /// <summary>
+    /// Re-reads everything after settings changed somewhere else.
+    ///
+    /// <para>Rebinding alone was not enough: the model held the settings it was
+    /// built with, so the window redrew the same stale values.</para>
+    /// </summary>
+    public void Adopt(HypoSettings settings)
+    {
+        _model.Adopt(settings);
+        Bind();
+    }
+
     public void Bind()
     {
         _model.Refresh();

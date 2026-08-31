@@ -86,9 +86,10 @@ public sealed class TrayIconHost : IDisposable
         _cloudItem.Checked = settings.AllowCloudClipboardUpload;
         _notifyItem.Checked = settings.NotifyOnArrival;
 
-        // The settings window shows the same three. Leaving it stale is how the
-        // menu and the window end up disagreeing in front of someone.
-        _settingsWindow?.Bind();
+        // The settings window shows the same three. Handing it the new settings
+        // rather than asking it to redraw: its model holds the ones it was built
+        // with, so a bare rebind draws the same stale values.
+        _settingsWindow?.Adopt(settings);
     }
 
     /// <summary>The history window while it is open, and null once it is closed.</summary>

@@ -53,6 +53,24 @@ public class GlobalHotkeyTests
     }
 
     [SkippableFact]
+    public void OpeningAndClosingItRepeatedlyKeepsWorking()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows());
+
+        // Each one registers a window class named after its pump thread. Managed
+        // thread ids are reused once a thread ends, so the fourth or fifth of
+        // these used to collide with a name already registered and fail with
+        // "RegisterClassExW failed" -- which reached a user as a shortcut that
+        // did not work for no stated reason.
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            using var hotkey = new GlobalHotkey(HotkeyBinding.Parse("Ctrl+Alt+Shift+F11")!);
+
+            Assert.True(hotkey.IsRegistered, $"attempt {attempt + 1}: {hotkey.Failure}");
+        }
+    }
+
+    [SkippableFact]
     public void TheReservedCombinationIsRefusedWithoutAskingWindows()
     {
         Skip.IfNot(OperatingSystem.IsWindows());

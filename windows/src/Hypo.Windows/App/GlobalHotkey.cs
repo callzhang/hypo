@@ -29,6 +29,7 @@ public sealed partial class GlobalHotkey : IDisposable
 
     private nint _hwnd;
     private volatile bool _disposed;
+    private string? _className;
 
     private delegate nint WindowProcedure(nint hwnd, uint message, nint wParam, nint lParam);
 
@@ -117,6 +118,14 @@ public sealed partial class GlobalHotkey : IDisposable
             // so Dispose posts here rather than doing the work itself.
             UnregisterHotKey(hwnd, Id);
             DestroyWindow(hwnd);
+
+            // The class outlives the window, and a process that opens and closes
+            // the hotkey repeatedly would accumulate one per attempt.
+            if (_className is { } name)
+            {
+                UnregisterClassW(name, GetModuleHandleW(null));
+            }
+
             PostQuitMessage(0);
             return 0;
         }
@@ -126,7 +135,12 @@ public sealed partial class GlobalHotkey : IDisposable
 
     private nint CreateMessageOnlyWindow()
     {
-        var className = $"HypoHotkey{Environment.ProcessId}{Environment.CurrentManagedThreadId}";
+        // A counter, not the thread id: managed thread ids are reused once a
+        // thread ends, so a second GlobalHotkey could land on the name the first
+        // one registered and RegisterClassExW would refuse it -- which surfaced
+        // as "RegisterClassExW failed" where "already taken" was expected.
+        var className = $"HypoHotkey{Environment.ProcessId}-{Interlocked.Increment(ref _classes)}";
+        _className = className;
 
         var windowClass = new WNDCLASSEXW
         {
@@ -211,6 +225,12 @@ public sealed partial class GlobalHotkey : IDisposable
 
     [LibraryImport("user32.dll")]
     private static partial void PostQuitMessage(int exitCode);
+
+    private static long _classes;
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterClassW(string className, nint instance);
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern ushort RegisterClassExW(ref WNDCLASSEXW windowClass);

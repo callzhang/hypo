@@ -128,4 +128,41 @@ final class HypoUITests: XCTestCase {
         }
         XCTAssertTrue(offered, "did not offer to send what was on the clipboard")
     }
+
+    /// Offering to send must not interrupt the user.
+    ///
+    /// The whole reason sending is a button rather than something the app does
+    /// on its own: iOS raises "Hypo would like to paste from …" for any
+    /// programmatic read of content this app did not write. Deciding whether
+    /// there is anything worth offering asks only whether the clipboard holds
+    /// text, which raises nothing; the read happens inside UIPasteControl,
+    /// which Apple exempts. If a prompt ever appears just from opening the app,
+    /// that promise is broken.
+    func testOfferingToSendDoesNotPrompt() {
+        let app = launch()
+        XCTAssertTrue(app.textFields["Search"].waitForExistence(timeout: 15))
+
+        UIPasteboard.general.string = "foreign text \(UUID().uuidString.prefix(6))"
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 2)
+        app.activate()
+
+        var offered = false
+        for _ in 0..<12 where !offered {
+            UIPasteboard.general.string = "foreign text \(UUID().uuidString.prefix(6))"
+            offered = app.buttons["Paste"].waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(offered, "never offered to send, so the no-prompt claim is untested")
+
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let pasteAlert = springboard.buttons["Allow Paste"]
+        XCTAssertFalse(
+            pasteAlert.exists,
+            "a paste prompt appeared just from showing the offer"
+        )
+        XCTAssertFalse(
+            app.staticTexts["Don't Allow Paste"].exists,
+            "a paste prompt appeared inside the app"
+        )
+    }
 }

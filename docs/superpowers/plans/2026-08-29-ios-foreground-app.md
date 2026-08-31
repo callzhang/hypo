@@ -2145,3 +2145,45 @@ Android 的 `removeDevice` 是四步,其中**先删密钥再忘掉设备**这个
 改成默认 nil、用到时才解析,且只在 `Bundle.main` 确实是 `.app` 时才取。
 
 **但修完之后崩溃依旧**,栈顶仍指向默认参数生成器。源码是对的,是 `xcodebuild` 的增量产物没更新——`rm -rf DerivedData/HypoiOS-*` 之后 33 个测试全绿。**症状是"修复没生效",实际是"验证读的是旧二进制"**,这是本期第三次撞上"验证手段本身有盲区"。
+
+
+## 端到端验证真的跑起来了（2026-08-31）
+
+在此之前有四个 UI 测试一直是 **skipped**,而汇总行看起来是绿的。跳过的测试证明不了任何事,所以把真实对端起起来让它们真跑。
+
+### 结果
+
+| 测试 | 结果 |
+|---|---|
+| `testPairsOverLanAndSyncsBothWays` | **通过** —— LAN 配对 + 双向同步 |
+| `testTappingANearbyDevicePairsWithIt` | **通过**(需全新对端身份,见下) |
+| `testAPairedDeviceCanBeUnpaired` | 仍 skip;行为已由 `UnpairTests` 三个单测覆盖 |
+| `testSyncsThroughTheRelayWithNoLocalRoute` | 仍 skip;需要 relay 模式的 harness |
+
+`testPairsOverLanAndSyncsBothWays` 通过意味着最初验收清单里的第 6、7 条(Mac→iOS、iOS→Mac)真的成立了。
+
+### 两次失败都是我起 harness 的方式不对,不是产品问题
+
+第一次两个方向都红。查 harness 日志发现:
+
+```
+[incoming] 📥 Received clipboard: text from iPhone 17
+[HistoryStore] ✅ Inserted entry: copied on the phone 5C476580
+```
+
+**iOS → harness 明明成功了**,但测试断言"从未到达"。原因是 harness 只有在设了 `HYPO_RECEIVED_FILE` 时才把收到的内容写盘供测试轮询;同样,只有设了 `HYPO_SEND_TEXT` 才会主动发送。两个变量我都漏了,于是"没发过"和"发到了但没人记录"被一起读成了"同步坏了"。
+
+正确的起法:
+
+```bash
+HYPO_DEVICE_NAME="Harness Mac" HYPO_LAN_PORT=7011 \
+HYPO_SEND_TEXT="hello from the Mac harness" \
+HYPO_RECEIVED_FILE=/tmp/hypo-received.txt \
+swift run HypoHarness show
+```
+
+`HYPO_LAN_PORT` 必须换:默认 7010 被本机运行中的 Hypo.app 占着。
+
+### 已配对的设备不能再配一次
+
+`testTappingANearbyDevicePairsWithIt` 在同一轮里跑第二次会失败,因为 iPhone 已经和这个 harness 配过了,重复的 challenge 会被 `PairingSession` 判为 duplicate 拒掉。换一个全新身份的 harness(每次启动都会生成新的 device id)即通过。这是正确行为,但意味着**这个测试对运行顺序敏感**。

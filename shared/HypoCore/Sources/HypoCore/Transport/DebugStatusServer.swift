@@ -32,6 +32,10 @@ public struct DebugStatus: Codable, Sendable {
     }
 
     public let generatedAt: Date
+    /// Which binary answered. The harness and the menu bar app both link this
+    /// server, and when one of them is down the other answers on the same port --
+    /// which reads as the app reporting nonsense rather than as the wrong process.
+    public let processName: String
     public let version: String
     public let deviceId: String
     public let deviceName: String

@@ -22,6 +22,7 @@ struct DebugStatusServerTests {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let status = try decoder.decode(DebugStatus.self, from: data)
+        #expect(status.processName == "TestProcess")
         #expect(status.deviceName == "Test Mac")
         #expect(status.hasRelayToken == false)
         #expect(status.pairedDevices.map(\.name) == ["Peer One"])
@@ -44,6 +45,7 @@ struct DebugStatusServerTests {
     private func makeStatus() -> DebugStatus {
         DebugStatus(
             generatedAt: Date(timeIntervalSince1970: 1_000),
+            processName: "TestProcess",
             version: "1.2.0",
             deviceId: "aaaa1111",
             deviceName: "Test Mac",

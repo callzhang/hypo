@@ -539,6 +539,18 @@ fi
 touch "$APP_BUNDLE"
 log_info "App bundle updated: $(date -r "$APP_BUNDLE" '+%Y-%m-%d %H:%M:%S')"
 
+# An unsigned bundle cannot launch: macOS refuses it with a launchd spawn failure
+# and no explanation. Signing has a fallback path that only warns when it fails, so
+# check the result here -- before killing the running app and deleting the install,
+# both of which happen immediately below. Failing after those leaves no working app
+# at all, which is worse than not building.
+if ! codesign --verify "$APP_BUNDLE" >/dev/null 2>&1; then
+    log_error "Refusing to install: the bundle is not validly signed"
+    log_error "Signing failed earlier in this build; the running app and the existing install are untouched."
+    log_info "Usually extended attributes: xattr -cr \"$APP_BUNDLE\" and build again."
+    exit 1
+fi
+
 # Kill existing instances
 log_info "Stopping existing app instances..."
 if killall -9 "$BINARY_NAME" 2>/dev/null; then

@@ -487,6 +487,7 @@ public final class TransportManager: ObservableObject {
 
         return DebugStatus(
             generatedAt: dateProvider(),
+            processName: ProcessInfo.processInfo.processName,
             version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
             deviceId: identity.deviceIdString,
             deviceName: identity.deviceName,
@@ -536,6 +537,7 @@ public final class TransportManager: ObservableObject {
         let server = DebugStatusServer(port: port) { [weak self] in
             self?.debugStatus() ?? DebugStatus(
                 generatedAt: Date(),
+                processName: ProcessInfo.processInfo.processName,
                 version: "unknown",
                 deviceId: "",
                 deviceName: "",

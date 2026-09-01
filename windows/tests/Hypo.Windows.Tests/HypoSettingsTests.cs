@@ -110,4 +110,44 @@ public class HypoSettingsTests : IDisposable
         Assert.False(settings.ShareWithWindowsHistory);
         Assert.False(settings.AllowCloudClipboardUpload);
     }
+
+    /// <summary>
+    /// The name every peer shows for this device. It defaults to what the OS
+    /// calls the machine, which is rarely what its owner would call it.
+    /// </summary>
+    [Fact]
+    public void FallsBackToTheMachineNameUntilItIsRenamed()
+    {
+        Assert.Equal(Environment.MachineName, new HypoSettings().EffectiveDeviceName);
+        Assert.Equal("Studio PC", new HypoSettings { DeviceName = "Studio PC" }.EffectiveDeviceName);
+        // Whitespace is not a name.
+        Assert.Equal(Environment.MachineName, new HypoSettings { DeviceName = "   " }.EffectiveDeviceName);
+    }
+
+    [Fact]
+    public void SanitisesANameTheWayEveryOtherClientDoes()
+    {
+        Assert.Equal("studio", HypoSettings.SanitiseDeviceName("  studio.local  "));
+        Assert.Equal("Derek's PC", HypoSettings.SanitiseDeviceName("Derek's PC"));
+        // Null rather than empty: a device with no name is worse than one named
+        // after the machine, so the caller keeps what it had.
+        Assert.Null(HypoSettings.SanitiseDeviceName("   "));
+        Assert.Null(HypoSettings.SanitiseDeviceName(null));
+    }
+
+    [Fact]
+    public void KeepsTheNameAcrossASaveAndLoad()
+    {
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName());
+        try
+        {
+            new HypoSettings { DeviceName = "Studio PC" }.Save(path);
+
+            Assert.Equal("Studio PC", HypoSettings.Load(path).DeviceName);
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
 }

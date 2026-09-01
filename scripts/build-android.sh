@@ -113,13 +113,13 @@ ICON_CHECK="$ANDROID_RES/mipmap-xxxhdpi/ic_launcher.png"
 if [ ! -f "$ICON_CHECK" ]; then
     if [ -f "$ICON_SCRIPT" ]; then
         echo "   Icons not found. Generating..."
-        python3 "$ICON_SCRIPT" || echo -e "${YELLOW}⚠️  Icon generation failed, continuing without icons${NC}"
+        python3 "$ICON_SCRIPT" android || echo -e "${YELLOW}⚠️  Icon generation failed, continuing without icons${NC}"
     else
         echo -e "${YELLOW}⚠️  Icon generation script not found. App will build without icons.${NC}"
     fi
 elif [ -f "$ICON_SCRIPT" ] && [ "$ICON_SCRIPT" -nt "$ICON_CHECK" ]; then
     echo "   Icon generation script is newer than icons, regenerating..."
-    python3 "$ICON_SCRIPT" 2>/dev/null || echo -e "${YELLOW}⚠️  Icon regeneration failed, using existing icons${NC}"
+    python3 "$ICON_SCRIPT" android 2>/dev/null || echo -e "${YELLOW}⚠️  Icon regeneration failed, using existing icons${NC}"
 else
     echo "   Icons are up to date"
 fi

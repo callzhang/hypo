@@ -766,6 +766,46 @@ public final class TransportManager: ObservableObject {
         discoveryCache.save(lastSeen)
     }
 
+    /// Renames this device and re-advertises it under the new name.
+    ///
+    /// Re-published rather than updated in place: the Bonjour service name is
+    /// fixed when the service is published, so a peer browsing the network would
+    /// otherwise keep seeing the old one until this device next restarted.
+    ///
+    /// Peers that are already paired keep the name they stored at pairing time --
+    /// nothing here reaches into another device's store.
+    ///
+    /// Returns the name that was actually kept; blank input is refused.
+    @discardableResult
+    public func renameDevice(to newName: String) -> String {
+        // The manager's own store, not `.standard`: in the app they are the same
+        // object, and in a test they are not -- renaming through `.standard` there
+        // reaches outside the test and into whatever else is running.
+        let identity = DeviceIdentity(userDefaults: defaults)
+        let kept = identity.rename(to: newName)
+        guard kept != lanConfiguration.serviceName else { return kept }
+
+        lanConfiguration = BonjourPublisher.Configuration(
+            domain: lanConfiguration.domain,
+            serviceType: lanConfiguration.serviceType,
+            serviceName: kept,
+            port: lanConfiguration.port,
+            version: lanConfiguration.version,
+            fingerprint: lanConfiguration.fingerprint,
+            protocols: lanConfiguration.protocols,
+            deviceId: identity.deviceIdString,
+            publicKey: lanConfiguration.publicKey,
+            signingPublicKey: lanConfiguration.signingPublicKey
+        )
+
+        if isAdvertising {
+            publisher.stop()
+            publisher.start(with: lanConfiguration)
+            logger.info("📢 [TransportManager] Re-advertising as \(kept)")
+        }
+        return kept
+    }
+
     public func updateLocalAdvertisement(
         port: Int? = nil,
         fingerprint: String? = nil,

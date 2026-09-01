@@ -47,6 +47,31 @@ public sealed record HypoSettings
     /// discovery, or who would rather not advertise the machine, can turn it
     /// off and use the relay alone.</para>
     /// </summary>
+    /// <summary>
+    /// What peers call this device. Blank means the machine name.
+    ///
+    /// <para>Stored rather than always taken from <see cref="Environment.MachineName"/>
+    /// because that is what the OS calls the machine, which is rarely what its
+    /// owner would call it -- and it is the name every peer shows.</para>
+    /// </summary>
+    public string DeviceName { get; init; } = string.Empty;
+
+    /// <summary>The name to advertise and send: the stored one, or the machine's.</summary>
+    public string EffectiveDeviceName =>
+        string.IsNullOrWhiteSpace(DeviceName) ? Environment.MachineName : DeviceName;
+
+    /// <summary>
+    /// Sanitises a name the way every other client does: trimmed, without a
+    /// <c>.local</c> suffix. Returns null when nothing usable is left, since a
+    /// device with no name is worse than one named after the machine.
+    /// </summary>
+    public static string? SanitiseDeviceName(string? name)
+    {
+        var sanitised = (name ?? string.Empty).Replace(".local", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
+
+        return sanitised.Length == 0 ? null : sanitised;
+    }
+
     public bool LanEnabled { get; init; } = true;
 
     /// <summary>

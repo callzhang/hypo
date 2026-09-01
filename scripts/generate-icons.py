@@ -134,7 +134,16 @@ def create_icon_image(size, svg_data):
     return render_svg_square(size, svg_data)
 
 def build_android_foreground_xml():
-    """Adaptive icon foreground matching the stacked-card SVG motif."""
+    """
+    Adaptive icon foreground: the stacked cards, and nothing else.
+
+    The gradient lives in the background layer, not here. An adaptive icon's
+    foreground is masked and parallaxed by the launcher, so a shape drawn in it
+    gets cropped to whatever silhouette the device uses -- and a second gradient
+    here fights the one behind it. `BrandIconResourceTest` asserts the split, so
+    emitting the older single-layer design here silently reverted the icon and
+    failed that test on the next Android build.
+    """
     return '''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -142,27 +151,16 @@ def build_android_foreground_xml():
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:pathData="M27,27 h54 a15.3,15.3 0 0 1 15.3,15.3 v23.4 a15.3,15.3 0 0 1 -15.3,15.3 h-54 a15.3,15.3 0 0 1 -15.3,-15.3 v-23.4 a15.3,15.3 0 0 1 15.3,-15.3 z">
-        <gradient
-            android:type="linear"
-            android:startX="27"
-            android:startY="27"
-            android:endX="81"
-            android:endY="81"
-            android:startColor="#5EB1FF"
-            android:endColor="#8458FF" />
-    </path>
-    <path
         android:fillColor="#FFFFFF"
         android:fillAlpha="0.12"
-        android:pathData="M34.1,61.2 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+        android:pathData="M34,63 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
     <path
         android:fillColor="#FFFFFF"
         android:fillAlpha="0.25"
-        android:pathData="M34.1,54.9 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+        android:pathData="M34,55 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M34.1,48.6 a18.9,7.56 0 1,0 37.8,0 a18.9,7.56 0 1,0 -37.8,0z" />
+        android:pathData="M34,47 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
 </vector>
 '''
 
@@ -198,15 +196,25 @@ def generate_android_icons(svg_data):
     drawable_dir.mkdir(parents=True, exist_ok=True)
     
     # Background and foreground are a simplified vector reduction of the same SVG.
+    # The gradient is the background's, filling the whole 108dp square: a launcher
+    # masks this layer to its own silhouette, so the colour has to reach the edges
+    # or a round mask shows a pale corner where the fill stopped.
     background_xml = '''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#E6EEFF"
-        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
+        <gradient
+            android:type="linear"
+            android:startX="54"
+            android:startY="0"
+            android:endX="54"
+            android:endY="108"
+            android:startColor="#5EB1FF"
+            android:endColor="#8458FF" />
+    </path>
 </vector>
 '''
     (drawable_dir / "ic_launcher_background.xml").write_text(background_xml)
@@ -388,14 +396,34 @@ def generate_macos_icons(svg_data):
     print("✅ macOS icons generated")
 
 def main():
-    """Main entry point."""
+    """
+    Main entry point.
+
+    Takes platforms as arguments so a build for one platform does not rewrite
+    another's assets. A macOS build regenerating the Android drawables is how
+    `BrandIconResourceTest` kept failing in worktrees where nobody had touched
+    Android at all. With no arguments it still does everything, which is what
+    the release workflow wants.
+    """
+    platforms = [argument for argument in sys.argv[1:] if not argument.startswith("-")]
+    do_android = not platforms or "android" in platforms
+    do_macos = not platforms or "macos" in platforms
+
+    unknown = [p for p in platforms if p not in ("android", "macos")]
+    if unknown:
+        print(f"❌ Unknown platform(s): {', '.join(unknown)}. Use 'android', 'macos', or neither for both.")
+        sys.exit(2)
+
     print("🎨 Generating Hypo app icons...\n")
     
     try:
         svg_data = parse_icon_svg()
-        generate_android_icons(svg_data)
-        print()
-        generate_macos_icons(svg_data)
+        if do_android:
+            generate_android_icons(svg_data)
+            if do_macos:
+                print()
+        if do_macos:
+            generate_macos_icons(svg_data)
         print("\n✅ All icons generated successfully!")
     except Exception as e:
         print(f"\n❌ Error: {e}")

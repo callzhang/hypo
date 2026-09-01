@@ -55,8 +55,11 @@ public partial class App : System.Windows.Application
         var settingsPath = HypoSettings.PathIn(AppStartup.DefaultStateDirectory);
         var settings = HypoSettings.Load(settingsPath);
 
+        // The stored name, falling back to the machine's. Taking the machine name
+        // directly here is what made the setting cosmetic: peers kept seeing the
+        // OS name however the field was edited.
         var result = await AppStartup.RunAsync(
-            _clipboard, AppStartup.DefaultStateDirectory, Environment.MachineName, settings: settings);
+            _clipboard, AppStartup.DefaultStateDirectory, settings.EffectiveDeviceName, settings: settings);
 
         if (!result.Started)
         {
@@ -81,7 +84,7 @@ public partial class App : System.Windows.Application
                 store,
                 new LanPairingCoordinator(store),
                 deviceId,
-                Environment.MachineName,
+                settings.EffectiveDeviceName,
                 _client.Coordinator,
                 new RemotePairingCoordinator(new RelayPairingClient(new HttpClient()), store)),
             Shutdown,

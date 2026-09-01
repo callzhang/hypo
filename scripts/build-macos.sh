@@ -165,7 +165,7 @@ ICONSET_DIR="$APP_BUNDLE/Contents/Resources/AppIcon.iconset"
 if [ ! -f "$ICON_ICNS" ] && [ ! -d "$ICONSET_DIR" ]; then
     log_warn "App icon not found. Generating icons..."
     if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ]; then
-        python3 "$PROJECT_ROOT/scripts/generate-icons.py" || log_warn "Icon generation failed, continuing without icon"
+        python3 "$PROJECT_ROOT/scripts/generate-icons.py" macos || log_warn "Icon generation failed, continuing without icon"
     else
         log_warn "Icon generation script not found. App will run without icon."
     fi
@@ -488,11 +488,11 @@ fi
 if [ -f "$PROJECT_ROOT/scripts/generate-icons.py" ] && [ -f "$ICON_ICNS" ]; then
     if [ "$PROJECT_ROOT/scripts/generate-icons.py" -nt "$ICON_ICNS" ]; then
         log_info "Icon generation script is newer than icon, regenerating..."
-        python3 "$PROJECT_ROOT/scripts/generate-icons.py" 2>/dev/null || log_warn "Icon regeneration failed, using existing icon"
+        python3 "$PROJECT_ROOT/scripts/generate-icons.py" macos 2>/dev/null || log_warn "Icon regeneration failed, using existing icon"
     fi
 elif [ ! -f "$ICON_ICNS" ] && [ ! -d "$ICONSET_DIR" ]; then
     log_info "Icons not found, generating..."
-    python3 "$PROJECT_ROOT/scripts/generate-icons.py" 2>/dev/null || log_warn "Icon generation failed, continuing without icon"
+    python3 "$PROJECT_ROOT/scripts/generate-icons.py" macos 2>/dev/null || log_warn "Icon generation failed, continuing without icon"
 fi
 
 # Sign the app for local development (adhoc signature)

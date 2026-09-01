@@ -2123,6 +2123,8 @@ private struct SettingsSectionView: View {
     /// Set once the search has run long enough that finding nothing is worth
     /// explaining rather than still being in progress.
     @State private var searchHasHadTime = false
+    @State private var deviceName: String = ""
+    @FocusState private var deviceNameFocused: Bool
     @State private var shortcutRecorderMonitor: Any?
     @State private var shortcutErrorMessage: String?
 
@@ -2321,6 +2323,35 @@ private struct SettingsSectionView: View {
                 }
                 #endif
 
+                Section("This device") {
+                    // Editable, because the default is whatever the OS calls the
+                    // machine and that is often not what its owner would call it --
+                    // and it is the name every peer shows.
+                    HStack {
+                        Text("Name")
+                        Spacer()
+                        TextField("Name", text: $deviceName)
+                            .multilineTextAlignment(.trailing)
+                            .textFieldStyle(.plain)
+                            .frame(maxWidth: 220)
+                            .onSubmit { commitDeviceName() }
+                            .focused($deviceNameFocused)
+                            .onChange(of: deviceNameFocused) { isFocused in
+                                // Committed on losing focus too: a name typed and
+                                // then clicked away from is a name the user meant.
+                                if !isFocused { commitDeviceName() }
+                            }
+                            .accessibilityIdentifier("DeviceNameField")
+                    }
+                    HStack {
+                        Text("ID")
+                        Spacer()
+                        Text(String(viewModel.localDeviceId.prefix(8)))
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Devices") {
                     if transportManager.pairedDevices.isEmpty && pairablePeers.isEmpty {
                         Text("No devices yet. Devices on this network appear here; use a code for one that is elsewhere.")
@@ -2416,6 +2447,7 @@ private struct SettingsSectionView: View {
             .scrollContentBackground(.hidden)
             .formStyle(.grouped)
             .onAppear {
+                deviceName = DeviceIdentity().deviceName
                 // Someone looking at the device list is asking about now. Bonjour
                 // announces a service once, so a phone whose app was opened while
                 // nobody was browsing will not announce itself again on its own.
@@ -2813,6 +2845,12 @@ private struct SettingsSectionView: View {
             }
         }
         .help("Not paired yet — \(peer.endpoint.host):\(peer.endpoint.port)")
+    }
+
+    /// Keeps whatever the rename actually accepted, so a blank entry visibly
+    /// snaps back to the existing name rather than appearing to have been taken.
+    private func commitDeviceName() {
+        deviceName = transportManager.renameDevice(to: deviceName)
     }
 
     private func pair(with peer: DiscoveredPeer) {

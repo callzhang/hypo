@@ -13,7 +13,16 @@
     <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
       <StackPanel>
 
-        <TextBlock Text="Devices" FontWeight="SemiBold" FontSize="15" />
+        <TextBlock Text="This device" FontWeight="SemiBold" FontSize="15" />
+        <TextBlock Text="The name your other devices show for this one."
+                   Margin="0,4,0,0"
+                   Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+        <TextBox x:Name="DeviceNameBox"
+                 Margin="0,8,0,0"
+                 LostFocus="OnDeviceNameCommitted"
+                 KeyDown="OnDeviceNameKey" />
+
+        <TextBlock Text="Devices" FontWeight="SemiBold" FontSize="15" Margin="0,20,0,0" />
         <TextBlock x:Name="Connection"
                    Margin="0,4,0,0"
                    Foreground="{DynamicResource SecondaryTextBrush}" />

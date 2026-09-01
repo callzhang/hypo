@@ -35,6 +35,7 @@ class SettingsViewModel @Inject constructor(
     private val syncCoordinator: SyncCoordinator,
     private val connectionStatusProber: com.hypo.clipboard.transport.ConnectionStatusProber,
     private val accessibilityServiceChecker: com.hypo.clipboard.util.AccessibilityServiceChecker,
+    private val deviceIdentity: com.hypo.clipboard.sync.DeviceIdentity,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -201,12 +202,30 @@ class SettingsViewModel @Inject constructor(
                     isBatteryOptimizationDisabled = isBatteryOptimizationDisabled,
                     connectionState = cloudConnectionState,
                     peerDiscoveryStatus = peerDiscoveryStatus,
-                    peerDeviceNames = peerDeviceNames
+                    peerDeviceNames = peerDeviceNames,
+                    deviceName = deviceIdentity.deviceName,
+                    deviceId = deviceIdentity.deviceId
                 )
             }.collect { state ->
                 _state.value = state
             }
         }
+    }
+
+    /**
+     * Renames this device, keeping whatever the identity accepted so a blank entry
+     * visibly snaps back rather than appearing to have been taken.
+     *
+     * Peers already paired keep the name they stored; this reaches the network
+     * through the Bonjour advertisement, which is republished under the new name.
+     */
+    fun onDeviceNameChanged(newName: String) {
+        val kept = deviceIdentity.rename(newName)
+        _state.value = _state.value.copy(deviceName = kept)
+        // Re-registered rather than updated in place: the advertised service name
+        // is fixed when the service is registered, so a peer browsing the network
+        // would otherwise keep seeing the old one until this device restarted.
+        transportManager.updateAdvertisement(serviceName = kept)
     }
 
     fun onLanSyncChanged(enabled: Boolean) {
@@ -291,5 +310,7 @@ data class SettingsUiState(
         val isAccessibilityServiceEnabled: Boolean = false,
         val connectionState: com.hypo.clipboard.transport.ConnectionState = com.hypo.clipboard.transport.ConnectionState.Disconnected,
         val peerDiscoveryStatus: Map<String, Boolean> = emptyMap(), // Maps serviceName to isDiscovered
-        val peerDeviceNames: Map<String, String?> = emptyMap() // Maps serviceName to device name
+        val peerDeviceNames: Map<String, String?> = emptyMap(), // Maps serviceName to device name
+        val deviceName: String = "",
+        val deviceId: String = ""
     )

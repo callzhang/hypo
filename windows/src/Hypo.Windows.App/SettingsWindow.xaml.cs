@@ -55,6 +55,14 @@ public partial class SettingsWindow : Window
         Connection.Text = _model.ConnectionSummary;
         Devices.ItemsSource = _model.Devices;
 
+        // Not rebound while it is being edited: Bind() runs on every change in
+        // this window, and overwriting a half-typed name is how a rename loses
+        // the last few characters.
+        if (!DeviceNameBox.IsKeyboardFocusWithin)
+        {
+            DeviceNameBox.Text = _model.Settings.EffectiveDeviceName;
+        }
+
         LimitBox.Text = _model.Settings.HistoryLimit.ToString(CultureInfo.CurrentCulture);
         PortBox.Text = _model.Settings.LanPort.ToString(CultureInfo.CurrentCulture);
         LanBox.IsChecked = _model.Settings.LanEnabled;
@@ -72,6 +80,29 @@ public partial class SettingsWindow : Window
 
         Message.Text = _model.LastMessage ?? string.Empty;
         UnpairButton.IsEnabled = Devices.SelectedItem is not null;
+    }
+
+    /// <summary>
+    /// Commits the typed name, showing whatever was actually kept: a blank entry
+    /// snaps back to the current name rather than appearing to have been taken.
+    /// </summary>
+    private void OnDeviceNameCommitted(object sender, RoutedEventArgs e) => CommitDeviceName();
+
+    private void OnDeviceNameKey(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key is System.Windows.Input.Key.Enter)
+        {
+            CommitDeviceName();
+        }
+    }
+
+    private void CommitDeviceName()
+    {
+        var kept = _model.SetDeviceName(DeviceNameBox.Text);
+        if (DeviceNameBox.Text != kept)
+        {
+            DeviceNameBox.Text = kept;
+        }
     }
 
     private void OnPair(object sender, RoutedEventArgs e) => _openPairing();

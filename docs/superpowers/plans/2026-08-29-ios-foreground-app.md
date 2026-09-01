@@ -2555,3 +2555,12 @@ guard case .found = state else { return }   // ← 点击直接无效
 | 本地网络权限弹窗/拒绝 | 无法验证 —— 模拟器不建模该权限 |
 
 第二项的**报文格式**部分已由 `AndroidWireFormatTests` 覆盖(按 Android 的序列化规则手写、并验证过能抓住时间戳 bug),缺的只是那台设备本身。
+
+
+### 让 Android 那条在设备出现时自动完成
+
+`testTappingANearbyDevicePairsWithIt` 改成从 `/tmp/hypo-peer-name` 读取目标设备名(默认仍是 Harness Mac),所以同一个测试可以对准真手机。
+
+配套一个监视脚本 `scratchpad/await-oppo.sh`:每 45 秒用 `dns-sd -B _hypo._tcp local` 扫一次,发现 OPPO 或 Xiaomi 就写入目标名、放上开关文件、跑那个测试。**手机端不需要任何操作,配对是模拟器这边发起的**,人只要把手机唤醒、确认 Hypo 在运行。
+
+这样这条缺口不再是"等人有空",而是"设备一上线就自证"。

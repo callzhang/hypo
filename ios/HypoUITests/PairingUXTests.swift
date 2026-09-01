@@ -97,13 +97,17 @@ final class PairingUXTests: XCTestCase {
         // Identifiers rather than the label text: a nearby device and a paired
         // one both show the same name, and after pairing the row moves from one
         // group to the other, which is exactly what this asserts.
-        let nearby = app.buttons["NearbyDevice-Harness Mac"]
+        // Which device to pair with, so this can be aimed at a real phone as
+        // easily as at the harness. Defaults to the harness when unset.
+        let target = (try? String(contentsOfFile: "/tmp/hypo-peer-name", encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Harness Mac"
+        let nearby = app.buttons["NearbyDevice-\(target)"]
         guard revealElement(nearby, in: app) else {
             throw XCTSkip("no harness on this network; start HypoHarness to exercise this")
         }
         nearby.tap()
 
-        let paired = isPaired("Harness Mac", in: app)
+        let paired = isPaired(target, in: app)
         if !paired {
             print("LAN_PAIR_SCREEN: \(app.staticTexts.allElementsBoundByIndex.map { $0.label })")
         }

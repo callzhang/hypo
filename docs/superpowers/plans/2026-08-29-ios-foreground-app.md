@@ -2522,3 +2522,36 @@ guard case .found = state else { return }   // ← 点击直接无效
 ### 顺带:状态框太大
 
 `LabeledContent` 里套 `Label` 会按默认字号和间距渲染。改成 `HStack` + 小号图标 + 次要色文字。
+
+
+## macOS ↔ iOS 的真实互传,验证通过（2026-09-01）
+
+此前一直把"真机互传"整块记为未验证,这说得过于保守了。**对端是 macOS 时,产品对产品的双向同步现在验过了**,而且对面不是 harness,是用户自己运行的 Hypo.app。
+
+### Mac → iPhone
+
+在 Mac 上 `pbcopy` 一段带时间戳的文字,十几秒后模拟器的日志:
+
+```
+📥 Cloud relay incoming message received: 0.75 KB, origin=cloud
+📦 Decoded envelope: deviceId=007e4a95, deviceName=derek's MacBook Air (2)
+📥 Received clipboard: text from derek's MacBook Air (2)
+✅ Applied text to clipboard (25 chars)
+```
+
+25 个字符正是发出的那句。
+
+### iPhone → Mac
+
+先把 Mac 的剪贴板换成别的内容,再让 UI 测试在模拟器上点 Paste。测试结束后 `pbpaste` 拿到的正是 iOS 发出的文本。
+
+### 所以真正剩下的缺口比之前说的窄
+
+| 项 | 状态 |
+|---|---|
+| macOS ↔ iOS(真实产品) | **已验证** |
+| Android ↔ iOS(OPPO) | 未验证 —— `dns-sd` 显示手机当前不在网络上(息屏或未运行) |
+| 物理 iOS 设备 | 未验证 —— 全程模拟器 |
+| 本地网络权限弹窗/拒绝 | 无法验证 —— 模拟器不建模该权限 |
+
+第二项的**报文格式**部分已由 `AndroidWireFormatTests` 覆盖(按 Android 的序列化规则手写、并验证过能抓住时间戳 bug),缺的只是那台设备本身。

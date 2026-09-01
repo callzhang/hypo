@@ -2727,7 +2727,7 @@ Internal Error: DecodingError.dataCorrupted: Corrupted JSON. Underlying error: u
 
 这正是本期反复出现的那类问题:**看起来绿,实际证明得更少。**
 
-## 模拟器的 mDNS 卡住了,不是代码（2026-09-01）
+## ~~模拟器的 mDNS 卡住了~~ 更正：Mac 换了网络（2026-09-01）
 
 补完测试后发现模拟器一个对端都发现不了。排查:
 
@@ -2738,6 +2738,21 @@ Internal Error: DecodingError.dataCorrupted: Corrupted JSON. Underlying error: u
 | macOS 版 Hypo 此刻仍能发现 Harness Mac;`dns-sd` 也看得到广播 | 网络与广播端 |
 | 模拟器的**云端路径正常**(仍在接收 Mac 的剪贴板) | 模拟器整体断网 |
 
-结论是宿主层面的模拟器 mDNS 卡死,已知偶发问题,通常需要 `sudo killall -HUP mDNSResponder` 或重启 Mac。
+当时的结论是"宿主层面的 mDNS 卡死,需要 `sudo killall -HUP mDNSResponder`"。**这个结论是错的。**
 
-**影响**:所有依赖 LAN 发现的测试会 skip 而不是失败(它们本来就设计成这样),CI 不受影响(CI 上本来就没有对端)。恢复之前,LAN 相关的本地验证做不了。
+真实原因是 **Mac 换了网络**:
+
+```
+今早发现成功时:  OPPO 在 10.0.0.17,Xiaomi 在 10.0.0.137
+现在:            en0 → 192.168.15.188
+```
+
+两台手机和 Mac 已经不在同一网段,所以发现不到它们是必然的。机器上还有 Tailscale(`utun5`)在跑,VPN 会干扰模拟器的多播,这可能是模拟器连本机 harness 都看不到的原因——而 macOS 版 Hypo 看得到,因为它和 harness 在同一台机器上。
+
+**连带更正**:前面反复记录的"OPPO 一直没上线、监视器三轮都没等到"同样不成立。手机很可能一直开着,只是不在同一个网络里,监视器再挂多久也不可能发现它。
+
+**这次排查的教训**:看到"发现不了"就依次怀疑代码回归、模拟器状态、mDNS 服务,唯独没有先确认最基本的前提——**两端是否在同一个网络**。一条 `ipconfig getifaddr en0` 就能省掉前面整轮排查,包括新建一台模拟器、重启 CoreSimulator 服务,以及给用户一条不必要的 sudo 建议。
+
+**恢复 LAN 验证需要**:把 Mac 和手机放回同一网络;若模拟器仍看不到本机 harness,临时关掉 VPN。两者都不需要 sudo。
+
+**影响**:依赖 LAN 发现的测试会 skip 而不是误报(本来就这么设计),CI 不受影响(CI 上没有对端)。

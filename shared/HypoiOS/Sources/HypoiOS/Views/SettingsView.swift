@@ -36,13 +36,14 @@ public struct SettingsView: View {
         List {
             Section("Connection") {
                 LabeledContent("Status") {
-                    Label {
-                        Text(connectionDescription)
-                    } icon: {
+                    HStack(spacing: 5) {
                         Image(systemName: connectionSymbol)
+                            .font(.caption)
                             .foregroundStyle(connectionTint)
+                        Text(connectionDescription)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
-                    .font(.callout)
                 }
             }
 
@@ -119,7 +120,7 @@ public struct SettingsView: View {
                 // already about devices, and a device you can see is the
                 // shortest path to pairing with it. Typing a code is the
                 // fallback for devices that cannot see each other.
-                ForEach(nearbyUnpaired, id: \.serviceName) { peer in
+                ForEach(lanViewModel.unpairedPeers, id: \.serviceName) { peer in
                     Button {
                         lanViewModel.pair(with: peer)
                     } label: {
@@ -137,14 +138,19 @@ public struct SettingsView: View {
                             }
                         }
                     }
-                    .disabled(isPairing)
+                    .disabled(lanViewModel.isPairingInProgress)
                     .accessibilityIdentifier("NearbyDevice-\(peer.serviceName)")
                 }
 
-                if case .failed(let message) = lanViewModel.state {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                if case .failed(let message) = lanViewModel.pairing {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Button("Dismiss") { lanViewModel.dismissPairingOutcome() }
+                            .font(.caption)
+                    }
                 }
 
                 // Shown only once discovery has been empty for a while, which
@@ -231,26 +237,8 @@ public struct SettingsView: View {
     /// sitting right there on the network reads as "Offline" until something
     /// has been sent — which is both true and useless. Bonjour already knows it
     /// is nearby; say so.
-    /// Discovered peers that are not paired yet.
-    ///
-    /// A device already in the paired list above would otherwise appear twice,
-    /// once as something to manage and once as something to pair with.
-    private var nearbyUnpaired: [DiscoveredPeer] {
-        guard case .found(let peers) = lanViewModel.state else { return [] }
-        let paired = Set(transportManager.pairedDevices.map { $0.id.lowercased() })
-        return peers.filter { peer in
-            guard let id = peer.endpoint.metadata["device_id"]?.lowercased() else { return true }
-            return !paired.contains(id)
-        }
-    }
-
-    private var isPairing: Bool {
-        if case .pairing = lanViewModel.state { return true }
-        return false
-    }
-
     private func pairingLabel(for peer: DiscoveredPeer) -> String {
-        if case .pairing(let name) = lanViewModel.state, name == peer.serviceName {
+        if case .inProgress(let name) = lanViewModel.pairing, name == peer.serviceName {
             return "Pairing…"
         }
         return "Pair"

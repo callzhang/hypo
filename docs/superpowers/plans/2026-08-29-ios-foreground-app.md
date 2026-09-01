@@ -2434,3 +2434,34 @@ count: 6
 最后一次失败则是等待窗口不够:中转服务器往返时间会波动,30 秒偶尔不够,放宽到 120 秒后 16.5 秒就通过了——快的时候立即返回,不增加耗时。
 
 **教训**:断言失败先问"我断言的东西是否存在",再问"产品是否有问题"。这一轮五次失败全部属于前者。
+
+
+## 按 Android 的真实报文格式测试（2026-08-31）
+
+真机互传这条缺口没有手机就关不掉,但能收窄到只剩"设备本身"这一项:**用手工拼出的、符合 Android 序列化规则的字节去跑配对**。
+
+原有的配对测试用 Swift 自己的编码器造 challenge,两端**按构造就一致**,Android 写出来的差异根本没机会出现——小数秒那个 bug 就是这么活下来的。
+
+`AndroidWireFormatTests` 里的报文按 Android 的规则手写:
+
+| 规则 | 体现 |
+|---|---|
+| `@SerialName` 蛇形键名 | `initiator_device_id` 等 |
+| `encodeDefaults = false` | **不写 `challenge_id`**(它有默认值) |
+| `Base64.NO_WRAP` | 带 padding 的标准 base64 |
+| `Instant.toString()` | 纳秒 / 毫秒 / 无小数三种形态 |
+| `challenge` 是 String | 密文内的 payload 用 base64 字符串,不是 Swift 的 `Data` |
+
+四个测试:三种时间戳形态各一,外加"缺 `challenge_id` 仍能解码"。
+
+### 确认它们真的抓得住 bug
+
+**一个抓不住 bug 的回归测试没有价值。** 临时把 `PairingDateFormat` 的小数秒支持撤掉,三个时间戳测试立刻变红,失败原因正是「Unable to decode pairing challenge」;恢复后全绿。
+
+### 过程中的一次误判
+
+第一版四条全红,包括本该通过的"整秒"。看错误原因是「Challenge timestamp is outside the allowed window」——**时间戳其实解析成功了**(否则会是"无法解码"),是我 fixture 里写死的时间和 session 的时钟对不上。改成从同一个时钟派生即可。
+
+这反过来也是证据:窗口检查能报出来,说明解析这一步已经过了。
+
+HypoCore 从 170 涨到 174。

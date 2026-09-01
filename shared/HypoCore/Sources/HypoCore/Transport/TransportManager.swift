@@ -30,6 +30,9 @@ public final class TransportManager: ObservableObject {
     private let incomingHandler: IncomingClipboardHandler?
     private weak var historyViewModel: (any RemoteEntryReceiving)?
     private var connectionStatusProber: ConnectionStatusProber?
+#if canImport(Network)
+    private var debugStatusServer: DebugStatusServer?
+#endif
     private var lanConnectedDeviceIds = Set<String>()
     private var cloudConnectedDeviceIds = Set<String>()
     private var connectionDeviceIds: [UUID: String] = [:]
@@ -52,9 +55,13 @@ public final class TransportManager: ObservableObject {
     @Published public private(set) var connectionState: ConnectionState = .disconnected
     // Peer state managed by TransportManager
     @Published public private(set) var pairedDevices: [PairedDevice] = []
+    /// Peers currently advertising on the LAN, minus this device. Published so the
+    /// pairing UI updates as devices come and go rather than polling for them.
+    @Published public private(set) var discoveredLanPeers: [DiscoveredPeer] = []
 #else
     public private(set) var connectionState: ConnectionState = .disconnected
     public private(set) var pairedDevices: [PairedDevice] = []
+    public private(set) var discoveredLanPeers: [DiscoveredPeer] = []
 #endif
 
     // Cache for synchronous name lookup
@@ -128,6 +135,10 @@ public final class TransportManager: ObservableObject {
         // Restore persisted peers from cache
         let cachedPeers = discoveryCache.loadPeers()
         self.lanPeers = cachedPeers
+        // Publish them straight away. Refreshing only on discovery events left the
+        // pairing list empty until a peer happened to appear or disappear, which for
+        // an already-known peer can be never.
+        self.discoveredLanPeers = TransportManager.peersExcludingSelf(in: cachedPeers)
         self.webSocketServer = webSocketServer
         self.dispatcher = dispatcher ?? ClipboardEventDispatcher()
         self.notificationController = notificationController
@@ -463,8 +474,93 @@ public final class TransportManager: ObservableObject {
         } else {
             logger.info("🔧 [TransportManager] ConnectionStatusProber already initialized")
         }
+        startDebugStatusServer()
         #endif
     }
+
+    /// Current state as a debugging snapshot. Also served over loopback HTTP.
+    public func debugStatus() -> DebugStatus {
+        let identity = DeviceIdentity()
+        let bundleToken = Bundle.main.object(forInfoDictionaryKey: "RelayWsAuthToken") as? String
+        let envToken = ProcessInfo.processInfo.environment["RELAY_WS_AUTH_TOKEN"]
+        let hasToken = (bundleToken?.isEmpty == false) || (envToken?.isEmpty == false)
+
+        return DebugStatus(
+            generatedAt: dateProvider(),
+            processName: ProcessInfo.processInfo.processName,
+            version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            deviceId: identity.deviceIdString,
+            deviceName: identity.deviceName,
+            platform: identity.platform.rawValue,
+            hasRelayToken: hasToken,
+            connectionState: String(describing: connectionState),
+            lanServerPort: lanConfiguration.port > 0 ? lanConfiguration.port : nil,
+            publishedPeerCount: discoveredLanPeers.count,
+            pairablePeers: pairableLanPeers().map(\.serviceName),
+            pairedDevices: pairedDevices.map { device in
+                DebugStatus.Device(
+                    id: device.id,
+                    name: device.name,
+                    platform: device.platform,
+                    isOnline: device.isOnline,
+                    lastSeen: device.lastSeen,
+                    bonjourHost: device.bonjourHost,
+                    bonjourPort: device.bonjourPort
+                )
+            },
+            discoveredPeers: lanDiscoveredPeers().map { peer in
+                DebugStatus.Peer(
+                    serviceName: peer.serviceName,
+                    host: peer.endpoint.host,
+                    port: peer.endpoint.port,
+                    deviceId: peer.endpoint.metadata["device_id"],
+                    advertisesPairingKey: !(peer.endpoint.metadata["pub_key"] ?? "").isEmpty,
+                    isPaired: isPaired(peer),
+                    lastSeen: peer.lastSeen
+                )
+            }
+        )
+    }
+
+#if canImport(Network)
+    private func startDebugStatusServer() {
+        guard debugStatusServer == nil else { return }
+        // On by default: it is loopback-only and carries nothing secret. Turn it off
+        // with `defaults write com.hypo.clipboard hypo_debug_api_enabled -bool false`.
+        if defaults.object(forKey: "hypo_debug_api_enabled") != nil,
+           !defaults.bool(forKey: "hypo_debug_api_enabled") {
+            logger.info("🩺 [TransportManager] Debug status API disabled by preference")
+            return
+        }
+        let configuredPort = defaults.integer(forKey: "hypo_debug_api_port")
+        let port = configuredPort > 0 ? configuredPort : DebugStatusServer.defaultPort
+        let server = DebugStatusServer(port: port) { [weak self] in
+            self?.debugStatus() ?? DebugStatus(
+                generatedAt: Date(),
+                processName: ProcessInfo.processInfo.processName,
+                version: "unknown",
+                deviceId: "",
+                deviceName: "",
+                platform: "",
+                hasRelayToken: false,
+                connectionState: "unavailable",
+                lanServerPort: nil,
+                publishedPeerCount: 0,
+                pairablePeers: [],
+                pairedDevices: [],
+                discoveredPeers: []
+            )
+        }
+        server.localDeviceId = DeviceIdentity().deviceIdString
+        do {
+            try server.start()
+            debugStatusServer = server
+        } catch {
+            // A debug aid must never take the app down with it.
+            logger.warning("⚠️ [TransportManager] Debug status API unavailable: \(error.localizedDescription)")
+        }
+    }
+#endif
     
     /// Update the connection state (used by ConnectionStatusProber)
     @MainActor
@@ -522,6 +618,14 @@ public final class TransportManager: ObservableObject {
     public func ensureLanDiscoveryActive() async {
         await activateLanServices()
     }
+
+    /// Asks the network again, rather than reporting what has arrived so far.
+    /// Peers are announced once, so a device that came up while nobody was
+    /// browsing -- or that failed to resolve -- needs a fresh look.
+    public func rescanLanPeers() async {
+        await activateLanServices()
+        await browser.rescan()
+    }
     
     /// Trigger connection status probe to refresh peer status
     public func probeConnectionStatus() async {
@@ -533,6 +637,27 @@ public final class TransportManager: ObservableObject {
     }
 
     public func lanDiscoveredPeers() -> [DiscoveredPeer] {
+        let peers = peersExcludingSelf()
+        if discoveredLanPeers != peers {
+            discoveredLanPeers = peers
+        }
+        return peers
+    }
+
+    /// Recomputes the published peer list. Called whenever `lanPeers` changes so the
+    /// pairing UI sees additions, removals and prunes without polling.
+    private func refreshDiscoveredLanPeers() {
+        let peers = peersExcludingSelf()
+        if discoveredLanPeers != peers {
+            discoveredLanPeers = peers
+        }
+    }
+
+    private func peersExcludingSelf() -> [DiscoveredPeer] {
+        TransportManager.peersExcludingSelf(in: lanPeers)
+    }
+
+    private static func peersExcludingSelf(in lanPeers: [String: DiscoveredPeer]) -> [DiscoveredPeer] {
         let allPeers = lanPeers.values.sorted(by: { $0.lastSeen > $1.lastSeen })
         
         // Filter out self
@@ -557,6 +682,66 @@ public final class TransportManager: ObservableObject {
         return filteredPeers
     }
 
+    /// Exactly what the pairing UI offers: discovered, not already paired, and one
+    /// entry per device. Lives here rather than in the view so the debug snapshot
+    /// reports the same list the sheet draws, instead of a lookalike.
+    public func pairableLanPeers() -> [DiscoveredPeer] {
+        // One device advertising on two interfaces shows up twice, under service names
+        // that differ only by a " (2)" suffix. Key by device_id so it is offered once.
+        var seen = Set<String>()
+        // Services on this Mac are not devices to pair with, and a sandboxed app
+        // cannot open a LAN connection back to its own host in any case -- the offer
+        // could only ever end in "could not reach the device".
+        return discoveredPeersOnOtherMachines().filter { peer in
+            guard !isPaired(peer) else { return false }
+            let key = peer.endpoint.metadata["device_id"].flatMap { $0.isEmpty ? nil : $0.lowercased() }
+                ?? peer.serviceName
+            return seen.insert(key).inserted
+        }
+    }
+
+    /// Peers discovered on the network that are not this machine. What a person
+    /// means by "devices on this network"; the local harness and any other service
+    /// this Mac advertises are not that.
+    public func discoveredPeersOnOtherMachines() -> [DiscoveredPeer] {
+        let localAddresses = LocalAddresses.current()
+        return discoveredLanPeers.filter { !LocalAddresses.isLocal($0.endpoint.host, addresses: localAddresses) }
+    }
+
+    /// True when a LAN connection to this device is open right now.
+    ///
+    /// Distinct from having a stored Bonjour address: that survives the Mac moving
+    /// to another network, where it names somewhere the device certainly is not.
+    public func isConnectedOverLan(_ deviceId: String) -> Bool {
+        lanConnectedDeviceIds.contains(deviceId.lowercased())
+    }
+
+    /// True when this peer has already been paired, so the pairing UI can leave it out.
+    public func isPaired(_ peer: DiscoveredPeer) -> Bool {
+        guard let peerDeviceId = peer.endpoint.metadata["device_id"], !peerDeviceId.isEmpty else {
+            return false
+        }
+        return pairedDevices.contains { $0.id.caseInsensitiveCompare(peerDeviceId) == .orderedSame }
+    }
+
+    /// Pairs with a peer discovered on the LAN, as the initiator.
+    ///
+    /// The mirror of `handlePairingChallenge`, which covers the case where the other
+    /// device starts. On success the key is stored and the device joins `pairedDevices`.
+    @discardableResult
+    public func pairOverLan(with peer: DiscoveredPeer, timeout: TimeInterval = 30) async throws -> PairedDevice {
+        let initiator = LanPairingInitiator()
+        let device = try await initiator.pair(with: peer, timeout: timeout)
+        registerPairedDevice(device)
+        logger.info("✅ [TransportManager] LAN pairing complete: \(device.name) (\(device.id.prefix(8)))")
+
+        // Pick the new peer up for clipboard sync without waiting for the next discovery tick.
+        if let provider = provider as? DefaultTransportProvider {
+            await provider.syncPeerConnections()
+        }
+        return device
+    }
+
     public func currentLanConfiguration() -> BonjourPublisher.Configuration {
         lanConfiguration
     }
@@ -576,6 +761,7 @@ public final class TransportManager: ObservableObject {
         guard interval > 0 else { return }
         let threshold = dateProvider().addingTimeInterval(-interval)
         lanPeers = lanPeers.filter { $0.value.lastSeen >= threshold }
+        refreshDiscoveredLanPeers()
         lastSeen = lastSeen.filter { $0.value >= threshold }
         discoveryCache.save(lastSeen)
     }
@@ -1269,6 +1455,7 @@ public final class TransportManager: ObservableObject {
             lastSeen[peer.serviceName] = peer.lastSeen
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
+            refreshDiscoveredLanPeers()
 
             if let peerDeviceId = peer.endpoint.metadata["device_id"] {
                 if let device = pairedDevices.first(where: { $0.id.caseInsensitiveCompare(peerDeviceId) == .orderedSame }) {
@@ -1288,6 +1475,7 @@ public final class TransportManager: ObservableObject {
             lanPeers.removeValue(forKey: serviceName)
             discoveryCache.save(lastSeen)
             discoveryCache.savePeers(lanPeers) // Persist peer data
+            refreshDiscoveredLanPeers()
             
             // Sync peer connections in LanSyncTransport (remove disconnected peer)
             if let provider = provider as? DefaultTransportProvider {

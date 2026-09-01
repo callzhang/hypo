@@ -27,6 +27,12 @@ public final class ClipboardMonitor {
     private let logger = HypoLogger(category: "ClipboardMonitor")
     private let pasteboard: PasteboardProviding
     private var changeCount: Int
+    /// What we last applied from a peer, and when. A capture matching this inside
+    /// the window is that content coming back rather than something newly copied.
+    private var recentlyApplied: (fingerprint: String, at: Date)?
+    /// Long enough to cover applying, capturing and re-encoding; short enough that
+    /// deliberately copying the same thing again still registers.
+    private let echoWindow: TimeInterval = 20
     private var timer: Timer?
     private let throttle: TokenBucket
     private let deviceId: UUID
@@ -56,6 +62,9 @@ public final class ClipboardMonitor {
         // Listen for events when remote clipboard is applied
         dispatcher?.addClipboardAppliedHandler { [weak self] changeCount in
             self?.changeCount = changeCount
+        }
+        dispatcher?.addClipboardAppliedContentHandler { [weak self] fingerprint in
+            self?.recentlyApplied = (fingerprint, Date())
         }
         
         // Initialize storage on the main actor.
@@ -147,6 +156,20 @@ public final class ClipboardMonitor {
         return nil
     }
     
+    /// Matches `IncomingClipboardHandler.appliedFingerprint(for:)`: shape, not bytes.
+    static func fingerprint(for content: ClipboardContent) -> String {
+        switch content {
+        case .text(let value):
+            return "text:\(value)"
+        case .link(let url):
+            return "text:\(url.absoluteString)"
+        case .image(let metadata):
+            return "image:\(metadata.pixelSize.width)x\(metadata.pixelSize.height)"
+        case .file(let metadata):
+            return "file:\(metadata.fileName)-\(metadata.byteSize)"
+        }
+    }
+
     /// Update the change count to prevent detecting a change that was just applied
     /// This is called after IncomingClipboardHandler applies a received clipboard
     public func updateChangeCount() {
@@ -156,6 +179,17 @@ public final class ClipboardMonitor {
     private func deliverIfNew(_ entry: ClipboardEntry) -> ClipboardEntry? {
         guard lastCapturedContent != entry.content else {
             logger.info("⏭️ [ClipboardMonitor] Ignoring identical content after pasteboard generation change")
+            return nil
+        }
+        if let recentlyApplied,
+           Date().timeIntervalSince(recentlyApplied.at) < echoWindow,
+           Self.fingerprint(for: entry.content) == recentlyApplied.fingerprint {
+            // Sending this back is how an image ends up circulating between two
+            // devices: each hop re-encodes it, so the bytes never match and every
+            // arrival looks like a fresh copy.
+            logger.info("⏭️ [ClipboardMonitor] Ignoring content we just applied from a peer")
+            self.recentlyApplied = nil
+            lastCapturedContent = entry.content
             return nil
         }
         lastCapturedContent = entry.content

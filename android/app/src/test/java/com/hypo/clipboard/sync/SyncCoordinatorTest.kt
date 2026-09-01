@@ -69,6 +69,7 @@ class SyncCoordinatorTest {
             identity = identity,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
+            echoGuard = ClipboardEchoGuard(),
             lanTransportClient = lanTransportClient,
             context = context
         )
@@ -112,7 +113,7 @@ class SyncCoordinatorTest {
     @Test
     fun `broadcasts to targets when skipBroadcast is false`() = runTest {
         coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
-        val coordinator = SyncCoordinator(repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+        val coordinator = SyncCoordinator(repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, ClipboardEchoGuard(), context)
         
         // Wait for initial load
         advanceUntilIdle()
@@ -140,7 +141,7 @@ class SyncCoordinatorTest {
     @Test
     fun `does not broadcast received items`() = runTest {
         coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
-        val coordinator = SyncCoordinator(repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+        val coordinator = SyncCoordinator(repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, ClipboardEchoGuard(), context)
         advanceUntilIdle()
         coordinator.start(this)
         
@@ -185,7 +186,7 @@ class SyncCoordinatorTest {
         coEvery { repository.getLatestEntry() } returns latest
         coEvery { repository.findMatchingEntryInHistory(any()) } returns null
 
-        val coordinator = SyncCoordinator(repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+        val coordinator = SyncCoordinator(repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, ClipboardEchoGuard(), context)
         advanceUntilIdle()
         coordinator.start(this)
 
@@ -223,6 +224,7 @@ class SyncCoordinatorTest {
             identity = identity,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
+            echoGuard = ClipboardEchoGuard(),
             lanTransportClient = lanTransportClient,
             context = context
         )
@@ -254,7 +256,7 @@ class SyncCoordinatorTest {
         every { transportManager.peers } returns peersFlow
         coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("paired-device")
         
-        val coordinator = SyncCoordinator(repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+        val coordinator = SyncCoordinator(repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, ClipboardEchoGuard(), context)
         
         // Initially only paired device is target
         awaitTargets(coordinator, setOf("paired-device"))
@@ -340,7 +342,7 @@ class SyncCoordinatorTest {
         coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
 
         val coordinator = SyncCoordinator(
-            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, ClipboardEchoGuard(), context)
         val clock = MutableClock(Instant.parse("2026-08-29T20:00:00Z"))
         coordinator.clock = clock
 
@@ -376,7 +378,7 @@ class SyncCoordinatorTest {
         coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
 
         val coordinator = SyncCoordinator(
-            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, ClipboardEchoGuard(), context)
         val clock = MutableClock(Instant.parse("2026-08-29T20:00:00Z"))
         coordinator.clock = clock
 
@@ -405,7 +407,7 @@ class SyncCoordinatorTest {
         coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
 
         val coordinator = SyncCoordinator(
-            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, ClipboardEchoGuard(), context)
         val clock = MutableClock(Instant.parse("2026-08-29T20:00:00Z"))
         coordinator.clock = clock
 
@@ -437,7 +439,7 @@ class SyncCoordinatorTest {
         coEvery { deviceKeyStore.getAllDeviceIds() } returns listOf("mac-device")
 
         val coordinator = SyncCoordinator(
-            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, context)
+            repository, syncEngine, identity, transportManager, deviceKeyStore, lanTransportClient, ClipboardEchoGuard(), context)
         val clock = MutableClock(Instant.parse("2026-08-29T20:00:00Z"))
         coordinator.clock = clock
 

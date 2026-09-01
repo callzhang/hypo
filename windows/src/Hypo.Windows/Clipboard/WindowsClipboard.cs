@@ -136,6 +136,33 @@ public static class WindowsClipboard
     }
 
     /// <summary>
+    /// Publishes an image a peer sent, whatever it was encoded as, returning the
+    /// sequence number the listener uses to recognise its own write.
+    ///
+    /// <para>JPEG is converted to PNG rather than published as-is: Windows
+    /// applications paste the registered PNG format or CF_DIB, and nothing reads
+    /// raw JPEG bytes off the clipboard. Since a Mac re-encodes anything large to
+    /// JPEG before sending, refusing them meant the bigger the picture, the more
+    /// certainly it never arrived.</para>
+    /// </summary>
+    public static uint WriteImage(byte[] image, ClipboardPrivacy? privacy = null)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+
+        if (ClipboardFormats.LooksLikePng(image))
+        {
+            return WritePng(image, privacy);
+        }
+
+        if (ClipboardFormats.LooksLikeJpeg(image))
+        {
+            return WritePng(ImageCompressor.ToPng(image), privacy);
+        }
+
+        throw new ArgumentException("These bytes are neither a PNG nor a JPEG.", nameof(image));
+    }
+
+    /// <summary>
     /// Publishes every format in one clipboard session.
     ///
     /// <para>One session, not one per format. EmptyClipboard wipes what came

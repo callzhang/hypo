@@ -40,7 +40,8 @@ class IncomingClipboardHandler @Inject constructor(
     private val identity: DeviceIdentity,
     private val accessibilityServiceChecker: com.hypo.clipboard.util.AccessibilityServiceChecker,
     @ApplicationContext private val context: Context,
-    private val storageManager: com.hypo.clipboard.data.local.StorageManager
+    private val storageManager: com.hypo.clipboard.data.local.StorageManager,
+    private val echoGuard: ClipboardEchoGuard
 ) {
     private var ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
     private var scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + ioDispatcher)
@@ -536,6 +537,9 @@ class IncomingClipboardHandler @Inject constructor(
                 
                 withContext(Dispatchers.Main) {
                     try {
+                        // Recorded before the write: the listener fires synchronously
+                        // on setPrimaryClip, so recording afterwards is already too late.
+                        echoGuard.recordApplied(item)
                         clipboardManager.setPrimaryClip(clip)
                         Log.d(TAG, "✅ Updated system clipboard: type=${item.type}, preview=${item.preview.take(50)}")
                     } catch (e: SecurityException) {

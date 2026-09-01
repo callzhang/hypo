@@ -28,6 +28,10 @@ final class MockBonjourDriverState: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock()
     private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
     fileprivate var startCount = 0
+    fileprivate var restartCount = 0
+
+    func incrementRestartCount() { lock.withLock { restartCount += 1 } }
+    func getRestartCount() -> Int { lock.withLock { restartCount } }
 
     func incrementStartCount() { lock.withLock { startCount += 1 } }
     func decrementStartCount() { lock.withLock { startCount = max(0, startCount - 1) } }
@@ -47,9 +51,14 @@ final class MockBonjourDriver: BonjourBrowsingDriver, @unchecked Sendable {
     let state = MockBonjourDriverState()
 
     var startCount: Int { state.getStartCount() }
+    var restartCount: Int { state.getRestartCount() }
 
     func startBrowsing(serviceType: String, domain: String) {
         state.incrementStartCount()
+    }
+
+    func restartBrowsing() {
+        state.incrementRestartCount()
     }
 
     func stopBrowsing() {

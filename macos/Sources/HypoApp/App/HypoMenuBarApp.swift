@@ -2115,6 +2115,14 @@ private struct SettingsSectionView: View {
     @State private var localHistoryLimit: Double = 200
     @State private var historyLimitUpdateTask: Task<Void, Never>?
     @State private var isRecordingShortcut = false
+    /// Service name of the peer currently being paired with, if any.
+    @State private var pairingPeer: String?
+    @State private var lanFailure: String?
+    @State private var lanPairedName: String?
+    @State private var isRescanning = false
+    /// Set once the search has run long enough that finding nothing is worth
+    /// explaining rather than still being in progress.
+    @State private var searchHasHadTime = false
     @State private var shortcutRecorderMonitor: Any?
     @State private var shortcutErrorMessage: String?
 
@@ -2128,7 +2136,7 @@ private struct SettingsSectionView: View {
     
     var body: some View {
         if isPresentingPairing {
-            PairDeviceSheet(viewModel: viewModel, isPresented: $isPresentingPairing)
+            PairDeviceSheet(viewModel: viewModel, transportManager: transportManager, isPresented: $isPresentingPairing)
         } else {
             ScrollView {
                 Form {
@@ -2313,9 +2321,9 @@ private struct SettingsSectionView: View {
                 }
                 #endif
 
-                Section("Paired devices") {
-                    if transportManager.pairedDevices.isEmpty {
-                        Text("No devices paired yet.")
+                Section("Devices") {
+                    if transportManager.pairedDevices.isEmpty && pairablePeers.isEmpty {
+                        Text("No devices yet. Devices on this network appear here; use a code for one that is elsewhere.")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(transportManager.pairedDevices) { device in
@@ -2353,8 +2361,45 @@ private struct SettingsSectionView: View {
                             }
                             .help("Device ID: \(device.id)")
                         }
+                        ForEach(pairablePeers, id: \.serviceName) { peer in
+                            nearbyDeviceRow(peer)
+                        }
                     }
-                    Button("Pair new device") { isPresentingPairing = true }
+
+                    nearbyStatusLine
+
+                    if let lanPairedName {
+                        Label("Paired with \(lanPairedName)", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                            .font(.caption)
+                    }
+                    if let lanFailure {
+                        Label(lanFailure, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    HStack {
+                        Button("Pair with code") { isPresentingPairing = true }
+                        Spacer()
+                        Button {
+                            isRescanning = true
+                            Task {
+                                await transportManager.rescanLanPeers()
+                                isRescanning = false
+                            }
+                        } label: {
+                            if isRescanning {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Scan again", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .buttonStyle(.link)
+                        .disabled(isRescanning)
+                        .help("Look for devices on this network again")
+                    }
                 }
 
 
@@ -2370,6 +2415,18 @@ private struct SettingsSectionView: View {
             }
             .scrollContentBackground(.hidden)
             .formStyle(.grouped)
+            .onAppear {
+                // Someone looking at the device list is asking about now. Bonjour
+                // announces a service once, so a phone whose app was opened while
+                // nobody was browsing will not announce itself again on its own.
+                searchHasHadTime = false
+                Task {
+                    await transportManager.rescanLanPeers()
+                    // Long enough that a slow answer is not called a silent network.
+                    try? await Task.sleep(nanoseconds: 12_000_000_000)
+                    searchHasHadTime = true
+                }
+            }
             .onDisappear {
                 stopShortcutRecording()
             }
@@ -2658,11 +2715,16 @@ private struct SettingsSectionView: View {
         }
         let isCloudTransport = deviceTransport == .cloud && isServerConnected
         
-        // Use current discovery info if available, otherwise fall back to stored values, then active connection
-        // Priority: current discovery > stored bonjour info > active connection metadata
-        let effectiveHost = discoveredPeerHost ?? device.bonjourHost ?? activeConnectionHost
-        let effectivePort = discoveredPeerPort ?? device.bonjourPort ?? activeConnectionPort
+        // Only what is true now. `device.bonjourHost` is stored from whenever the
+        // device was last discovered and survives this Mac moving to another network,
+        // where it names an address the device is certainly not at -- the row claimed
+        // "Connected via 10.0.0.137:7010" from a Wi-Fi that could not carry a packet
+        // to it. Live discovery and an open connection are the only honest sources.
+        let effectiveHost = discoveredPeerHost ?? activeConnectionHost
+        let effectivePort = discoveredPeerPort ?? activeConnectionPort
+        let isLanConnected = viewModel.transportManager?.isConnectedOverLan(device.id) ?? false
         let hasEffectiveLan = effectiveHost != nil && effectivePort != nil && effectiveHost != "unknown"
+            && (isLanConnected || discoveredPeerHost != nil)
         
         if hasEffectiveLan {
             // We have LAN info - show IP:PORT
@@ -2697,6 +2759,77 @@ private struct SettingsSectionView: View {
         return "Connected"
     }
     
+    /// Says which kind of nothing this is. With paired devices listed above, an
+    /// absent nearby device otherwise shows as no message at all -- and "we are
+    /// looking", "everything here is paired" and "this network does not let devices
+    /// see each other" send people in three different directions.
+    @ViewBuilder
+    private var nearbyStatusLine: some View {
+        if pairablePeers.isEmpty {
+            let discovered = transportManager.discoveredPeersOnOtherMachines().count
+            if discovered > 0 {
+                Text("^[\(discovered) other device](inflect: true) on this network, already paired.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if searchHasHadTime {
+                Text("Nothing on this network answered. Office and public Wi-Fi often stop devices from reaching each other; pair with a code instead.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Looking for devices on this network…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// Devices on this network that are not paired yet, offered in the same list as
+    /// the paired ones: to a person they are all just "my devices", and having them
+    /// in two places meant pairing started with finding the right screen.
+    private var pairablePeers: [DiscoveredPeer] {
+        transportManager.pairableLanPeers()
+    }
+
+    @ViewBuilder
+    private func nearbyDeviceRow(_ peer: DiscoveredPeer) -> some View {
+        let isPairing = pairingPeer == peer.serviceName
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(peer.endpoint.deviceName ?? peer.serviceName)
+                Text("On this network · \(peer.endpoint.host)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if isPairing {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Pair") { pair(with: peer) }
+                    .disabled(pairingPeer != nil)
+            }
+        }
+        .help("Not paired yet — \(peer.endpoint.host):\(peer.endpoint.port)")
+    }
+
+    private func pair(with peer: DiscoveredPeer) {
+        pairingPeer = peer.serviceName
+        lanFailure = nil
+        lanPairedName = nil
+        Task { @MainActor in
+            do {
+                let device = try await transportManager.pairOverLan(with: peer)
+                lanPairedName = device.name
+            } catch {
+                lanFailure = error.localizedDescription
+            }
+            pairingPeer = nil
+        }
+    }
+
     private func deviceTooltip(for device: PairedDevice) -> String {
         var tooltip = "Device: \(device.name)\n"
         tooltip += "Platform: \(device.platform)\n"
@@ -2861,25 +2994,31 @@ private struct AccessibilityPermissionSection: View {
 #endif
 
 private struct PairDeviceSheet: View {
+    private let logger = HypoLogger(category: "PairDeviceSheet")
     @ObservedObject var viewModel: ClipboardHistoryViewModel
+    @ObservedObject var transportManager: TransportManager
     @Binding var isPresented: Bool
     @StateObject private var remoteViewModel: RemotePairingViewModel
     @State private var hasStarted = false
 
-    init(viewModel: ClipboardHistoryViewModel, isPresented: Binding<Bool>) {
+    init(viewModel: ClipboardHistoryViewModel, transportManager: TransportManager, isPresented: Binding<Bool>) {
         self._viewModel = ObservedObject(initialValue: viewModel)
+        self._transportManager = ObservedObject(initialValue: transportManager)
         self._isPresented = isPresented
         _remoteViewModel = StateObject(wrappedValue: viewModel.makeRemotePairingViewModel())
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Pair New Device")
+            Text("Pair with Code")
                 .font(.title2.bold())
 
-            statusSection
+            Text("For a device that is not on this network. Devices that are appear in the device list, ready to pair.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
 
-            content
+            statusSection
+            remoteContent
 
             Divider()
             
@@ -2903,7 +3042,6 @@ private struct PairDeviceSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { startIfNeeded() }
-
     }
 
     @ViewBuilder
@@ -2916,11 +3054,6 @@ private struct PairDeviceSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        remoteContent
     }
 
     private var isComplete: Bool {
@@ -2944,7 +3077,7 @@ private struct PairDeviceSheet: View {
                     .frame(maxWidth: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
                     .cornerRadius(12)
-                Text("Enter this code on your Android device")
+                Text("Enter this code on your other device")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2985,7 +3118,6 @@ private struct PairDeviceSheet: View {
     }
 
     private func startIfNeeded(force: Bool = false) {
-        guard let transportManager = viewModel.transportManager else { return }
         let params = transportManager.pairingParameters()
         if force || (!hasStarted && remoteViewModel.state == .idle) {
             remoteViewModel.start(service: params.service, port: params.port, relayHint: params.relayHint)

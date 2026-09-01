@@ -17,6 +17,18 @@ public class ClipboardImageTests
     private static void RequireWindows() =>
         Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only: drives the real Win32 clipboard.");
 
+    /// <summary>Built rather than inlined: a real JPEG is a kilobyte of base64.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static byte[] EncodeAsJpeg(byte[] png)
+    {
+        using var input = new MemoryStream(png, writable: false);
+        using var image = System.Drawing.Image.FromStream(input);
+        using var output = new MemoryStream();
+        image.Save(output, System.Drawing.Imaging.ImageFormat.Jpeg);
+
+        return output.ToArray();
+    }
+
     [Fact]
     public void RecognisesThePngSignature()
     {
@@ -45,6 +57,59 @@ public class ClipboardImageTests
         WindowsClipboard.WritePng(Png);
 
         Assert.Equal(Png, WindowsClipboard.ReadPng());
+    }
+
+    [Fact]
+    public void RecognisesTheJpegSignature()
+    {
+        Assert.True(ClipboardFormats.LooksLikeJpeg([0xFF, 0xD8, 0xFF, 0xE0]));
+        Assert.False(ClipboardFormats.LooksLikeJpeg(Png));
+        Assert.False(ClipboardFormats.LooksLikeJpeg([0xFF, 0xD8]));
+        Assert.False(ClipboardFormats.LooksLikeJpeg([]));
+    }
+
+    /// <summary>
+    /// A peer that re-encodes anything large before sending -- as the Mac does --
+    /// delivers JPEG, and refusing it meant the bigger the picture, the more
+    /// certainly it never arrived.
+    /// </summary>
+    [SkippableFact]
+    public void AcceptsAPeersJpegByConvertingItToPng()
+    {
+        RequireWindows();
+
+        var jpeg = EncodeAsJpeg(Png);
+        Assert.True(ClipboardFormats.LooksLikeJpeg(jpeg));
+
+        var converted = ImageCompressor.ToPng(jpeg);
+
+        // Published as PNG because that is the format Windows applications paste;
+        // nothing reads raw JPEG bytes off the clipboard.
+        Assert.True(ClipboardFormats.LooksLikePng(converted));
+    }
+
+    [SkippableFact]
+    public async Task PublishesAJpegFromAPeer()
+    {
+        RequireWindows();
+
+        using var listener = new ClipboardListener();
+
+        await listener.SetAsync(new ClipboardContent
+        {
+            ContentType = ContentType.Image,
+            Data = EncodeAsJpeg(Png),
+        });
+
+        Assert.True(ClipboardFormats.LooksLikePng(WindowsClipboard.ReadPng()!));
+    }
+
+    [SkippableFact]
+    public void RefusesBytesThatAreNeitherAPngNorAJpeg()
+    {
+        RequireWindows();
+
+        Assert.Throws<ArgumentException>(() => WindowsClipboard.WriteImage("just text"u8.ToArray()));
     }
 
     [SkippableFact]

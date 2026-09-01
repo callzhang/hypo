@@ -118,6 +118,27 @@ public static class ImageCompressor
         return scaled;
     }
 
+    /// <summary>
+    /// Re-encodes an image as PNG for publication on the clipboard.
+    ///
+    /// <para>Windows has no clipboard format that applications reliably paste JPEG
+    /// from -- they read the registered PNG format or CF_DIB. So a peer's JPEG is
+    /// accepted and converted here rather than refused: publishing the JPEG bytes
+    /// under a format nothing reads would look like arriving and paste nowhere,
+    /// which is worse than an error.</para>
+    /// </summary>
+    public static byte[] ToPng(byte[] image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+
+        using var stream = new MemoryStream(image, writable: false);
+        using var decoded = Image.FromStream(stream);
+        using var output = new MemoryStream();
+        decoded.Save(output, ImageFormat.Png);
+
+        return output.ToArray();
+    }
+
     private static byte[] EncodeJpeg(Image image, int quality)
     {
         var codec = ImageCodecInfo.GetImageEncoders()

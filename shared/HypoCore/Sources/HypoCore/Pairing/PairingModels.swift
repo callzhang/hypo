@@ -140,6 +140,25 @@ public struct PairingChallengeMessage: Codable, Equatable, Sendable {
         case tag
     }
     
+    // Memberwise initializer for creating a challenge as the initiator
+    public init(
+        challengeId: UUID,
+        initiatorDeviceId: String,
+        initiatorDeviceName: String,
+        initiatorPublicKey: Data,
+        nonce: Data,
+        ciphertext: Data,
+        tag: Data
+    ) {
+        self.challengeId = challengeId
+        self.initiatorDeviceId = initiatorDeviceId
+        self.initiatorDeviceName = initiatorDeviceName
+        self.initiatorPublicKey = initiatorPublicKey
+        self.nonce = nonce
+        self.ciphertext = ciphertext
+        self.tag = tag
+    }
+
     // Custom decoder to handle Base64 strings from Android
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)

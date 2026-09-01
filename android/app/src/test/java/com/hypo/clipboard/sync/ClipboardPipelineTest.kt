@@ -61,6 +61,7 @@ class ClipboardPipelineTest {
             identity = identity,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
+            echoGuard = ClipboardEchoGuard(),
             lanTransportClient = lanTransportClient,
             context = context
         )
@@ -101,6 +102,7 @@ class ClipboardPipelineTest {
             identity = identity,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
+            echoGuard = ClipboardEchoGuard(),
             lanTransportClient = lanTransportClient,
             context = context
         )
@@ -149,6 +151,7 @@ class ClipboardPipelineTest {
             identity = identity,
             transportManager = transportManager,
             deviceKeyStore = deviceKeyStore,
+            echoGuard = ClipboardEchoGuard(),
             lanTransportClient = lanTransportClient,
             context = context
         )

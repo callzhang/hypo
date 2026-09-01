@@ -23,6 +23,63 @@ public struct LanEndpoint: Equatable, Sendable {
     }
 }
 
+/// How long to wait before trying a failed Bonjour browse again.
+///
+/// A browse that fails is not retried by the system. At login the network is
+/// often not up yet, so the first attempt fails and, without this, the app spends
+/// the rest of the session unable to see anything on the LAN.
+public struct BrowseRetryPolicy: Sendable {
+    public let initialDelay: TimeInterval
+    public let maximumDelay: TimeInterval
+
+    public init(initialDelay: TimeInterval = 1, maximumDelay: TimeInterval = 30) {
+        self.initialDelay = initialDelay
+        self.maximumDelay = maximumDelay
+    }
+
+    /// `attempt` counts from 1 for the first retry.
+    public func delay(forAttempt attempt: Int) -> TimeInterval {
+        guard attempt > 0 else { return initialDelay }
+        let doubled = initialDelay * pow(2, Double(attempt - 1))
+        return min(doubled, maximumDelay)
+    }
+}
+
+/// Decodes a DNS-SD TXT record.
+///
+/// `NetService.dictionary(fromTXTRecord:)` is typed `[String: Data]` in Swift, but
+/// the record format allows an entry to be a bare key with no value, and that
+/// bridges as `NSNull`. The forced bridge inside that call then aborts the whole
+/// process -- a peer advertising one valueless key crashes anything that resolves
+/// it. Parsing the bytes ourselves is a dozen lines and cannot fail that way.
+public enum TXTRecord {
+    public static func parse(_ data: Data) -> [String: String] {
+        var result: [String: String] = [:]
+        var index = data.startIndex
+        while index < data.endIndex {
+            let length = Int(data[index])
+            let entryStart = data.index(after: index)
+            guard length > 0, let entryEnd = data.index(entryStart, offsetBy: length, limitedBy: data.endIndex) else {
+                // A length that runs past the end means the record is malformed;
+                // keep whatever parsed cleanly rather than discarding all of it.
+                break
+            }
+            let entry = data[entryStart..<entryEnd]
+            if let separator = entry.firstIndex(of: UInt8(ascii: "=")) {
+                let key = String(decoding: entry[entry.startIndex..<separator], as: UTF8.self)
+                let value = String(decoding: entry[entry.index(after: separator)...], as: UTF8.self)
+                if !key.isEmpty { result[key] = value }
+            } else {
+                // A key with no value is legal and means "present".
+                let key = String(decoding: entry, as: UTF8.self)
+                if !key.isEmpty { result[key] = "" }
+            }
+            index = entryEnd
+        }
+        return result
+    }
+}
+
 public struct DiscoveredPeer: Equatable, Sendable {
     public let serviceName: String
     public let endpoint: LanEndpoint
@@ -63,6 +120,7 @@ public enum BonjourBrowsingDriverEvent: Equatable, Sendable {
 
 public protocol BonjourBrowsingDriver: AnyObject, Sendable {
     @MainActor func startBrowsing(serviceType: String, domain: String)
+    @MainActor func restartBrowsing()
     @MainActor func stopBrowsing()
     @MainActor func setEventHandler(_ handler: @escaping @Sendable (BonjourBrowsingDriverEvent) -> Void)
 }
@@ -122,6 +180,18 @@ public actor BonjourBrowser {
         startDriverEventLoopIfNeeded()
         await MainActor.run {
             driver.startBrowsing(serviceType: serviceType, domain: domain)
+        }
+    }
+
+    /// Re-announces everything currently on the network, for when the user is
+    /// looking at a list and expects it to reflect the moment.
+    public func rescan() async {
+        guard didStart else {
+            await start()
+            return
+        }
+        await MainActor.run {
+            driver.restartBrowsing()
         }
     }
 
@@ -218,6 +288,15 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
     private let browser: NetServiceBrowser
     private var handler: (@Sendable (BonjourBrowsingDriverEvent) -> Void)?
     private var services: [ObjectIdentifier: NetService] = [:]
+    private var currentSearch: (serviceType: String, domain: String)?
+    private var retryAttempt = 0
+    private var resolveAttempts: [ObjectIdentifier: Int] = [:]
+    /// A device that is still advertising deserves more than one attempt, but not
+    /// an unbounded one: five tries spans about half a minute.
+    private let maximumResolveAttempts = 5
+    private var isStoppingIntentionally = false
+    private let retryPolicy = BrowseRetryPolicy()
+    private let logger = HypoLogger(category: "BonjourBrowser")
 
     public override init() {
         self.browser = NetServiceBrowser()
@@ -230,12 +309,46 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
     }
 
     public func startBrowsing(serviceType: String, domain: String) {
+        currentSearch = (serviceType, domain)
+        retryAttempt = 0
+        isStoppingIntentionally = false
         browser.searchForServices(ofType: serviceType, inDomain: domain)
     }
 
-    public func stopBrowsing() {
+    /// Stops and restarts the current browse so that services already announced are
+    /// announced again. Opening the pairing panel should mean "look now", not "show
+    /// me whatever happened to arrive on its own".
+    public func restartBrowsing() {
+        guard let search = currentSearch else { return }
+        logger.info("🔄 [BonjourBrowser] Restarting browse for \(search.serviceType)")
         browser.stop()
         services.removeAll()
+        resolveAttempts.removeAll()
+        retryAttempt = 0
+        isStoppingIntentionally = false
+        browser.searchForServices(ofType: search.serviceType, inDomain: search.domain)
+    }
+
+    public func stopBrowsing() {
+        isStoppingIntentionally = true
+        currentSearch = nil
+        browser.stop()
+        services.removeAll()
+        resolveAttempts.removeAll()
+    }
+
+    /// Re-issues a browse that failed or stopped on its own, backing off each time.
+    private func scheduleBrowseRetry(reason: String) {
+        guard let search = currentSearch, !isStoppingIntentionally else { return }
+        retryAttempt += 1
+        let delay = retryPolicy.delay(forAttempt: retryAttempt)
+        logger.warning("⚠️ [BonjourBrowser] Browse \(reason); retrying in \(Int(delay))s (attempt \(retryAttempt))")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, let search = self.currentSearch, !self.isStoppingIntentionally else { return }
+            self.browser.stop()
+            self.browser.searchForServices(ofType: search.serviceType, inDomain: search.domain)
+        }
+        _ = search
     }
 
     private func emitResolved(for service: NetService) {
@@ -257,11 +370,7 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
         }
         
         let displayHost = ipAddress ?? host
-        let txt = NetService.dictionary(fromTXTRecord: service.txtRecordData() ?? Data())
-        var metadata: [String: String] = [:]
-        for (key, value) in txt {
-            metadata[key] = String(data: value, encoding: .utf8) ?? ""
-        }
+        let metadata = TXTRecord.parse(service.txtRecordData() ?? Data())
         let record = BonjourServiceRecord(
             serviceName: service.name,
             host: displayHost,
@@ -274,7 +383,11 @@ public final class NetServiceBonjourBrowsingDriver: NSObject, BonjourBrowsingDri
 
 extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceBrowserDelegate {
     public func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
+        // A browse that is producing results is healthy; forget the earlier failures.
+        retryAttempt = 0
+        logger.debug("🔍 [BonjourBrowser] Found \(service.name), resolving")
         services[ObjectIdentifier(service)] = service
+        resolveAttempts[ObjectIdentifier(service)] = 0
         service.delegate = self
         service.resolve(withTimeout: 5)
     }
@@ -286,15 +399,20 @@ extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceBrowserDele
 
     public func netServiceBrowserDidStopSearch(_ browser: NetServiceBrowser) {
         services.removeAll()
+        // A browse we did not stop ourselves has died; nothing restarts it but us.
+        scheduleBrowseRetry(reason: "stopped unexpectedly")
     }
 
     public func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String : NSNumber]) {
         services.removeAll()
+        let detail = errorDict.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
+        scheduleBrowseRetry(reason: "failed to start (\(detail))")
     }
 }
 
 extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceDelegate {
     public func netServiceDidResolveAddress(_ sender: NetService) {
+        resolveAttempts[ObjectIdentifier(sender)] = 0
         emitResolved(for: sender)
     }
 
@@ -303,7 +421,28 @@ extension NetServiceBonjourBrowsingDriver: @preconcurrency NetServiceDelegate {
     }
 
     public func netService(_ sender: NetService, didNotResolve errorDict: [String : NSNumber]) {
-        services.removeValue(forKey: ObjectIdentifier(sender))
+        // Dropping the service here means it is gone for good: the browser announces
+        // a service once, so nothing offers it to us again while it keeps
+        // advertising. A phone whose app has just been opened routinely misses the
+        // first resolve, and stayed invisible for the rest of the session.
+        let key = ObjectIdentifier(sender)
+        let attempt = (resolveAttempts[key] ?? 0) + 1
+        let detail = errorDict.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
+
+        guard attempt <= maximumResolveAttempts else {
+            logger.warning("⚠️ [BonjourBrowser] Giving up on \(sender.name) after \(attempt - 1) resolve attempts (\(detail))")
+            services.removeValue(forKey: key)
+            resolveAttempts.removeValue(forKey: key)
+            return
+        }
+
+        resolveAttempts[key] = attempt
+        let delay = retryPolicy.delay(forAttempt: attempt)
+        logger.info("🔁 [BonjourBrowser] Could not resolve \(sender.name) (\(detail)); retrying in \(Int(delay))s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak sender] in
+            guard let self, let sender, self.services[key] != nil else { return }
+            sender.resolve(withTimeout: 5)
+        }
     }
 }
 #else
@@ -318,6 +457,7 @@ public final class NetServiceBonjourBrowsingDriver: BonjourBrowsingDriver, @unch
     }
 
     public func startBrowsing(serviceType: String, domain: String) {}
+    public func restartBrowsing() {}
 
     public func stopBrowsing() {}
 }

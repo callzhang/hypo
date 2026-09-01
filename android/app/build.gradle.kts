@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 import org.gradle.api.file.DuplicatesStrategy
 
@@ -51,8 +52,31 @@ tasks.register<JacocoReport>("jacocoTestReport") {
     ))
 }
 
-// Load .env file if it exists (for Auth Token injection)
-val envFile = rootProject.file("../.env")
+// Load .env file if it exists (for Auth Token injection).
+//
+// `.env` is gitignored, so it lives only in the main checkout. A build from a
+// worktree used to find nothing there and bake in an empty token, which the relay
+// then rejects with 401 forever — so resolve the main checkout too. In a worktree
+// `.git` is a file pointing at `<main>/.git/worktrees/<name>`, and `.env` sits
+// beside that repository.
+fun mainCheckoutDir(start: File): File? {
+    val gitPath = File(start, ".git")
+    if (gitPath.isDirectory) return start
+    if (!gitPath.isFile) return null
+    val gitDir = gitPath.readLines()
+        .firstOrNull { it.startsWith("gitdir:") }
+        ?.substringAfter("gitdir:")
+        ?.trim()
+        ?: return null
+    // <main>/.git/worktrees/<name> -> <main>
+    return File(gitDir).parentFile?.parentFile?.parentFile
+}
+
+val repoRoot = rootProject.file("..")
+val envFile = listOfNotNull(
+    File(repoRoot, ".env"),
+    mainCheckoutDir(repoRoot)?.let { File(it, ".env") }
+).firstOrNull { it.exists() } ?: File(repoRoot, ".env")
 val envProperties = Properties()
 if (envFile.exists()) {
     envFile.inputStream().use { envProperties.load(it) }
@@ -109,10 +133,17 @@ android {
         // Certificate pinning causes issues when certificates change and is overkill for a relay service
         buildConfigField("String", "RELAY_CERT_FINGERPRINT", "\"\"")
         buildConfigField("String", "RELAY_ENVIRONMENT", "\"production\"")
-        // Prefer an explicitly supplied environment variable so isolated
-        // worktrees do not need a second copy of the repository's .env.
+        // An explicit environment variable wins; otherwise take it from whichever
+        // .env we resolved above. An APK without it cannot reach the relay at all,
+        // so fail the build rather than ship one that 401s on every connection.
         val relayAuthToken = System.getenv("RELAY_WS_AUTH_TOKEN")
+            ?.takeIf { it.isNotBlank() }
             ?: envProperties.getProperty("RELAY_WS_AUTH_TOKEN", "")
+        require(relayAuthToken.isNotBlank() || System.getenv("ALLOW_MISSING_RELAY_TOKEN") == "1") {
+            "RELAY_WS_AUTH_TOKEN not found (looked in the environment and ${envFile.absolutePath}). " +
+                "The relay rejects a token-less build with 401. " +
+                "Set ALLOW_MISSING_RELAY_TOKEN=1 to build without it anyway."
+        }
         buildConfigField("String", "RELAY_WS_AUTH_TOKEN", "\"$relayAuthToken\"")
     }
 

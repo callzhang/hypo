@@ -272,6 +272,40 @@ struct ClipboardMonitorTests {
         #expect(entry == nil)
     }
 
+    /// The bug this guards: an image applied from a peer is captured again as a
+    /// local copy and sent back. Each hop re-encodes it, so the bytes never match
+    /// and neither device ever recognises its own picture returning.
+    @Test
+    @MainActor
+    func testDoesNotRecaptureAnImageJustAppliedFromAPeer() throws {
+        let dispatcher = ClipboardEventDispatcher()
+        let pasteboard = MockPasteboard()
+        let monitor = ClipboardMonitor(
+            pasteboard: pasteboard,
+            deviceId: UUID(),
+            platform: .macOS,
+            deviceName: "Test Mac",
+            dispatcher: dispatcher
+        )
+
+        let image = NSImage(size: NSSize(width: 24, height: 18))
+        image.lockFocus()
+        NSColor.purple.set()
+        NSRect(x: 0, y: 0, width: 24, height: 18).fill()
+        image.unlockFocus()
+        let tiff = try #require(image.tiffRepresentation)
+        let png = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+
+        pasteboard.types = []
+        pasteboard.setData(png, for: .png)
+
+        // The peer's image is on the pasteboard because we just put it there, and the
+        // change count has already moved on -- which is how the echo slips through.
+        dispatcher.notifyClipboardApplied(changeCount: pasteboard.changeCount - 1, fingerprint: "image:24x18")
+
+        #expect(monitor.evaluatePasteboard() == nil)
+    }
+
     @Test
     @MainActor
     func testCapturesHeicImageFile() throws {

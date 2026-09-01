@@ -174,4 +174,58 @@ final class PairingUXTests: XCTestCase {
             || app.cells.count < before
         XCTAssertTrue(removed, "the device was still listed after unpairing")
     }
+    /// The app recovers after being backgrounded for a while.
+    ///
+    /// iOS suspends a backgrounded app, which stops its discovery browser and
+    /// drops its connections. Everything on this screen has to come back on
+    /// its own when the app returns — nothing else is going to restart it, and
+    /// a phone spends most of its life in exactly this state. The other tests
+    /// background the app for two seconds to move the clipboard around; none
+    /// of them leave it there long enough to be suspended.
+    func testRecoversAfterALongBackground() throws {
+        let app = openSettings()
+        XCTAssertTrue(app.staticTexts["Status"].waitForExistence(timeout: 10))
+
+        let peersBefore = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'NearbyDevice-'")
+        ).count
+
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 30)
+        app.activate()
+
+        // Still answering at all.
+        XCTAssertTrue(
+            app.staticTexts["Status"].waitForExistence(timeout: 20),
+            "the settings screen did not come back after a background"
+        )
+        let known = ["Disconnected", "Connecting", "LAN", "Connected"]
+        let labels = app.staticTexts.allElementsBoundByIndex.map { $0.label }
+        XCTAssertNotNil(
+            known.first { state in labels.contains { $0.contains(state) } },
+            "the status row said nothing after returning: \(labels.prefix(14))"
+        )
+
+        // And discovery restarted: whatever was visible before should come
+        // back, given time for a browse cycle.
+        //
+        // Skipped rather than silently returning when the network is empty.
+        // Returning made the test pass having checked only that the screen
+        // came back, which is the weaker half and says so nowhere.
+        guard peersBefore > 0 else {
+            throw XCTSkip("no devices on the network before backgrounding; only the screen's return was checked")
+        }
+        var peersAfter = 0
+        for _ in 0..<12 where peersAfter == 0 {
+            peersAfter = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH 'NearbyDevice-'")
+            ).count
+            if peersAfter == 0 { Thread.sleep(forTimeInterval: 2) }
+        }
+        XCTAssertGreaterThan(
+            peersAfter, 0,
+            "discovery found \(peersBefore) devices before the background and none after"
+        )
+    }
+
 }

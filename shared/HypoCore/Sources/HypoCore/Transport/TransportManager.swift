@@ -401,7 +401,20 @@ public final class TransportManager: ObservableObject {
                 logger.info("🔄 [TransportManager] Updated existing device: \(device.name)")
             }
             updatedDevices[index] = device
-        } else if let existingIndex = updatedDevices.firstIndex(where: { $0.name == device.name && $0.platform == device.platform }) {
+        } else if let existingIndex = updatedDevices.firstIndex(where: {
+            // Only when the platform is actually known. Nothing in the
+            // handshake or the Bonjour record carries one today, so every
+            // device stores "Unknown" and this test degenerated into matching
+            // on the name alone — pairing a second device that happened to
+            // share a name silently replaced the first, unpairing a device
+            // that was working. A duplicate entry is only untidy, and can be
+            // removed; a device that stops syncing for no visible reason is
+            // not. The intent — one entry per device when it re-pairs under a
+            // new id — comes back on its own if a platform is ever carried.
+            $0.name == device.name
+                && $0.platform == device.platform
+                && device.platform.lowercased() != "unknown"
+        }) {
             updatedDevices[existingIndex] = device
             logger.info("🔄 [TransportManager] Updated device by name: \(device.name)")
         } else {

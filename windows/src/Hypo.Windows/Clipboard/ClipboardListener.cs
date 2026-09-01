@@ -208,9 +208,11 @@ public sealed class ClipboardListener : IClipboard, IDisposable
             return WriteFileAsync(content);
         }
 
-        if (content.ContentType is ContentType.Image && !ClipboardFormats.LooksLikePng(content.Data))
+        if (content.ContentType is ContentType.Image
+            && !ClipboardFormats.LooksLikePng(content.Data)
+            && !ClipboardFormats.LooksLikeJpeg(content.Data))
         {
-            throw new NotSupportedException("Only PNG images can be placed on the clipboard.");
+            throw new NotSupportedException("Only PNG and JPEG images can be placed on the clipboard.");
         }
 
         var text = content.ContentType is ContentType.Image
@@ -223,7 +225,7 @@ public sealed class ClipboardListener : IClipboard, IDisposable
             // write causes is dispatched afterwards, by which time the sequence
             // number it must be compared against is already recorded.
             _ownSequences.Enqueue(text is null
-                ? WindowsClipboard.WritePng(content.Data, Privacy)
+                ? WindowsClipboard.WriteImage(content.Data, Privacy)
                 : WindowsClipboard.WriteText(text, Privacy));
             while (_ownSequences.Count > 8)
             {

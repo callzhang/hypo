@@ -103,6 +103,16 @@ public static class ClipboardFormats
         && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47
         && data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A;
 
+    /// <summary>
+    /// True when the bytes begin with a JPEG SOI marker.
+    ///
+    /// <para>Peers send JPEG routinely: a Mac re-encodes anything large before
+    /// sending it, so refusing JPEG means the bigger the picture, the more certain
+    /// it is never to arrive.</para>
+    /// </summary>
+    public static bool LooksLikeJpeg(ReadOnlySpan<byte> data) =>
+        data.Length >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF;
+
     /// <summary>Builds content from decoded text, classifying it on the way.</summary>
     public static ClipboardContent FromText(string text)
     {

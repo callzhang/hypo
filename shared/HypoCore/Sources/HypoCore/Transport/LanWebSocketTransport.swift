@@ -150,7 +150,6 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         // But cloud relay may require query parameters, so preserve them for cloud connections
         let originalURL = configuration.url
         let scheme = originalURL.scheme ?? "wss"
-        let host = originalURL.host ?? ""
         let path = originalURL.path.isEmpty ? "/ws" : originalURL.path
         let isCloudConnection = configuration.environment == "cloud" || scheme == "wss"
         
@@ -160,14 +159,21 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
             finalURL = originalURL
             logger.info("☁️ [LanWebSocketTransport] Cloud connection - preserving query parameters: \(originalURL.absoluteString)")
         } else {
-            // For LAN connections, remove query parameters
-            let cleanURLString = "\(scheme)://\(host)\(path)"
-            guard let url = URL(string: cleanURLString) else {
-                logger.error("❌ [LanWebSocketTransport] Failed to create clean URL from: \(cleanURLString)")
+            // For LAN connections, drop the query but keep everything that addresses
+            // the peer. Rebuilding the string by hand used to lose the port, so every
+            // dial went to :80 while peers listen on the port they advertise.
+            var components = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)
+            components?.query = nil
+            components?.fragment = nil
+            if components?.path.isEmpty ?? true {
+                components?.path = path
+            }
+            guard let url = components?.url else {
+                logger.error("❌ [LanWebSocketTransport] Failed to create clean URL from: \(originalURL.absoluteString)")
                 throw NSError(domain: "LanWebSocketTransport", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create clean URL"])
             }
             finalURL = url
-            logger.info("📡 [LanWebSocketTransport] LAN connection - removed query parameters: \(cleanURLString)")
+            logger.info("📡 [LanWebSocketTransport] LAN connection - removed query parameters: \(url.absoluteString)")
         }
         request.url = finalURL
         // Verify the URL was set correctly (log only if mismatch)

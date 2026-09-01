@@ -348,6 +348,10 @@ struct LanWebSocketTransportTests {
         stubTask.receiveHandler?(.failure(error))
 
         #expect(transport.isConnected() == false)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -366,6 +370,10 @@ struct LanWebSocketTransportTests {
         await transport._testing_closeDueToIdle(task: stubTask)
         #expect(cancelled.withLock { $0 })
         #expect(transport.isConnected() == false)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -422,6 +430,10 @@ struct LanWebSocketTransportTests {
 
         await transport._testing_processMessageQueue()
         #expect(transport._testing_messageQueueCount() == 0)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -451,6 +463,10 @@ struct LanWebSocketTransportTests {
         await transport._testing_processMessageQueue()
         #expect(transport._testing_messageQueueCount() == 0)
         #expect(task.sentData.count == 1)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -480,6 +496,10 @@ struct LanWebSocketTransportTests {
         await transport._testing_processMessageQueue()
         #expect(transport._testing_messageQueueCount() == 0)
         #expect(task.sentData.count == 1)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -558,6 +578,10 @@ struct LanWebSocketTransportTests {
             resumeCount.withLock { $0 } >= 1
         }
         #expect(reconnected)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -575,6 +599,10 @@ struct LanWebSocketTransportTests {
         ))
         let encoded = try TransportFrameCodec().encode(envelope)
         transport._testing_handleIncoming(encoded)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -584,6 +612,10 @@ struct LanWebSocketTransportTests {
         )
         let garbage = Data([0, 0, 0, 1, 0xFF])
         transport._testing_handleIncoming(garbage)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -597,6 +629,10 @@ struct LanWebSocketTransportTests {
 
         stubTask.receiveHandler?(.success(.string("hello")))
         #expect(transport.isConnected())
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -610,6 +646,10 @@ struct LanWebSocketTransportTests {
 
         transport.urlSession(session, webSocketTask: task, didCloseWith: .goingAway, reason: Data("bye".utf8))
         #expect(transport.isConnected() == false)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 
     @Test
@@ -623,6 +663,10 @@ struct LanWebSocketTransportTests {
 
         transport.urlSession(session, task: task, didCompleteWithError: NSError(domain: NSURLErrorDomain, code: -1))
         #expect(transport.isConnected() == false)
+        // Disconnect, or the keepalive this transport starts for a wss URL
+        // keeps pinging after the test ends. Eleven tests left one running,
+        // and together they held the process open past CI's step timeout.
+        await transport.disconnect()
     }
 }
 

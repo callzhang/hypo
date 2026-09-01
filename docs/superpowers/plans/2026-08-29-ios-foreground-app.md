@@ -2636,3 +2636,38 @@ the status row showed none of ["Disconnected", …]:
 **标签和值被合并成了一个元素**——`"Status, Disconnected"`。查找独立的 `"Disconnected"` 在合并前成立,布局一改就失效,而 app 的行为一点没变。
 
 改成在所有标签里按**包含**匹配。这一类断言(按精确名字取元素)在 SwiftUI 里都很脆:同一段内容会因为外层容器不同而变成一个或多个元素。本期已经被这件事绊过三次——配对行的标识符合并、成功页文案、现在是状态行。
+
+
+## 测试跑完不退出的真正原因（2026-09-01）
+
+本次会话从头到尾都有一个现象:`swift test` 跑完不会自己结束,每次都要 `pkill`。我在中途诊断过一次——「`LanWebSocketTransport` 有个没人关闭的心跳任务每 21 秒 ping 一次」——但当时判定"超出 HypoiOS 的范围",没有修。
+
+它最后挡住了 CI:`Run HypoCore tests on iOS Simulator` 连续两轮跑满 20 分钟被杀,日志末尾就是每 20 秒一次的:
+
+```
+🏓 [LanWebSocketTransport] Ping sent successfully
+```
+
+### 为什么会这样
+
+`startWatchdog` 里有个分支:
+
+```swift
+if configuration.environment == "cloud" || configuration.url.scheme == "wss" {
+```
+
+而 `LanWebSocketTransportTests` 里几乎每个测试都用 `wss://example.com` 作占位 URL——**scheme 就是 `wss`,于是每个都启动了心跳**。25 处构造里有 11 处从不调用 `disconnect()`,于是留下 11 个各自每 20 秒 ping 一次的循环,把进程一直吊着。
+
+`deinit` 里确实取消了 watchdog,但那些 transport 显然没有被释放。
+
+### 修法与效果
+
+给那 11 个测试补上 `await transport.disconnect()`。
+
+| | 之前 | 之后 |
+|---|---|---|
+| `swift test`(HypoCore) | 挂住,必须 `pkill` | **30 秒退出,exit 0** |
+| iOS 模拟器 | 同上 | **33 秒退出,exit 0** |
+| macOS | 4 秒 | 4 秒 |
+
+**教训**:一个"只是有点烦"的现象——每次要手动杀进程——最终变成了 CI 的硬阻塞。当时判它超出范围是错的:它不是范围问题,是我不想在别的任务中途岔开。代价是后面每一次本地测试都要多一步,以及两轮各 20 分钟的 CI。

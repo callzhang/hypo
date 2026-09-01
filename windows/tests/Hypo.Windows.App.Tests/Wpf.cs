@@ -171,6 +171,62 @@ internal static class Wpf
     }
 
     /// <summary>
+    /// Finds a block of light chrome in an image that should be dark.
+    ///
+    /// <para>The failure this catches: a control WPF styles itself — a Button, a
+    /// ComboBox — that the theme forgot, which stays pale with white text on it
+    /// and is unreadable. It has happened twice, and both times a person looking
+    /// at a screenshot found it rather than a test.</para>
+    ///
+    /// <para>A block, not a bright pixel count: white text is bright and
+    /// scattered, so counting pixels cannot tell text from chrome. A run of
+    /// light pixels wide enough to be a control, repeated over enough rows to be
+    /// its height, is chrome and nothing else. A single bright line is a
+    /// separator, which is why the row count matters.</para>
+    /// </summary>
+    /// <param name="height">Rows to look at. The bitmap is the window's height
+    /// and the content is the client area, so the last rows are unpainted.</param>
+    public static bool HasLightChrome(byte[] pixels, int width, int height, int minWidth = 40, int minRows = 8)
+    {
+        var consecutive = 0;
+
+        for (var y = 0; y < height; y++)
+        {
+            var run = 0;
+            var wide = false;
+
+            for (var x = 0; x < width; x++)
+            {
+                var i = ((y * width) + x) * 4;
+
+                // Pbgra32: blue, green, red, alpha.
+                var luminance = (0.0722 * pixels[i]) + (0.7152 * pixels[i + 1]) + (0.2126 * pixels[i + 2]);
+
+                if (luminance > 150)
+                {
+                    if (++run >= minWidth)
+                    {
+                        wide = true;
+                    }
+                }
+                else
+                {
+                    run = 0;
+                }
+            }
+
+            consecutive = wide ? consecutive + 1 : 0;
+
+            if (consecutive >= minRows)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// True when the image is not a single flat colour.
     ///
     /// <para>The check that matters: a window that failed to lay out renders as

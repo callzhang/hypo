@@ -95,6 +95,81 @@ public class ThemeTests : IDisposable
     }
 
     [SkippableFact]
+    public void NoControlKeepsItsLightChromeInTheDarkTheme()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        // Twice now a control WPF styles itself has been left out of the theme
+        // and turned up as a pale slab with white text on it -- first Button,
+        // then ComboBox -- and both times a person looking at a screenshot found
+        // it rather than a test. This asks the pixels.
+        Wpf.Run(() =>
+        {
+            ThemeHost.Apply(System.Windows.Application.Current, ThemePalette.Dark);
+
+            try
+            {
+                var model = new HistoryViewModel(_history, new NullClipboard());
+                model.Refresh();
+
+                var window = new HistoryWindow(model) { HideWhenDeactivated = false };
+                window.Show();
+                window.Settle();
+
+                var content = (System.Windows.FrameworkElement)window.Content;
+                var pixels = window.Capture(name: null);
+
+                Assert.False(
+                    Wpf.HasLightChrome(pixels, (int)window.ActualWidth, (int)content.ActualHeight),
+                    "something in the dark theme is still wearing its light chrome");
+
+                window.Close();
+            }
+            finally
+            {
+                ThemeHost.Apply(System.Windows.Application.Current, ThemePalette.Light);
+            }
+        });
+    }
+
+    [SkippableFact]
+    public void ThePairingWindowKeepsNoLightChromeEither()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");
+
+        Wpf.Run(() =>
+        {
+            ThemeHost.Apply(System.Windows.Application.Current, ThemePalette.Dark);
+
+            try
+            {
+                var store = new Hypo.Core.Abstractions.InMemorySecretStore();
+                var window = new PairingWindow(new PairingViewModel(
+                    store,
+                    new Hypo.Core.Pairing.LanPairingCoordinator(store),
+                    "11111111-2222-3333-4444-555555555555",
+                    "Test PC"));
+
+                window.Show();
+                window.Settle();
+
+                var content = (System.Windows.FrameworkElement)window.Content;
+                var pixels = window.Capture(name: null);
+
+                Assert.False(
+                    Wpf.HasLightChrome(pixels, (int)window.ActualWidth, (int)content.ActualHeight),
+                    "something in the dark theme is still wearing its light chrome");
+
+                window.Close();
+            }
+            finally
+            {
+                ThemeHost.Apply(System.Windows.Application.Current, ThemePalette.Light);
+            }
+        });
+    }
+
+    [SkippableFact]
     public void SwitchingThemeRepaintsAWindowThatIsAlreadyOpen()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only.");

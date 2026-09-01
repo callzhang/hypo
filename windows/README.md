@@ -206,6 +206,13 @@ the setting and which backdrop follows from the Windows version can both be
 tested on a Mac. Their contrast is tested too, which is how the light theme's
 search hint turned out to be at 2.67:1 — it is darker now.
 
+Two controls have already been left out of it — Button, then ComboBox — and both
+times a pale slab with white text on it survived every test and was caught by a
+person looking at a screenshot. There is a test for that class of mistake now:
+it renders both windows dark and fails if any block of light chrome is left,
+distinguishing a control's background from white text by asking for a run wide
+enough to be a control repeated over enough rows to be its height.
+
 The design named the WPF-UI Fluent dictionary for this. It is not used: the
 whole theme is seven brushes, and a UI toolkit would have restyled every control
 in the screenshots for them.

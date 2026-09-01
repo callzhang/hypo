@@ -45,6 +45,27 @@
     <Setter Property="BorderThickness" Value="1" />
   </Style>
 
+  <!-- The same story as Button: left alone it keeps light chrome, which in the
+       dark theme is a pale slab with white text on it. ComboBoxItem too, or the
+       dropped-down list is the same problem one layer in. -->
+  <Style TargetType="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <Style TargetType="ComboBoxItem">
+    <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+  </Style>
+
+  <!-- Unthemed it is a near-white line, which on a dark background is louder
+       than a separator has any business being. -->
+  <Style TargetType="Separator">
+    <Setter Property="Background" Value="{DynamicResource ControlBorderBrush}" />
+  </Style>
+
   <Style TargetType="ListBox">
     <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />

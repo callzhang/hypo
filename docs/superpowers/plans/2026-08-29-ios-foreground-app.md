@@ -1,5 +1,30 @@
 # iOS 前台版客户端实现计划（第 2 期）
 
+> ## 状态：代码完成,等待真机验证
+>
+> 十一个任务全部实现并落地。文档中散落的步骤复选框是执行时的工作清单,**未勾选不代表未完成**——每个任务末尾都有对应的执行记录。
+>
+> **已验证**
+>
+> | 项 | 证据 |
+> |---|---|
+> | LAN 配对 + 双向同步 | 对真实对端跑通的 UI 测试 |
+> | 经中转服务器配对 + 双向同步 | 同上 |
+> | macOS ↔ iOS 真实互传 | 接收方**应用**的记录:信封解码 + `originDeviceName` |
+> | Android 报文格式兼容 | 按 Android 序列化规则手写的 fixture,并验证过能抓住时间戳 bug |
+> | 单元与界面测试 | HypoCore 179 / iOS 148、HypoiOS 33、macOS 56、iOS UI 17 |
+>
+> **未验证,均需实体设备**
+>
+> | 项 | 阻塞原因 |
+> |---|---|
+> | Android ↔ iOS 实际互传 | 手机需上线;监视脚本会在它出现时自动配对 |
+> | 物理 iOS 设备 | 全程模拟器;工程已配好,只差选一个开发团队 |
+> | 本地网络权限的弹窗与拒绝行为 | 模拟器不建模该权限(`simctl privacy` 无 local-network) |
+>
+> 前两项的"最后一公里"是插上设备;第三项随真机运行一并完成。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 做出可在 iOS 模拟器运行、与 macOS 客户端真实双向同步剪贴板的 iOS App：配对、LAN + 云双通道、历史列表、`UIPasteControl` 发送。

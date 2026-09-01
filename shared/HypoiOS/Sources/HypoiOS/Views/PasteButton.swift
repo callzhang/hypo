@@ -16,8 +16,14 @@ public struct PasteButton: UIViewRepresentable {
     }
 
     public func makeUIView(context: Context) -> UIPasteControl {
+        // Icon only, and round. UIPasteControl draws its own glyph — the
+        // configuration exposes a display mode, corner style and colours and
+        // nothing else, so the system paste symbol cannot be swapped for
+        // another one. Dropping the "Paste" label and rounding it is as small
+        // as this control gets.
         let configuration = UIPasteControl.Configuration()
-        configuration.displayMode = .labelOnly
+        configuration.displayMode = .iconOnly
+        configuration.cornerStyle = .capsule
         let control = UIPasteControl(configuration: configuration)
         control.target = context.coordinator
         return control

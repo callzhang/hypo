@@ -2363,3 +2363,42 @@ cd ios && xcodebuild test -scheme Hypo \
 ```
 
 这也落实了一条分工:**iOS 的开发闭环在本地,CI 只做最后一道关。** 本地能跑 iOS 的每一样东西,一轮 66 秒;把 CI 当诊断工具是在为本地就能抓到的东西反复付 push-and-wait 的代价。CI 剩下的实际价值是两条:一个干净的受限环境(今天的 `SO_NECP_LISTENUUID` 就是同样 iOS 26.5 下 CI 失败、本地通过),以及另外四个平台。
+
+
+## 界面细节（2026-08-31,用户逐条指出）
+
+### app 图标从来没做过
+
+`ios/` 下没有 `Assets.xcassets`,工程里 `ASSETCATALOG_COMPILER_APPICON_NAME` 是空字符串,构建产物里一个图标文件也没有——所以主屏上是空白默认图标。不是"坏了",是缺失。
+
+从 macOS 的 `AppIcon.icns` 抽出 1024×1024(已确认无 alpha 通道,iOS 不接受带 alpha 的图标),建资源目录并接进 Resources 阶段。
+
+### 设备列表里每一行都写着 "Unknown"
+
+那一行显示 `device.platform`,而**三处构造 `PairedDevice` 全都写死成 "Unknown"**,其中一处的注释还写着"从 device ID 探测平台",探测从没实现。
+
+查了为什么:**配对协议里根本不传平台**。`PairingChallengeMessage` 只有 id、设备名、公钥、nonce、密文、tag,Android 的模型一模一样;Bonjour 的 TXT 记录也没有平台字段。这个信息两端都不存在。
+
+Android 的设备行显示的是名字 + 状态徽章 + 地址/最后可见时间,**没有平台**。改成同样的做法。要真正显示平台需要改配对协议加字段,两端同时改,是另一件事。
+
+### history 底部的白边
+
+`.safeAreaInset(edge: .bottom)` 里的容器**无条件存在**,带着 `.padding(.vertical, 8)` 和 `.bar` 背景。没东西可发时它就是一条空白材质条,而 settings 没有这个 inset 所以是满屏——两个页面因此对不齐。改成只在真有内容时才插入。
+
+### Paste 按钮不能换成别的图标
+
+实测 `UIPasteControl.Configuration` 只有五个属性:显示模式、圆角样式、圆角半径、前景色、背景色。**没有任何设置自定义图片的接口**,四个显示模式(图标+文字/仅图标/仅文字/箭头+文字)都用系统自己的粘贴字形。
+
+原因不难理解:正是这个系统绘制的控件才享有"读剪贴板不弹框"的豁免,换成自绘按钮就等于放弃豁免。
+
+能做的是改成**仅图标 + 胶囊形**。改的时候发现文件里有一行遗留的 `displayMode = .labelOnly` 排在后面把设置覆盖了。
+
+### 图片条目显示尺寸
+
+新增 `listDescription`,图片显示"262×138 · PNG · 19 kB"。没有改共享的 `previewDescription`——macOS 也在用它,而且搜索是按它匹配的。
+
+### 连接状态改成图标
+
+照搬 macOS 菜单栏的映射:断开 `cloud.slash.fill` 灰、连接中 `arrow.triangle.2.circlepath` 橙、LAN `wifi` 绿、云端 `cloud.fill` 蓝、错误 `exclamationmark.triangle.fill` 红,文案也统一成同样的词。
+
+顺带发现 `testReportsConnectionStatus` **只打印、不断言**——无论 app 显示什么(包括什么都不显示)它都通过。改成断言状态行确实显示了已知状态之一。

@@ -33,7 +33,15 @@ public struct SettingsView: View {
     public var body: some View {
         List {
             Section("Connection") {
-                LabeledContent("Status", value: connectionDescription)
+                LabeledContent("Status") {
+                    Label {
+                        Text(connectionDescription)
+                    } icon: {
+                        Image(systemName: connectionSymbol)
+                            .foregroundStyle(connectionTint)
+                    }
+                    .font(.callout)
+                }
             }
 
             Section("This device") {
@@ -55,7 +63,7 @@ public struct SettingsView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(device.name)
-                                Text(device.platform)
+                                Text(detail(of: device))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -210,6 +218,23 @@ public struct SettingsView: View {
         return "Pair"
     }
 
+    /// The address when it is known, otherwise when it was last seen.
+    ///
+    /// This used to show `device.platform`, which is always "Unknown": nothing
+    /// in the handshake carries a platform — the challenge has an id, a name
+    /// and keys, and the Bonjour record has no platform field either — so every
+    /// row said the same useless word. Android's device row shows the address
+    /// or a last-seen time for exactly this reason.
+    private func detail(of device: PairedDevice) -> String {
+        if let host = device.bonjourHost, let port = device.bonjourPort {
+            return "\(host):\(port)"
+        }
+        if let host = device.bonjourHost {
+            return host
+        }
+        return "Last seen \(device.lastSeen.formatted(.relative(presentation: .named)))"
+    }
+
     private func status(of device: PairedDevice) -> (label: String, tint: Color) {
         if device.isOnline { return ("Connected", .green) }
         let onThisNetwork = transportManager.lanDiscoveredPeers().contains { peer in
@@ -227,14 +252,35 @@ public struct SettingsView: View {
         context.unpair(device)
     }
 
+    // The same symbols and colours the macOS menu bar uses, so both clients
+    // describe one connection the same way.
+    private var connectionSymbol: String {
+        switch transportManager.connectionState {
+        case .disconnected: return "cloud.slash.fill"
+        case .connectingLan, .connectingCloud: return "arrow.triangle.2.circlepath"
+        case .connectedLan: return "wifi"
+        case .connectedCloud: return "cloud.fill"
+        case .error: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var connectionTint: Color {
+        switch transportManager.connectionState {
+        case .disconnected: return .gray
+        case .connectingLan, .connectingCloud: return .orange
+        case .connectedLan: return .green
+        case .connectedCloud: return .blue
+        case .error: return .red
+        }
+    }
+
     private var connectionDescription: String {
         switch transportManager.connectionState {
         case .disconnected: return "Disconnected"
-        case .connectingLan: return "Connecting over LAN…"
-        case .connectedLan: return "Connected over LAN"
-        case .connectingCloud: return "Connecting to relay…"
-        case .connectedCloud: return "Connected via relay"
-        case .error(let message): return message
+        case .connectingLan, .connectingCloud: return "Connecting…"
+        case .connectedLan: return "LAN"
+        case .connectedCloud: return "Connected"
+        case .error: return "Disconnected"
         }
     }
 

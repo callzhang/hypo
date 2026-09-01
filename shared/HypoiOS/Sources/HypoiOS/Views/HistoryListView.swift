@@ -50,28 +50,36 @@ public struct HistoryListView: View {
 
             list
         }
+        // Only inset when there is a bar to show. An unconditional inset left
+        // an empty strip of .bar material pinned to the bottom whenever there
+        // was nothing to send, which is most of the time — the settings screen
+        // has no inset and so ran full height, and the two did not match.
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 6) {
-                if let message = sendStatusMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                // Shown only when there is something to send. Detecting that
-                // costs no prompt; reading does, so the read waits for this
-                // button, which is the one way iOS allows it silently.
-                if viewModel.hasClipboardToSend {
-                    PasteButton { text in
-                        Task { await viewModel.sendText(text) }
+            if viewModel.hasClipboardToSend || sendStatusMessage != nil {
+                VStack(spacing: 6) {
+                    if let message = sendStatusMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Text("Send what you copied to your other devices")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    // Detecting that there is something to send costs no
+                    // prompt; reading does, so the read waits for this button,
+                    // which is the one way iOS allows it silently.
+                    if viewModel.hasClipboardToSend {
+                        HStack(spacing: 8) {
+                            PasteButton { text in
+                                Task { await viewModel.sendText(text) }
+                            }
+                            Text("Send what you copied")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(.bar)
             }
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(.bar)
         }
         .sheet(item: $detailEntry) { entry in
             ClipboardEntryDetailView(entry: entry) {

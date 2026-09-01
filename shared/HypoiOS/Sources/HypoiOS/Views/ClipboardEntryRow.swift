@@ -45,7 +45,7 @@ struct ClipboardEntryRow: View {
                 }
             }
 
-            Text(entry.content.previewDescription)
+            Text(entry.content.listDescription)
                 .font(.body)
                 .foregroundStyle(.primary)
                 .lineLimit(3)

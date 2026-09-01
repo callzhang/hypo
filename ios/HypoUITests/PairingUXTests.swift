@@ -112,21 +112,22 @@ final class PairingUXTests: XCTestCase {
 
     /// Reports the connection row. Not an assertion about which state it
     /// reaches — that depends on the network — but a way to see it.
+    /// The status row says one of the states it knows, with an icon.
+    ///
+    /// It used to print the screen's labels and assert nothing, which passes
+    /// whatever the app does — including showing nothing at all.
     func testReportsConnectionStatus() {
-        let app = XCUIApplication()
-        app.launch()
-        addUIInterruptionMonitor(withDescription: "system alerts") { alert in
-            for label in ["Allow", "Allow Paste", "OK"] where alert.buttons[label].exists {
-                alert.buttons[label].tap(); return true
-            }
-            return false
-        }
-        app.tap()
-        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15))
-        app.buttons["Settings"].tap()
-        XCTAssertTrue(app.staticTexts["Connection"].waitForExistence(timeout: 10))
-        Thread.sleep(forTimeInterval: 15)
-        print("CONNECTION: \(app.staticTexts.allElementsBoundByIndex.map { $0.label }.prefix(6))")
+        let app = openSettings()
+
+        XCTAssertTrue(app.staticTexts["Status"].waitForExistence(timeout: 10))
+
+        // The same words the macOS menu bar uses.
+        let known = ["Disconnected", "Connecting…", "LAN", "Connected"]
+        let shown = known.first { app.staticTexts[$0].exists }
+        XCTAssertNotNil(
+            shown,
+            "the status row showed none of \(known): \(app.staticTexts.allElementsBoundByIndex.map { $0.label }.prefix(12))"
+        )
     }
 
     /// A paired device can be removed.

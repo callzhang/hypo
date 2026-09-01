@@ -2,7 +2,7 @@
 
 > Real-time, secure clipboard synchronization between any devices (Android, macOS, iOS, etc.)
 
-[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Android%208%2B-blue)]()
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20iOS%2017%2B%20%7C%20Android%208%2B%20%7C%20Windows%2010%2B-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
 [![Status](https://img.shields.io/badge/status-Production%20Beta-green)]()
 [![Deploy Backend Relay](https://github.com/callzhang/hypo/actions/workflows/backend-deploy.yml/badge.svg)](https://github.com/callzhang/hypo/actions/workflows/backend-deploy.yml)
@@ -21,9 +21,9 @@ Hypo enables seamless clipboard synchronization between any devices. Copy on one
 - **🔒 E2E Encrypted**: AES-256-GCM encryption, your data never exposed
 - **📡 Dual Transport**: LAN-first for speed, cloud fallback for mobility
 - **📋 Multi-Format**: Text, links, images (≤10MB), and files (≤10MB)
-- **🕒 Clipboard History**: Search and restore past clipboard items (macOS)
+- **🕒 Clipboard History**: Search and restore past clipboard items (macOS, iOS, Android)
 - **🔔 Rich Notifications**: Preview content before pasting
-- **🎨 Native UI**: SwiftUI on macOS, Material 3 on Android
+- **🎨 Native UI**: SwiftUI on macOS and iOS, Material 3 on Android
 - **🔋 Battery Optimized**: Auto-idles WebSocket when screen is off (Android)
 
 ---
@@ -63,6 +63,7 @@ what is and is not implemented.
 ### Prerequisites
 
 - **macOS**: macOS 13+ with Xcode 15+
+- **iOS**: iOS 17+ device or simulator, built with Xcode 15+
 - **Android**: HyperOS 3+ (or Android 8+) device
 - **Backend** (optional for cloud sync): Docker or Rust 1.75+
 
@@ -73,6 +74,7 @@ what is and is not implemented.
 **Quick Links**:
 - **macOS**: Download from [GitHub Releases](https://github.com/callzhang/hypo/releases) or [build from source](#macos-client)
 - **Android**: Download APK from [GitHub Releases](https://github.com/callzhang/hypo/releases) or [build from source](#android-client)
+- **iOS**: build from source — `ios/Hypo.xcodeproj`. See [`docs/USER_GUIDE.md#ios`](docs/USER_GUIDE.md#ios) for what differs from the other platforms.
 
 For development setup, see [Development Setup](#development-setup) below.
 

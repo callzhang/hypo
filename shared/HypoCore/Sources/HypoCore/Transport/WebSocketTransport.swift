@@ -183,7 +183,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         lastActivity = dateProvider()
 
         let session = sessionFactory(self, configuration.idleTimeout)
-        self.session = session
         
         var request = URLRequest(url: configuration.url)
         if configuration.headers.isEmpty {
@@ -207,9 +206,14 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             // For cloud connections, preserve query parameters if present
             finalURL = originalURL
         } else {
-            // For LAN connections, drop the query but keep everything that addresses
-            // the peer. Rebuilding the string by hand used to lose the port, so every
-            // dial went to :80 while peers listen on the port they advertise.
+            // For LAN connections, drop the query and fragment — and nothing
+            // else.
+            //
+            // This used to rebuild the URL as "\(scheme)://\(host)\(path)",
+            // which silently discarded the port: every LAN dial to a peer on
+            // 7010 went to port 80 instead and could never connect. Invisible
+            // on macOS, which is usually dialled rather than dialling; fatal on
+            // iOS, which only ever dials.
             var components = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)
             components?.query = nil
             components?.fragment = nil
@@ -224,6 +228,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
         request.url = finalURL
         let task = session.webSocketTask(with: request)
+        // Published only once the task exists. Assigning earlier let a
+        // concurrent disconnect() invalidate this very session between its
+        // creation and its first use, and creating a task on an invalidated
+        // session throws an ObjC exception that no Swift catch can hold —
+        // the app aborted with "Task created in a session that has been
+        // invalidated" the moment it started dialling peers.
+        self.session = session
         
         // CRITICAL: Set maximumMessageSize to 1GB to support large file transfers
         // This allows WebSocket to automatically fragment large messages using RFC 6455 fragmentation
@@ -256,6 +267,45 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             }
             state = .idle
             throw error
+        }
+    }
+
+    /// Whether these bytes are a pairing handshake message rather than a
+    /// clipboard envelope. Recognised by its keys, the same way the LAN server
+    /// recognises one arriving from the other direction.
+    private func looksLikePairingMessage(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return object["responder_device_id"] != nil || object["initiator_pub_key"] != nil
+    }
+
+    /// Sends bytes exactly as given, outside the envelope protocol.
+    ///
+    /// LAN pairing has to exchange a plain JSON challenge before either side
+    /// holds a shared key, so it cannot go through send(_ envelope:), which
+    /// frames and encrypts. The peer's server recognises a bare pairing
+    /// message by its keys.
+    public func sendRaw(_ data: Data) async throws {
+        let task: WebSocketTasking? = stateLock.withLock {
+            if case .connected(let task) = state { return task }
+            return nil
+        }
+        guard let task else {
+            throw NSError(
+                domain: "WebSocketTransport",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Not connected"]
+            )
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
+            task.send(.data(data)) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
         }
     }
 
@@ -1205,6 +1255,11 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                     self.handleIncoming(data: data)
                 } else if case .string(let str) = message {
                     self.logger.info("📝 [WebSocketTransport] Received text message: \(str.prefix(100))")
+                    // Text frames were logged and thrown away. The LAN server
+                    // sends a pairing ack as text on purpose — so Android can
+                    // read it as a JSON string — which meant a Swift client
+                    // asking to pair over the LAN never heard the answer.
+                    self.handleIncoming(data: Data(str.utf8))
                 }
                 self.receiveNext(on: task)
             case .failure(let error):
@@ -1287,6 +1342,17 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func handleIncoming(data: Data) {
+        // Checked before decoding, not in a catch. A pairing message has no
+        // frame around it — it travels before either side has a key to build
+        // an envelope with — and the codec rejects it with TransportFrameError,
+        // which is not the DecodingError the recovery path below catches. So
+        // the ack that completes LAN pairing arrived, failed to decode, and
+        // was logged as junk.
+        if looksLikePairingMessage(data), let handler = onIncomingMessage {
+            logger.info("🤝 [WebSocketTransport] Forwarding an unframed pairing message")
+            Task { await handler(data, .lan) }
+            return
+        }
         do {
             // Check for error/control messages before decoding as SyncEnvelope
             if data.count >= 4 {

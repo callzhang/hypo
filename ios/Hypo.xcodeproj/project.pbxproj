@@ -1,0 +1,436 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1A00000000000000000000B2 /* HypoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000B1 /* HypoApp.swift */; };
+		1A00000000000000000000C3 /* HypoiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000000C2 /* HypoiOS */; };
+		1A00000000000000000000D3 /* HypoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000D2 /* HypoUITests.swift */; };
+		1A00000000000000000000E5 /* PairingEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000E4 /* PairingEndToEndTests.swift */; };
+		1A00000000000000000000E7 /* HarnessSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000E6 /* HarnessSyncTests.swift */; };
+		1A00000000000000000000F6 /* PairingUXTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000F5 /* PairingUXTests.swift */; };
+		1A00000000000000000000F8 /* RelaySyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000000F7 /* RelaySyncTests.swift */; };
+		1A00000000000000000000E2 /* HypoCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000000E1 /* HypoCore */; };
+		1A0000000000000000000F81 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000F80 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1A00000000000000000000A3 /* Hypo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hypo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A00000000000000000000B1 /* HypoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HypoApp.swift; sourceTree = "<group>"; };
+		1A00000000000000000000B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1A00000000000000000000D1 /* HypoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HypoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A00000000000000000000D2 /* HypoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HypoUITests.swift; sourceTree = "<group>"; };
+		1A00000000000000000000E4 /* PairingEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingEndToEndTests.swift; sourceTree = "<group>"; };
+		1A00000000000000000000E6 /* HarnessSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessSyncTests.swift; sourceTree = "<group>"; };
+		1A00000000000000000000F5 /* PairingUXTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingUXTests.swift; sourceTree = "<group>"; };
+		1A00000000000000000000F7 /* RelaySyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySyncTests.swift; sourceTree = "<group>"; };
+		1A0000000000000000000F80 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A00000000000000000000A8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A00000000000000000000C3 /* HypoiOS in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A00000000000000000000D4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A00000000000000000000E2 /* HypoCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A00000000000000000000A4 = {
+			isa = PBXGroup;
+			children = (
+				1A00000000000000000000A5 /* Hypo */,
+				1A00000000000000000000D5 /* HypoUITests */,
+				1A00000000000000000000A6 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1A00000000000000000000A5 /* Hypo */ = {
+			isa = PBXGroup;
+			children = (
+				1A00000000000000000000B1 /* HypoApp.swift */,
+				1A00000000000000000000B3 /* Info.plist */,
+				1A0000000000000000000F80 /* Assets.xcassets */,
+			);
+			path = Hypo;
+			sourceTree = "<group>";
+		};
+		1A00000000000000000000A6 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A00000000000000000000A3 /* Hypo.app */,
+				1A00000000000000000000D1 /* HypoUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1A00000000000000000000D5 /* HypoUITests */ = {
+			isa = PBXGroup;
+			children = (
+				1A00000000000000000000D2 /* HypoUITests.swift */,
+				1A00000000000000000000E4 /* PairingEndToEndTests.swift */,
+				1A00000000000000000000E6 /* HarnessSyncTests.swift */,
+				1A00000000000000000000F5 /* PairingUXTests.swift */,
+				1A00000000000000000000F7 /* RelaySyncTests.swift */,
+			);
+			path = HypoUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A00000000000000000000A2 /* Hypo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A00000000000000000000B5 /* Build configuration list for PBXNativeTarget "Hypo" */;
+			buildPhases = (
+				1A00000000000000000000A7 /* Sources */,
+				1A00000000000000000000A8 /* Frameworks */,
+				1A00000000000000000000A9 /* Resources */,
+				1A00000000000000000000F1 /* Inject relay auth token */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Hypo;
+			packageProductDependencies = (
+				1A00000000000000000000C2 /* HypoiOS */,
+			);
+			productName = Hypo;
+			productReference = 1A00000000000000000000A3 /* Hypo.app */;
+			productType = "com.apple.product-type.application";
+		};
+		1A00000000000000000000D6 /* HypoUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A00000000000000000000D7 /* Build configuration list for PBXNativeTarget "HypoUITests" */;
+			buildPhases = (
+				1A00000000000000000000DA /* Sources */,
+				1A00000000000000000000D4 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1A00000000000000000000DB /* PBXTargetDependency */,
+			);
+			name = HypoUITests;
+			packageProductDependencies = (
+				1A00000000000000000000E1 /* HypoCore */,
+			);
+			productName = HypoUITests;
+			productReference = 1A00000000000000000000D1 /* HypoUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A00000000000000000000A1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					1A00000000000000000000A2 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					1A00000000000000000000D6 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 1A00000000000000000000A2;
+					};
+				};
+			};
+			buildConfigurationList = 1A00000000000000000000B4 /* Build configuration list for PBXProject "Hypo" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 1A00000000000000000000A4;
+			packageReferences = (
+				1A00000000000000000000C1 /* XCLocalSwiftPackageReference "../shared/HypoiOS" */,
+				1A00000000000000000000E3 /* XCLocalSwiftPackageReference "../shared/HypoCore" */,
+			);
+			productRefGroup = 1A00000000000000000000A6 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A00000000000000000000A2 /* Hypo */,
+				1A00000000000000000000D6 /* HypoUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A00000000000000000000A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000000000000000000F81 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		1A00000000000000000000F1 /* Inject relay auth token */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Inject relay auth token";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/../scripts/inject-ios-relay-token.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A00000000000000000000A7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A00000000000000000000B2 /* HypoApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A00000000000000000000DA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A00000000000000000000D3 /* HypoUITests.swift in Sources */,
+				1A00000000000000000000E5 /* PairingEndToEndTests.swift in Sources */,
+				1A00000000000000000000E7 /* HarnessSyncTests.swift in Sources */,
+				1A00000000000000000000F6 /* PairingUXTests.swift in Sources */,
+				1A00000000000000000000F8 /* RelaySyncTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1A00000000000000000000DB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A00000000000000000000A2 /* Hypo */;
+			targetProxy = 1A00000000000000000000DC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		1A00000000000000000000DC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A00000000000000000000A1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A00000000000000000000A2;
+			remoteInfo = Hypo;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin XCBuildConfiguration section */
+		1A00000000000000000000B6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		1A00000000000000000000B7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 6.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		1A00000000000000000000B8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]" = NO;
+				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Hypo/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hypo.clipboard.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1A00000000000000000000B9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]" = NO;
+				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Hypo/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hypo.clipboard.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		1A00000000000000000000D8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hypo.clipboard.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Hypo;
+			};
+			name = Debug;
+		};
+		1A00000000000000000000D9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hypo.clipboard.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Hypo;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A00000000000000000000B4 /* Build configuration list for PBXProject "Hypo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A00000000000000000000B6 /* Debug */,
+				1A00000000000000000000B7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A00000000000000000000B5 /* Build configuration list for PBXNativeTarget "Hypo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A00000000000000000000B8 /* Debug */,
+				1A00000000000000000000B9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A00000000000000000000D7 /* Build configuration list for PBXNativeTarget "HypoUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A00000000000000000000D8 /* Debug */,
+				1A00000000000000000000D9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1A00000000000000000000C1 /* XCLocalSwiftPackageReference "../shared/HypoiOS" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../shared/HypoiOS;
+		};
+		1A00000000000000000000E3 /* XCLocalSwiftPackageReference "../shared/HypoCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../shared/HypoCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A00000000000000000000C2 /* HypoiOS */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HypoiOS;
+		};
+		1A00000000000000000000E1 /* HypoCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HypoCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1A00000000000000000000A1 /* Project object */;
+}

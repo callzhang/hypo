@@ -10,15 +10,21 @@ public final class StorageManager {
     // Accessed from non-MainActor contexts (e.g., model helpers); file IO here is thread-safe.
     nonisolated public static let shared = StorageManager()
 
-    // Use Caches directory so the OS can clean it up if needed, but it persists across reboots
     private let locations: StorageLocations
     private let imagesDirectory: URL
+
+    /// Where images actually land. Exposed so a test can assert what the
+    /// singleton resolved to: the iOS-specific locations type once lived in
+    /// HypoiOS, where HypoCore could not reach it, so `shared` quietly kept
+    /// using Caches — which iOS evicts, leaving history pointing at files that
+    /// are gone. Nothing could observe that from outside.
+    nonisolated public var imagesDirectoryURL: URL { imagesDirectory }
 
     #if canImport(os)
     private let logger = HypoLogger(category: "StorageManager")
     #endif
 
-    nonisolated public init(locations: StorageLocations = CachesStorageLocations()) {
+    nonisolated public init(locations: StorageLocations = PlatformStorageLocations.current()) {
         self.locations = locations
         imagesDirectory = locations.imagesDirectory
 

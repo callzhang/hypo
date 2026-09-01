@@ -51,7 +51,7 @@ iOS 侧**必须**有 xcodeproj——App Extension、App Group、APNs capability 
 - 后端 `backend/src/models/device.rs` 的 `Platform` enum 已包含 `Ios`。
 - Android 的 `device_platform` 是裸字符串直接透传（`SyncModels.kt:35`）。
 - macOS 的 `DevicePlatform` enum **已经有 `case iOS = "ios"`**（还有 `windows`、`linux`）。
-- 唯一缺口：`DeviceIdentity.swift:26` 把当前平台硬编码为 `private static let currentPlatform = DevicePlatform.macOS`，需改成按 `#if os(iOS)` 判定。
+- ~~唯一缺口：`DeviceIdentity.swift:26` 把当前平台硬编码为 `private static let currentPlatform = DevicePlatform.macOS`~~ **已修**（第 2 期 Task 8 期间）：改为按 `#if os(iOS)` / `#if os(Windows)` 判定。这个值在首次启动时写入 UserDefaults 并发给对端，所以不修的话 iPhone 会把自己报告成 Mac 并一直如此。已在模拟器上确认真实 app 持久化的 `device_platform` 为 `ios`。已持久化的值仍然优先，老装机不会被改写。
 
 ### 2.4 后端现状
 
@@ -161,7 +161,23 @@ macOS 约 4500 行 UI 代码中，`HypoMenuBarApp.swift`（3404 行）、`Histor
 
 iOS 特有配置：`NSLocalNetworkUsageDescription`、`NSBonjourServices: [_hypo._tcp]`。
 
-**必须处理的 iOS 坑**：首次浏览会弹「本地网络」权限窗，用户拒绝后 Bonjour 静默失效且不报错。设置页必须显式展示「本地网络：未授权（当前仅云端同步）」并提供跳转系统设置的引导，否则用户只会觉得 LAN 莫名其妙不生效。
+**必须处理的 iOS 坑**：首次浏览会弹「本地网络」权限窗，用户拒绝后 Bonjour 静默失效且不报错。
+
+**更正（第 2 期实施时发现）**：本文原先要求设置页展示「本地网络：未授权」——**这做不到，iOS 没有提供读取该权限状态的 API**。设置页只能给出说明文字和跳转系统设置的入口，不能显示实际状态。这是平台限制。
+
+**发送的触发方式（2026-08-30 实测后定稿）**：Android 不能后台监听剪贴板,它在 `onResume` 里检查;iOS 连这个都做不到——**读取别的 app 写入的剪贴板一定会弹系统授权框**,所以"回到前台就自动发送"会变成"每次回到前台都弹一次框",已用截图确认。
+
+最终做法是三段:
+
+1. 回到前台时用 `UIPasteboard.hasStrings` **探测**有没有内容。这是探测类属性,不弹框、不泄露内容。
+2. 有内容才在底部显示 `UIPasteControl`(系统粘贴按钮)。
+3. 用户点它,苹果给一次性豁免——**读取时不弹框**。
+
+比 Android 多一次点击,换掉了每次一个弹窗。若本 app 自己刚写过剪贴板(刚收到的同步内容),探测返回 false,避免把刚收到的东西又发回去。
+
+**另一处 iOS 特有的语义收窄**：`SystemClipboard.currentText()` / `containsImage()` 在 iOS 上只回答本 app 自己写入的内容，未命中返回 `nil` / `false`，不回落到读取 `UIPasteboard`。原因是 `-[UIPasteboard string]` 会阻塞调用线程等 pasteboard 服务，而协议是 `@MainActor` 的、没有别的线程可挪；且 iOS 16+ 对非本 app 写入的内容会弹粘贴授权框。唯一的读取调用方 `IncomingClipboardHandler` 只用它做回声抑制，关心的永远是刚写进去的内容，缓存对这一档回答得精确；未命中时 `nil` 落到去重逻辑上就是"照常写入"，正是安全的一侧。
+
+**iOS 只做发起端是靠类型保证的**：`TransportManager` 新增 `LanRole`（`.peer` / `.clientOnly`），iOS 传 `.clientOnly`，跳过绑定监听器与 Bonjour 广播，保留浏览发现、prune/health-check/network-monitor 与云端自动连接。
 
 ---
 
@@ -230,7 +246,7 @@ NSE 解密并写入 `UIPasteboard` → 立即回读校验 → 校验失败则改
 
 | 情况 | 处理 |
 |---|---|
-| 本地网络权限被拒 | 降级为仅云端；设置页明示状态并给跳转引导 |
+| 本地网络权限被拒 | 降级为仅云端；设置页给出说明与跳转引导（**无法明示状态**——iOS 不提供读取该权限的 API） |
 | 通知权限被拒 | 后台完全收不到内容；设置页明示后果 |
 | APNs token 失效 | 重新注册 |
 | relay 不可达 | 指数退避重连；UI 显示离线状态 |
@@ -268,6 +284,22 @@ NSE 解密并写入 `UIPasteboard` → 立即回读校验 → 校验失败则改
 ---
 
 ## 11. 未决事项
+
+- **🔴 Swift 侧没有实现配对的应答方,因此 iOS 与 macOS 无法互相配对。**（2026-08-30 实测发现）
+
+  配对是不对称的:一方出示配对码,另一方认领该码并发出 challenge。`RemotePairingViewModel` + `PairingRelayClient` 实现的是**出示码**的那一半——`createPairingCode` / `pollChallenge` / `submitAck`。macOS 用它,iOS 现在也用它。
+
+  另一半从来没有 Swift 实现。后端有对应端点(`POST /pairing/claim`、`POST /pairing/code/{code}/challenge`、`GET .../ack`),Android 的 `PairingRelayClient.kt` 有,Windows 的 .NET harness 有;`shared/HypoCore` 与 `macos/Sources` 里一处都没有。全仓库唯一构造 `PairingChallengeMessage` 的 Swift 代码是 `PairingSessionTests.swift:243` 的测试辅助函数。
+
+  界面文案「Waiting for Android device…」把这件事说得很清楚,只是从没人当真:**能与 macOS 或 iOS 配对的,今天只有 Android**(以及经 LAN 的 .NET harness,但那要求对端在监听,iOS 不监听)。
+
+  **因此本文第 9 节给第 2 期定的验收「模拟器与 macOS 双向同步成功」是当前代码无法满足的**——不是没验证,是缺功能。这个验收标准从写下时就不可达,直到有人真的走一遍配对流程才暴露。
+
+  补齐需要三件事,都超出第 2 期计划范围,应单独立项:
+  1. `PairingRelayClient` 增加 `claimPairingCode` 与 `submitChallenge`
+  2. 一个构造 `PairingChallengeMessage` 的实现(X25519 + AES-GCM,`PairingSession.handleChallenge` 的镜像;可用它做往返测试验证)
+  3. macOS 或 iOS 上一个「输入对方配对码」的入口
+
 
 - **Apple Developer Program 账号**：本文档按已有付费账号设计。若最终只有免费账号，第 3、4 期无法执行（无 App Groups、无 APNs），iOS 端将退化为「仅前台、无扩展」的形态，需重新评审。
 - **分发目标**：TestFlight/App Store 还是仅自用真机。若上架，需额外处理剪贴板相关的审核说明、隐私清单（Privacy Manifest）、本地网络权限文案。

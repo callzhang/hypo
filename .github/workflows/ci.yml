@@ -166,13 +166,19 @@ jobs:
 
   ios-core-build:
     name: HypoCore iOS Build
-    runs-on: macos-15
-    # 15 was inside the job's own running time: it builds for the simulator, for
-    # macOS, and then runs the tests on a simulator, compiling swift-syntax from
-    # scratch on the way because nothing here is cached. It finished at 14
-    # minutes on a good run and was cancelled at 15 on the next, which reads as
-    # a broken build rather than a tight limit.
-    timeout-minutes: 30
+    # macos-26 rather than macos-15: the older image ships Xcode 16.4, two
+    # major versions behind what this app is developed against, and Swift 6.1
+    # rejects actor-isolation that 6.3 accepts. CI was the only place those
+    # divergences showed up, one push at a time. Matching the toolchains means
+    # a local build can catch them instead.
+    runs-on: macos-26
+    # Generous, because the whole job is inside this: it builds for the
+    # simulator, for macOS, then runs tests on a simulator, compiling
+    # swift-syntax from scratch on the way since nothing here is cached. A
+    # 15-minute limit finished at 14 on a good run and cancelled at 15 on the
+    # next, which reads as a broken build rather than a tight limit. The
+    # individual steps carry their own timeouts, so a hang still says where.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -180,7 +186,19 @@ jobs:
       - name: Show available iOS SDKs and simulators
         run: |
           xcodebuild -showsdks | grep -i ios || true
-          xcrun simctl list devicetypes | grep -i iphone || true
+          xcrun simctl list devices available | grep -i iphone || true
+      # Resolved once, not hardcoded. A pinned "iPhone 16" is only correct for
+      # one Xcode, and when the runner image moved on the device was simply
+      # absent — which xcodebuild reported by hanging until the job timed out.
+      - name: Pick a simulator
+        run: |
+          DEVICE="$(xcrun simctl list devices available \
+            | sed -n 's/^ *\(iPhone[^(]*\) (.*/\1/p' | sed 's/ *$//' | tail -1)"
+          if [ -z "$DEVICE" ]; then
+            echo "No iPhone simulator on this image"; xcrun simctl list devices available; exit 1
+          fi
+          echo "Using $DEVICE"
+          echo "IOS_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
       - name: Build HypoCore for iOS Simulator
         working-directory: shared/HypoCore
         run: |
@@ -191,15 +209,45 @@ jobs:
       - name: Build HypoCore for macOS
         working-directory: shared/HypoCore
         run: swift build
+      # Via the wrapper, not xcodebuild directly: xcodebuild prints
+      # "** TEST SUCCEEDED **" and exits 0 even when Swift Testing tests fail,
+      # because it only tallies XCTest results and these packages have none.
       - name: Run HypoCore tests on iOS Simulator
-        working-directory: shared/HypoCore
+        timeout-minutes: 20
+        run: ./scripts/run-ios-tests.sh shared/HypoCore HypoCore "$IOS_SIMULATOR"
+      - name: Build HypoiOS for iOS Simulator
+        working-directory: shared/HypoiOS
+        run: |
+          xcodebuild build \
+            -scheme HypoiOS \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation
+      - name: Run HypoiOS tests on iOS Simulator
+        timeout-minutes: 20
+        run: ./scripts/run-ios-tests.sh shared/HypoiOS HypoiOS "$IOS_SIMULATOR"
+      # Builds and drives the app. These are XCUITest, so xcodebuild's exit
+      # code is meaningful here — unlike the Swift Testing suites above, which
+      # need scripts/run-ios-tests.sh to notice failures at all.
+      # CODE_SIGNING_ALLOWED=NO because the runner has no signing certificate
+      # and a simulator build does not need one.
+      - name: Build and UI-test the iOS app
+        timeout-minutes: 30
+        working-directory: ios
         run: |
           xcodebuild test \
-            -scheme HypoCore \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -scheme Hypo \
+            -destination "platform=iOS Simulator,name=$IOS_SIMULATOR" \
             -skipMacroValidation \
             -enableCodeCoverage NO \
-            -parallel-testing-enabled NO
+            CODE_SIGNING_ALLOWED=NO
+      # The local network permission prompt cannot be tested on a simulator,
+      # which does not enforce it. What can be checked is the declaration it
+      # depends on: without these keys iOS refuses Bonjour with no error and no
+      # prompt, and devices simply never appear.
+      - name: Check the iOS app declares local network access
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData/Hypo-* -name Hypo.app -path '*iphonesimulator*' | head -1)
+          ./scripts/check-ios-local-network.sh "$APP"
   windows-tests:
     name: Windows Core Tests
     runs-on: windows-latest

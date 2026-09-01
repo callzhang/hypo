@@ -13,6 +13,18 @@ import Network
 import Darwin
 #endif
 
+/// Whether this device offers a LAN listener that other devices can dial.
+///
+/// macOS and Windows do. iOS does not: the system suspends the app in the
+/// background, so an advertised listener would make peers watch the device
+/// flap online and offline. A client-only manager still browses for peers,
+/// prunes them, health-checks them and connects to the cloud relay — it just
+/// never binds a socket and never advertises one over Bonjour.
+public enum LanRole: Sendable {
+    case peer
+    case clientOnly
+}
+
 @MainActor
 public final class TransportManager: ObservableObject {
     private let logger = HypoLogger(category: "TransportManager")
@@ -85,6 +97,7 @@ public final class TransportManager: ObservableObject {
         return (service: service, port: port, relayHint: relayHint)
     }
     private var connectionSupervisorTask: Task<Void, Never>?
+    private var peerSyncTask: Task<Void, Never>?
     private var autoConnectTask: Task<Void, Never>?
     private var initTask: Task<Void, Never>?
     private var manualRetryRequested = false
@@ -98,6 +111,7 @@ public final class TransportManager: ObservableObject {
     public var webSocketServerInstance: LanWebSocketServer { webSocketServer }
 
     private let lifecycleObserver: AppLifecycleObserving?
+    private let lanRole: LanRole
 
     private let notificationController: ClipboardNotificationScheduling
     private let clipboard: SystemClipboard
@@ -119,6 +133,7 @@ public final class TransportManager: ObservableObject {
         notificationController: ClipboardNotificationScheduling,
         clipboard: SystemClipboard,
         lifecycleObserver: AppLifecycleObserving? = nil,
+        lanRole: LanRole = .peer,
         autoStartLanServices: Bool = true
     ) {
         self.defaults = defaults
@@ -144,6 +159,7 @@ public final class TransportManager: ObservableObject {
         self.notificationController = notificationController
         self.clipboard = clipboard
         self.lifecycleObserver = lifecycleObserver
+        self.lanRole = lanRole
 
         // Configure TempFileManager with the dispatcher
         TempFileManager.shared.configure(dispatcher: self.dispatcher)
@@ -225,6 +241,16 @@ public final class TransportManager: ObservableObject {
                     await handler?.handle(data, transportOrigin: transportOrigin)
                 } catch {
                     self?.logger.error("❌ [TransportManager] Failed to decode envelope: \(error.localizedDescription)")
+                }
+            }
+
+            // The same routing for frames that arrive on LAN connections this
+            // device opened. Those never touch webSocketServer, so on a device
+            // that only dials — iOS — nothing was received at all.
+            if let defaultProvider = provider as? DefaultTransportProvider {
+                defaultProvider.setLanIncomingMessageHandler { [weak self, weak handler] data, transportOrigin in
+                    self?.logger.info("📥 [TransportManager] LAN client incoming message: \(data.count.formattedAsKB)")
+                    await handler?.handle(data, transportOrigin: transportOrigin)
                 }
             }
         }
@@ -386,7 +412,20 @@ public final class TransportManager: ObservableObject {
                 logger.info("🔄 [TransportManager] Updated existing device: \(device.name)")
             }
             updatedDevices[index] = device
-        } else if let existingIndex = updatedDevices.firstIndex(where: { $0.name == device.name && $0.platform == device.platform }) {
+        } else if let existingIndex = updatedDevices.firstIndex(where: {
+            // Only when the platform is actually known. Nothing in the
+            // handshake or the Bonjour record carries one today, so every
+            // device stores "Unknown" and this test degenerated into matching
+            // on the name alone — pairing a second device that happened to
+            // share a name silently replaced the first, unpairing a device
+            // that was working. A duplicate entry is only untidy, and can be
+            // removed; a device that stops syncing for no visible reason is
+            // not. The intent — one entry per device when it re-pairs under a
+            // new id — comes back on its own if a platform is ever carried.
+            $0.name == device.name
+                && $0.platform == device.platform
+                && device.platform.lowercased() != "unknown"
+        }) {
             updatedDevices[existingIndex] = device
             logger.info("🔄 [TransportManager] Updated device by name: \(device.name)")
         } else {
@@ -397,6 +436,33 @@ public final class TransportManager: ObservableObject {
         updatedDevices.sort { $0.lastSeen > $1.lastSeen }
         pairedDevices = updatedDevices
         persistPairedDevices()
+
+        schedulePeerConnectionSync()
+    }
+
+    /// Dials whatever is paired and discovered, coalescing bursts into one pass.
+    ///
+    /// syncPeerConnections used to run only on Bonjour discovery events, and a
+    /// peer is normally discovered *before* it is paired — so nothing
+    /// reconnected afterwards and a freshly paired peer was never dialled.
+    /// That is invisible on macOS, which also listens and can be dialled
+    /// instead. It is fatal on iOS, which is a LAN client only: if iOS does
+    /// not dial, no connection exists in either direction.
+    ///
+    /// Coalesced because registerPairedDevice is called once per device when
+    /// the stored list loads at startup. Firing a sync per device raced
+    /// several passes against each other over the same connection table, and
+    /// tearing a connection down while another pass was still opening it
+    /// aborted the app inside URLSession.
+    private func schedulePeerConnectionSync() {
+        peerSyncTask?.cancel()
+        peerSyncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled, let self else { return }
+            if let provider = self.provider as? DefaultTransportProvider {
+                await provider.syncPeerConnections()
+            }
+        }
     }
 
     // MARK: - Helper Methods
@@ -448,6 +514,15 @@ public final class TransportManager: ObservableObject {
         return provider.preferredTransport()
     }
 
+    /// Whether incoming clipboard payloads will be handled at all.
+    ///
+    /// False when no history store was supplied at construction. That one
+    /// branch also sets the server's local-device-id filter, hands the LAN
+    /// transport a way to resolve discovered peers, and gives it a back
+    /// reference for logging — so omitting the store silently disables
+    /// receiving *and* outbound LAN dialling, with nothing to notice it by.
+    public var isReceivingEnabled: Bool { incomingHandler != nil }
+
     public func setHistoryViewModel(_ viewModel: any RemoteEntryReceiving) {
         logger.info("🔧 [TransportManager] setHistoryViewModel called")
         
@@ -457,8 +532,11 @@ public final class TransportManager: ObservableObject {
             await self?.historyViewModel?.handleIncomingRemoteEntry(entry, duplicate: duplicate)
         }
         
-        // Initialize connection status prober now that we have the ViewModel
-        #if canImport(AppKit)
+        // Initialize connection status prober now that we have the ViewModel.
+        // This used to be #if canImport(AppKit), which left connectionState
+        // frozen at .disconnected on iOS forever. ConnectionStatusProber does
+        // not use AppKit — the import in that file is a leftover from the
+        // phase-1 migration — so the guard was gating portable code.
         if connectionStatusProber == nil {
             logger.info("🔧 [TransportManager] Initializing ConnectionStatusProber")
             
@@ -474,6 +552,12 @@ public final class TransportManager: ObservableObject {
         } else {
             logger.info("🔧 [TransportManager] ConnectionStatusProber already initialized")
         }
+        // Both intents kept. The prober is no longer behind #if canImport(AppKit)
+        // — that guard left connectionState frozen at .disconnected on iOS
+        // forever, and ConnectionStatusProber does not use AppKit. The debug
+        // status server stays macOS-only: it binds a listener, which is the one
+        // thing iOS is not supposed to do here.
+        #if canImport(AppKit)
         startDebugStatusServer()
         #endif
     }
@@ -890,7 +974,7 @@ public final class TransportManager: ObservableObject {
         logger.info("🎬 [TransportManager] activateLanServices called")
         
         // Start WebSocket server first to resolve port if ephemeral
-        if !isServerRunning, lanConfiguration.port >= 0 {
+        if lanRole == .peer, !isServerRunning, lanConfiguration.port >= 0 {
             logger.info("📡 [TransportManager] Starting WebSocket server on port \(lanConfiguration.port)")
             do {
                 try webSocketServer.start(port: lanConfiguration.port)
@@ -940,7 +1024,7 @@ public final class TransportManager: ObservableObject {
         }
 
         // Start Bonjour advertising with (possibly updated) port
-        if !isAdvertising, lanConfiguration.port > 0 {
+        if lanRole == .peer, !isAdvertising, lanConfiguration.port > 0 {
             logger.info("📢 [TransportManager] Starting Bonjour advertising on port \(lanConfiguration.port)")
             publisher.start(with: lanConfiguration)
             isAdvertising = true
@@ -1020,20 +1104,28 @@ public final class TransportManager: ObservableObject {
                 try? await Task.sleep(nanoseconds: interval)
                 if Task.isCancelled { break }
                 
+                // All three checks below are about listening and advertising,
+                // which a .clientOnly device deliberately does not do. Without
+                // the role in the condition this loop asserts every 30 seconds
+                // that something is broken, calls activateLanServices() to no
+                // effect, and would start a listener on iOS the moment anyone
+                // touched the guards in there.
+                let shouldServe = self.lanRole == .peer
+
                 // Check if advertising should be active but isn't
-                if self.lanConfiguration.port > 0 && !self.isAdvertising {
+                if shouldServe && self.lanConfiguration.port > 0 && !self.isAdvertising {
                     self.logger.warning("⚠️ [TransportManager] Health check: Advertising should be active but isn't. Restarting...")
                     await self.activateLanServices()
                 }
                 
                 // Check if WebSocket server should be running but isn't
-                if self.lanConfiguration.port > 0 && !self.isServerRunning {
+                if shouldServe && self.lanConfiguration.port > 0 && !self.isServerRunning {
                     self.logger.warning("⚠️ [TransportManager] Health check: WebSocket server should be running but isn't. Restarting...")
                     await self.activateLanServices()
                 }
                 
                 // Verify publisher is still active (check currentEndpoint)
-                if self.isAdvertising, self.publisher.currentEndpoint == nil {
+                if shouldServe, self.isAdvertising, self.publisher.currentEndpoint == nil {
                     self.logger.warning("⚠️ [TransportManager] Health check: Publisher endpoint is nil but isAdvertising=true. Restarting...")
                     await self.activateLanServices()
                 }
@@ -1504,12 +1596,12 @@ public final class TransportManager: ObservableObject {
                 }
             }
             
-            // Sync peer connections in LanSyncTransport (maintain persistent connections)
-            if let provider = provider as? DefaultTransportProvider {
-                Task { @MainActor in
-                    await provider.syncPeerConnections()
-                }
-            }
+            // Coalesced: this handler also calls registerPairedDevice, which
+            // asks for a sync too. Firing both raced two passes over the same
+            // connection table, which opened several connections to one peer
+            // and then tore them down — the peer saw a connection arrive,
+            // identify, and immediately drop.
+            schedulePeerConnectionSync()
         case .removed(let serviceName):
             logger.info("🔍 [TransportManager] Peer removed: \(serviceName)")
             lanPeers.removeValue(forKey: serviceName)
@@ -1517,12 +1609,7 @@ public final class TransportManager: ObservableObject {
             discoveryCache.savePeers(lanPeers) // Persist peer data
             refreshDiscoveredLanPeers()
             
-            // Sync peer connections in LanSyncTransport (remove disconnected peer)
-            if let provider = provider as? DefaultTransportProvider {
-                Task { @MainActor in
-                    await provider.syncPeerConnections()
-                }
-            }
+            schedulePeerConnectionSync()
         }
     }
     

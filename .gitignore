@@ -19,6 +19,20 @@ macos/*.xcuserdatad/
 macos/xcuserdata/
 macos/.DS_Store
 
+# iOS app shell
+# The project file and shared scheme are tracked; everything Xcode writes per
+# user is not. project.xcworkspace holds package resolution state that xcodebuild
+# regenerates.
+ios/*.xcodeproj/*
+!ios/*.xcodeproj/project.pbxproj
+!ios/*.xcodeproj/xcshareddata/
+ios/*.xcuserstate
+ios/*.xcuserdatad/
+ios/xcuserdata/
+ios/build/
+ios/DerivedData/
+ios/.DS_Store
+
 # Build artifacts
 macos/build/
 macos/DerivedData/
@@ -35,6 +49,7 @@ macos/.derived/
 macos/.spm-cache/
 macos/Package.resolved
 shared/**/.build/
+tools/**/.build/
 shared/**/Package.resolved
 
 # CocoaPods (if used)

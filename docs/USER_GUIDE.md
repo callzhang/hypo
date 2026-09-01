@@ -786,6 +786,22 @@ The first time Hypo looks for devices, iOS asks for permission to find devices o
 
 To change it later: **iOS Settings → Privacy & Security → Local Network → Hypo**. The app's Settings screen has an *Open Settings* button that takes you there.
 
+### Running it on your own iPhone
+
+Everything above has been exercised on the simulator. A real phone differs in three ways that matter — Bonjour behaves differently, the system suspends the app in the background, and the local network permission is actually enforced — so the first run on hardware is worth doing deliberately.
+
+1. Open `ios/Hypo.xcodeproj` in Xcode.
+2. Select the **Hypo** target → **Signing & Capabilities** → pick your team under **Team**. A free Apple ID works; the app is then good for seven days before it needs rebuilding. Nothing Hypo does requires a paid account.
+3. If the bundle identifier is refused as taken, change it to something of your own — `com.yourname.hypo` — in the same pane.
+4. Choose your iPhone as the run destination and press Run.
+
+The first launch asks for two permissions. **Both matter, and one fails silently if refused:**
+
+- **Notifications** — declining only costs you the arrival banners.
+- **Local network** — declining stops LAN sync working *with no error anywhere*. Sync falls back to the relay, which still works but is slower. The devices section will say it has found nothing on the network once it has been looking for a while; that message is usually this permission.
+
+Signing is only bypassed for simulator builds, so a device build will stop and ask for a team rather than producing an app that cannot be installed.
+
 ### What iOS does not do
 
 - **No background sync.** Entries arrive while Hypo is open. Notification-driven background delivery needs a paid Apple developer account and is not part of this version.

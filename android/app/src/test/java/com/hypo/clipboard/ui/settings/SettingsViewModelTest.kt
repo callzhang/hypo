@@ -1,6 +1,7 @@
 package com.hypo.clipboard.ui.settings
 
 import androidx.lifecycle.viewModelScope
+import com.hypo.clipboard.sync.DeviceIdentity
 import com.hypo.clipboard.data.settings.UserSettings
 import com.hypo.clipboard.fakes.FakeSettingsRepository
 import com.hypo.clipboard.transport.TransportManager
@@ -81,6 +82,7 @@ class SettingsViewModelTest {
             syncCoordinator = syncCoordinator,
             connectionStatusProber = connectionStatusProber,
             accessibilityServiceChecker = accessibilityServiceChecker,
+            deviceIdentity = DeviceIdentity(context),
             context = context
         )
         runCurrent()
@@ -102,6 +104,7 @@ class SettingsViewModelTest {
             syncCoordinator = syncCoordinator,
             connectionStatusProber = connectionStatusProber,
             accessibilityServiceChecker = accessibilityServiceChecker,
+            deviceIdentity = DeviceIdentity(context),
             context = context
         )
         runCurrent()
@@ -125,6 +128,7 @@ class SettingsViewModelTest {
             syncCoordinator = syncCoordinator,
             connectionStatusProber = connectionStatusProber,
             accessibilityServiceChecker = accessibilityServiceChecker,
+            deviceIdentity = DeviceIdentity(context),
             context = context
         )
         
@@ -158,6 +162,7 @@ class SettingsViewModelTest {
             syncCoordinator = syncCoordinator,
             connectionStatusProber = connectionStatusProber,
             accessibilityServiceChecker = accessibilityServiceChecker,
+            deviceIdentity = DeviceIdentity(context),
             context = context
         )
         
@@ -181,6 +186,7 @@ class SettingsViewModelTest {
             syncCoordinator = syncCoordinator,
             connectionStatusProber = connectionStatusProber,
             accessibilityServiceChecker = accessibilityServiceChecker,
+            deviceIdentity = DeviceIdentity(context),
             context = context
         )
         runCurrent()

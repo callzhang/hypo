@@ -156,4 +156,7 @@
     <string name="error_image_not_loaded">Image is still loading</string>
     <string name="error_image_save_target">Unable to open the save location</string>
     <string name="error_saving_image">Failed to save image: %1$s</string>
+    <string name="settings_this_device">This device</string>
+    <string name="settings_device_name">Name</string>
+    <string name="settings_device_id">ID %1$s</string>
 </resources>

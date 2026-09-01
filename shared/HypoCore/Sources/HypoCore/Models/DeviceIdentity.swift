@@ -45,7 +45,9 @@ public final class DeviceIdentity: DeviceIdentityProviding {
 
     public let deviceId: UUID
     public let platform: DevicePlatform
-    public let deviceName: String
+    public private(set) var deviceName: String
+    /// Kept so a rename can be persisted to the same store the name was read from.
+    private let userDefaults: UserDefaults
 
     /// UUID string for protocol compatibility (backward compatibility during migration)
     /// Normalized to lowercase for cross-platform compatibility (Android uses lowercase UUIDs)
@@ -54,6 +56,7 @@ public final class DeviceIdentity: DeviceIdentityProviding {
     }
 
     public init(userDefaults: UserDefaults = .standard, hostname: String? = nil) {
+        self.userDefaults = userDefaults
         let hostname = hostname ?? Self.defaultHostname
         // Load or generate device ID (migrate from prefixed format if needed)
         let uuid: UUID
@@ -97,5 +100,25 @@ public final class DeviceIdentity: DeviceIdentityProviding {
             userDefaults.set(sanitized, forKey: DefaultsKey.deviceName)
             deviceName = sanitized
         }
+    }
+
+    /// Renames this device.
+    ///
+    /// The name travels in the pairing handshake and in the Bonjour service,
+    /// so peers that are already paired keep showing the old one until they
+    /// pair or see this device advertise again. Nothing here can change what
+    /// another device has already stored.
+    ///
+    /// Returns the name that was actually kept: blank input is refused and
+    /// `.local` is stripped, the same way the initial name is sanitised.
+    @discardableResult
+    public func rename(to newName: String) -> String {
+        let sanitized = newName
+            .replacingOccurrences(of: ".local", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitized.isEmpty else { return deviceName }
+        deviceName = sanitized
+        userDefaults.set(sanitized, forKey: DefaultsKey.deviceName)
+        return sanitized
     }
 }

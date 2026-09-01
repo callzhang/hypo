@@ -199,6 +199,28 @@ public sealed class SettingsViewModel
     /// </summary>
     public bool NeedsRestart { get; private set; }
 
+    /// <summary>
+    /// Renames this device, returning the name that was actually kept.
+    ///
+    /// <para>Blank input is refused, so a cleared field snaps back rather than
+    /// appearing to have been taken. Peers already paired keep the name they
+    /// stored at pairing time; this reaches the network when the device next
+    /// advertises.</para>
+    /// </summary>
+    public string SetDeviceName(string? name)
+    {
+        var sanitised = HypoSettings.SanitiseDeviceName(name);
+        if (sanitised is null || sanitised == Settings.EffectiveDeviceName)
+        {
+            return Settings.EffectiveDeviceName;
+        }
+
+        Settings = Settings with { DeviceName = sanitised };
+        _save(Settings);
+
+        return sanitised;
+    }
+
     public void SetLanEnabled(bool enabled) => UpdateTransport(Settings with { LanEnabled = enabled });
 
     public void SetCloudEnabled(bool enabled) => UpdateTransport(Settings with { CloudEnabled = enabled });

@@ -1,5 +1,15 @@
 package com.hypo.clipboard.ui.settings
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -83,7 +93,8 @@ fun SettingsRoute(
         onNearbyDeviceTap = lanPairingViewModel::pairWithDevice,
         onNearbyReset = lanPairingViewModel::reset,
         onCheckPeerStatus = { viewModel.checkPeerStatus() },
-        onOpenAccessibilitySettings = { viewModel.openAccessibilitySettings() }
+        onOpenAccessibilitySettings = { viewModel.openAccessibilitySettings() },
+        onDeviceNameChanged = viewModel::onDeviceNameChanged
     )
 }
 
@@ -103,6 +114,7 @@ fun SettingsScreen(
     onNearbyReset: () -> Unit,
     onCheckPeerStatus: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
+    onDeviceNameChanged: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Scaffold(
@@ -167,6 +179,14 @@ fun SettingsScreen(
             }
 
             item {
+                ThisDeviceSection(
+                    deviceName = state.deviceName,
+                    deviceId = state.deviceId,
+                    onDeviceNameChanged = onDeviceNameChanged
+                )
+            }
+
+            item {
                 DevicesSection(
                     peers = state.discoveredPeers,
                     deviceStatuses = state.deviceStatuses,
@@ -186,6 +206,58 @@ fun SettingsScreen(
             item {
                 AboutSection()
             }
+        }
+    }
+}
+
+/**
+ * The name every peer shows for this device.
+ *
+ * Editable because the default is the make and model, which is what the OS knows
+ * and rarely what its owner would call it. Committed when the field loses focus
+ * or the keyboard's Done is pressed, and it keeps whatever the rename accepted --
+ * a blank entry snaps back rather than appearing to have been taken.
+ */
+@Composable
+private fun ThisDeviceSection(
+    deviceName: String,
+    deviceId: String,
+    onDeviceNameChanged: (String) -> Unit
+) {
+    var draft by remember(deviceName) { mutableStateOf(deviceName) }
+    var focused by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(id = R.string.settings_this_device),
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                label = { Text(text = stringResource(id = R.string.settings_device_name)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onDeviceNameChanged(draft) }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("DeviceNameField")
+                    .onFocusChanged { focusState ->
+                        if (focused && !focusState.isFocused) onDeviceNameChanged(draft)
+                        focused = focusState.isFocused
+                    }
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(id = R.string.settings_device_id, deviceId.take(8)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

@@ -14,6 +14,17 @@ import Network
 ///
 /// This is the shape of what iOS does when it dials a Mac: iOS is a LAN client
 /// only, so it is always the side making the connection.
+/// macOS only, for the same reason LanWebSocketServerTests is: an iOS test
+/// bundle cannot create an NWListener at all
+/// (`nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID
+/// failed`), and this binds a real one. It passed on CI only while the runner
+/// was on iOS 18.5, which did not enforce it; iOS 26.5 does.
+///
+/// Nothing is lost by not running it there. It binds a server in-process, and
+/// iOS never binds one — the LAN role is client-only by design. The side iOS
+/// does play, dialling out, is covered by the app's own UI tests against a
+/// live peer.
+#if os(macOS)
 @Suite("LAN clipboard sync", .serialized)
 @MainActor
 struct LanClipboardSyncTests {
@@ -277,3 +288,4 @@ private actor CapturingTransport: SyncTransport {
         envelopes.append(envelope)
     }
 }
+#endif

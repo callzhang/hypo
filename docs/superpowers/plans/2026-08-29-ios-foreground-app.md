@@ -2287,3 +2287,21 @@ error: main actor-isolated property 'staticTexts' can not be referenced from a n
 改成两边都动态解析:取镜像上实际可用的任一 iPhone,指定的机型不存在时打印一行说明再退回。这些是单元测试和 UI 测试,不依赖具体机型。
 
 另外注意"设备类型"和"设备"是两回事:`simctl list devicetypes` 里有 iPhone 16,但 `simctl list devices available` 里没有对应实例。诊断步骤原来打印的是前者,所以看起来一切正常——现在改成打印后者。
+
+
+### 升级运行器立刻兑现了一条早就写下的预言
+
+模拟器解析修好之后,那一步换了个原因失败:
+
+```
+nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed
+✘ Test "an entry sent over LAN lands in the receiver's history" failed
+```
+
+这正是第 1 期处理过的问题——**iOS 的测试包不能创建 `NWListener`**。当时我为此把 `LanWebSocketServerTests` 和两个 `TransportManagerLanTests` 标为 macOS 专属,并在注释里写下:「iOS 18.5(CI 的模拟器)不强制执行这一点,所以直到本地装了 Xcode 26.6 / iOS 26.5 才发现。」
+
+`LanClipboardSyncTests` 当时漏掉了,而 CI 一直跑在 iOS 18.5 上,所以一直是绿的。**换到 macos-26 的第一件事就是让那条注释应验。**
+
+从设计上说它本来也不该在 iOS 上跑:它在进程内绑定了一个服务端,而 **iOS 按设计永远不当服务端**。iOS 真正扮演的角色——主动拨号——由 app 自己的 UI 测试对着真实对端覆盖。
+
+iOS 131(减去 5 个 macOS 专属),macOS 162 不变。

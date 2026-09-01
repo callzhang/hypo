@@ -30,20 +30,25 @@ public sealed class TrayIconHost : IDisposable
     private readonly HypoClient? _client;
     private readonly HistoryViewModel _history;
     private readonly Func<PairingViewModel> _pairing;
+    private readonly Func<HypoSettings, Action<HypoSettings>, SettingsViewModel>? _settingsModel;
     private readonly Action _shutdown;
 
     private readonly NotifyIcon _icon = new();
     private readonly System.Windows.Forms.Timer _poll = new();
     private readonly ToolStripMenuItem _pauseItem;
+    private ToolStripMenuItem _historyMenuItem = null!;
     private readonly ToolStripMenuItem _historyItem;
     private readonly ToolStripMenuItem _cloudItem;
+    private readonly ToolStripMenuItem _notifyItem;
     private readonly Action<HypoSettings> _saveSettings;
     private HypoSettings _settings;
 
     private readonly ForegroundHandoff _handoff = new();
+    private GlobalHotkey? _hotkey;
 
     private HistoryWindow? _historyWindow;
     private PairingWindow? _pairingWindow;
+    private SettingsWindow? _settingsWindow;
     private bool _paused;
 
     /// <summary>What the icon currently says. Exposed so a test can read it.</summary>
@@ -79,6 +84,12 @@ public sealed class TrayIconHost : IDisposable
 
         _historyItem.Checked = settings.ShareWithWindowsHistory;
         _cloudItem.Checked = settings.AllowCloudClipboardUpload;
+        _notifyItem.Checked = settings.NotifyOnArrival;
+
+        // The settings window shows the same three. Handing it the new settings
+        // rather than asking it to redraw: its model holds the ones it was built
+        // with, so a bare rebind draws the same stale values.
+        _settingsWindow?.Adopt(settings);
     }
 
     /// <summary>The history window while it is open, and null once it is closed.</summary>
@@ -100,7 +111,8 @@ public sealed class TrayIconHost : IDisposable
         HypoClient? client = null,
         HypoSettings? settings = null,
         Action<HypoSettings>? saveSettings = null,
-        Action<ClipboardPrivacy>? applyPrivacy = null)
+        Action<ClipboardPrivacy>? applyPrivacy = null,
+        Func<HypoSettings, Action<HypoSettings>, SettingsViewModel>? settingsModel = null)
     {
         _status = status;
         _client = client;
@@ -109,6 +121,7 @@ public sealed class TrayIconHost : IDisposable
         _applyPrivacy = applyPrivacy ?? (_ => { });
         _history = history;
         _pairing = pairing;
+        _settingsModel = settingsModel;
         _shutdown = shutdown;
 
         _pauseItem = new ToolStripMenuItem("Pause syncing", null, (_, _) => TogglePause());
@@ -116,6 +129,9 @@ public sealed class TrayIconHost : IDisposable
         // Both start off. The labels say what turning them on does rather than
         // naming a feature, because "Share with Windows clipboard history" is
         // only meaningful if you already know what that is.
+        _historyMenuItem = new ToolStripMenuItem(
+            "Clipboard history…", null, (_, _) => ShowHistory());
+
         _historyItem = new ToolStripMenuItem(
             "Show synced items in Windows clipboard history (Win+V)",
             null,
@@ -134,19 +150,46 @@ public sealed class TrayIconHost : IDisposable
             Checked = _settings.AllowCloudClipboardUpload,
         };
 
+        _notifyItem = new ToolStripMenuItem(
+            "Tell me when something arrives from another device",
+            null,
+            (_, _) => Update(_settings with { NotifyOnArrival = !_settings.NotifyOnArrival }))
+        {
+            CheckOnClick = false,
+            Checked = _settings.NotifyOnArrival,
+        };
+
         var menu = new ContextMenuStrip();
-        menu.Items.Add(new ToolStripMenuItem("Clipboard history…", null, (_, _) => ShowHistory()));
+        menu.Items.Add(_historyMenuItem);
         menu.Items.Add(new ToolStripMenuItem("Pair a device…", null, (_, _) => ShowPairing()));
+
+        // Only the composition root has the history store and the secret store
+        // the settings window needs, so it is handed in. Without one there is
+        // nothing to show and the item would be a dead end.
+        if (_settingsModel is not null)
+        {
+            menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => ShowSettings()));
+        }
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_historyItem);
         menu.Items.Add(_cloudItem);
+        menu.Items.Add(_notifyItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_pauseItem);
         menu.Items.Add(new ToolStripSeparator());
+
+        // Disabled on purpose: it is a label, not a command. The first question
+        // anyone asks about a sync bug is which version each end is running, and
+        // a tray application has nowhere else to say it.
+        menu.Items.Add(new ToolStripMenuItem($"Hypo {AppVersion.Current}") { Enabled = false });
         menu.Items.Add(new ToolStripMenuItem("Quit Hypo", null, (_, _) => _shutdown()));
 
         _icon.ContextMenuStrip = menu;
-        _icon.DoubleClick += (_, _) => ShowHistory();
+        // A single left click, which is what the design asks for and what every
+        // other clipboard tool in the notification area does. Right click still
+        // opens the menu; NotifyIcon raises MouseClick for both, so the button
+        // has to be checked or the menu would open the window behind itself.
+        _icon.MouseClick += (_, e) => ClickIcon(e.Button);
 
         _poll.Interval = (int)PollInterval.TotalMilliseconds;
         _poll.Tick += (_, _) => UpdateStatus();
@@ -161,8 +204,108 @@ public sealed class TrayIconHost : IDisposable
         _icon.Visible = true;
         _poll.Start();
 
+        _icon.BalloonTipClicked += (_, _) => OnNotificationClicked();
+
         ShowFirewallNoticeOnce();
+        RegisterHotkey();
+        AnnounceArrivals();
     }
+
+    /// <summary>
+    /// Claims the key combination that opens the history, and says so in the
+    /// menu either way.
+    ///
+    /// <para>A hotkey that silently does nothing is indistinguishable from a
+    /// broken application, so a refusal -- almost always another application
+    /// already holding the combination -- goes where the user will look.</para>
+    /// </summary>
+    private void RegisterHotkey()
+    {
+        // Pressed arrives on the hotkey's own message pump. Everything ShowHistory
+        // touches is WPF, so it has to be handed back here -- and asynchronously,
+        // so holding the keys down cannot block that pump.
+        var ui = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+
+        _hotkey = new GlobalHotkey(_settings.HotkeyBinding);
+        _hotkey.Pressed += (_, _) => ui.BeginInvoke(ShowHistory);
+
+        _historyMenuItem.Text = _hotkey.IsRegistered
+            ? $"Clipboard history…\t{_hotkey.Binding}"
+            : "Clipboard history…";
+
+        if (_hotkey.Failure is { } failure)
+        {
+            _icon.BalloonTipTitle = "Hypo's shortcut is unavailable";
+            _icon.BalloonTipText = $"{failure} Open the history from this menu instead.";
+            _icon.BalloonTipIcon = ToolTipIcon.Warning;
+            _icon.ShowBalloonTip(10_000);
+        }
+    }
+
+    /// <summary>
+    /// Says when something arrives from another device.
+    ///
+    /// <para>Only remote arrivals: <c>Applied</c> fires for inbound items alone,
+    /// and <see cref="ArrivalNotice"/> checks again, because notifying someone
+    /// about the thing they just copied themselves is noise.</para>
+    /// </summary>
+    private void AnnounceArrivals()
+    {
+        if (_client is null)
+        {
+            return;
+        }
+
+        _client.Coordinator.Applied += (_, entry) =>
+        {
+            if (!_settings.NotifyOnArrival || ArrivalNotice.For(entry) is not { } notice)
+            {
+                return;
+            }
+
+            Announce(notice);
+        };
+    }
+
+    /// <summary>The last thing said, for the tests.</summary>
+    public ArrivalNotice? LastAnnouncement { get; private set; }
+
+    /// <summary>
+    /// Shows a notice.
+    ///
+    /// <para>A balloon rather than the Windows App SDK's AppNotificationManager
+    /// that the design named: that needs the application to be packaged, and
+    /// Hypo ships as a zip. A balloon is a real toast on Windows 10 and 11.</para>
+    /// </summary>
+    public void Announce(ArrivalNotice notice)
+    {
+        LastAnnouncement = notice;
+
+        _icon.BalloonTipTitle = notice.Title;
+        _icon.BalloonTipText = notice.Body;
+        _icon.BalloonTipIcon = ToolTipIcon.Info;
+        _icon.ShowBalloonTip(5_000);
+    }
+
+    /// <summary>
+    /// Opens the history when a notification is clicked.
+    ///
+    /// <para>Clicking a notification about something that arrived and having
+    /// nothing happen is worse than not being notified: it is a promise of a
+    /// destination that turns out not to exist.</para>
+    /// </summary>
+    private void OnNotificationClicked()
+    {
+        if (LastAnnouncement is not null)
+        {
+            ShowHistory();
+        }
+    }
+
+    /// <summary>The hotkey's state, for anyone showing it.</summary>
+    public string? HotkeyFailure => _hotkey?.Failure;
+
+    public bool HotkeyRegistered => _hotkey?.IsRegistered ?? false;
 
     /// <summary>
     /// Explains the firewall prompt, once, on the first run.
@@ -264,7 +407,65 @@ public sealed class TrayIconHost : IDisposable
         _handoff.Capture();
 
         Surface(_historyWindow);
+        _historyWindow.ReadyToType();
     }
+
+    /// <summary>
+    /// What a click on the notification-area icon does.
+    ///
+    /// <para>A method rather than a lambda so a test can call it: nothing can
+    /// move the real mouse to the notification area on a runner. The button
+    /// matters -- NotifyIcon raises the same event for both, and opening the
+    /// history on a right click would put it behind the menu.</para>
+    /// </summary>
+    public void ClickIcon(MouseButtons button)
+    {
+        if (button is MouseButtons.Left)
+        {
+            ShowHistory();
+        }
+    }
+
+    /// <summary>Clicks the last notification, for tests.</summary>
+    public void ClickNotification() => OnNotificationClicked();
+
+    /// <summary>The settings window while it is open.</summary>
+    public Window? OpenSettingsWindow => _settingsWindow;
+
+    private void ShowSettings()
+    {
+        if (_settingsModel is null)
+        {
+            return;
+        }
+
+        if (_settingsWindow is null)
+        {
+            // Built through the tray's own Update so the switches it shares with
+            // this menu are applied and saved by one piece of code. Two paths
+            // writing the same setting is how a menu ends up disagreeing with a
+            // window.
+            _settingsWindow = new SettingsWindow(_settingsModel(_settings, Update), ShowPairing)
+            {
+                HotkeyStatus = HotkeyDescription,
+            };
+            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        }
+
+        _settingsWindow.Bind();
+        Surface(_settingsWindow);
+    }
+
+    /// <summary>
+    /// The shortcut, or why it is not working -- the design puts this in
+    /// Settings, which is the only place with room to explain it.
+    /// </summary>
+    public string? HotkeyDescription => _hotkey switch
+    {
+        null => null,
+        { Failure: { } failure } => $"Shortcut: {failure} Open the history from the tray menu instead.",
+        var hotkey => $"Shortcut: {hotkey.Binding} opens the clipboard history.",
+    };
 
     private void ShowPairing()
     {
@@ -291,13 +492,26 @@ public sealed class TrayIconHost : IDisposable
         }
 
         window.Activate();
-        window.Topmost = true;
+
+        // The false-then-true toggle is what pulls a window in front of whatever
+        // had the foreground. Ending on the value the window declared matters:
+        // the history window asks to stay on top, and finishing on false took
+        // that away from it every time it was opened.
+        var stayOnTop = window.Topmost;
+
         window.Topmost = false;
+        window.Topmost = true;
+        window.Topmost = stayOnTop;
+
         window.Focus();
     }
 
     public void Dispose()
     {
+        // Left registered, the combination stays claimed for the session and the
+        // next launch cannot have it.
+        _hotkey?.Dispose();
+
         _poll.Stop();
         _poll.Dispose();
         _icon.Visible = false;

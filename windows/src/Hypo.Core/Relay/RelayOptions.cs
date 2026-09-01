@@ -104,9 +104,19 @@ public sealed record RelayOptions
     private static bool Blank(string? value) => string.IsNullOrWhiteSpace(value);
 
     /// <summary>
-    /// Walks up looking for a <c>.env</c> holding <see cref="DotEnvKey"/>. Walks
-    /// rather than assuming a fixed depth because the tests, the harness and a
-    /// git worktree all sit at different distances from the root.
+    /// Walks up looking for a <b>checkout's</b> <c>.env</c> holding
+    /// <see cref="DotEnvKey"/>. Walks rather than assuming a fixed depth
+    /// because the tests, the harness and a git worktree all sit at different
+    /// distances from the root.
+    ///
+    /// <para>A <c>.env</c> only counts when <c>.git</c> sits beside it, which is
+    /// what "a checkout's .env" means and what the error above promises. Without
+    /// that condition the walk runs to the filesystem root and will use any
+    /// <c>.env</c> that happens to define the key -- a copy left in the system
+    /// temp directory was enough to make five tests fail on one machine and pass
+    /// everywhere else. An application picking up a secret from a stray file
+    /// several directories above itself is a surprise whichever way it
+    /// resolves.</para>
     /// </summary>
     private static string? FindInDotEnv(string startDirectory)
     {
@@ -114,7 +124,13 @@ public sealed record RelayOptions
         while (dir is not null)
         {
             var candidate = Path.Combine(dir.FullName, ".env");
-            if (File.Exists(candidate))
+
+            // A worktree's .git is a file, not a directory; the main checkout's
+            // is a directory. Both are checkouts.
+            var isCheckout = Directory.Exists(Path.Combine(dir.FullName, ".git"))
+                || File.Exists(Path.Combine(dir.FullName, ".git"));
+
+            if (isCheckout && File.Exists(candidate))
             {
                 var value = ReadKey(candidate, DotEnvKey);
                 if (!Blank(value))

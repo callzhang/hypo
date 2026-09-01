@@ -26,6 +26,73 @@ public sealed record HypoSettings
     /// </summary>
     public bool FirewallNoticeShown { get; init; }
 
+    /// <summary>
+    /// The key combination that opens the history, written the way it reads:
+    /// "Alt+V".
+    ///
+    /// <para>Text rather than an enum pair so the file stays legible to whoever
+    /// opens it, and an unparseable value falls back to the default rather than
+    /// stopping the application.</para>
+    /// </summary>
+    public string Hotkey { get; init; } = HotkeyBinding.Default.ToString();
+
+    [JsonIgnore]
+    public HotkeyBinding HotkeyBinding => HotkeyBinding.Parse(Hotkey) ?? HotkeyBinding.Default;
+
+    /// <summary>
+    /// Whether to sync over the local network.
+    ///
+    /// <para>On by default and worth keeping on: it is faster and the content
+    /// never leaves the building. Someone on a network that blocks the
+    /// discovery, or who would rather not advertise the machine, can turn it
+    /// off and use the relay alone.</para>
+    /// </summary>
+    public bool LanEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Whether to sync through the relay when the LAN cannot reach a peer.
+    ///
+    /// <para>Off means devices on different networks stop syncing entirely. The
+    /// content is encrypted end to end either way, so this is about whether it
+    /// leaves the network at all.</para>
+    /// </summary>
+    public bool CloudEnabled { get; init; } = true;
+
+    /// <summary>The port the LAN listener binds. 0 asks Windows for a free one.</summary>
+    public int LanPort { get; init; } = DefaultLanPort;
+
+    public const int DefaultLanPort = 7010;
+
+    /// <summary>How many entries the history keeps. The design's number.</summary>
+    public int HistoryLimit { get; init; } = DefaultHistoryLimit;
+
+    public const int DefaultHistoryLimit = 200;
+
+    /// <summary>
+    /// Below this the history stops being a history.
+    ///
+    /// <para>Ten is enough to be useful and small enough to be a real answer for
+    /// someone who wants very little of their clipboard on disk. Zero is not
+    /// offered: that is what turning sync off is for, and a history of nothing
+    /// looks like a broken window.</para>
+    /// </summary>
+    public const int MinimumHistoryLimit = 10;
+
+    /// <summary>
+    /// Above this the window is slower to open than the thing it saves.
+    /// </summary>
+    public const int MaximumHistoryLimit = 2000;
+
+    /// <summary>
+    /// Whether an arrival from another device raises a notification.
+    ///
+    /// <para>On by default, unlike the two sharing switches: a copy that reaches
+    /// this machine silently is one you find out about by pasting and seeing,
+    /// and this one shares nothing outside the screen already in front of
+    /// you.</para>
+    /// </summary>
+    public bool NotifyOnArrival { get; init; } = true;
+
     /// <summary>Whether synced items may appear in this machine's Win+V history.</summary>
     public bool ShareWithWindowsHistory { get; init; }
 
@@ -42,7 +109,13 @@ public sealed record HypoSettings
         AllowCloudUpload = AllowCloudClipboardUpload,
     };
 
-    private static readonly JsonSerializerOptions Format = new() { WriteIndented = true };
+    // Indented and case-insensitive because this file is meant to be opened and
+    // edited by hand, and "hotkey" should not quietly mean nothing.
+    private static readonly JsonSerializerOptions Format = new()
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true,
+    };
 
     /// <summary>
     /// Reads the settings, falling back to the defaults for anything missing.
@@ -59,7 +132,7 @@ public sealed record HypoSettings
         try
         {
             return File.Exists(path)
-                ? JsonSerializer.Deserialize<HypoSettings>(File.ReadAllText(path)) ?? new HypoSettings()
+                ? JsonSerializer.Deserialize<HypoSettings>(File.ReadAllText(path), Format) ?? new HypoSettings()
                 : new HypoSettings();
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)

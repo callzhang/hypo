@@ -14,7 +14,7 @@
 
     <TextBlock Grid.Row="0"
                TextWrapping="Wrap"
-               Foreground="#FF6B6B6B"
+               Foreground="{DynamicResource SecondaryTextBrush}"
                Text="Devices running Hypo on this network. Open Hypo on the other device first." />
 
     <ListBox x:Name="Peers"
@@ -27,8 +27,8 @@
           <StackPanel Margin="2,6">
             <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
                        TextTrimming="CharacterEllipsis" />
-            <TextBlock Foreground="#FF3A7D44" FontSize="11" Text="{Binding Status}" />
-            <TextBlock Foreground="#FF9A9A9A" FontSize="10" Text="{Binding DeviceId}" />
+            <TextBlock Foreground="{DynamicResource SuccessBrush}" FontSize="11" Text="{Binding Status}" />
+            <TextBlock Foreground="{DynamicResource TertiaryTextBrush}" FontSize="10" Text="{Binding DeviceId}" />
           </StackPanel>
         </DataTemplate>
       </ListBox.ItemTemplate>
@@ -49,7 +49,7 @@
       <Separator Margin="0,14,0,10" />
 
       <TextBlock TextWrapping="Wrap"
-                 Foreground="#FF6B6B6B"
+                 Foreground="{DynamicResource SecondaryTextBrush}"
                  Text="Not on this network? Use a six-digit code instead." />
 
       <Grid Margin="0,8,0,0">
@@ -64,7 +64,7 @@
           <TextBlock x:Name="CodeHint"
                      Margin="8,0,0,0"
                      VerticalAlignment="Center"
-                     Foreground="#FF9A9A9A"
+                     Foreground="{DynamicResource TertiaryTextBrush}"
                      IsHitTestVisible="False"
                      Text="Six-digit code" />
         </Grid>

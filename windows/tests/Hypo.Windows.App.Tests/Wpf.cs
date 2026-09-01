@@ -73,6 +73,15 @@ internal static class Wpf
             // windows come and go.
             application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+            // The shipped dictionary, not an approximation of it. Screenshots
+            // taken without it showed dark windows full of white controls, which
+            // is not what the application looks like -- and would have been a
+            // convincing-looking bug report.
+            application.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("pack://application:,,,/Hypo;component/Theme.xaml"),
+            });
+
             ready.SetResult(Dispatcher.CurrentDispatcher);
             Dispatcher.Run();
         })
@@ -130,10 +139,14 @@ internal static class Wpf
     /// gets caught without a second machine -- which is most of what "we cannot
     /// test DPI here" was hiding.
     /// </param>
-    public static byte[] Capture(this Window window, string name, double dpi = 96)
+    public static byte[] Capture(this Window window, string? name, double dpi = 96)
     {
         window.Settle();
 
+        // The window, sized by the window: rendering its content element instead
+        // draws that element at its own offset -- a Margin of 12 puts it 12px in
+        // and clips 12px off the far side. The title bar's worth of unpainted
+        // pixels along the bottom is the cost of not doing that.
         var scale = dpi / 96.0;
         var width = (int)Math.Max(window.ActualWidth * scale, 1);
         var height = (int)Math.Max(window.ActualHeight * scale, 1);
@@ -141,15 +154,76 @@ internal static class Wpf
         var bitmap = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
         bitmap.Render(window);
 
-        var encoder = new PngEncoder();
-        var png = encoder.Encode(bitmap);
+        // A null name asks for the pixels without adding to the artifact. Tests
+        // that read the bitmap rather than look at it would otherwise leave a
+        // pile of near-identical images for someone to search through.
+        if (name is not null)
+        {
+            var png = new PngEncoder().Encode(bitmap);
 
-        Directory.CreateDirectory(ScreenshotDirectory);
-        File.WriteAllBytes(Path.Combine(ScreenshotDirectory, $"{name}.png"), png);
+            Directory.CreateDirectory(ScreenshotDirectory);
+            File.WriteAllBytes(Path.Combine(ScreenshotDirectory, $"{name}.png"), png);
+        }
 
         var pixels = new byte[width * height * 4];
         bitmap.CopyPixels(pixels, width * 4, 0);
         return pixels;
+    }
+
+    /// <summary>
+    /// Finds a block of light chrome in an image that should be dark.
+    ///
+    /// <para>The failure this catches: a control WPF styles itself — a Button, a
+    /// ComboBox — that the theme forgot, which stays pale with white text on it
+    /// and is unreadable. It has happened twice, and both times a person looking
+    /// at a screenshot found it rather than a test.</para>
+    ///
+    /// <para>A block, not a bright pixel count: white text is bright and
+    /// scattered, so counting pixels cannot tell text from chrome. A run of
+    /// light pixels wide enough to be a control, repeated over enough rows to be
+    /// its height, is chrome and nothing else. A single bright line is a
+    /// separator, which is why the row count matters.</para>
+    /// </summary>
+    /// <param name="height">Rows to look at. The bitmap is the window's height
+    /// and the content is the client area, so the last rows are unpainted.</param>
+    public static bool HasLightChrome(byte[] pixels, int width, int height, int minWidth = 40, int minRows = 8)
+    {
+        var consecutive = 0;
+
+        for (var y = 0; y < height; y++)
+        {
+            var run = 0;
+            var wide = false;
+
+            for (var x = 0; x < width; x++)
+            {
+                var i = ((y * width) + x) * 4;
+
+                // Pbgra32: blue, green, red, alpha.
+                var luminance = (0.0722 * pixels[i]) + (0.7152 * pixels[i + 1]) + (0.2126 * pixels[i + 2]);
+
+                if (luminance > 150)
+                {
+                    if (++run >= minWidth)
+                    {
+                        wide = true;
+                    }
+                }
+                else
+                {
+                    run = 0;
+                }
+            }
+
+            consecutive = wide ? consecutive + 1 : 0;
+
+            if (consecutive >= minRows)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

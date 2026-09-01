@@ -184,6 +184,11 @@ public sealed class SyncCoordinator
             CopiedAt = _clock.GetUtcNow(),
             SourceDeviceId = senderId,
             SourceDeviceName = e.Envelope.Payload.DeviceName,
+
+            // Which channel carried it. "Did that come over the LAN or go all
+            // the way to the relay and back?" is the first question about slow
+            // syncing, and by the time anyone asks, the connection has moved on.
+            Origin = e.Origin,
         };
 
         // Recorded before the clipboard write, deliberately. An item this machine

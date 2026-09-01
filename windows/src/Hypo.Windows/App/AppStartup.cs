@@ -102,9 +102,12 @@ public sealed class AppStartup
         string stateDirectory,
         string deviceName,
         string? relaySearchFrom = null,
+        HypoSettings? settings = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(clipboard);
+
+        settings ??= new HypoSettings();
 
         ISecretStore store;
         string deviceId;
@@ -115,7 +118,8 @@ public sealed class AppStartup
             Directory.CreateDirectory(stateDirectory);
             store = new FileSecretStore(stateDirectory);
             deviceId = LoadOrCreateDeviceId(store);
-            history = new ClipboardHistoryStore(Path.Combine(stateDirectory, "history.db"));
+            history = new ClipboardHistoryStore(
+                Path.Combine(stateDirectory, "history.db"), settings.HistoryLimit);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -148,7 +152,11 @@ public sealed class AppStartup
             };
         }
 
-        var client = HypoClient.Create(clipboard, store, history, deviceId, deviceName, relay);
+        var client = HypoClient.Create(
+            clipboard, store, history, deviceId, deviceName, relay,
+            lanPort: settings.LanPort,
+            lanEnabled: settings.LanEnabled,
+            cloudEnabled: settings.CloudEnabled);
 
         try
         {

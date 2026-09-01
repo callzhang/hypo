@@ -1,0 +1,15 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- One source of truth for the version, shared with the relay, the macOS
+         app and the release archives. Without this every assembly reported
+         1.0.0 for ever, which is worse than saying nothing. -->
+    <HypoVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\VERSION').Trim())</HypoVersion>
+    <Version>$(HypoVersion)</Version>
+    <AssemblyVersion>$(HypoVersion).0</AssemblyVersion>
+    <FileVersion>$(HypoVersion).0</FileVersion>
+    <Company>Hypo</Company>
+    <Product>Hypo</Product>
+  </PropertyGroup>
+
+</Project>

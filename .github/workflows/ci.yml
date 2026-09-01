@@ -12,6 +12,18 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Seconds, and it guards the one thing none of the suites below can: each of
+  # them runs its own vector tests, so a client that *disagrees* with the shared
+  # fixtures already fails. A client that stops reading them is green.
+  shared-fixtures:
+    name: Shared Fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Every client still reads the shared fixtures
+        run: ./scripts/check-shared-fixtures.sh
+
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest
@@ -88,7 +100,13 @@ jobs:
           # across toolchains. No restore-keys on purpose: a partially stale
           # DerivedData is a well-known source of baffling build failures, and
           # a cold build is better than a poisoned one.
-          key: macos-spm-${{ runner.os }}-${{ env.XCODE_BUILD }}-${{ hashFiles('macos/Package.resolved') }}
+          #
+          # The manifests, not Package.resolved: this repository has never
+          # committed one, so hashFiles found nothing, every run shared one key,
+          # and DerivedData built against a dependency that had since been
+          # removed was restored on top of the new manifest. That is the
+          # poisoned cache this comment warns about, arriving through the key.
+          key: macos-spm-${{ runner.os }}-${{ env.XCODE_BUILD }}-${{ hashFiles('macos/Package.swift', 'macos/Package.resolved', 'shared/HypoCore/Package.swift') }}
       - name: List Schemes
         working-directory: macos
         run: xcodebuild -list
@@ -149,7 +167,12 @@ jobs:
   ios-core-build:
     name: HypoCore iOS Build
     runs-on: macos-15
-    timeout-minutes: 15
+    # 15 was inside the job's own running time: it builds for the simulator, for
+    # macOS, and then runs the tests on a simulator, compiling swift-syntax from
+    # scratch on the way because nothing here is cached. It finished at 14
+    # minutes on a good run and was cancelled at 15 on the next, which reads as
+    # a broken build rather than a tight limit.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -199,7 +222,49 @@ jobs:
           # Somewhere predictable for the interface screenshots the WPF tests
           # take, so they can be collected below.
           HYPO_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/screenshots
-        run: dotnet test --no-build --configuration Release --verbosity normal
+        run: >
+          dotnet test --no-build --configuration Release --verbosity normal
+          --collect:"XPlat Code Coverage" --results-directory coverage
+      # Hypo.Core is where the protocol, the crypto and the transports live, and
+      # it has no UI and no Win32 dependency, so there is no excuse for a gap in
+      # it. The gate is the repository's 80%; it sits around 89% today, and the
+      # point of the number is to notice a fall rather than to celebrate a rise.
+      #
+      # Reading the run above rather than running the suite again: a second run
+      # doubles the exposure to anything flaky, and it cost a green build the
+      # first time this existed.
+      - name: Check Hypo.Core coverage
+        working-directory: windows
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob
+          import sys
+          import xml.etree.ElementTree as ET
+
+          reports = glob.glob("coverage/**/coverage.cobertura.xml", recursive=True)
+          if not reports:
+              sys.exit("No coverage report was produced.")
+
+          # The best any single suite manages, not the union of all of them.
+          # Merging would need another tool; the best is never higher than the
+          # union, so this gate can only be too strict, never too lax.
+          rates = [
+              float(package.get("line-rate")) * 100
+              for report in reports
+              for package in ET.parse(report).getroot().iter("package")
+              if package.get("name") == "Hypo.Core"
+          ]
+
+          if not rates:
+              sys.exit("No report covered Hypo.Core.")
+
+          rate = max(rates)
+          print(f"Hypo.Core line coverage: {rate:.1f}%")
+
+          if rate < 80:
+              sys.exit(f"Coverage fell to {rate:.1f}%, below the repository's 80% floor.")
+          PY
       # The runner is a fully interactive session -- it shows windows and renders
       # them -- so these are the only way anyone without a Windows machine sees
       # the interface at all.
@@ -225,8 +290,9 @@ jobs:
           name: hypo-console-win-x64
           path: artifacts/hypo-win-x64
           if-no-files-found: error
-      # The tray application is the one thing here CI cannot judge -- it has no
-      # interactive desktop. Publishing it is how a person on Windows can.
+      # The tray application runs here and is screenshotted above. What is still
+      # out of reach is a second monitor, a session lock, and a day of someone
+      # using it. Publishing it is how a person on Windows judges that.
       - name: Publish the tray application
         working-directory: windows
         run: >

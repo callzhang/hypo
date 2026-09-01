@@ -23,6 +23,18 @@ public class HypoSettingsTests : IDisposable
     }
 
     [Fact]
+    public void AHandEditedHotkeyFallsBackRatherThanBreaking()
+    {
+        // People edit this file. A typo should cost them the shortcut they meant,
+        // not the application.
+        File.WriteAllText(Path, """{"hotkey": "Ctrl+Alt+H"}""");
+        Assert.Equal("Ctrl+Alt+H", HypoSettings.Load(Path).HotkeyBinding.ToString());
+
+        File.WriteAllText(Path, """{"hotkey": "Alt+"}""");
+        Assert.Equal(HotkeyBinding.Default, HypoSettings.Load(Path).HotkeyBinding);
+    }
+
+    [Fact]
     public void TheDefaultsRestrictBothDirections()
     {
         var privacy = new HypoSettings().Privacy;

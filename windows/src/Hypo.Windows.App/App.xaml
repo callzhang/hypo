@@ -3,12 +3,12 @@
              x:Class="Hypo.Windows.App.Shell.App"
              ShutdownMode="OnExplicitShutdown">
   <Application.Resources>
-    <!-- Deliberately sparse. The shell's job is to bind, and a stylesheet here
-         would be the first thing to drift from what anyone actually sees. -->
-    <Style TargetType="Window">
-      <Setter Property="Background" Value="#FFF9F9F9" />
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontSize" Value="13" />
-    </Style>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!-- Its own file so the tests can merge the same one. A theme the
+             screenshots do not go through is a theme nothing checks. -->
+        <ResourceDictionary Source="pack://application:,,,/Hypo;component/Theme.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
   </Application.Resources>
 </Application>

@@ -47,6 +47,16 @@ Hypo is a secure, real-time clipboard synchronization app that seamlessly connec
 - **Network**: Wi-Fi connection (for LAN sync and cloud fallback)
 - **Current Status**: ✅ Production-ready, fully functional
 
+### Windows
+- **OS Version**: Windows 10 version 1809 or later, and Windows 11
+- **Architecture**: x64 and ARM64 (an ARM64 build, so Copilot+ PCs and Windows
+  VMs on Apple Silicon do not run under emulation)
+- **Memory**: 4GB RAM minimum
+- **Storage**: 200MB available space (the build is self-contained — no .NET
+  runtime to install)
+- **Network**: Wi-Fi connection (for LAN sync and cloud fallback)
+- **Current Status**: ✅ Functional; distributed as a zip rather than an installer
+
 ### Android
 - **OS Version**: Android 8.0 (API 26) or later  
   *(Tested on Android 8-14, HyperOS 3+)*
@@ -206,6 +216,39 @@ launchctl load ~/Library/LaunchAgents/com.hypo.agent.plist
 ```
 
 ---
+
+### Windows Installation
+
+There is no installer and no signing certificate, so Windows will warn about an
+unrecognised application the first time. That is expected for an unsigned zip.
+
+1. **Download and unzip**
+
+   Take `Hypo-<version>-windows-x64.zip` (or `-arm64.zip` on an ARM machine)
+   from the [releases page](https://github.com/callzhang/hypo/releases) and
+   unzip it anywhere you like — `%LOCALAPPDATA%\Programs\Hypo` is a reasonable
+   home. Unzip it before running: Windows runs an executable from inside a zip
+   in a temporary folder that disappears.
+
+2. **Run `Hypo.exe`**
+
+   SmartScreen shows "Windows protected your PC". Choose **More info → Run
+   anyway**. It appears once, not every launch.
+
+3. **Allow it through the firewall**
+
+   Windows asks on first launch. **Private networks** is the box that matters —
+   that is how LAN sync finds other devices. Declining it does not break Hypo;
+   it falls back to the relay, which is slower.
+
+4. **Start it with Windows** (optional)
+
+   Press <kbd>Win</kbd>+<kbd>R</kbd>, run `shell:startup`, and put a shortcut to
+   `Hypo.exe` in the folder that opens.
+
+**Data lives in `%LOCALAPPDATA%\Hypo`** — history database, settings, device
+identity, and files received from peers. To uninstall: quit from the tray icon,
+delete the folder you unzipped, and delete `%LOCALAPPDATA%\Hypo`.
 
 ### Android Installation
 
@@ -701,6 +744,89 @@ The App Bundle format allows Google Play to generate optimized APKs per device, 
 - `⌘Q`: Quit application
 - `↑/↓`: Navigate history items
 - `Enter`: Copy selected item
+
+### Windows Usage
+
+Hypo is a notification-area icon, not a window. The icon itself is the status:
+it says whether sync is connected, over the LAN or the relay, and whether it is
+paused — paused and disconnected look different on purpose.
+
+**Global Shortcut**:
+- <kbd>Alt</kbd>+<kbd>V</kbd>: Open clipboard history from anywhere, with the
+  caret already in the search box
+- Type to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to choose without leaving
+  the box, <kbd>Enter</kbd> to put the entry back on the clipboard —
+  <kbd>Ctrl</kbd>+<kbd>V</kbd> then pastes it where you were
+- <kbd>Esc</kbd>, or clicking anywhere else, closes it without taking anything
+
+<kbd>Win</kbd>+<kbd>V</kbd> belongs to the Windows clipboard history and cannot
+be taken. If another application already holds Alt+V, Hypo says so in a
+notification and Settings explains it, instead of failing quietly; you can
+change the combination with a `"Hotkey": "Ctrl+Alt+H"` line in
+`%LOCALAPPDATA%\Hypo\settings.json`.
+
+**Notifications**:
+- A notification names the device an item came from and shows the first 80
+  characters of it; things you copy on this PC never notify
+- Turn it off from the tray menu if you would rather not have clipboard content
+  appear on screen
+
+**Appearance**:
+- Follows the Windows app theme, and switches with it while running — there is
+  no setting to keep in step
+- Windows 11 gets a Mica backdrop and a dark title bar; Windows 10 gets a solid
+  background
+
+**Clipboard History Window**:
+- **Search** narrows as you type; the two drop-downs filter by type (text,
+  links, images, files) and by when it was copied (today, this week)
+- **Right-click an entry → Pin to the top** keeps it at the top of the list and
+  stops it falling off the end when older entries are trimmed
+- **Drag an entry** into another application to drop it there without touching
+  the clipboard
+- Each row says which device sent it, whether it came over the network or
+  through the relay, and when. A padlock means it arrived encrypted; things you
+  copied on this PC never travelled, so they do not carry one
+- The window has no title bar of its own — drag its header to move it, and use
+  the ✕ or <kbd>Esc</kbd> to close it
+
+**Tray Icon**:
+- **One left click** opens the clipboard history
+- **Clipboard history…**: Search, and double-click an entry to put it back on
+  the clipboard. Focus returns to whatever you were typing in, so the next
+  <kbd>Ctrl</kbd>+<kbd>V</kbd> lands where you expect
+- **Pair a device…**: Devices on this network, or a six-digit code for one that
+  is not
+- **Settings…**: Paired devices and unpairing, whether to sync over the local
+  network or through the relay and on which port, how many clipboard entries to
+  keep, clearing the history, and whether Hypo starts when you sign in.
+
+  The retention limit applies at once — lowering it removes older entries
+  immediately, and the window says how many went. The three transport settings
+  are read when Hypo starts, so changing one asks you to restart; the window
+  says so rather than pretending otherwise.
+- **Pause syncing**: Stops sending and receiving without quitting
+- **Three switches**: notifications, and the two clipboard sharing settings
+  described below. They are the same switches Settings shows; changing one in
+  either place changes it in both
+- **The version**, which is the first thing to check when two devices disagree
+- **Quit**
+
+**Windows Clipboard Sharing** — both switches are **off by default**:
+
+Windows shares clipboard content in two directions that have nothing to do with
+Hypo: the local <kbd>Win</kbd>+<kbd>V</kbd> history, and the cloud clipboard
+that roams to your Microsoft account and every machine signed into it. Hypo opts
+out of both, because it carries whatever was copied on another device, and a
+password from a phone's password manager silently roaming to a Microsoft account
+is worse than the convenience is good. Turn either on if you want it; turning it
+off afterwards does not un-upload anything already sent.
+
+**Received Files**:
+- A file from a peer is written to `%LOCALAPPDATA%\Hypo\received` and its path
+  put on the clipboard, so pasting into Explorer works
+- Existing files are never overwritten — a peer resending `report.pdf` gets a
+  timestamped name
 
 ### Android Usage
 

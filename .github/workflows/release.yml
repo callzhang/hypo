@@ -263,6 +263,33 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # The zip is named from the tag; the binary reports what VERSION says, and
+      # the tray menu shows that. Letting them differ would poison the first
+      # question anyone asks about a sync problem -- which version is each end
+      # running -- with an answer that depends on where you looked.
+      - name: The tag and the VERSION file must agree
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            echo "Not a release build; nothing to check."
+            exit 0
+          fi
+
+          VERSION="${VERSION#v}"
+          DECLARED="$(tr -d '[:space:]' < VERSION)"
+
+          if [ "$VERSION" != "$DECLARED" ]; then
+            echo "Releasing $VERSION but VERSION says $DECLARED."
+            echo "Run scripts/update-version.sh $VERSION and commit before tagging."
+            exit 1
+          fi
+
+          echo "Both say $VERSION."
+
       - name: Publish the tray application
         working-directory: windows
         run: >

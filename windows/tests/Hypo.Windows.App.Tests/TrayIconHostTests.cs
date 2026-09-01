@@ -74,7 +74,15 @@ public class TrayIconHostTests : IDisposable
             client: null,
             settings: settings,
             saveSettings: _saved.Add,
-            applyPrivacy: _applied.Add);
+            applyPrivacy: _applied.Add,
+            settingsModel: (current, save) => new SettingsViewModel(
+                store,
+                _history,
+                _status,
+                current,
+                save,
+                () => false,
+                _ => null));
     }
 
     [SkippableFact]
@@ -530,6 +538,258 @@ public class TrayIconHostTests : IDisposable
             Assert.False(window.IsVisible);
 
             window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void TheArrivalSwitchIsOnAndCanBeTurnedOff()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            var notify = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Tell me when", StringComparison.Ordinal));
+
+            Assert.True(notify.Checked);
+
+            notify.PerformClick();
+
+            Assert.False(notify.Checked);
+            Assert.False(_saved[^1].NotifyOnArrival, "the choice was not written down");
+        });
+    }
+
+    [SkippableFact]
+    public void ANoticeWithAnAbsurdlyLongDeviceNameStillShows()
+    {
+        RequireWindows();
+
+        // NotifyIcon throws rather than truncating, and this runs on the path an
+        // arrival takes -- so an over-long name would lose the notification and
+        // take the arrival with it.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            var notice = ArrivalNotice.For(new Hypo.Core.History.HistoryEntry
+            {
+                Content = new ClipboardContent
+                {
+                    ContentType = ContentType.Text,
+                    Data = Encoding.UTF8.GetBytes(new string('x', 4000)),
+                },
+                CopiedAt = DateTimeOffset.UnixEpoch,
+                SourceDeviceName = new string('D', 300),
+            })!;
+
+            tray.Announce(notice);
+
+            Assert.Equal(notice, tray.LastAnnouncement);
+        });
+    }
+
+    [SkippableFact]
+    public void OneLeftClickOnTheIconOpensTheHistory()
+    {
+        RequireWindows();
+
+        // What every other clipboard tool in the notification area does, and
+        // what the design asks for. It used to need a double click.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.ClickIcon(MouseButtons.Left);
+
+            Assert.NotNull(tray.OpenHistoryWindow);
+            tray.OpenHistoryWindow!.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void ARightClickDoesNotOpenTheHistoryBehindTheMenu()
+    {
+        RequireWindows();
+
+        // NotifyIcon raises the same event for both buttons.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.ClickIcon(MouseButtons.Right);
+
+            Assert.Null(tray.OpenHistoryWindow);
+        });
+    }
+
+    [SkippableFact]
+    public void ClickingANotificationOpensTheHistory()
+    {
+        RequireWindows();
+
+        // A notification about something that arrived, that goes nowhere when
+        // clicked, is a promise of a destination that does not exist.
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.Announce(new ArrivalNotice { Title = "Copied from OPPO PLP110", Body = "a link" });
+            tray.ClickNotification();
+
+            Assert.NotNull(tray.OpenHistoryWindow);
+            tray.OpenHistoryWindow!.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void SettingsOpensAndShowsWhatTheMenuShows()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build(settings: new HypoSettings { AllowCloudClipboardUpload = true });
+            tray.Start();
+
+            tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Settings", StringComparison.Ordinal))
+                .PerformClick();
+
+            var window = Assert.IsType<SettingsWindow>(tray.OpenSettingsWindow);
+            window.Settle();
+
+            // The same switch appears in both. Two pieces of code writing one
+            // setting is how a menu ends up disagreeing with a window.
+            Assert.True(((System.Windows.Controls.CheckBox)window.FindName("CloudBox")).IsChecked);
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void ChangingASwitchInTheMenuUpdatesAnOpenSettingsWindow()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Settings", StringComparison.Ordinal))
+                .PerformClick();
+
+            var window = Assert.IsType<SettingsWindow>(tray.OpenSettingsWindow);
+            var box = (System.Windows.Controls.CheckBox)window.FindName("CloudBox");
+
+            Assert.False(box.IsChecked);
+
+            tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.Contains("Microsoft account", StringComparison.Ordinal))
+                .PerformClick();
+            window.Settle();
+
+            Assert.True(box.IsChecked, "the open window kept showing the old value");
+
+            window.Close();
+        });
+    }
+
+    [SkippableFact]
+    public void SettingsSaysWhatTheShortcutIs()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            // Whether it registered or not, it says something -- the design puts
+            // a failed registration here rather than nowhere.
+            Assert.NotNull(tray.HotkeyDescription);
+            Assert.Contains("Shortcut:", tray.HotkeyDescription);
+        });
+    }
+
+    [SkippableFact]
+    public void TheMenuSaysWhichVersionThisIs()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            // The first question about any sync bug is what each end is running,
+            // and a tray application has nowhere else to answer it.
+            var version = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Hypo ", StringComparison.Ordinal));
+
+            Assert.Equal($"Hypo {AppVersion.Current}", version.Text);
+            Assert.False(version.Enabled, "the version is a label, not a command");
+        });
+    }
+
+    [SkippableFact]
+    public void TheMenuTellsYouTheShortcut()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            using var tray = Build();
+            tray.Start();
+
+            Skip.IfNot(tray.HotkeyRegistered, tray.HotkeyFailure ?? "the shortcut did not register");
+
+            // Nothing else on screen ever says what the combination is, so the
+            // menu is where anyone would find it.
+            var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Clipboard history", StringComparison.Ordinal));
+
+            Assert.Contains("Alt+V", history.Text);
+        });
+    }
+
+    [SkippableFact]
+    public void ATakenShortcutIsSaidOutLoudAndTheMenuStillWorks()
+    {
+        RequireWindows();
+
+        Wpf.Run(() =>
+        {
+            var binding = HotkeyBinding.Parse("Ctrl+Alt+Shift+F8")!;
+            using var squatter = new GlobalHotkey(binding);
+            Skip.IfNot(squatter.IsRegistered, "something else on this machine already holds the combination");
+
+            using var tray = Build(settings: new HypoSettings { Hotkey = binding.ToString() });
+            tray.Start();
+
+            // A shortcut that silently does nothing is indistinguishable from a
+            // broken application.
+            Assert.False(tray.HotkeyRegistered);
+            Assert.Contains("already taken", tray.HotkeyFailure);
+
+            // ...and the menu must not advertise a shortcut that will not fire.
+            var history = tray.Menu.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Text!.StartsWith("Clipboard history", StringComparison.Ordinal));
+
+            Assert.DoesNotContain("F8", history.Text);
+
+            history.PerformClick();
+            Assert.NotNull(tray.OpenHistoryWindow);
+            tray.OpenHistoryWindow!.Close();
         });
     }
 

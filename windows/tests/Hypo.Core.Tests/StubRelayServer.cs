@@ -25,6 +25,16 @@ internal sealed class StubRelayServer : IAsyncDisposable
     private readonly Channel<byte[]> _received = Channel.CreateUnbounded<byte[]>();
     private readonly Channel<WebSocket> _sockets = Channel.CreateUnbounded<WebSocket>();
     private WebSocket? _current;
+
+    /// <summary>
+    /// How long to wait for something that should be immediate.
+    ///
+    /// <para>Generous on purpose: this ceiling only comes into play when
+    /// something is already wrong, and a CI runner under coverage
+    /// instrumentation is much slower than the machine these were written on.
+    /// A tight timeout there fails a working test.</para>
+    /// </summary>
+    private static readonly TimeSpan DefaultWait = TimeSpan.FromSeconds(20);
     private int _connections;
 
     private StubRelayServer(WebApplication app, Uri uri)
@@ -117,20 +127,33 @@ internal sealed class StubRelayServer : IAsyncDisposable
     /// <summary>Waits for the client's next frame, failing the test rather than hanging.</summary>
     public async Task<byte[]> NextFrameAsync(TimeSpan? within = null)
     {
-        using var timeout = new CancellationTokenSource(within ?? TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(within ?? DefaultWait);
         return await _received.Reader.ReadAsync(timeout.Token);
     }
 
+    /// <summary>
+    /// Sends to the connection that is up, waiting for one if none is.
+    ///
+    /// <para>The state check is not belt and braces. <c>_current</c> holds the
+    /// last socket that was accepted, and a client that reconnected leaves a
+    /// disposed one there; sending to it fails with ObjectDisposedException in
+    /// a test that has nothing to do with reconnection. That is what it did,
+    /// once, under a coverage-instrumented run slow enough to make the race
+    /// wide.</para>
+    /// </summary>
     public async Task SendAsync(byte[] payload, WebSocketMessageType type = WebSocketMessageType.Binary)
     {
-        var socket = _current ?? await WaitForConnectionAsync();
+        var socket = _current is { State: WebSocketState.Open } open
+            ? open
+            : await WaitForConnectionAsync();
+
         await socket.SendAsync(payload, type, endOfMessage: true, CancellationToken.None);
     }
 
     /// <summary>Waits for the next upgrade to complete and returns its socket.</summary>
     public async Task<WebSocket> WaitForConnectionAsync(TimeSpan? within = null)
     {
-        using var timeout = new CancellationTokenSource(within ?? TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(within ?? DefaultWait);
         return await _sockets.Reader.ReadAsync(timeout.Token);
     }
 

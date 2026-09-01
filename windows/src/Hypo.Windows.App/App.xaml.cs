@@ -32,6 +32,10 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Before anything can put a window on screen, including the
+        // already-running message box below.
+        ThemeHost.Follow(this);
+
         _instance = new Mutex(initiallyOwned: true, AppStartup.MutexNameFor(Environment.UserName), out var isFirst);
         if (!isFirst)
         {
@@ -45,8 +49,14 @@ public partial class App : System.Windows.Application
 
         _clipboard = new ClipboardListener();
 
+        // Read before the client is built: the transports it brings up, the port
+        // it binds and how much history it keeps are all decided here and cannot
+        // be changed without starting again.
+        var settingsPath = HypoSettings.PathIn(AppStartup.DefaultStateDirectory);
+        var settings = HypoSettings.Load(settingsPath);
+
         var result = await AppStartup.RunAsync(
-            _clipboard, AppStartup.DefaultStateDirectory, Environment.MachineName);
+            _clipboard, AppStartup.DefaultStateDirectory, Environment.MachineName, settings: settings);
 
         if (!result.Started)
         {
@@ -64,8 +74,6 @@ public partial class App : System.Windows.Application
         var store = new FileSecretStore(AppStartup.DefaultStateDirectory);
         var deviceId = result.DeviceId!;
 
-        var settingsPath = HypoSettings.PathIn(AppStartup.DefaultStateDirectory);
-
         _tray = new TrayIconHost(
             new ClientStatusSource(_client),
             new HistoryViewModel(_history, _clipboard),
@@ -78,9 +86,21 @@ public partial class App : System.Windows.Application
                 new RemotePairingCoordinator(new RelayPairingClient(new HttpClient()), store)),
             Shutdown,
             _client,
-            HypoSettings.Load(settingsPath),
-            settings => settings.Save(settingsPath),
-            privacy => _clipboard.Privacy = privacy);
+            settings,
+            updated => updated.Save(settingsPath),
+            privacy => _clipboard.Privacy = privacy,
+            // The tray hands in the settings in force and its own writer, so a
+            // switch that appears in both the menu and the window is applied and
+            // saved by one piece of code either way.
+            (current, save) => new SettingsViewModel(
+                store,
+                _history,
+                new ClientStatusSource(_client),
+                current,
+                save,
+                StartupRegistration.IsEnabled,
+                enabled => StartupRegistration.Set(
+                    enabled, Environment.ProcessPath ?? AppContext.BaseDirectory)));
 
         _tray.Start();
     }

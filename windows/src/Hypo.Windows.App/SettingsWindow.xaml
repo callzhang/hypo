@@ -1,0 +1,124 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Hypo.Windows.App.Shell.SettingsWindow"
+        Title="Hypo — Settings"
+        Width="560" Height="640"
+        WindowStartupLocation="CenterScreen">
+  <Grid Margin="16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+      <StackPanel>
+
+        <TextBlock Text="Devices" FontWeight="SemiBold" FontSize="15" />
+        <TextBlock x:Name="Connection"
+                   Margin="0,4,0,0"
+                   Foreground="{DynamicResource SecondaryTextBrush}" />
+
+        <ListBox x:Name="Devices"
+                 Height="150"
+                 Margin="0,8,0,0"
+                 HorizontalContentAlignment="Stretch"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 SelectionChanged="OnDeviceSelected">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <StackPanel Margin="2,6">
+                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11"
+                           Text="{Binding Status}" />
+                <TextBlock Foreground="{DynamicResource TertiaryTextBrush}" FontSize="10"
+                           Text="{Binding DeviceId}" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <StackPanel Orientation="Horizontal" Margin="0,8,0,0" HorizontalAlignment="Right">
+          <Button x:Name="PairButton" Padding="12,6" Content="Pair a device…" Click="OnPair" />
+          <Button x:Name="UnpairButton" Margin="8,0,0,0" Padding="12,6"
+                  Content="Unpair" Click="OnUnpair" />
+        </StackPanel>
+
+        <TextBlock Text="Transport" FontWeight="SemiBold" FontSize="15" Margin="0,20,0,0" />
+
+        <CheckBox x:Name="LanBox" Margin="0,8,0,0"
+                  Content="Sync over the local network"
+                  Click="OnLanChanged" />
+
+        <CheckBox x:Name="CloudBox2" Margin="0,10,0,0"
+                  Content="Sync through the relay when a device is elsewhere"
+                  Click="OnCloudTransportChanged" />
+
+        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+          <TextBlock Text="Local network port" VerticalAlignment="Center" />
+          <TextBox x:Name="PortBox" Width="70" Margin="8,0" Padding="6" TextAlignment="Right" />
+          <Button x:Name="ApplyPortButton" Padding="12,6" Content="Apply" Click="OnApplyPort" />
+          <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
+                     Foreground="{DynamicResource TertiaryTextBrush}" FontSize="11"
+                     Text="0 lets Windows choose" />
+        </StackPanel>
+
+        <TextBlock x:Name="RestartNotice"
+                   Margin="0,8,0,0"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   FontSize="11"
+                   Visibility="Collapsed"
+                   Text="These three are read when Hypo starts. Restart it to apply the change." />
+
+        <TextBlock Text="History" FontWeight="SemiBold" FontSize="15" Margin="0,20,0,0" />
+
+        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+          <TextBlock Text="Keep" VerticalAlignment="Center" />
+          <TextBox x:Name="LimitBox" Width="70" Margin="8,0" Padding="6"
+                   TextAlignment="Right" />
+          <TextBlock Text="entries" VerticalAlignment="Center" />
+          <Button x:Name="ApplyLimitButton" Margin="12,0,0,0" Padding="12,6"
+                  Content="Apply" Click="OnApplyLimit" />
+          <Button x:Name="ClearButton" Margin="8,0,0,0" Padding="12,6"
+                  Content="Clear history" Click="OnClear" />
+        </StackPanel>
+
+        <TextBlock Text="General" FontWeight="SemiBold" FontSize="15" Margin="0,20,0,0" />
+
+        <CheckBox x:Name="StartupBox" Margin="0,8,0,0"
+                  Content="Start Hypo when I sign in"
+                  Click="OnStartupChanged" />
+
+        <TextBlock x:Name="Shortcut" Margin="0,10,0,0"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   TextWrapping="Wrap" />
+
+        <CheckBox x:Name="NotifyBox" Margin="0,14,0,0"
+                  Content="Tell me when something arrives from another device"
+                  Click="OnNotifyChanged" />
+
+        <CheckBox x:Name="WindowsHistoryBox" Margin="0,10,0,0"
+                  Content="Show synced items in Windows clipboard history (Win+V)"
+                  Click="OnWindowsHistoryChanged" />
+
+        <CheckBox x:Name="CloudBox" Margin="0,10,0,0"
+                  Content="Let Windows upload synced items to your Microsoft account"
+                  Click="OnCloudChanged" />
+
+        <TextBlock Margin="0,8,0,0"
+                   Foreground="{DynamicResource TertiaryTextBrush}"
+                   FontSize="11"
+                   TextWrapping="Wrap"
+                   Text="Those two are off by default. Hypo carries whatever was copied on another device, and turning either on lets it travel further than this PC." />
+
+      </StackPanel>
+    </ScrollViewer>
+
+    <TextBlock x:Name="Message"
+               Grid.Row="1"
+               Margin="0,12,0,0"
+               TextWrapping="Wrap"
+               Foreground="{DynamicResource SecondaryTextBrush}" />
+  </Grid>
+</Window>

@@ -19,10 +19,19 @@ public final class LanPairingViewModel: ObservableObject {
 
     @Published public private(set) var state: State = .discovering
 
+    /// True once discovery has run a while and turned up nothing.
+    ///
+    /// This is the only signal iOS gives that local network access was denied.
+    /// There is no API to ask, and a denial does not raise an error — Bonjour
+    /// simply returns nothing, forever, which is indistinguishable from an
+    /// empty network until you notice it is always empty.
+    @Published public private(set) var foundNothingForAWhile = false
+
     private let discoveredPeers: @MainActor () -> [DiscoveredPeer]
     private let pairedDeviceIds: @MainActor () -> Set<String>
     private let pairWithPeer: @Sendable (DiscoveredPeer) async throws -> PairedDevice
     private var refreshTask: Task<Void, Never>?
+    private var emptyRounds = 0
     private var pairTask: Task<Void, Never>?
 
     public init(
@@ -82,6 +91,14 @@ public final class LanPairingViewModel: ObservableObject {
                     break
                 default:
                     self.state = .found(peers)
+                    if peers.isEmpty {
+                        self.emptyRounds += 1
+                    } else {
+                        self.emptyRounds = 0
+                    }
+                    // Six rounds at two seconds: long enough that a slow
+                    // network has answered, short enough to matter.
+                    self.foundNothingForAWhile = self.emptyRounds >= 6
                 }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }

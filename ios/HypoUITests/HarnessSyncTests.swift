@@ -19,6 +19,22 @@ final class HarnessSyncTests: XCTestCase {
     }
 
     func testPairsOverLanAndSyncsBothWays() throws {
+        // Checked before launching anything. This needs a live peer on the
+        // network, which CI never has, so there it could only ever launch the
+        // app and skip — minutes spent to learn nothing, and one more chance
+        // for the simulator to fail to launch at all, which is how this failed
+        // on CI rather than skipping.
+        // A marker file rather than an environment variable: xcodebuild does
+        // not forward the shell's environment to the test runner process, and
+        // TEST_RUNNER_-prefixed variables did not arrive either. A file is
+        // visible to both sides with no ceremony, and CI never has one.
+        //
+        // Create it alongside a running HypoHarness:
+        //   touch /tmp/hypo-peer-tests
+        guard FileManager.default.fileExists(atPath: "/tmp/hypo-peer-tests") else {
+            throw XCTSkip("no /tmp/hypo-peer-tests marker; start HypoHarness and touch it to run this")
+        }
+
         let app = XCUIApplication()
         app.launch()
         addUIInterruptionMonitor(withDescription: "system alerts") { alert in
@@ -50,7 +66,13 @@ final class HarnessSyncTests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(
             app.staticTexts["hello from the Mac harness"].waitForExistence(timeout: 120),
-            "the harness's clipboard entry never arrived"
+            """
+            the harness's clipboard entry never arrived. The harness sends once \
+            and stops — repeating would keep overwriting the phone's clipboard \
+            and the send control would never appear — so a harness that already \
+            paired with an earlier test has nothing left to send. Run this suite \
+            against its own freshly started harness.
+            """
         )
 
         // And the other direction.

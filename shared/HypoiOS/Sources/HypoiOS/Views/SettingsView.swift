@@ -102,6 +102,30 @@ public struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
 
+                // Shown only once discovery has been empty for a while, which
+                // is the one symptom a denied local network permission
+                // produces. iOS offers no way to ask whether it was denied,
+                // and a denial raises no error — Bonjour just returns nothing
+                // forever. Saying this unprompted would be noise; saying it
+                // exactly when the symptom appears is a diagnosis.
+                if lanViewModel.foundNothingForAWhile {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("No devices found on this network", systemImage: "wifi.exclamationmark")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Text("If your other device is on this network and running Hypo, iOS may have denied local network access. Sync still works through the relay, just slower.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Button("Open iOS Settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        .font(.caption)
+                    }
+                    .accessibilityIdentifier("LanDiscoveryHint")
+                }
+
                 NavigationLink("Pair with code") {
                     PairingView(
                         viewModel: pairingViewModel,

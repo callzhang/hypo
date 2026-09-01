@@ -2305,3 +2305,61 @@ nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed
 从设计上说它本来也不该在 iOS 上跑:它在进程内绑定了一个服务端,而 **iOS 按设计永远不当服务端**。iOS 真正扮演的角色——主动拨号——由 app 自己的 UI 测试对着真实对端覆盖。
 
 iOS 131(减去 5 个 macOS 专属),macOS 162 不变。
+
+
+### `HarnessSyncTests` 必须独享一个新起的 harness
+
+和别的配对测试一起跑时它会失败在「the harness's clipboard entry never arrived」。原因不在产品,在测试对端:
+
+**harness 只发送一次。** 这是有意的,它自己的注释写着理由——重复发送会让手机的剪贴板永远是"刚收到的那条",于是 app 正确地认为没有用户的新内容可发,**发送按钮再也不出现**,把依赖它的那批测试全部打挂。
+
+所以哪个测试先配对上,那条消息就被谁消费掉;后面的测试等不到任何东西。加上"已配对的设备不能再配一次"(重复 challenge 会被判为 duplicate),这个套件对运行顺序是双重敏感的。
+
+正确跑法:
+
+```bash
+pkill -9 -f HypoHarness; rm -f /tmp/hypo-received.txt
+HYPO_DEVICE_NAME="Harness Mac" HYPO_LAN_PORT=7011 \
+HYPO_RECEIVED_FILE=/tmp/hypo-received.txt \
+HYPO_SEND_TEXT="hello from the Mac harness" \
+swift run HypoHarness show &
+# 然后单独跑：-only-testing:HypoUITests/HarnessSyncTests
+```
+
+失败信息现在会把这件事说出来,免得下次又去查产品。
+
+
+## 依赖真实对端的测试改为显式开关（2026-08-31）
+
+CI 上 `Build and UI-test the iOS app` 失败在「Failed to launch」——模拟器偶发的启动故障。但更根本的问题是:**那几个测试在 CI 上永远没有对端**,它们启动 app 只是为了跳过,花掉几分钟、什么也没验证,还多给了模拟器一次失败的机会。
+
+改成在**启动任何东西之前**先检查标记文件 `/tmp/hypo-peer-tests`。
+
+### 为什么用文件而不是环境变量
+
+先试了 `HYPO_PEER_TESTS=1`——**`xcodebuild` 不会把 shell 的环境变量传给测试运行进程**,测试读到的是空。再试 `TEST_RUNNER_HYPO_PEER_TESTS=1`(文档说这个前缀会传给 UI 测试运行器)——**同样没到**。文件两边都看得见,不需要任何机制配合,CI 上也永远不会有。
+
+### 效果
+
+| | CI 形态(无标记) | 本地(有标记 + harness) |
+|---|---|---|
+| 结果 | 16 个测试,4 跳过,**0 失败** | 依赖对端的测试真跑并通过 |
+| 耗时 | **166 秒**(原 342 秒) | — |
+
+跳过从"启动 app、等待、超时"变成零点几秒。
+
+### 本地跑完整闭环
+
+```bash
+pkill -9 -f HypoHarness; rm -f /tmp/hypo-received.txt
+cd tools/HypoHarness && HYPO_DEVICE_NAME="Harness Mac" HYPO_LAN_PORT=7011 \
+  HYPO_RECEIVED_FILE=/tmp/hypo-received.txt \
+  HYPO_SEND_TEXT="hello from the Mac harness" swift run HypoHarness show &
+touch /tmp/hypo-peer-tests
+# 单独跑，不要和别的配对测试混在一起（见上文 harness 只发送一次）
+cd ios && xcodebuild test -scheme Hypo \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -only-testing:HypoUITests/HarnessSyncTests
+```
+
+这也落实了一条分工:**iOS 的开发闭环在本地,CI 只做最后一道关。** 本地能跑 iOS 的每一样东西,一轮 66 秒;把 CI 当诊断工具是在为本地就能抓到的东西反复付 push-and-wait 的代价。CI 剩下的实际价值是两条:一个干净的受限环境(今天的 `SO_NECP_LISTENUUID` 就是同样 iOS 26.5 下 CI 失败、本地通过),以及另外四个平台。

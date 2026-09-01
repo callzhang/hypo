@@ -82,6 +82,16 @@ final class PairingUXTests: XCTestCase {
     /// Skipped when nothing named "Harness Mac" turns up, so the suite stays
     /// runnable without it.
     func testTappingANearbyDevicePairsWithIt() throws {
+        // A marker file rather than an environment variable: xcodebuild does
+        // not forward the shell's environment to the test runner process, and
+        // TEST_RUNNER_-prefixed variables did not arrive either. A file is
+        // visible to both sides with no ceremony, and CI never has one.
+        //
+        // Create it alongside a running HypoHarness:
+        //   touch /tmp/hypo-peer-tests
+        guard FileManager.default.fileExists(atPath: "/tmp/hypo-peer-tests") else {
+            throw XCTSkip("no /tmp/hypo-peer-tests marker; start HypoHarness and touch it to run this")
+        }
         let app = openSettings()
 
         // Identifiers rather than the label text: a nearby device and a paired

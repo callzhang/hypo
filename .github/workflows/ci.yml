@@ -162,7 +162,19 @@ jobs:
       - name: Show available iOS SDKs and simulators
         run: |
           xcodebuild -showsdks | grep -i ios || true
-          xcrun simctl list devicetypes | grep -i iphone || true
+          xcrun simctl list devices available | grep -i iphone || true
+      # Resolved once, not hardcoded. A pinned "iPhone 16" is only correct for
+      # one Xcode, and when the runner image moved on the device was simply
+      # absent — which xcodebuild reported by hanging until the job timed out.
+      - name: Pick a simulator
+        run: |
+          DEVICE="$(xcrun simctl list devices available \
+            | sed -n 's/^ *\(iPhone[^(]*\) (.*/\1/p' | sed 's/ *$//' | tail -1)"
+          if [ -z "$DEVICE" ]; then
+            echo "No iPhone simulator on this image"; xcrun simctl list devices available; exit 1
+          fi
+          echo "Using $DEVICE"
+          echo "IOS_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
       - name: Build HypoCore for iOS Simulator
         working-directory: shared/HypoCore
         run: |
@@ -178,7 +190,7 @@ jobs:
       # because it only tallies XCTest results and these packages have none.
       - name: Run HypoCore tests on iOS Simulator
         timeout-minutes: 20
-        run: ./scripts/run-ios-tests.sh shared/HypoCore HypoCore 'iPhone 16'
+        run: ./scripts/run-ios-tests.sh shared/HypoCore HypoCore "$IOS_SIMULATOR"
       - name: Build HypoiOS for iOS Simulator
         working-directory: shared/HypoiOS
         run: |
@@ -188,7 +200,7 @@ jobs:
             -skipMacroValidation
       - name: Run HypoiOS tests on iOS Simulator
         timeout-minutes: 20
-        run: ./scripts/run-ios-tests.sh shared/HypoiOS HypoiOS 'iPhone 16'
+        run: ./scripts/run-ios-tests.sh shared/HypoiOS HypoiOS "$IOS_SIMULATOR"
       # Builds and drives the app. These are XCUITest, so xcodebuild's exit
       # code is meaningful here — unlike the Swift Testing suites above, which
       # need scripts/run-ios-tests.sh to notice failures at all.
@@ -200,7 +212,7 @@ jobs:
         run: |
           xcodebuild test \
             -scheme Hypo \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "platform=iOS Simulator,name=$IOS_SIMULATOR" \
             -skipMacroValidation \
             -enableCodeCoverage NO \
             CODE_SIGNING_ALLOWED=NO

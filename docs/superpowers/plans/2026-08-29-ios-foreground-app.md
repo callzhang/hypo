@@ -2276,3 +2276,14 @@ error: main actor-isolated property 'staticTexts' can not be referenced from a n
 改成 `runs-on: macos-26`,两边同代。代价是不再对旧 SDK 做兼容性验证,而这个 app 的部署目标是 iOS 17+,可以接受。
 
 另外给三个 iOS 步骤加了单步超时(20/20/30 分钟)。**卡死本身不可怕,可怕的是它烧满整个 job 预算却不说停在哪一步。**
+
+
+### 写死模拟器机型是个脆弱点
+
+换到 `macos-26` 后那一步立刻以 70 退出,日志列出了可用目标:该镜像上**根本没有名为「iPhone 16」的设备**,只有 iPhone 17 系列和 iPhone Air。而 workflow 和 `run-ios-tests.sh` 都把机型写死成了 `iPhone 16`。
+
+值得注意的是本机也没有 iPhone 16 —— 我一直手动传 `iPhone 17`,所以这个坑在本地从来不会暴露。
+
+改成两边都动态解析:取镜像上实际可用的任一 iPhone,指定的机型不存在时打印一行说明再退回。这些是单元测试和 UI 测试,不依赖具体机型。
+
+另外注意"设备类型"和"设备"是两回事:`simctl list devicetypes` 里有 iPhone 16,但 `simctl list devices available` 里没有对应实例。诊断步骤原来打印的是前者,所以看起来一切正常——现在改成打印后者。

@@ -20,7 +20,32 @@ set -euo pipefail
 
 PACKAGE_DIR="${1:?usage: run-ios-tests.sh <package-dir> <scheme> [simulator-name]}"
 SCHEME="${2:?usage: run-ios-tests.sh <package-dir> <scheme> [simulator-name]}"
-SIMULATOR="${3:-iPhone 16}"
+SIMULATOR="${3:-}"
+
+# Resolve the device rather than trusting a name. A hardcoded "iPhone 16" is
+# only correct for one Xcode: the runner image was upgraded and the device was
+# simply not there, which xcodebuild reported by hanging rather than failing.
+# Any iPhone will do — these are unit tests, not layout tests.
+available_iphone() {
+    xcrun simctl list devices available \
+        | sed -n 's/^ *\(iPhone[^(]*\) (.*/\1/p' \
+        | sed 's/ *$//' \
+        | tail -1
+}
+
+if [ -z "$SIMULATOR" ] || ! xcrun simctl list devices available | grep -q "^ *$SIMULATOR ("; then
+    FALLBACK="$(available_iphone)"
+    if [ -z "$FALLBACK" ]; then
+        echo "❌ No iPhone simulator is available on this machine."
+        xcrun simctl list devices available
+        exit 1
+    fi
+    if [ -n "$SIMULATOR" ]; then
+        echo "ℹ️  '$SIMULATOR' is not available here; using '$FALLBACK' instead."
+    fi
+    SIMULATOR="$FALLBACK"
+fi
+echo "▶️  Simulator: $SIMULATOR"
 
 LOG="$(mktemp -t hypo-ios-tests-XXXXXX)"
 trap 'rm -f "$LOG"' EXIT

@@ -2606,3 +2606,19 @@ Sim clipboard:  host-to-sim probe 113645
 **二、"内容出现在对面"永远不能作为同步的证据**,只要两端共用剪贴板。判据必须是接收方**应用**的记录:日志里的信封解码,或历史条目的 `originDeviceName`。
 
 关掉模拟器的 Edit → Automatically Sync Pasteboard 可以消除这个混淆,但那会让"外来剪贴板内容"的测试没法用 `pbcopy` 来准备。目前保持开启,并在判据上绕开它。
+
+
+## 固定 sleep 做同步,在 CI 上会挂死（2026-09-01）
+
+`Run HypoCore tests on iOS Simulator` 在 CI 上跑满 20 分钟被杀,最后一行停在:
+
+```
+◇ Test testDisconnectWhileConnectingCancelsHandshake() started.
+🚀 [LanWebSocketTransport] Resuming WebSocket task
+```
+
+这个测试**用的是 Stub,根本不碰网络**,URL 只是占位。挂住的是时序:它固定 `sleep 50ms` 之后调用 `disconnect()`,假定那时 `connect()` 已经走到"取消才有意义"的位置。CI 机器慢的时候并没有,于是断开取消不到任何东西,`connectTask.value` 永远不返回。
+
+改成**等待 stub 的 `onResume` 真的被调用**——那正是同一个时刻,但是观测到的而不是猜的——并给测试加 `.timeLimit(.minutes(1))`。
+
+之前加的单步超时在这里兑现了价值:失败发生在 20 分钟而不是烧满整个 job,而且日志明确停在哪个测试上。**挂死本身难免,但它必须说得出自己停在哪里。**

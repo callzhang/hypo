@@ -507,9 +507,19 @@ struct LanWebSocketTransportTests {
         #expect(transport._testing_messageQueueCount() == 0)
     }
 
-    @Test
+    /// Time-limited, and synchronised on the stub rather than a fixed sleep.
+    ///
+    /// It used to wait 50ms and then disconnect, assuming connect() had reached
+    /// the point where cancelling means something. On a loaded CI machine it
+    /// had not, so the disconnect cancelled nothing and the test waited on a
+    /// handshake that never resolved — the step ran for twenty minutes and was
+    /// killed. Waiting for the task to be resumed is the same moment, observed
+    /// rather than guessed.
+    @Test(.timeLimit(.minutes(1)))
     func testDisconnectWhileConnectingCancelsHandshake() async {
+        let resumed = Locked(false)
         let stubTask = StubWebSocketTask()
+        stubTask.onResume = { resumed.withLock { $0 = true } }
         let session = StubSession(task: stubTask)
         let transport = await MainActor.run { LanWebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
@@ -517,7 +527,8 @@ struct LanWebSocketTransportTests {
         ) }
 
         let connectTask = Task { try await transport.connect() }
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        let started = await waitUntil(timeout: .seconds(5)) { resumed.withLock { $0 } }
+        #expect(started, "connect() never resumed the task, so there was nothing to cancel")
         await transport.disconnect()
         await expectThrows { try await connectTask.value }
     }

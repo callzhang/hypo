@@ -66,13 +66,8 @@ public struct HistoryListView: View {
                     // prompt; reading does, so the read waits for this button,
                     // which is the one way iOS allows it silently.
                     if viewModel.hasClipboardToSend {
-                        HStack(spacing: 8) {
-                            PasteButton { text in
-                                Task { await viewModel.sendText(text) }
-                            }
-                            Text("Send what you copied")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        PasteButton { text in
+                            Task { await viewModel.sendText(text) }
                         }
                     }
                 }

@@ -24,6 +24,17 @@ public struct PasteButton: UIViewRepresentable {
         let configuration = UIPasteControl.Configuration()
         configuration.displayMode = .iconOnly
         configuration.cornerStyle = .capsule
+        // Borderless: no filled pill, just the glyph. The glyph itself is the
+        // system's and cannot be replaced — the configuration exposes a display
+        // mode, corner style, radius and two colours, nothing more — because
+        // this control is what Apple exempts from the paste prompt. Drawing a
+        // refresh icon instead would mean an ordinary button, and an ordinary
+        // button has to read the clipboard itself, which asks permission every
+        // single time.
+        // .clear is not honoured — the control drew a black pill — so this
+        // uses the system's own subdued fill instead.
+        configuration.baseBackgroundColor = .secondarySystemBackground
+        configuration.baseForegroundColor = .tintColor
         let control = UIPasteControl(configuration: configuration)
         control.target = context.coordinator
         return control

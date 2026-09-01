@@ -2564,3 +2564,45 @@ guard case .found = state else { return }   // ← 点击直接无效
 配套一个监视脚本 `scratchpad/await-oppo.sh`:每 45 秒用 `dns-sd -B _hypo._tcp local` 扫一次,发现 OPPO 或 Xiaomi 就写入目标名、放上开关文件、跑那个测试。**手机端不需要任何操作,配对是模拟器这边发起的**,人只要把手机唤醒、确认 Hypo 在运行。
 
 这样这条缺口不再是"等人有空",而是"设备一上线就自证"。
+
+
+## 模拟器和 Mac 共用剪贴板,这会伪造证据（2026-09-01）
+
+用户问:历史里那条在 Mac 上复制的链接,为什么标着来自 iPhone 17 而不是 Mac?
+
+实测:
+
+```
+Mac clipboard:  host-to-sim probe 113645
+Sim clipboard:  host-to-sim probe 113645
+```
+
+**模拟器默认开启「自动同步剪贴板」**,Mac 上复制的内容会直接进入模拟器剪贴板,**完全不经过 Hypo**。于是链路变成:Mac 复制 → 模拟器剪贴板自动拿到 → Hypo 认为"有外来内容可发" → 测试点 Paste → 记成**本机发出**的条目。
+
+### 这让我此前的一个验证结论失效
+
+我曾用"Mac 的 `pbpaste` 变成了 iOS 发出的文本"来证明 iPhone → Mac 通了。**那不是证据**——模拟器的剪贴板本来就会同步回 Mac,不需要 Hypo 参与。
+
+反方向的验证仍然成立,因为看的是日志里的信封解码,那只可能来自 Hypo:
+
+```
+📦 Decoded envelope: deviceName=derek's MacBook Air (2), origin=cloud
+```
+
+### 用正确的证据重验
+
+查 **macOS 应用自己的历史**,里面有:
+
+```
+- 'iPhone 17' | "a long entry that the row cannot show in f…"
+```
+
+`originDeviceName` 是 iPhone 17,**只有 Hypo 把它当作来自 iPhone 的远程条目接收才会这样记录**;剪贴板同步只会让它成为 Mac 的本地条目。所以 iPhone → Mac 确实通,结论不变,证据换了。
+
+### 两条后果
+
+**一、测试会污染真实机器。** Mac 的历史里那些 `foreign text XXXX`、`something worth sending XXXX` 全是测试字符串,经模拟器剪贴板同步流到 Mac、再被 Hypo 记录。在本机跑这些测试等于往用户的剪贴板历史里灌数据。
+
+**二、"内容出现在对面"永远不能作为同步的证据**,只要两端共用剪贴板。判据必须是接收方**应用**的记录:日志里的信封解码,或历史条目的 `originDeviceName`。
+
+关掉模拟器的 Edit → Automatically Sync Pasteboard 可以消除这个混淆,但那会让"外来剪贴板内容"的测试没法用 `pbcopy` 来准备。目前保持开启,并在判据上绕开它。

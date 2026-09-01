@@ -35,12 +35,12 @@ struct ClipboardEntryRow: View {
                 // more, text only when the preview had to cut it.
                 if hasMoreToShow {
                     Button(action: onOpenDetail) {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        Image(systemName: detailSymbol)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.blue)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Preview")
+                    .accessibilityLabel(detailLabel)
                     .accessibilityIdentifier("Preview-\(entry.id.uuidString)")
                 }
             }
@@ -92,6 +92,23 @@ struct ClipboardEntryRow: View {
             return text != entry.content.previewDescription || text.count > 120
         case .link:
             return false
+        }
+    }
+
+    /// What opening the entry will do, said with the icon macOS uses for it.
+    private var detailSymbol: String {
+        switch entry.content {
+        case .file: return "folder"
+        case .link: return "safari"
+        case .image, .text: return "eye"
+        }
+    }
+
+    private var detailLabel: String {
+        switch entry.content {
+        case .file: return "Show file"
+        case .link: return "Open link"
+        case .image, .text: return "Preview"
         }
     }
 

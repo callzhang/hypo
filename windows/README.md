@@ -129,6 +129,15 @@ about if you touch this code:
 - A relay secret in `HYPO_RELAY_AUTH_TOKEN`, or a repo-root `.env` defining
   `RELAY_WS_AUTH_TOKEN`, for cloud sync. LAN sync needs neither.
 
+  The `.env` is found by walking up from the binary, and **only counts where
+  `.git` sits beside it** — a checkout's, in other words. Without that condition
+  the walk runs to the filesystem root and uses whatever defines the key: a copy
+  of this repository's `.env` left in the system temp directory was enough to
+  fail five tests on one machine while CI stayed green. Working in a git
+  worktree still finds the main checkout's `.env`, one level further up, because
+  a worktree's `.git` is a file and the walk continues past a checkout with no
+  `.env` in it.
+
 ## Build and test
 
 ```bash

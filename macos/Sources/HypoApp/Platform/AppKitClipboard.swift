@@ -25,11 +25,33 @@ public final class AppKitClipboard: SystemClipboard {
     }
 
     public func writeImageData(_ data: Data) -> Bool {
-        guard let image = NSImage(data: data) else {
-            return false
+        // Put the received bytes on the pasteboard as they arrived.
+        //
+        // Writing an `NSImage` instead decodes and re-encodes, so the bytes that
+        // come back out are never the bytes that went in -- which defeats every
+        // check that asks "is this the item we just applied?" and turns a synced
+        // image into one that bounces between devices, re-encoded each hop. It also
+        // writes lazily, changing the pasteboard again after we have read its change
+        // count to suppress exactly this.
+        guard let type = Self.pasteboardType(for: data) else {
+            // An encoding we cannot name: fall back rather than drop the image.
+            guard let image = NSImage(data: data) else { return false }
+            pasteboard.writeObjects([image])
+            return true
         }
-        pasteboard.writeObjects([image])
+        pasteboard.setData(data, forType: type)
         return true
+    }
+
+    /// Identifies the encoding from its magic bytes, since the sender's declared
+    /// format does not reach this far.
+    static func pasteboardType(for data: Data) -> NSPasteboard.PasteboardType? {
+        let prefix = [UInt8](data.prefix(8))
+        if prefix.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return .png }
+        if prefix.starts(with: [0xFF, 0xD8, 0xFF]) { return NSPasteboard.PasteboardType("public.jpeg") }
+        if prefix.starts(with: [0x47, 0x49, 0x46]) { return NSPasteboard.PasteboardType("com.compuserve.gif") }
+        if prefix.starts(with: [0x49, 0x49, 0x2A]) || prefix.starts(with: [0x4D, 0x4D, 0x00]) { return .tiff }
+        return nil
     }
 
     public func writeFileURL(_ url: URL) {

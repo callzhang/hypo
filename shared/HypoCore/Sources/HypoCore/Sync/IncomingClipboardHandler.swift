@@ -91,7 +91,8 @@ public final class IncomingClipboardHandler {
             let afterChangeCount = await MainActor.run { clipboard.changeCount }
             
             // Notify dispatcher (multicast) and direct callbacks
-            dispatcher.notifyClipboardApplied(changeCount: afterChangeCount)
+            let fingerprint = await MainActor.run { appliedFingerprint(for: payload) }
+            dispatcher.notifyClipboardApplied(changeCount: afterChangeCount, fingerprint: fingerprint)
             onClipboardApplied?(afterChangeCount)
             
             // Notify dispatcher (multicast) and direct callbacks (updates lastSeen)
@@ -142,6 +143,28 @@ public final class IncomingClipboardHandler {
         }
     }
     
+    /// Identifies applied content well enough to recognise it coming back.
+    ///
+    /// Pixel dimensions rather than bytes, because an image is re-encoded on every
+    /// hop -- captured, compressed, sent, applied, captured again -- so its bytes
+    /// differ each time round while it is plainly the same picture. Comparing bytes
+    /// is what let an image circulate between two devices indefinitely.
+    @MainActor
+    private func appliedFingerprint(for payload: ClipboardPayload) -> String {
+        switch payload.contentType {
+        case .image:
+            if let size = clipboard.imagePixelSize(from: payload.data) {
+                return "image:\(size.width)x\(size.height)"
+            }
+            return "image:\(payload.data.count)"
+        case .text, .link:
+            let text = String(data: payload.data, encoding: .utf8) ?? ""
+            return "text:\(text)"
+        case .file:
+            return "file:\(payload.metadata?["file_name"] ?? "")-\(payload.data.count)"
+        }
+    }
+
     private func applyToClipboard(_ payload: ClipboardPayload) async throws {
         // Size check: prevent copying very large items
         let MAX_COPY_SIZE_BYTES = SizeConstants.maxCopySizeBytes

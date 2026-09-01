@@ -2696,3 +2696,20 @@ if configuration.environment == "cloud" || configuration.url.scheme == "wss" {
 | macOS | 4 秒 | 4 秒 |
 
 **教训**:一个"只是有点烦"的现象——每次要手动杀进程——最终变成了 CI 的硬阻塞。当时判它超出范围是错的:它不是范围问题,是我不想在别的任务中途岔开。代价是后面每一次本地测试都要多一步,以及两轮各 20 分钟的 CI。
+
+
+## CI 全绿,以及包装脚本拦下的第三种失败（2026-09-01）
+
+五个 job 全部通过。此前两轮各烧 20 分钟的超时,在心跳修复之后没有再出现。
+
+绿之前还遇到一次偶发:`Run HypoiOS tests` 里 `xcodebuild` 打印了
+
+```
+Internal Error: DecodingError.dataCorrupted: Corrupted JSON. Underlying error: unexpected end of file
+…
+** TEST SUCCEEDED **
+```
+
+**报告成功,但日志里没有任何 Swift Testing 的汇总行——套件根本没跑。** `run-ios-tests.sh` 当初是为"Swift Testing 失败而 xcodebuild 仍报成功"写的,这次拦下的是更糟的一种:**声称成功,实际什么都没执行**。重跑即通过,是 runner 上的偶发故障。
+
+这也说明那个包装脚本的判据选对了:**不看退出码,看有没有测试真的报数**。

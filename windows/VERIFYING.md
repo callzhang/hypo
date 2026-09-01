@@ -64,6 +64,10 @@ simulate.
 - [ ] **Mica** on Windows 11 — the history window should pick up the wallpaper
       behind it. On Windows 10 it should be a flat colour, not transparent and
       not black.
+- [ ] **The filter drop-downs in the dark theme.** They have been unreadable
+      twice — a control WPF styles itself, left out of the theme. There is a
+      pixel test for it now, but it judges colour, not words: open both
+      drop-downs and check the options are legible and say what they should.
 - [ ] **Switch the system theme while Hypo is running.** Both windows should
       follow immediately, including their title bars.
 - [ ] **A second monitor at a different scaling.** Drag the history window from

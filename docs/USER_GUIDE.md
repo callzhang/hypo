@@ -759,10 +759,11 @@ paused — paused and disconnected look different on purpose.
   <kbd>Ctrl</kbd>+<kbd>V</kbd> then pastes it where you were
 - <kbd>Esc</kbd>, or clicking anywhere else, closes it without taking anything
 
-  <kbd>Win</kbd>+<kbd>V</kbd> belongs to the Windows clipboard history and
-  cannot be taken. If another application already holds Alt+V, Hypo says so in a
-  notification instead of failing quietly, and you can change the combination
-  with a `"Hotkey": "Ctrl+Alt+H"` line in `%LOCALAPPDATA%\Hypo\settings.json`.
+<kbd>Win</kbd>+<kbd>V</kbd> belongs to the Windows clipboard history and cannot
+be taken. If another application already holds Alt+V, Hypo says so in a
+notification and Settings explains it, instead of failing quietly; you can
+change the combination with a `"Hotkey": "Ctrl+Alt+H"` line in
+`%LOCALAPPDATA%\Hypo\settings.json`.
 
 **Notifications**:
 - A notification names the device an item came from and shows the first 80
@@ -784,7 +785,10 @@ paused — paused and disconnected look different on purpose.
 - **Drag an entry** into another application to drop it there without touching
   the clipboard
 - Each row says which device sent it, whether it came over the network or
-  through the relay, and when
+  through the relay, and when. A padlock means it arrived encrypted; things you
+  copied on this PC never travelled, so they do not carry one
+- The window has no title bar of its own — drag its header to move it, and use
+  the ✕ or <kbd>Esc</kbd> to close it
 
 **Tray Icon**:
 - **One left click** opens the clipboard history
@@ -795,9 +799,17 @@ paused — paused and disconnected look different on purpose.
   is not
 - **Settings…**: Paired devices and unpairing, whether to sync over the local
   network or through the relay and on which port, how many clipboard entries to
-  keep, clearing the history, and whether Hypo starts when you sign in
+  keep, clearing the history, and whether Hypo starts when you sign in.
+
+  The retention limit applies at once — lowering it removes older entries
+  immediately, and the window says how many went. The three transport settings
+  are read when Hypo starts, so changing one asks you to restart; the window
+  says so rather than pretending otherwise.
 - **Pause syncing**: Stops sending and receiving without quitting
-- **Two sharing switches**: See below
+- **Three switches**: notifications, and the two clipboard sharing settings
+  described below. They are the same switches Settings shows; changing one in
+  either place changes it in both
+- **The version**, which is the first thing to check when two devices disagree
 - **Quit**
 
 **Windows Clipboard Sharing** — both switches are **off by default**:

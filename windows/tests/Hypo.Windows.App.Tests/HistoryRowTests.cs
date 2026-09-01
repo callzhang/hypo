@@ -104,6 +104,17 @@ public class HistoryRowTests : IDisposable
             Assert.Equal(0, types.SelectedIndex);
             Assert.Equal(0, dates.SelectedIndex);
 
+            // What they say, not just that they exist. The ComboBox has a
+            // template of its own, whose selection box does not honour
+            // DisplayMemberPath -- both drop-downs read "FilterChoice`1" for one
+            // build, and the pixel test could not see it because the text was
+            // the right colour.
+            Assert.Equal("All types", types.SelectedItem!.ToString());
+            Assert.Equal("Any time", dates.SelectedItem!.ToString());
+            Assert.Equal(
+                ["All types", "Text", "Links", "Images", "Files"],
+                types.Items.Cast<object>().Select(item => item.ToString()));
+
             Assert.Equal(4, ((System.Windows.Controls.ListBox)window.FindName("Rows")).Items.Count);
 
             window.Capture("history-window-filters");

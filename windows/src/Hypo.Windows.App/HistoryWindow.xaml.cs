@@ -156,7 +156,6 @@ public partial class HistoryWindow : Window
             new FilterChoice<TypeFilter>(TypeFilter.Image, "Images"),
             new FilterChoice<TypeFilter>(TypeFilter.File, "Files"),
         };
-        TypeFilterBox.DisplayMemberPath = nameof(FilterChoice<TypeFilter>.Label);
         TypeFilterBox.SelectedIndex = 0;
 
         DateFilterBox.ItemsSource = new[]
@@ -165,12 +164,21 @@ public partial class HistoryWindow : Window
             new FilterChoice<DateFilter>(DateFilter.Today, "Today"),
             new FilterChoice<DateFilter>(DateFilter.ThisWeek, "This week"),
         };
-        DateFilterBox.DisplayMemberPath = nameof(FilterChoice<DateFilter>.Label);
         DateFilterBox.SelectedIndex = 0;
     }
 
-    /// <summary>One entry in a filter drop-down.</summary>
-    public sealed record FilterChoice<T>(T Value, string Label);
+    /// <summary>
+    /// One entry in a filter drop-down.
+    ///
+    /// <para>It renders through ToString rather than DisplayMemberPath: the
+    /// ComboBox has a template of its own now, and that template's selection box
+    /// does not honour DisplayMemberPath — the drop-downs read "FilterChoice`1"
+    /// until this existed.</para>
+    /// </summary>
+    public sealed record FilterChoice<T>(T Value, string Label)
+    {
+        public override string ToString() => Label;
+    }
 
     private void OnTypeFilterChanged(object sender, SelectionChangedEventArgs e)
     {

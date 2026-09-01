@@ -2402,3 +2402,35 @@ Android 的设备行显示的是名字 + 状态徽章 + 地址/最后可见时�
 照搬 macOS 菜单栏的映射:断开 `cloud.slash.fill` 灰、连接中 `arrow.triangle.2.circlepath` 橙、LAN `wifi` 绿、云端 `cloud.fill` 蓝、错误 `exclamationmark.triangle.fill` 红,文案也统一成同样的词。
 
 顺带发现 `testReportsConnectionStatus` **只打印、不断言**——无论 app 显示什么(包括什么都不显示)它都通过。改成断言状态行确实显示了已知状态之一。
+
+
+## 设备可以改名（2026-08-31）
+
+设备名默认取自操作系统对机器的称呼,而**这个名字是每个对端看到的名字**,三个平台都没有改名入口。`DeviceIdentity.deviceName` 是 `let`,也没有任何 setter。
+
+改成 `private(set) var` 加一个 `rename(to:)`:写回 UserDefaults、拒绝空白、照初次命名的规则去掉 `.local`。五个单元测试钉住:改名生效、重启后仍在、空白被拒、`.local` 被剥离、**device id 不变**(对端的密钥是按 id 存的,改了就等于解除配对)。
+
+界面上那一行变成可编辑,并带一个清除按钮——不加的话要先选中旧名字,在手机上很别扭,而且测试正是在这里反复把新名字**追加**到旧名字后面("Renamed 129ARenamed F59F")。
+
+### 找 bug 找了半天,bug 在测试里
+
+`testAppPairsWithASwiftPeer` 配对后断言不到对端,连查五轮都失败。最后从模拟器容器里把 `transport_paired_devices` 解出来:
+
+```
+count: 6
+ - UITest Peer | Unknown | 4eee26da
+ - Harness Mac | Unknown | cb077930
+ - derek's MacBook Air (2) | ...
+```
+
+**对端就在里面,而且排第一。产品从头到尾都是对的。** 一路上我改错了三次断言方式,每次都以为是产品问题:
+
+1. 以为行在屏幕外 —— 加滚动,仍失败
+2. 以为 `accessibilityIdentifier` 把整行合并了 —— 加 `.contain`,仍失败
+3. 以为成功页文案是 "Paired" —— 实际是 **"Paired with UITest Peer"**
+
+第 3 条是把屏幕内容**写进文件**才看到的:`xcodebuild` 会吞掉测试进程的 `print`,而 attachment 只进 xcresult。harness 早就在用文件通信,我却绕了一大圈才想起来用同样的办法。
+
+最后一次失败则是等待窗口不够:中转服务器往返时间会波动,30 秒偶尔不够,放宽到 120 秒后 16.5 秒就通过了——快的时候立即返回,不增加耗时。
+
+**教训**:断言失败先问"我断言的东西是否存在",再问"产品是否有问题"。这一轮五次失败全部属于前者。

@@ -16,6 +16,8 @@ public struct SettingsView: View {
 
     @State private var notificationStatus: String = "Checking…"
     @State private var historyLimit: Double = 200
+    @State private var deviceName: String = ""
+    @FocusState private var focusedOnName: Bool
 
     public init(
         context: HypoiOSContext,
@@ -45,7 +47,37 @@ public struct SettingsView: View {
             }
 
             Section("This device") {
-                LabeledContent("Name", value: context.identity.deviceName)
+                // Editable, because the default is whatever the OS calls the
+                // device and that is often not what its owner would call it.
+                // Peers already paired keep the old name until they see this
+                // one advertise again — nothing here reaches into their store.
+                LabeledContent("Name") {
+                    HStack(spacing: 6) {
+                        TextField("Name", text: $deviceName)
+                            .multilineTextAlignment(.trailing)
+                            .submitLabel(.done)
+                            .accessibilityIdentifier("DeviceNameField")
+                            .onSubmit { commitDeviceName() }
+                            .onChange(of: focusedOnName) { _, isFocused in
+                                if !isFocused { commitDeviceName() }
+                            }
+                            .focused($focusedOnName)
+                        // Replacing the name otherwise means selecting the old
+                        // one first, which is fiddly on a phone and is exactly
+                        // where a test kept appending instead of replacing.
+                        if focusedOnName && !deviceName.isEmpty {
+                            Button {
+                                deviceName = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Clear name")
+                            .accessibilityIdentifier("ClearDeviceName")
+                        }
+                    }
+                }
                 LabeledContent("ID", value: String(context.identity.deviceIdString.prefix(8)))
             }
 
@@ -73,6 +105,11 @@ public struct SettingsView: View {
                                 unpair(device)
                             }
                         }
+                        // .contain keeps the name and detail addressable on
+                        // their own. A bare identifier collapses the row into
+                        // one element, and the texts inside it stop existing as
+                        // far as the accessibility tree is concerned.
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("PairedDevice-\(device.name)")
                     }
                 }
@@ -182,6 +219,7 @@ public struct SettingsView: View {
         .onAppear { lanViewModel.startDiscovery() }
         .onDisappear { lanViewModel.stopDiscovery() }
         .task {
+            deviceName = context.identity.deviceName
             notificationStatus = await Self.notificationStatusText()
             historyLimit = Double(await context.historyStore.limit())
         }
@@ -225,6 +263,12 @@ public struct SettingsView: View {
     /// and keys, and the Bonjour record has no platform field either — so every
     /// row said the same useless word. Android's device row shows the address
     /// or a last-seen time for exactly this reason.
+    /// Keeps whatever the identity accepted, so a blank entry snaps back to
+    /// the old name rather than leaving the field looking empty and applied.
+    private func commitDeviceName() {
+        deviceName = context.identity.rename(to: deviceName)
+    }
+
     private func detail(of device: PairedDevice) -> String {
         if let host = device.bonjourHost, let port = device.bonjourPort {
             return "\(host):\(port)"

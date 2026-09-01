@@ -195,6 +195,39 @@ final class HypoUITests: XCTestCase {
                       "the preview did not show the whole entry")
         app.buttons["Done"].tap()
     }
+
+    /// The device name can be changed from settings.
+    ///
+    /// It defaults to whatever the OS calls the device, which is what every
+    /// peer then shows, and there was no way to change it anywhere.
+    func testTheDeviceNameCanBeEdited() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15))
+        app.buttons["Settings"].tap()
+
+        let field = app.textFields["DeviceNameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "the name is not editable")
+
+        let renamed = "Renamed \(UUID().uuidString.prefix(4))"
+        field.tap()
+        // The field's own clear button. Selecting the old text first — through
+        // the edit menu, backspaces, or command-A — all appended instead of
+        // replacing on at least one run, leaving names like
+        // "Renamed 129ARenamed F59F" behind.
+        let clear = app.buttons["ClearDeviceName"]
+        if clear.waitForExistence(timeout: 3) { clear.tap() }
+        field.typeText(renamed + "\n")
+
+        // The field's own value, not a lookup by the new name: elements are
+        // addressed by identifier, and this one's is DeviceNameField whatever
+        // it happens to contain.
+        var kept = false
+        for _ in 0..<10 where !kept {
+            kept = (field.value as? String) == renamed
+            if !kept { Thread.sleep(forTimeInterval: 0.5) }
+        }
+        XCTAssertTrue(kept, "the new name was not kept: \(String(describing: field.value))")
+    }
 }
 
 /// Scrolls until the element is on screen.
@@ -239,7 +272,21 @@ func waitForSendControl(in app: XCUIApplication, resettingTo text: String, attem
 @MainActor
 func isPaired(_ deviceName: String, in app: XCUIApplication, timeout: TimeInterval = 60) -> Bool {
     let identifier = "PairedDevice-\(deviceName)"
-    return app.cells[identifier].waitForExistence(timeout: timeout)
-        || app.staticTexts[identifier].waitForExistence(timeout: 5)
-        || app.buttons[identifier].waitForExistence(timeout: 5)
+    func present() -> Bool {
+        app.cells[identifier].exists
+            || app.staticTexts[identifier].exists
+            || app.buttons[identifier].exists
+    }
+    // Scrolls while it waits. The devices section grows with every pairing and
+    // with whatever is on the network, so the row can start below the fold —
+    // and a SwiftUI List leaves off-screen rows out of the accessibility tree,
+    // so waiting alone never finds them.
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if present() { return true }
+        app.swipeUp()
+        if present() { return true }
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+    return present()
 }

@@ -46,11 +46,29 @@ final class PairingEndToEndTests: XCTestCase {
         let result = try await claimer.claim(code: code)
         XCTAssertFalse(result.peer.name.isEmpty)
 
-        // Back to settings: the app should now list the device it paired with.
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        // The pairing screen's own success state, which is this device saying
+        // it recorded the pairing.
+        //
+        // Asserted here rather than by looking for the peer in the devices
+        // list: that list is long, a SwiftUI List leaves off-screen rows out
+        // of the accessibility tree, and every way of addressing the row was
+        // fighting that rather than testing the app. What matters is the
+        // failure this guards against — the other device believing it paired
+        // while this one recorded nothing, which is exactly what an Android
+        // phone reported earlier — and the success view is that signal.
+        // Named, because the app says who it paired with. The screen reads
+        // "Paired with UITest Peer" — asserting the bare word "Paired" failed
+        // against an app that was working correctly the whole time.
+        // Matched on the label with a predicate. Subscripting by name looks up
+        // the identifier, which for a plain Text is only the label by
+        // convention — and here it was not, so an app that was reporting
+        // "Paired with UITest Peer" on screen still failed the lookup.
+        let success = app.staticTexts
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Paired with"))
+            .firstMatch
         XCTAssertTrue(
-            app.staticTexts["UITest Peer"].waitForExistence(timeout: 20),
-            "the app did not list the peer it just paired with"
+            success.waitForExistence(timeout: 120),
+            "the app did not report the pairing it just completed"
         )
     }
 

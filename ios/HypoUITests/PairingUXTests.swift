@@ -125,12 +125,16 @@ final class PairingUXTests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Status"].waitForExistence(timeout: 10))
 
-        // The same words the macOS menu bar uses.
-        let known = ["Disconnected", "Connecting…", "LAN", "Connected"]
-        let shown = known.first { app.staticTexts[$0].exists }
+        // Matched by containment, because the row reads as one element:
+        // "Status, Disconnected". Looking for a standalone "Disconnected"
+        // passed while the label and value were separate views and broke the
+        // moment they were laid out in one HStack, with the app unchanged.
+        let known = ["Disconnected", "Connecting", "LAN", "Connected"]
+        let labels = app.staticTexts.allElementsBoundByIndex.map { $0.label }
+        let shown = known.first { state in labels.contains { $0.contains(state) } }
         XCTAssertNotNil(
             shown,
-            "the status row showed none of \(known): \(app.staticTexts.allElementsBoundByIndex.map { $0.label }.prefix(12))"
+            "the status row showed none of \(known): \(labels.prefix(14))"
         )
     }
 

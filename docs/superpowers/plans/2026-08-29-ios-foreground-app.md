@@ -2622,3 +2622,17 @@ Sim clipboard:  host-to-sim probe 113645
 改成**等待 stub 的 `onResume` 真的被调用**——那正是同一个时刻,但是观测到的而不是猜的——并给测试加 `.timeLimit(.minutes(1))`。
 
 之前加的单步超时在这里兑现了价值:失败发生在 20 分钟而不是烧满整个 job,而且日志明确停在哪个测试上。**挂死本身难免,但它必须说得出自己停在哪里。**
+
+
+### 改布局会改变可访问性树,断言要按"包含"匹配
+
+把状态行从 `Label` 换成 `HStack` 之后,CI 报:
+
+```
+the status row showed none of ["Disconnected", …]:
+["Settings", "Connection", "Status", "Status, Disconnected", …]
+```
+
+**标签和值被合并成了一个元素**——`"Status, Disconnected"`。查找独立的 `"Disconnected"` 在合并前成立,布局一改就失效,而 app 的行为一点没变。
+
+改成在所有标签里按**包含**匹配。这一类断言(按精确名字取元素)在 SwiftUI 里都很脆:同一段内容会因为外层容器不同而变成一个或多个元素。本期已经被这件事绊过三次——配对行的标识符合并、成功页文案、现在是状态行。

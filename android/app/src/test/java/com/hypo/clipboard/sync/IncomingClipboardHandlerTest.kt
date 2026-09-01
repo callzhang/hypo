@@ -47,7 +47,8 @@ class IncomingClipboardHandlerTest {
             identity = identity,
             accessibilityServiceChecker = accessibilityServiceChecker,
             context = context,
-            storageManager = storageManager
+            storageManager = storageManager,
+            echoGuard = ClipboardEchoGuard()
         )
         handler.setDispatcher(testDispatcher)
     }

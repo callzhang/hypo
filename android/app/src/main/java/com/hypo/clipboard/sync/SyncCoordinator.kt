@@ -38,6 +38,7 @@ class SyncCoordinator @Inject constructor(
     private val transportManager: com.hypo.clipboard.transport.TransportManager,
     private val deviceKeyStore: DeviceKeyStore,
     private val lanTransportClient: com.hypo.clipboard.transport.ws.WebSocketTransportClient,
+    private val echoGuard: ClipboardEchoGuard,
     @ApplicationContext private val context: Context
 ) {
     private var eventChannel: Channel<ClipboardEvent>? = null
@@ -178,6 +179,15 @@ class SyncCoordinator @Inject constructor(
                     localPath = event.localPath
                 )
                 
+                // Content we put on the clipboard for a peer comes back as a local
+                // copy moments later. Sending it on is what makes an image circulate
+                // between two devices; bytes cannot catch it because every hop
+                // re-encodes them.
+                if (event.deviceId == null && echoGuard.isEchoOfAppliedContent(eventItem)) {
+                    Log.d(TAG, "⏭️ Ignoring local copy of content just applied from a peer")
+                    continue
+                }
+
                 val latestEntry = repository.getLatestEntry()
                 
                 // Check if matches current clipboard (latest entry)

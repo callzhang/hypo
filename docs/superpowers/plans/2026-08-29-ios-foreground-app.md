@@ -2258,3 +2258,21 @@ error: main actor-isolated property 'staticTexts' can not be referenced from a n
 修法是给三个函数和 `HypoUITests` 类都标上 `@MainActor`(另外三个测试类本来就标了,只有这个漏了)。这样在两个工具链下都成立,不依赖谁更宽松。
 
 **这是本期第二次因为同一个原因被 CI 拦下**(第一次是 `UNNotificationSettings` 跨隔离边界)。结论没变:**本机只装了一个 Xcode,iOS 的编译结论必须以 CI 为准,本地绿只是必要条件。**
+
+
+## CI 的 iOS job 卡死,以及把工具链对齐（2026-08-31）
+
+「Run HypoCore tests on iOS Simulator」这一步连续两轮跑了近一小时,而它平时只要几分钟。排查结果:
+
+- **不是最后那个提交**:它只改了 `HypoUITests.swift` 和文档,`git diff de32b69 9c999e2 -- shared/HypoCore` 是空的。
+- **不是缓存**:DerivedData 缓存在 macOS Tests 那个 job,iOS job 没有缓存。
+- **不是 relay 测试**:那个测试由 `HYPO_RELAY_TESTS` 控制,CI 没设。
+- **本地不复现**:同一条命令本地 66 秒跑完,136 个测试通过。
+
+所以是 runner 环境本身卡住了。
+
+顺带解决了另一件被反复付学费的事:**CI 的 `macos-15` 镜像装的是 Xcode 16.4(Swift 6.1),本机是 Xcode 26.6(Swift 6.3.3),差了两个大版本。** 本期两次被 CI 拦下的编译错误(`UNNotificationSettings` 跨隔离边界、共享测试辅助的 actor 隔离)都是这个差距造成的——新编译器接受,旧的拒绝。本地无法复现,因为**本地那个更宽松**;实测把 `@MainActor` 去掉后本地干净构建照样通过。
+
+改成 `runs-on: macos-26`,两边同代。代价是不再对旧 SDK 做兼容性验证,而这个 app 的部署目标是 iOS 17+,可以接受。
+
+另外给三个 iOS 步骤加了单步超时(20/20/30 分钟)。**卡死本身不可怕,可怕的是它烧满整个 job 预算却不说停在哪一步。**

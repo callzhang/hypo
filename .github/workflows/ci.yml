@@ -148,7 +148,12 @@ jobs:
 
   ios-core-build:
     name: HypoCore iOS Build
-    runs-on: macos-15
+    # macos-26 rather than macos-15: the older image ships Xcode 16.4, two
+    # major versions behind what this app is developed against, and Swift 6.1
+    # rejects actor-isolation that 6.3 accepts. CI was the only place those
+    # divergences showed up, one push at a time. Matching the toolchains means
+    # a local build can catch them instead.
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
@@ -172,6 +177,7 @@ jobs:
       # "** TEST SUCCEEDED **" and exits 0 even when Swift Testing tests fail,
       # because it only tallies XCTest results and these packages have none.
       - name: Run HypoCore tests on iOS Simulator
+        timeout-minutes: 20
         run: ./scripts/run-ios-tests.sh shared/HypoCore HypoCore 'iPhone 16'
       - name: Build HypoiOS for iOS Simulator
         working-directory: shared/HypoiOS
@@ -181,6 +187,7 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -skipMacroValidation
       - name: Run HypoiOS tests on iOS Simulator
+        timeout-minutes: 20
         run: ./scripts/run-ios-tests.sh shared/HypoiOS HypoiOS 'iPhone 16'
       # Builds and drives the app. These are XCUITest, so xcodebuild's exit
       # code is meaningful here — unlike the Swift Testing suites above, which
@@ -188,6 +195,7 @@ jobs:
       # CODE_SIGNING_ALLOWED=NO because the runner has no signing certificate
       # and a simulator build does not need one.
       - name: Build and UI-test the iOS app
+        timeout-minutes: 30
         working-directory: ios
         run: |
           xcodebuild test \

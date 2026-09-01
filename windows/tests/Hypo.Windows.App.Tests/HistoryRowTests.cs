@@ -15,6 +15,17 @@ namespace Hypo.Windows.App.Tests;
 [Collection("wpf")]
 public class HistoryRowTests : IDisposable
 {
+    /// <summary>
+    /// Midday today, in the reader's own time zone.
+    ///
+    /// <para>Not <c>DateTimeOffset.Now</c>: an entry three hours old is on
+    /// yesterday's calendar day if the tests run before 03:00, which is exactly
+    /// what CI does and what broke this the first time it ran there. Midday
+    /// leaves room on both sides for every offset below.</para>
+    /// </summary>
+    private static readonly DateTimeOffset Noon =
+        new(DateTime.Today.AddHours(12), TimeZoneInfo.Local.GetUtcOffset(DateTime.Today.AddHours(12)));
+
     private readonly string _dir = Directory.CreateTempSubdirectory("hypo-rows").FullName;
     private readonly ClipboardHistoryStore _history;
 
@@ -22,10 +33,10 @@ public class HistoryRowTests : IDisposable
     {
         _history = new ClipboardHistoryStore(Path.Combine(_dir, "history.db"));
 
-        Add(ContentType.Text, "a note to self", DateTimeOffset.Now.AddMinutes(-5));
-        Add(ContentType.Link, "https://example.com/thing", DateTimeOffset.Now.AddHours(-3), TransportOrigin.Lan);
-        Add(ContentType.Image, "not really a png", DateTimeOffset.Now.AddDays(-2), TransportOrigin.Cloud);
-        Add(ContentType.File, "report", DateTimeOffset.Now.AddDays(-20));
+        Add(ContentType.Text, "a note to self", Noon.AddMinutes(-5));
+        Add(ContentType.Link, "https://example.com/thing", Noon.AddHours(-3), TransportOrigin.Lan);
+        Add(ContentType.Image, "not really a png", Noon.AddDays(-2), TransportOrigin.Cloud);
+        Add(ContentType.File, "report", Noon.AddDays(-20));
     }
 
     public void Dispose()
@@ -66,7 +77,7 @@ public class HistoryRowTests : IDisposable
 
     private HistoryWindow Open()
     {
-        var model = new HistoryViewModel(_history, new NullClipboard());
+        var model = new HistoryViewModel(_history, new NullClipboard()) { Now = () => Noon };
         model.Refresh();
 
         var window = new HistoryWindow(model) { HideWhenDeactivated = false };
@@ -204,7 +215,7 @@ public class HistoryRowTests : IDisposable
 
         for (var i = 0; i < 200; i++)
         {
-            Add(ContentType.Text, $"entry number {i}", DateTimeOffset.Now.AddSeconds(-i));
+            Add(ContentType.Text, $"entry number {i}", Noon.AddSeconds(-i));
         }
 
         Wpf.Run(() =>

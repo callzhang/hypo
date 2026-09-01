@@ -621,9 +621,12 @@ Settings rather than failing silently.
 `Hypo.Wpf` uses the WPF-UI Fluent resource dictionary and follows the system
 light/dark setting.
 
-> **Built differently.** Seven brushes in a resource dictionary of its own, not
-> WPF-UI. The theme is small enough that a UI toolkit would have restyled every
-> control in the screenshot suite to get it. Following the system setting, Mica
+> **Built differently.** Seven brushes in a resource dictionary of its own,
+> plus one `ControlTemplate` for ComboBox, not WPF-UI. The theme is small enough
+> that a UI toolkit would have restyled every control in the screenshot suite to
+> get it — though the ComboBox template is the point where that trade starts to
+> look closer than it did: a control whose default template ignores `Background`
+> needs replacing outright, and there are others like it if the interface grows. Following the system setting, Mica
 > on Windows 11 and the explicit solid fallback below it are all as specified,
 > and the palettes' contrast is tested. On Windows 11, Mica is enabled via `DwmSetWindowAttribute`
 (`DWMWA_SYSTEMBACKDROP_TYPE`). On Windows 10 the app falls back to a solid

@@ -109,6 +109,9 @@ struct TransportManagerTests {
         await manager.deactivateLanServices()
     }
 
+    /// A device coming back is announced only when it has actually been away.
+    /// The rule used to be "any time it comes online", which meant a notification
+    /// every time a phone's screen slept and woke.
     @Test @MainActor
     func testUpdateDeviceOnlineStatusSendsNotification() async {
         let defaults = makeIsolatedDefaults()
@@ -131,16 +134,15 @@ struct TransportManagerTests {
         )
         manager.addPairedDevice(device)
 
+        // Stored as offline but never observed going offline: nothing to measure
+        // an absence against, so nothing is said.
         manager.updateDeviceOnlineStatus(deviceId: device.id, isOnline: true)
-        #expect(notificationController.statusNotifications.count == 1)
-        #expect(notificationController.statusNotifications.first == .init(
-            deviceId: device.id,
-            title: "Device Connected",
-            body: "\(device.name) is now Online"
-        ))
+        #expect(notificationController.statusNotifications.isEmpty)
 
+        // Going offline and straight back is the flicker the rule exists to ignore.
         manager.updateDeviceOnlineStatus(deviceId: device.id, isOnline: false)
-        #expect(notificationController.statusNotifications.count == 1) // Offline doesn't send
+        manager.updateDeviceOnlineStatus(deviceId: device.id, isOnline: true)
+        #expect(notificationController.statusNotifications.isEmpty)
     }
 
     @Test @MainActor

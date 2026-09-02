@@ -2,10 +2,12 @@ using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Windows;
+using System.Windows.Threading;
 using Hypo.Core.Abstractions;
 using Hypo.Core.Client;
 using Hypo.Core.History;
 using Hypo.Core.Pairing;
+using Hypo.Core.Presence;
 using Hypo.Core.Relay;
 using Hypo.Windows.App;
 using Hypo.Windows.Clipboard;
@@ -24,6 +26,7 @@ public partial class App : System.Windows.Application
 {
     private Mutex? _instance;
     private TrayIconHost? _tray;
+    private DispatcherTimer? _presenceTimer;
     private HypoClient? _client;
     private ClipboardListener? _clipboard;
     private ClipboardHistoryStore? _history;
@@ -106,6 +109,61 @@ public partial class App : System.Windows.Application
                     enabled, Environment.ProcessPath ?? AppContext.BaseDirectory)));
 
         _tray.Start();
+        StartPresenceWatch(store);
+    }
+
+    /// <summary>
+    /// Watches which peers are reachable and says so when one returns after a day
+    /// away.
+    ///
+    /// <para>Both transports, because either is enough to call a device reachable:
+    /// the LAN client knows who is on this network, and the relay is asked over
+    /// plain HTTP so the answer does not depend on our own socket being up.</para>
+    ///
+    /// <para>Ten minutes, matching the Mac. A device coming back is not urgent
+    /// news -- it is the kind that should arrive quietly and never twice.</para>
+    /// </summary>
+    private void StartPresenceWatch(ISecretStore store)
+    {
+        var tracker = new PeerReturnTracker(AppStartup.DefaultStateDirectory);
+        var presence = new CloudPresenceClient(new HttpClient());
+
+        _presenceTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(10) };
+        _presenceTimer.Tick += async (_, _) => await CheckPresenceAsync(store, tracker, presence);
+        _presenceTimer.Start();
+
+        // Once at startup as well: the interesting case is a device that returned
+        // while this application was not running.
+        _ = CheckPresenceAsync(store, tracker, presence);
+    }
+
+    private async Task CheckPresenceAsync(ISecretStore store, PeerReturnTracker tracker, CloudPresenceClient presence)
+    {
+        if (_client is null || _tray is null)
+        {
+            return;
+        }
+
+        var peers = PairedDevices.All(store);
+        if (peers.Count == 0)
+        {
+            return;
+        }
+
+        var ids = peers.Select(peer => peer.DeviceId).ToArray();
+        var reachable = new HashSet<string>(_client.LanPeers.Select(id => id.ToLowerInvariant()));
+        foreach (var id in await presence.ConnectedAsync(ids).ConfigureAwait(true))
+        {
+            reachable.Add(id);
+        }
+
+        foreach (var returned in tracker.Observe(reachable, ids, DateTimeOffset.UtcNow))
+        {
+            var name = peers.FirstOrDefault(peer =>
+                string.Equals(peer.DeviceId, returned, StringComparison.OrdinalIgnoreCase));
+
+            _tray.AnnounceDeviceReturn(name?.DisplayName ?? returned);
+        }
     }
 
     private static void Tell(string message, System.Windows.MessageBoxImage image) =>
@@ -113,6 +171,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _presenceTimer?.Stop();
         _tray?.Dispose();
         _client?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _clipboard?.Dispose();

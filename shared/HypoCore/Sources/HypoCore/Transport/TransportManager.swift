@@ -91,6 +91,11 @@ public final class TransportManager: ObservableObject {
     private var networkChangeRequested = false
     static let lanPairingKeyIdentifier = "lan-discovery-key"
 
+    /// How long a device must have been offline before its return is worth a
+    /// notification. A day: long enough that coming back is news, short enough
+    /// that a laptop left shut over a weekend still announces itself.
+    public static let returnNotificationThreshold: TimeInterval = 24 * 60 * 60
+
 #if canImport(Combine)
     public var connectionStatePublisher: Published<ConnectionState>.Publisher { $connectionState }
 #endif
@@ -274,14 +279,29 @@ public final class TransportManager: ObservableObject {
                 logger.info("🔄 [TransportManager] Device status changed: \(pairedDevices[index].name) is now \(isOnline ? "Online" : "Offline") on instance \(instanceAddr)")
             }
             pairedDevices[index].isOnline = isOnline
-            
+
             if isOnline {
-                let deviceName = pairedDevices[index].name
-                notificationController.deliverStatusNotification(
-                    deviceId: pairedDevices[index].id,
-                    title: "Device Connected",
-                    body: "\(deviceName) is now Online"
-                )
+                // Only worth interrupting someone for a device that has actually
+                // been away. A phone whose screen sleeps, or a Mac that changes
+                // network, flips this several times an hour, and a notification per
+                // flip is noise that teaches people to ignore the ones that matter.
+                let wasAwayLongEnough = pairedDevices[index].offlineSince
+                    .map { dateProvider().timeIntervalSince($0) >= TransportManager.returnNotificationThreshold }
+                    ?? false
+
+                if wasAwayLongEnough {
+                    let deviceName = pairedDevices[index].name
+                    notificationController.deliverStatusNotification(
+                        deviceId: pairedDevices[index].id,
+                        title: "Device Back Online",
+                        body: "\(deviceName) is back after being offline"
+                    )
+                }
+                pairedDevices[index].offlineSince = nil
+            } else {
+                // Stamped once, on the way down: overwriting it on every probe
+                // while the device stays offline would keep resetting the clock.
+                pairedDevices[index].offlineSince = dateProvider()
             }
             
             // Explicitly notify change to ensure SwiftUI picks it up across potential actor boundaries

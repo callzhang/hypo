@@ -287,6 +287,27 @@ public sealed class TrayIconHost : IDisposable
         _icon.ShowBalloonTip(5_000);
     }
 
+    /// <summary>The last device return announced, for the tests.</summary>
+    public string? LastReturnAnnouncement { get; private set; }
+
+    /// <summary>
+    /// Says that a device has come back after being away.
+    ///
+    /// <para>Deliberately not routed through <see cref="Announce"/>: that records
+    /// the notice so a click opens the history at what arrived, and there is
+    /// nothing to open here. A balloon that promises a destination it does not
+    /// have is worse than one that says nothing when clicked.</para>
+    /// </summary>
+    public void AnnounceDeviceReturn(string deviceName)
+    {
+        LastReturnAnnouncement = deviceName;
+
+        _icon.BalloonTipTitle = "Device back online";
+        _icon.BalloonTipText = $"{deviceName} is reachable again.";
+        _icon.BalloonTipIcon = ToolTipIcon.Info;
+        _icon.ShowBalloonTip(5_000);
+    }
+
     /// <summary>
     /// Opens the history when a notification is clicked.
     ///

@@ -7,6 +7,10 @@ public struct PairedDevice: Identifiable, Equatable, Codable {
     public let platform: String
     public var lastSeen: Date
     public var isOnline: Bool
+    /// When this device was last seen to go offline, if it has since we started
+    /// recording. Nil for a device that has never been observed going offline --
+    /// including every device stored before this field existed.
+    public var offlineSince: Date?
 
     // Bonjour/discovery information
     public let serviceName: String?
@@ -20,6 +24,7 @@ public struct PairedDevice: Identifiable, Equatable, Codable {
         platform: String,
         lastSeen: Date,
         isOnline: Bool,
+        offlineSince: Date? = nil,
         serviceName: String? = nil,
         bonjourHost: String? = nil,
         bonjourPort: Int? = nil,
@@ -30,6 +35,7 @@ public struct PairedDevice: Identifiable, Equatable, Codable {
         self.platform = platform
         self.lastSeen = lastSeen
         self.isOnline = isOnline
+        self.offlineSince = offlineSince
         self.serviceName = serviceName
         self.bonjourHost = bonjourHost
         self.bonjourPort = bonjourPort
@@ -43,6 +49,7 @@ public struct PairedDevice: Identifiable, Equatable, Codable {
         self.platform = platform
         self.lastSeen = peer.lastSeen
         self.isOnline = true
+        self.offlineSince = nil
         self.serviceName = peer.serviceName
         self.bonjourHost = peer.endpoint.host
         self.bonjourPort = peer.endpoint.port
@@ -57,6 +64,7 @@ public struct PairedDevice: Identifiable, Equatable, Codable {
             platform: self.platform,
             lastSeen: max(self.lastSeen, peer.lastSeen),
             isOnline: self.isOnline,
+            offlineSince: self.offlineSince,
             serviceName: peer.serviceName,
             bonjourHost: peer.endpoint.host,
             bonjourPort: peer.endpoint.port,

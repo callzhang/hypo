@@ -17,11 +17,11 @@ struct LanPeerListingTests {
         #expect(manager.discoveredLanPeers.isEmpty)
 
         driver.emit(.resolved(makeRecord(serviceName: "peer-one", deviceId: "aaaa1111")))
-        try await Task.sleep(nanoseconds: 5_000_000)
+        _ = await waitForPeerCount(1, in: manager)
         #expect(manager.discoveredLanPeers.map(\.serviceName) == ["peer-one"])
 
         driver.emit(.removed("peer-one"))
-        try await Task.sleep(nanoseconds: 5_000_000)
+        _ = await waitForPeerCount(0, in: manager, exactly: true)
         #expect(manager.discoveredLanPeers.isEmpty)
     }
 
@@ -58,7 +58,7 @@ struct LanPeerListingTests {
         await manager.ensureLanDiscoveryActive()
 
         driver.emit(.resolved(makeRecord(serviceName: "peer-one", deviceId: "AAAA1111")))
-        try await Task.sleep(nanoseconds: 5_000_000)
+        _ = await waitForPeerCount(1, in: manager)
         let peer = try #require(manager.discoveredLanPeers.first)
 
         #expect(manager.isPaired(peer) == false)
@@ -89,7 +89,7 @@ struct LanPeerListingTests {
             txtRecords: ["device_id": "cccc3333", "pub_key": "cHVibGljLWtleQ=="]
         )))
         driver.emit(.resolved(makeRecord(serviceName: "peer-one", deviceId: "aaaa1111")))
-        try await Task.sleep(nanoseconds: 5_000_000)
+        _ = await waitForPeerCount(2, in: manager)
 
         #expect(manager.discoveredLanPeers.count == 2)
         #expect(manager.discoveredPeersOnOtherMachines().map(\.serviceName) == ["peer-one"])
@@ -160,3 +160,29 @@ struct LanPeerListingTests {
     }
 }
 #endif
+
+/// Waits for discovery to settle instead of sleeping a fixed interval.
+///
+/// These tests emitted records and then slept 5ms before asserting. That is a
+/// guess about how long delivery takes, and it held until the suite grew and
+/// the machine got busier — then a peer had simply not arrived yet and the
+/// count came back one short. Waiting for the expected number costs nothing
+/// when it is already there.
+@MainActor
+func waitForPeerCount(
+    _ expected: Int,
+    in manager: TransportManager,
+    exactly: Bool = false,
+    timeout: TimeInterval = 5
+) async -> Bool {
+    func satisfied() -> Bool {
+        exactly ? manager.discoveredLanPeers.count == expected
+                : manager.discoveredLanPeers.count >= expected
+    }
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if satisfied() { return true }
+        try? await Task.sleep(nanoseconds: 5_000_000)
+    }
+    return satisfied()
+}

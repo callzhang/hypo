@@ -68,6 +68,12 @@ jobs:
         run: ./gradlew testDebugUnitTest
         env:
           ANDROID_HOME: ${{ github.workspace }}/.android-sdk
+          # The build refuses to produce an APK with no relay token, because one
+          # 401s on every connection. That guard is right for something you
+          # install and wrong here: this job runs unit tests and ships nothing,
+          # and CI has no token to give it. Without this the whole Android job
+          # fails before a single test runs.
+          ALLOW_MISSING_RELAY_TOKEN: "1"
 
   macos-tests:
     name: macOS Tests

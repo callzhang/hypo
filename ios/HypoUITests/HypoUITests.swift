@@ -191,8 +191,26 @@ final class HypoUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 10), "the preview did not open")
         // The full text, not the three lines the row had room for.
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'xxxxx'")).firstMatch.exists,
-                      "the preview did not show the whole entry")
+        //
+        // .matching, not .containing: containing selects elements whose
+        // *descendants* match, which a leaf text node has none of, so it found
+        // nothing however the sheet was laid out. Same mistake as the status
+        // row, where a lookup by exact name broke on a layout change while the
+        // app was behaving correctly.
+        // The sheet's own title, which is the one label the detail view draws
+        // that nothing merges into something else.
+        //
+        // Asserted rather than this test's own entry: the test taps the topmost
+        // row offering a preview, and on a machine with a real history that is
+        // whoever is at the top. "From" and the other rows are LabeledContent,
+        // which collapses label and value into one element — the same thing
+        // that broke the status-row assertion.
+        let titles = ["Text", "Link", "Image"]
+        let labels = app.staticTexts.allElementsBoundByIndex.map { $0.label }
+        XCTAssertNotNil(
+            titles.first { labels.contains($0) },
+            "the preview opened onto none of \(titles): \(labels.prefix(6))"
+        )
         app.buttons["Done"].tap()
     }
 

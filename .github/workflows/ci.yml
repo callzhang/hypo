@@ -246,6 +246,11 @@ jobs:
             -skipMacroValidation \
             -enableCodeCoverage NO \
             CODE_SIGNING_ALLOWED=NO
+        env:
+          # The build now refuses to produce an app with no relay token, because
+          # one cannot reach the relay at all and says so nowhere. CI has no
+          # token and needs none: it never talks to the relay.
+          ALLOW_MISSING_RELAY_TOKEN: "1"
       # The local network permission prompt cannot be tested on a simulator,
       # which does not enforce it. What can be checked is the declaration it
       # depends on: without these keys iOS refuses Bonjour with no error and no

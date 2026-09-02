@@ -32,16 +32,34 @@ for candidate in "${CANDIDATES[@]}"; do
     fi
 done
 
+# Fail rather than warn. A warning here produces an app that builds, installs
+# and runs, and then cannot reach the relay at all — the only symptom is cloud
+# sync quietly not working, which reads as a network or server problem. Finding
+# it costs far more than a failed build does. Android's build made the same
+# call, with the same escape hatch.
 if [ -z "$ENV_FILE" ]; then
-    echo "warning: no .env found; the app will have no relay auth token and the relay will refuse it"
-    exit 0
+    if [ "${ALLOW_MISSING_RELAY_TOKEN:-}" = "1" ]; then
+        echo "note: no .env found; building without a relay token because ALLOW_MISSING_RELAY_TOKEN=1"
+        exit 0
+    fi
+    echo "error: no .env found (looked in: ${CANDIDATES[*]})." >&2
+    echo "       The app would build with no relay auth token and the relay would refuse every" >&2
+    echo "       connection with a 401, visible only as cloud sync not working." >&2
+    echo "       Set ALLOW_MISSING_RELAY_TOKEN=1 to build without it anyway." >&2
+    exit 1
 fi
 
 TOKEN="$(grep -E '^[[:space:]]*RELAY_WS_AUTH_TOKEN[[:space:]]*=' "$ENV_FILE" | head -1 | cut -d= -f2- | xargs || true)"
 
 if [ -z "$TOKEN" ]; then
-    echo "warning: RELAY_WS_AUTH_TOKEN is absent or empty in $ENV_FILE; leaving the key out rather than baking in an empty one"
-    exit 0
+    if [ "${ALLOW_MISSING_RELAY_TOKEN:-}" = "1" ]; then
+        echo "note: RELAY_WS_AUTH_TOKEN is empty in $ENV_FILE; building without it because ALLOW_MISSING_RELAY_TOKEN=1"
+        exit 0
+    fi
+    echo "error: RELAY_WS_AUTH_TOKEN is absent or empty in $ENV_FILE." >&2
+    echo "       The relay would refuse this build with a 401 on every connection." >&2
+    echo "       Set ALLOW_MISSING_RELAY_TOKEN=1 to build without it anyway." >&2
+    exit 1
 fi
 
 plutil -replace RelayWsAuthToken -string "$TOKEN" "$PLIST"

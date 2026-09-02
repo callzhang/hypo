@@ -228,6 +228,26 @@ final class HypoUITests: XCTestCase {
         }
         XCTAssertTrue(kept, "the new name was not kept: \(String(describing: field.value))")
     }
+
+    /// Sends whatever is on the clipboard, for driving a real-device check.
+    ///
+    /// Gated on a marker so it never runs unattended.
+    ///   printf 'text' | xcrun simctl pbcopy booted
+    ///   touch /tmp/hypo-send-now
+    func testSendsWhateverIsOnTheClipboard() throws {
+        guard FileManager.default.fileExists(atPath: "/tmp/hypo-send-now") else {
+            throw XCTSkip("no /tmp/hypo-send-now marker")
+        }
+        let app = launch()
+        XCTAssertTrue(app.textFields["Search"].waitForExistence(timeout: 15))
+
+        // Whatever the harness put there — not replaced, unlike the other
+        // tests, which set their own text and would overwrite it.
+        let paste = app.buttons["Paste"]
+        XCTAssertTrue(paste.waitForExistence(timeout: 20), "nothing offered to send")
+        paste.tap()
+        Thread.sleep(forTimeInterval: 6)
+    }
 }
 
 /// Scrolls until the element is on screen.

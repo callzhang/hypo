@@ -85,4 +85,59 @@ final class PairingEndToEndTests: XCTestCase {
         }
         throw XCTSkip("the relay never produced a pairing code")
     }
+    /// Shows a pairing code and waits for a real phone to claim it.
+    ///
+    /// This is the Android side of interop without needing LAN discovery: the
+    /// relay carries the handshake, so it works even when multicast does not.
+    /// It also exercises the timestamps Android writes, which is what broke
+    /// pairing with a real phone and cannot be reached by any Swift-to-Swift
+    /// path.
+    ///
+    /// Gated on a marker so it never runs unattended — it needs someone to
+    /// type the code into the phone.
+    ///
+    ///   touch /tmp/hypo-await-phone
+    ///   # the code is written to /tmp/hypo-ios-code.txt
+    func testShowsACodeForAPhoneToClaim() throws {
+        guard FileManager.default.fileExists(atPath: "/tmp/hypo-await-phone") else {
+            throw XCTSkip("no /tmp/hypo-await-phone marker; this one waits for a person")
+        }
+        try? FileManager.default.removeItem(atPath: "/tmp/hypo-ios-code.txt")
+        try? FileManager.default.removeItem(atPath: "/tmp/hypo-paired-with.txt")
+
+        let app = XCUIApplication()
+        app.launch()
+        addUIInterruptionMonitor(withDescription: "system alerts") { alert in
+            for label in ["Allow", "Allow Paste", "OK"] where alert.buttons[label].exists {
+                alert.buttons[label].tap(); return true
+            }
+            return false
+        }
+        app.tap()
+
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15))
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(revealElement(app.buttons["Pair with code"], in: app), "no way in to code pairing")
+        app.buttons["Pair with code"].tap()
+        XCTAssertTrue(app.buttons["Show a code"].waitForExistence(timeout: 10))
+        app.buttons["Show a code"].tap()
+
+        let code = try waitForPairingCode(in: app)
+        try? code.write(toFile: "/tmp/hypo-ios-code.txt", atomically: true, encoding: .utf8)
+
+        // Five minutes, because a person has to read the code and type it.
+        let paired = app.staticTexts
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Paired with"))
+            .firstMatch
+        let done = paired.waitForExistence(timeout: 300)
+        if done {
+            try? paired.label.write(toFile: "/tmp/hypo-paired-with.txt", atomically: true, encoding: .utf8)
+        } else {
+            let labels = app.staticTexts.allElementsBoundByIndex.map { $0.label }
+            try? labels.joined(separator: " | ")
+                .write(toFile: "/tmp/hypo-paired-with.txt", atomically: true, encoding: .utf8)
+        }
+        XCTAssertTrue(done, "no device claimed the code within five minutes")
+    }
+
 }

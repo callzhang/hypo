@@ -108,7 +108,16 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     private var lastReceiveFailure: Date?
     private var reconnectingTask: Task<Void, Never>? // Guard to prevent concurrent reconnection attempts
     // Track messages that are "in flight" - send callback fired but transmission may not be complete
-    internal var inFlightMessages: [UUID: QueuedMessage] = [:] // message ID -> queued message
+    // Guarded by `stateLock`. Touch this directly only where that lock is already
+    // held; everywhere else go through `inFlightMessages` below, which takes it.
+    // Two unsynchronised writers corrupt the dictionary's own storage, and the crash
+    // surfaces as `-[__NSTaggedDate objectForKey:]` inside removeValue — nowhere near
+    // the code that actually raced.
+    private var inFlightMessagesStorage: [UUID: QueuedMessage] = [:] // message ID -> queued message
+    internal var inFlightMessages: [UUID: QueuedMessage] {
+        get { stateLock.withLock { inFlightMessagesStorage } }
+        set { stateLock.withLock { inFlightMessagesStorage = newValue } }
+    }
     // Track pending control message queries (query ID -> continuation)
     // Thread-safe access using a serial queue
     private let pendingControlQueriesQueue = DispatchQueue(label: "com.hypo.clipboard.pendingControlQueries")
@@ -542,7 +551,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 
                 // Track all messages as in-flight until we get server feedback
                 stateLock.withLock {
-                    inFlightMessages[messageId] = queuedMessage
+                    inFlightMessagesStorage[messageId] = queuedMessage
                 }
                 self.logger.debug("📤 [WebSocketTransport] Message in-flight: type=\(contentType), size=\(frameSize.formattedAsKB), id=\(messageId.uuidString.prefix(8))")
                 
@@ -557,7 +566,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                     await MainActor.run {
                         // Check if message is still in-flight
                         let queuedMessage = strongSelf.stateLock.withLock {
-                            return strongSelf.inFlightMessages.removeValue(forKey: messageId)
+                            return strongSelf.inFlightMessagesStorage.removeValue(forKey: messageId)
                         }
                         
                         guard let queuedMessage else {
@@ -1035,8 +1044,10 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
         }
         
         // Check for in-flight messages when connection closes
-        let inFlightCount = inFlightMessages.count
-        let inFlightSizes = inFlightMessages.values.map { $0.data.count.formattedAsKB }.joined(separator: ", ")
+        let (inFlightCount, inFlightSizes) = stateLock.withLock { () -> (Int, String) in
+            (inFlightMessagesStorage.count,
+             inFlightMessagesStorage.values.map { $0.data.count.formattedAsKB }.joined(separator: ", "))
+        }
         
         // Enhanced logging for cloud connections
         var closeMsg = "🔌 [WebSocketTransport] WebSocket closed\n"
@@ -1079,12 +1090,18 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
         // 2. Requeuing would use the same nonce, causing Android to reject it as duplicate
         // 3. If the message truly failed, it will be retried at the HistoryStore level,
         //    which will go through DualSyncTransport and generate a new nonce
-        if !inFlightMessages.isEmpty {
-            let inFlightCount = inFlightMessages.count
+        // Count and clear under one lock: reading the count, then clearing, let another
+        // thread mutate the dictionary in between.
+        let clearedInFlightCount = stateLock.withLock { () -> Int in
+            let count = inFlightMessagesStorage.count
+            inFlightMessagesStorage.removeAll()
+            return count
+        }
+        if clearedInFlightCount > 0 {
+            let inFlightCount = clearedInFlightCount
             logger.info("⚠️ [WebSocketTransport] Socket closed with \(inFlightCount) in-flight message(s)")
             // Not requeuing - messages may have been sent successfully. If not, they will be retried at HistoryStore level with new nonces.
-            // Clear in-flight messages - don't requeue to avoid duplicate nonce errors
-            inFlightMessages.removeAll()
+            // Already cleared above - don't requeue to avoid duplicate nonce errors
             
             // Trigger queue processing after reconnection
             Task { [weak self] in
@@ -1285,8 +1302,10 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                 }
                 
                 // Log detailed error information to diagnose connection failures
-                let inFlightCount = inFlightMessages.count
-                let inFlightSizes = inFlightMessages.values.map { $0.data.count.formattedAsKB }.joined(separator: ", ")
+                let (inFlightCount, inFlightSizes) = stateLock.withLock { () -> (Int, String) in
+                    (inFlightMessagesStorage.count,
+                     inFlightMessagesStorage.values.map { $0.data.count.formattedAsKB }.joined(separator: ", "))
+                }
                 
                 if isSocketNotConnected {
                     // Socket is not connected - this could be:
@@ -1309,15 +1328,19 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                     // 2. Requeuing would use the same nonce, causing Android to reject it as duplicate
                     // 3. If the message truly failed, it will be retried at the HistoryStore level,
                     //    which will go through DualSyncTransport and generate a new nonce
-                    if !inFlightMessages.isEmpty {
+                    let clearedInFlightCount = stateLock.withLock { () -> Int in
+                        let count = inFlightMessagesStorage.count
+                        inFlightMessagesStorage.removeAll()
+                        return count
+                    }
+                    if clearedInFlightCount > 0 {
                         logger.info("⚠️ [WebSocketTransport] Socket disconnected with \(inFlightCount) in-flight message(s)")
                         logger.info("ℹ️ [WebSocketTransport] Not requeuing - messages may have been sent successfully. If not, they will be retried at HistoryStore level with new nonces.")
                         
                         // Update state to idle to prevent further sends on this connection
                         state = .idle
                         
-                        // Clear in-flight messages - don't requeue to avoid duplicate nonce errors
-                        inFlightMessages.removeAll()
+                        // In-flight messages were cleared atomically above, to avoid duplicate nonce errors
                         
                         // Trigger reconnection immediately (don't wait)
                         reconnectWithBackoff()
@@ -1401,7 +1424,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                                 if let originalMessageIdStr = originalMessageIdStr,
                                    let originalMessageId = UUID(uuidString: originalMessageIdStr) {
                                     // Mark in-flight message as failed and requeue for retry
-                                    if var failedMessage = self.inFlightMessages.removeValue(forKey: originalMessageId) {
+                                    if var failedMessage = self.stateLock.withLock({ self.inFlightMessagesStorage.removeValue(forKey: originalMessageId) }) {
                                         // Check if this is a permanent error that shouldn't be retried
                                         let isPermanentError = code == "device_not_connected" || code == "incorrect_device_id"
                                         
@@ -1493,7 +1516,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             
             // Check if this is an acknowledgment for an in-flight message
             // (In some scenarios, the server may echo back the same envelope ID as acknowledgment)
-            if self.inFlightMessages.removeValue(forKey: envelope.id) != nil {
+            if self.stateLock.withLock({ self.inFlightMessagesStorage.removeValue(forKey: envelope.id) }) != nil {
                 self.logger.debug("✅ [WebSocketTransport] Received ack for message \(envelope.id.uuidString.prefix(8))")
             }
             

@@ -390,46 +390,63 @@ Google Play Store → Search "Hypo Clipboard" → Install
 
 ### Device Pairing
 
-#### Method 1: LAN Auto-Discovery Pairing (Same Network)
+#### Method 1: Pairing on the Same Network
 
-**Prerequisites**: Both devices on same Wi-Fi network
+**Prerequisites**: Both devices on the same Wi-Fi network
 
-1. **Start Pairing (macOS)**
-   ```
-   Menu Bar Icon → Pair Device
-   (macOS will automatically advertise itself on the network)
-   ```
+A device that is not paired yet appears in the other's device list on its own.
+Either side can start; there is no leader.
 
-2. **Pair Device (Android)**
+1. **Open the device list**
    ```
-   Open Hypo → Pair Device → Select "LAN" tab
-   → Wait for macOS device to appear
-   → Tap on the device to pair
+   macOS:    Menu Bar Icon → Settings → Devices
+   Android:  Open Hypo → Settings → Devices
+   Windows:  Tray Icon → Settings → Devices
    ```
 
-3. **Verify Connection**
-   - Both apps show "Connected" status
-   - Test by copying text on either device
-
-#### Method 2: Remote Pairing (Different Networks)
-
-**Prerequisites**: Both devices have internet connection
-
-1. **Generate Pairing Code (macOS)**
+2. **Pair**
    ```
-   Menu Bar Icon → Pair Device → Remote Pairing
-   → Note 6-digit code (valid 60 seconds)
+   Find the device under the paired ones, marked "On this network"
+   → Pair
    ```
 
-2. **Enter Code (Android)**
+3. **Verify**
+   - The device moves into the paired list with a green dot
+   - Copy text on either device and check it arrives on the other
+
+**If nothing appears**, the list says which kind of nothing it is:
+
+| What it says | What it means |
+|---|---|
+| Looking for devices on this network… | Still searching; give it a few seconds |
+| *N* other devices on this network, already paired | Everything reachable is already paired |
+| Nothing on this network answered | Nothing is reachable — see below |
+
+Office, hotel and public Wi-Fi commonly stop devices from reaching each other
+(client isolation). Discovery cannot work there for any application, so use a
+pairing code instead; clipboard sync itself still works over the relay. **Scan
+again** re-runs the search for a device whose app was opened after this screen.
+
+#### Method 2: Pairing with a Code (Different Networks)
+
+**Prerequisites**: Both devices have an internet connection
+
+1. **Show a code**
    ```
-   Open Hypo → Pair Device → Enter Code
-   → Type 6-digit code → Pair
+   macOS:    Menu Bar Icon → Settings → Devices → Pair with code
+   Windows:  Tray Icon → Pair a device…
+   → Note the 6-digit code (valid 60 seconds)
    ```
 
-3. **Verify Connection**
-   - Connection status shows "Cloud" mode
-   - Test clipboard sync between devices
+2. **Enter it on the other device**
+   ```
+   Android:  Open Hypo → Settings → Devices → Pair with Code
+   → Type the 6-digit code → Pair
+   ```
+
+3. **Verify**
+   - Connection status shows the relay is in use
+   - Copy text on either device and check it arrives on the other
 
 ---
 
@@ -488,6 +505,35 @@ adb shell pm list permissions -d | grep hypo
 
 ### Configuration
 
+#### Naming This Device
+
+Every platform names itself after the machine — a hostname, or a make and model —
+and that is the name your other devices show. Change it in Settings, under
+**This device**:
+
+```
+macOS:    Menu Bar Icon → Settings → This device → Name
+Android:  Open Hypo → Settings → This device → Name
+Windows:  Tray Icon → Settings → This device
+iOS:      Settings → This device → Name
+```
+
+The name is committed when you press Return or leave the field. A blank name is
+refused and the field snaps back to what it was.
+
+A device that is already paired keeps the name it recorded when you paired: no
+application can reach into another device's storage. It picks up the new name the
+next time it discovers this device on the network, or the next time you pair.
+
+#### Device Notifications
+
+A paired device coming back online is announced only if it has been offline for
+more than 24 hours. Shorter absences are silent — a phone whose screen sleeps, or
+a laptop that changes network, goes offline and back several times an hour, and a
+notification for each is noise.
+
+Nothing is shown when a device goes offline.
+
 #### macOS Configuration
 
 **Settings File Location**: `~/Library/Application Support/Hypo/`
@@ -502,6 +548,9 @@ defaults write com.hypo.clipboard debugLogging -bool true
 
 # Set sync timeout
 defaults write com.hypo.clipboard syncTimeout -int 5000
+
+# Turn off the local status endpoint (see TROUBLESHOOTING.md)
+defaults write com.hypo.clipboard hypo_debug_api_enabled -bool false
 ```
 
 #### Android Configuration

@@ -896,6 +896,77 @@ echo | openssl s_client -connect hypo.fly.dev:443 2>/dev/null | openssl x509 -fi
 
 ## 🧪 Testing & Diagnostics
 
+### Ask the macOS App What It Sees
+
+The menu bar app answers on the loopback interface, so you do not have to infer
+its state from logs or from `defaults read`:
+
+```bash
+curl -s localhost:7011/status | jq
+```
+
+```json
+{
+  "processName": "HypoMenuBar",
+  "hasRelayToken": true,
+  "connectionState": "connectedCloud",
+  "publishedPeerCount": 3,
+  "pairablePeers": ["OPPO PLP110"],
+  "pairedDevices": [{ "name": "Xiaomi 2410DPN6CC", "isOnline": true, "bonjourHost": "10.0.0.137" }],
+  "discoveredPeers": [{ "serviceName": "OPPO PLP110", "advertisesPairingKey": true, "isPaired": false }]
+}
+```
+
+What each field settles:
+
+| Field | Answers |
+|---|---|
+| `hasRelayToken` | Whether this build can reach the relay at all. `false` means every connection gets 401, and every cloud peer reads as offline. Rebuild with the token: `./scripts/build-macos.sh release` from a checkout that has `.env` |
+| `processName` | Which binary answered. The test harness holds the same port and replies when the app is down |
+| `publishedPeerCount` vs `discoveredPeers` | A published count of 0 next to a non-empty list means the UI's list is stale, not the network quiet |
+| `pairablePeers` | Exactly the list the pairing UI draws — not a lookalike computed separately |
+| `advertisesPairingKey` | A peer without one cannot be paired with, whatever the UI shows |
+
+To ask whether the app itself can reach a peer — which is a different question
+from whether your shell can, because sandboxing and the local-network permission
+apply to one and not the other:
+
+```bash
+curl -s "localhost:7011/probe?host=192.168.1.42&port=7010" | jq
+```
+
+It opens a WebSocket exactly the way pairing does and reports the raw error:
+
+```json
+{ "reachable": false, "errorDomain": "NSURLErrorDomain", "errorCode": -1004 }
+```
+
+The endpoint is loopback-only and carries no secrets (the relay token is reported
+present or absent, never echoed). Turn it off with
+`defaults write com.hypo.clipboard hypo_debug_api_enabled -bool false`, or move it
+with `hypo_debug_api_port`.
+
+### Devices Cannot See Each Other on the Same Wi-Fi
+
+Office, hotel and public networks commonly isolate clients from one another. When
+they do, no application can discover peers there, and the app's own list will say
+"Nothing on this network answered."
+
+Confirm it outside Hypo — if these fail, the network is the answer and nothing in
+the app can change it:
+
+```bash
+# Does anything advertise at all? (Hypo peers publish _hypo._tcp)
+dns-sd -B _hypo._tcp local
+
+# Can this machine reach the phone directly? Read its IP from its Wi-Fi settings.
+ping -c 2 192.168.1.42
+nc -z 192.168.1.42 7010
+```
+
+Pair with a code instead. Clipboard sync keeps working through the relay; only
+the local shortcut is unavailable.
+
 ### Automated Test Matrix
 
 ```bash

@@ -4,8 +4,27 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **macOS LAN Pairing**: macOS can now start a pairing with a device it discovers on the network, not only answer one. Unpaired devices on the same Wi-Fi appear in Settings → Devices with a Pair button; the handshake is the same one Android and Windows initiate, verified against the responder in tests.
+- **Device Renaming (all platforms)**: The name peers show for a device can be changed in Settings on macOS, Android and Windows (iOS already had it). Blank input is refused and the device advertises itself again under the new name; peers already paired keep the name they recorded until they pair or discover the device again.
+- **Windows Device-Return Notification**: Windows now says when a paired device becomes reachable again, which it never did, and polls the relay for cloud presence — previously it knew only who was on the local network.
+- **Windows JPEG Images**: An image arriving as JPEG is accepted and published to the clipboard as PNG. It used to be refused outright, so any picture large enough to have been re-encoded on the way never arrived.
+- **macOS Debug Status API**: The app serves its own state as JSON on `http://127.0.0.1:7011/status` — relay token present, connection state, paired devices with their online flags, discovered peers and whether each is pairable. `/probe?host=&port=` opens a WebSocket the way pairing does and reports the raw error. Loopback only, no secrets. Turn it off with `defaults write com.hypo.clipboard hypo_debug_api_enabled -bool false`.
+
 ### Changed
+- **Device-Return Notifications**: A device coming online is announced only after it has been offline for 24 hours. It used to fire on every transition, so a phone whose screen sleeps produced several an hour.
+- **macOS Devices List**: Paired devices and unpaired devices on the network are one list in Settings → Devices, each of the latter with a Pair button. The sheet behind the button is code-only and reads "Pair with Code". An empty nearby list now says which kind of empty it is: still looking, everything already paired, or a network that does not let devices reach each other.
 - **Android Devices Section**: Nearby LAN discovery now lives inside the Settings → Devices section — unpaired devices on the same network appear under “Nearby devices” and pair with a single tap, with inline progress, success, and retry states. The pairing screen is code-only and the entry button reads “Pair with Code” instead of “Pair New Device”.
+
+### Fixed
+- **Image Echo Loop (macOS, Android)**: An image could circulate between two devices indefinitely, adding a history entry each hop. Every check that could have caught it compared bytes, and each hop re-encoded the picture — applying it on macOS decoded and re-encoded it, and capture compresses anything large. Received bytes are now applied verbatim, and what was applied is remembered by shape (pixel dimensions) so the copy that comes back is recognised as ours.
+- **macOS Crash on a Bonjour TXT Record**: A peer advertising a key with no value aborted the app — `NetService.dictionary(fromTXTRecord:)` is typed `[String: Data]` but such an entry bridges as `NSNull`. The record is parsed directly now, so a device that advertises one no longer kills whatever resolves it.
+- **macOS LAN Discovery After a Restart**: A Bonjour browse that failed or stopped was never retried, so a launch before the network was up cost the whole session — the app advertised itself and saw nothing. Failures are retried with backoff, a failed resolve is retried rather than dropping the peer for good, and opening the pairing panel re-runs the browse.
+- **macOS LAN Dialling**: Every outgoing LAN connection went to port 80. Stripping the query rebuilt the peer's URL from scheme and host, and `URL.host` does not carry the port. Only incoming connections worked, which is why it went unnoticed.
+- **macOS Peer Presence**: Peer status was queried only while the app's own relay socket was up, so a local connection problem reported every cloud peer as offline. Presence is a plain HTTP endpoint and is now asked either way.
+- **macOS Device List Accuracy**: Peers restored from cache at startup are published without waiting for a discovery event that never comes; services running on this Mac are no longer offered for pairing; and a paired device no longer shows a LAN address from a network the Mac has left.
+- **Relay Token in Builds**: `build-macos.sh` and `android/app/build.gradle.kts` resolve the main checkout's `.env` themselves instead of relying on the token being exported, and fail rather than producing a build the relay answers with 401. The macOS script also refuses to install a bundle that failed to sign, and checks before stopping the running app.
+- **Icon Generation Scope**: `generate-icons.py` takes platform arguments, so a macOS build no longer rewrites Android's launcher drawables — and the Android output it produces is the design that is committed, rather than an older single-layer one its own test forbids.
 
 ## [1.2.0] - 2026-08-30
 

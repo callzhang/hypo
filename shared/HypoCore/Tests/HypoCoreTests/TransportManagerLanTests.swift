@@ -321,14 +321,26 @@ struct TransportManagerLanTests {
             )
         )
 
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        // Wait for the first dial to have run and failed, rather than guessing
+        // how long that takes.
+        let firstDialRan = await waitUntil(timeout: .seconds(5)) {
+            attempts.withLock { $0 } >= 1
+        }
+        #expect(firstDialRan, "the first dial never ran")
+
         await manager.requestReconnect()
-        try? await Task.sleep(nanoseconds: 800_000_000)
+
+        // Deliberately shorter than initialBackoff (5s): succeeding inside this
+        // window is what shows the manual retry skipped the backoff rather than
+        // sat through it. The fixed 800ms sleep this replaces was the flake —
+        // not always enough on a loaded machine — but simply waiting longer
+        // would have let a retry that waited out the backoff pass too.
+        let reconnected = await waitUntil(timeout: .seconds(3)) {
+            await manager.lastSuccessfulTransport(for: "peer") == .lan
+        }
 
         await manager.stopConnectionSupervisor()
-        await Task.yield()
-        let last = await manager.lastSuccessfulTransport(for: "peer")
-        #expect(last == .lan)
+        #expect(reconnected, "manual retry did not reconnect over LAN before the backoff would have allowed it")
     }
 
     @Test

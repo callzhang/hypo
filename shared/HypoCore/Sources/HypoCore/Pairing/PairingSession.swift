@@ -103,7 +103,19 @@ public final class PairingSession {
         self.jsonEncoder = JSONEncoder()
         self.jsonDecoder = JSONDecoder()
         self.jsonEncoder.dateEncodingStrategy = .iso8601
-        self.jsonDecoder.dateDecodingStrategy = .iso8601
+        // Not .iso8601: that strategy rejects fractional seconds, and Android
+        // sends Instant.toString(), which carries them. The challenge payload
+        // travels inside the ciphertext, so this is the decoder that reads it.
+        self.jsonDecoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            guard let date = PairingDateFormat.date(from: text) else {
+                throw DecodingError.dataCorruptedError(
+                    in: try decoder.singleValueContainer(),
+                    debugDescription: "Not an ISO-8601 date: \(text)"
+                )
+            }
+            return date
+        }
     }
 
     public func start(

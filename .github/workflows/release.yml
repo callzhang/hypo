@@ -65,6 +65,11 @@ jobs:
         working-directory: android
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          # The build refuses to bake an APK without the relay token, because a
+          # token-less client 401s on every relay connection. A release build is
+          # exactly what people install, so it gets the real secret — no
+          # ALLOW_MISSING_RELAY_TOKEN escape hatch here.
+          RELAY_WS_AUTH_TOKEN: ${{ secrets.RELAY_WS_AUTH_TOKEN }}
           # Increase Gradle JVM memory for faster builds
           GRADLE_OPTS: -Xmx4096m -Dfile.encoding=UTF-8
         run: |
@@ -116,6 +121,8 @@ jobs:
       - name: Build macOS App
         id: build-macos-app
         working-directory: macos
+        env:
+          RELAY_WS_AUTH_TOKEN: ${{ secrets.RELAY_WS_AUTH_TOKEN }}
         run: |
           set -e
           BINARY_NAME="HypoMenuBar"
@@ -178,7 +185,17 @@ jobs:
             BUILD_NUMBER="10000"  # Fallback if version format is unexpected
           fi
           printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n    <key>CFBundleExecutable</key>\n    <string>HypoMenuBar</string>\n    <key>CFBundleIdentifier</key>\n    <string>com.hypo.clipboard</string>\n    <key>CFBundleName</key>\n    <string>Hypo</string>\n    <key>CFBundlePackageType</key>\n    <string>APPL</string>\n    <key>CFBundleVersion</key>\n    <string>%s</string>\n    <key>CFBundleShortVersionString</key>\n    <string>%s</string>\n    <key>LSMinimumSystemVersion</key>\n    <string>13.0</string>\n    <key>LSUIElement</key>\n    <true/>\n    <key>NSHighResolutionCapable</key>\n    <true/>\n    <key>CFBundleIconFile</key>\n    <string>AppIcon</string>\n    <key>NSPrincipalClass</key>\n    <string>NSApplication</string>\n    <key>HypoBuildConfiguration</key>\n    <string>Release</string>\n    <key>NSServices</key>\n    <array>\n        <dict>\n            <key>NSMenuItem</key>\n            <dict>\n                <key>default</key>\n                <string>Copy to Hypo</string>\n            </dict>\n            <key>NSMessage</key>\n            <string>copyToHypo</string>\n            <key>NSPortName</key>\n            <string>com.hypo.clipboard</string>\n            <key>NSSendTypes</key>\n            <array>\n                <string>NSStringPboardType</string>\n                <string>public.plain-text</string>\n            </array>\n        </dict>\n    </array>\n</dict>\n</plist>\n' "${BUILD_NUMBER}" "${VERSION}" > Hypo.app/Contents/Info.plist
-          
+
+          # The app reads RelayWsAuthToken from Info.plist; without it every
+          # relay connection 401s and every peer shows offline. Refuse to
+          # release a bundle like that rather than find out from users.
+          if [ -z "$RELAY_WS_AUTH_TOKEN" ]; then
+            echo "❌ RELAY_WS_AUTH_TOKEN secret is not set; refusing to build a token-less release bundle"
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c "Add :RelayWsAuthToken string $RELAY_WS_AUTH_TOKEN" Hypo.app/Contents/Info.plist
+          echo "✅ Relay token injected into Info.plist"
+
           # Generate icons if script exists
           echo "Generating icons..."
           if [ -f "../scripts/generate-icons.py" ]; then

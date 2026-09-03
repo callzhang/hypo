@@ -23,7 +23,21 @@ public final class DeviceIdentity: DeviceIdentityProviding {
     }
 
 
-    private static let currentPlatform = DevicePlatform.macOS
+    /// The platform this build is running on.
+    ///
+    /// This used to be hardcoded to `.macOS`, which was harmless while macOS
+    /// was the only Swift client. It is not harmless on iOS: the value is
+    /// persisted to UserDefaults on first launch and sent to peers, so an
+    /// iPhone would introduce itself as a Mac and keep doing so.
+    private static let currentPlatform: DevicePlatform = {
+        #if os(iOS)
+        return .iOS
+        #elseif os(Windows)
+        return .Windows
+        #else
+        return .macOS
+        #endif
+    }()
 
     /// Default hostname for this device, used only when no explicit name is
     /// supplied to the initializer.

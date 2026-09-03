@@ -86,6 +86,23 @@ public enum ClipboardContent: Equatable, Codable, Sendable {
         }
     }
 
+    /// Like `previewDescription`, but says how big an image actually is.
+    ///
+    /// The pixel size is the first thing you want from an image in a list and
+    /// the one thing the plain preview leaves out. Separate rather than folded
+    /// into previewDescription because that string is also what macOS shows and
+    /// what search matches against.
+    public var listDescription: String {
+        guard case .image(let metadata) = self else { return previewDescription }
+        let pixels = "\(Int(metadata.pixelSize.width))×\(Int(metadata.pixelSize.height))"
+        let size = metadata.byteSize.formatted(.byteCount(style: .binary))
+        let format = metadata.format.uppercased()
+        if let name = metadata.altText, !name.isEmpty {
+            return "\(name) · \(pixels) · \(format) · \(size)"
+        }
+        return "\(pixels) · \(format) · \(size)"
+    }
+
     public var previewDescription: String {
         switch self {
         case .text(let text):

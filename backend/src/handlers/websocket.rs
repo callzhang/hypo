@@ -9,6 +9,7 @@ use serde_json::Value;
 use tracing::{error, info, warn};
 
 use crate::models::message::ClipboardMessage;
+use crate::services::metrics::get_metrics;
 use crate::services::session_manager::SessionError;
 use crate::AppState;
 
@@ -152,6 +153,15 @@ pub async fn websocket_handler(
     actix_web::rt::spawn(async move {
         let mut message_count = 0u64;
         let mut error_count = 0u64;
+        // Fetched once: get_metrics takes an async read lock, not something to
+        // do per message. The counters behind it are atomics, so the handle is
+        // cheap to hold and lock-free to bump.
+        //
+        // Nothing incremented these before — increment_messages had no callers
+        // at all — so /status reported zero messages processed however much
+        // traffic went through, which reads like a quiet relay rather than a
+        // counter nobody wired up.
+        let metrics = get_metrics().await;
         let mut last_message_time = reader_start_time;
         let mut close_reason = String::from("stream_ended_normally");
         
@@ -159,6 +169,9 @@ pub async fn websocket_handler(
             match msg_stream.recv().await {
                 Some(Ok(msg)) => {
                     message_count += 1;
+                    if let Some(m) = &metrics {
+                        m.increment_messages();
+                    }
                     last_message_time = std::time::Instant::now();
                     
                     match msg {
@@ -169,6 +182,9 @@ pub async fn websocket_handler(
                                     .await
                             {
                                 error_count += 1;
+                                if let Some(m) = &metrics {
+                                    m.increment_errors();
+                                }
                                 // DeviceNotConnected is expected when target device is offline - log as warn
                                 // Other errors (InvalidMessage, SendError) are actual problems - log as error
                                 match &err {
@@ -201,6 +217,9 @@ pub async fn websocket_handler(
                                     .await
                             {
                                 error_count += 1;
+                                if let Some(m) = &metrics {
+                                    m.increment_errors();
+                                }
                                 // DeviceNotConnected is expected when target device is offline - log as warn
                                 // Other errors (InvalidMessage, SendError) are actual problems - log as error
                                 match &err {
@@ -245,6 +264,9 @@ pub async fn websocket_handler(
                 }
                 Some(Err(e)) => {
                     error_count += 1;
+                    if let Some(m) = &metrics {
+                        m.increment_errors();
+                    }
                     close_reason = format!("stream_error_{:?}", e);
                     
                     let connection_duration = reader_start_time.elapsed();
@@ -627,6 +649,12 @@ struct ControlMessagePayload {
     symmetric_key: Option<String>,
     #[serde(default)]
     device_ids: Option<Vec<String>>,
+    /// receive_failed: which message the receiver could not use.
+    #[serde(default)]
+    failed_message_id: Option<String>,
+    /// receive_failed: why, in the receiver's words.
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 async fn handle_control_message(
@@ -666,6 +694,26 @@ async fn handle_control_message(
                 Err(err) => {
                     warn!("Failed to decode symmetric key for {}: {}", sender_id, err);
                 }
+            }
+        }
+        // A receiver telling us it could not use something we delivered.
+        //
+        // Delivery to a socket is all the relay can see on its own: once a
+        // frame is handed to a connected device the server considers it done,
+        // and a device that receives the bytes but cannot decrypt or apply them
+        // looks identical to a successful sync from here. There is no ack for
+        // clipboard envelopes and this is not one — nothing waits for it and
+        // nothing is retried. It exists so the failure appears in the server
+        // log at all, instead of only on the device it happened to.
+        "receive_failed" => {
+            let failed_id = control.failed_message_id.as_deref().unwrap_or("unknown");
+            let reason = control.reason.as_deref().unwrap_or("unspecified");
+            warn!(
+                "Device {} could not use message {}: {}",
+                sender_id, failed_id, reason
+            );
+            if let Some(m) = get_metrics().await {
+                m.increment_receive_failures();
             }
         }
         "deregister_key" => {

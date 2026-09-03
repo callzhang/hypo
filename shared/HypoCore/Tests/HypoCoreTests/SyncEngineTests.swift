@@ -162,9 +162,60 @@ struct SyncEngineTests {
     }
 }
 
+@Suite("Reporting what could not be decrypted")
+struct ReceiveFailureReportTests {
+    /// A device that takes the bytes and cannot decrypt them looks exactly like
+    /// a successful sync from the relay, which sees only that the frame reached
+    /// a connected socket. Reporting it is what puts the failure in the server
+    /// log; nothing waits for the report and nothing is retried.
+    @Test
+    func decryptionFailureIsReported() async throws {
+        let sender = "mac-device"
+        let transport = RecordingTransport()
+        // A key is present, so this gets past the key lookup and fails where it
+        // should: on the ciphertext itself.
+        let engine = SyncEngine(
+            transport: transport,
+            keyProvider: InMemoryDeviceKeyProvider(storage: [sender: SymmetricKey(size: .bits256)]),
+            localDeviceId: "android-device"
+        )
+
+        let envelope = SyncEnvelope(
+            type: .clipboard,
+            payload: .init(
+                contentType: .text,
+                ciphertext: Data(repeating: 0xAB, count: 32),
+                deviceId: sender,
+                target: "android-device",
+                encryption: .init(
+                    nonce: Data(repeating: 0x01, count: 12),
+                    tag: Data(repeating: 0x02, count: 16)
+                )
+            )
+        )
+        let framed = try TransportFrameCodec().encode(envelope)
+
+        do {
+            _ = try await engine.decode(framed)
+            #expect(Bool(false), "this ciphertext should not have opened")
+        } catch {
+            // expected
+        }
+
+        #expect(transport.receiveFailures.count == 1, "the failure was not reported")
+        #expect(transport.receiveFailures.first?.0 == envelope.id)
+        #expect(transport.receiveFailures.first?.1.contains("decryption failed") == true)
+    }
+}
+
 private final class RecordingTransport: SyncTransport, @unchecked Sendable {
     private(set) var sentEnvelopes: [SyncEnvelope] = []
     private(set) var connectCallCount = 0
+    private(set) var receiveFailures: [(UUID, String)] = []
+
+    func reportReceiveFailure(messageId: UUID, reason: String) async {
+        receiveFailures.append((messageId, reason))
+    }
 
     func connect() async throws {
         connectCallCount += 1

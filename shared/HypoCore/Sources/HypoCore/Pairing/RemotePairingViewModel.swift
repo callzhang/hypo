@@ -142,17 +142,43 @@ public final class RemotePairingViewModel: ObservableObject {
                 do {
                     let challengeJSON = try await relayClient.pollChallenge(code: code, initiatorDeviceId: payload.peerDeviceId)
                     let messageData = Data(challengeJSON.utf8)
-                    let message = try decoder.decode(PairingChallengeMessage.self, from: messageData)
+                    let message: PairingChallengeMessage
+                    do {
+                        message = try decoder.decode(PairingChallengeMessage.self, from: messageData)
+                    } catch {
+                        // Naming the step and showing what arrived, because
+                        // "The data couldn't be read because it isn't in the
+                        // correct format" on its own says nothing about which
+                        // of several decodes failed or what the peer sent.
+                        let preview = String(challengeJSON.prefix(200))
+                        throw PairingRelayClient.Error.server(
+                            "Could not read the challenge from the other device: \(error.localizedDescription) — received: \(preview)"
+                        )
+                    }
                     await MainActor.run {
                         self.statusMessage = "Processing challenge…"
                         self.state = .completing
                     }
-                    if let ack = await session.handleChallenge(message) {
-                        let ackData = try encoder.encode(ack)
-                        let ackJSON = String(decoding: ackData, as: UTF8.self)
-                        try await relayClient.submitAck(code: code, initiatorDeviceId: payload.peerDeviceId, ackJSON: ackJSON)
+                    guard let ack = await session.handleChallenge(message) else {
+                        // Rejected. Polling again would fetch the same
+                        // challenge and reject it as a duplicate, forever,
+                        // with the screen stuck on "Processing challenge…".
+                        await MainActor.run {
+                            let reason: String
+                            if case .failed(let message) = self.session.state {
+                                reason = message
+                            } else {
+                                reason = "the challenge was rejected"
+                            }
+                            self.state = .failed(reason)
+                            self.statusMessage = reason
+                        }
                         return
                     }
+                    let ackData = try encoder.encode(ack)
+                    let ackJSON = String(decoding: ackData, as: UTF8.self)
+                    try await relayClient.submitAck(code: code, initiatorDeviceId: payload.peerDeviceId, ackJSON: ackJSON)
+                    return
                 } catch let error as PairingRelayClient.Error {
                     switch error {
                     case .challengeNotReady:

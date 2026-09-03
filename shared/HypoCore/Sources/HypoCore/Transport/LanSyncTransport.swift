@@ -14,6 +14,8 @@ public final class LanSyncTransport: SyncTransport {
     private var isConnected = false
     private var messageHandlers: [UUID: (Data) async throws -> Void] = [:]
     private var getDiscoveredPeers: (() -> [DiscoveredPeer])?
+    private var onIncomingMessage: (@Sendable (Data, TransportOrigin) async -> Void)?
+    private var lastDiscoveredAt: [String: Date] = [:]
     // Persistent connections: one WebSocketTransport per peer (deviceId)
     // Connections are maintained for all discovered peers, mirroring Android's architecture
     private var clientTransports: [String: WebSocketTransport] = [:] // deviceId -> transport
@@ -36,6 +38,21 @@ public final class LanSyncTransport: SyncTransport {
         self.decoder.dateDecodingStrategy = .iso8601
     }
     
+    /// Routes frames arriving on outbound connections.
+    ///
+    /// Without this, a device that dials out can send but never receive: the
+    /// incoming handler is wired to the server's delegate, and connections we
+    /// opened ourselves do not go through the server at all. On macOS that is
+    /// invisible, because peers dial it and their frames arrive server-side.
+    /// On iOS it means nothing can ever be received — iOS never listens, so
+    /// every inbound frame comes back over a connection it opened.
+    public func setOnIncomingMessage(_ handler: @escaping @Sendable (Data, TransportOrigin) async -> Void) {
+        self.onIncomingMessage = handler
+        for transport in clientTransports.values {
+            transport.setOnIncomingMessage(handler)
+        }
+    }
+
     public func setGetDiscoveredPeers(_ closure: @escaping () -> [DiscoveredPeer]) {
         self.getDiscoveredPeers = closure
     }
@@ -90,8 +107,14 @@ public final class LanSyncTransport: SyncTransport {
             url: url,
             pinnedFingerprint: pinnedFingerprint,
             headers: [
-                "X-Device-Id": deviceIdentity.deviceId.uuidString,
-                "X-Device-Platform": "macos"
+                // deviceIdString, not deviceId.uuidString: the latter is
+                // uppercase, every target id in the system is lowercase, and
+                // the peer matches connections to targets by string equality —
+                // so an uppercase identify meant a peer could never find the
+                // connection to send back over.
+                "X-Device-Id": deviceIdentity.deviceIdString,
+                // Was hardcoded "macos"; DeviceIdentity knows what this is.
+                "X-Device-Platform": deviceIdentity.platform.rawValue
             ],
             idleTimeout: 3600,
             environment: "lan",
@@ -104,6 +127,9 @@ public final class LanSyncTransport: SyncTransport {
             metricsRecorder: NullTransportMetricsRecorder(),
             analytics: NoopTransportAnalytics()
         )
+        if let onIncomingMessage {
+            clientTransport.setOnIncomingMessage(onIncomingMessage)
+        }
         clientTransports[deviceId] = clientTransport
         peerURLs[deviceId] = url
 
@@ -121,13 +147,26 @@ public final class LanSyncTransport: SyncTransport {
             peer.endpoint.metadata["device_id"] ?? peer.serviceName
         })
         
-        // Remove connections for peers that are no longer discovered
-        let currentDeviceIds = Set(clientTransports.keys)
-        let removedDeviceIds = currentDeviceIds.subtracting(discoveredDeviceIds)
-        for deviceId in removedDeviceIds {
+        // Drop connections only for peers that have been absent for a while.
+        //
+        // Bonjour is not steady: a refresh can briefly return a peer without
+        // its TXT metadata, and the key then falls back to the service name so
+        // the device-id entry looks "no longer discovered". Removing on the
+        // first sync that misses it tore down a working connection seconds
+        // after it opened, which on iOS — where this is the only connection
+        // there is — meant sends failed with nothing to reach.
+        let now = Date()
+        for deviceId in discoveredDeviceIds {
+            lastDiscoveredAt[deviceId] = now
+        }
+        let absenceGrace: TimeInterval = 30
+        for deviceId in Set(clientTransports.keys) where !discoveredDeviceIds.contains(deviceId) {
+            let lastSeen = lastDiscoveredAt[deviceId] ?? .distantPast
+            guard now.timeIntervalSince(lastSeen) > absenceGrace else { continue }
             #if canImport(os)
-            logger.info("🔌 [LanSyncTransport] Removing connection for peer \(deviceId) (no longer discovered)")
+            logger.info("🔌 [LanSyncTransport] Removing connection for peer \(deviceId) (absent for over \(Int(absenceGrace))s)")
             #endif
+            lastDiscoveredAt.removeValue(forKey: deviceId)
             await removePersistentConnection(for: deviceId)
         }
         
@@ -229,8 +268,10 @@ public final class LanSyncTransport: SyncTransport {
             // Find connection(s) for target device
             var sentToTarget = false
             for connectionId in activeConnections {
+                // Case-insensitive: clients are not consistent about how they
+                // present a UUID, and a mismatch here silently drops the item.
                 if let metadata = server.connectionMetadata(for: connectionId),
-                   metadata.deviceId == targetDeviceId {
+                   metadata.deviceId?.lowercased() == targetDeviceId.lowercased() {
                     try? server.send(framed, to: connectionId)
                     sentToTarget = true
                     #if canImport(os)
@@ -245,29 +286,34 @@ public final class LanSyncTransport: SyncTransport {
                 logger.debug("📡 [LanSyncTransport] Target device not in active connections, trying persistent connection...")
                 #endif
                 
-                if let clientTransport = clientTransports[targetDeviceId] {
-                    Task {
-                        do {
-                            if !clientTransport.isConnected() {
-                                try await clientTransport.connect()
-                            }
-                            try await clientTransport.send(envelope)
-                            #if canImport(os)
-                            let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
-                            logger.debug("✅ [LanSyncTransport] Sent to target device \(deviceDesc) via persistent connection")
-                            #endif
-                        } catch {
-                            #if canImport(os)
-                            let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
-                            logger.warning("⚠️ [LanSyncTransport] Failed to send to target device \(deviceDesc): \(error.localizedDescription)")
-                            #endif
-                        }
-                    }
-                } else {
+                let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
+
+                guard let clientTransport = clientTransports[targetDeviceId] else {
+                    // Reaching nobody is a failure, and it used to be reported
+                    // as success: the caller saw send() return normally and
+                    // told the user the item had gone. On iOS that made every
+                    // send read as "Sent to 1 device" with nothing sent.
                     #if canImport(os)
-                    let deviceDesc = transportManager?.getDeviceName(targetDeviceId) ?? "\(targetDeviceId.prefix(8))..."
                     logger.warning("⚠️ [LanSyncTransport] No connection found for target device \(deviceDesc)")
                     #endif
+                    throw LanSyncTransportError.noConnectionToTarget(targetDeviceId)
+                }
+
+                // Awaited, not fired into a detached Task. A Task swallows the
+                // error the same way the missing branch above did.
+                do {
+                    if !clientTransport.isConnected() {
+                        try await clientTransport.connect()
+                    }
+                    try await clientTransport.send(envelope)
+                    #if canImport(os)
+                    logger.debug("✅ [LanSyncTransport] Sent to target device \(deviceDesc) via persistent connection")
+                    #endif
+                } catch {
+                    #if canImport(os)
+                    logger.warning("⚠️ [LanSyncTransport] Failed to send to target device \(deviceDesc): \(error.localizedDescription)")
+                    #endif
+                    throw error
                 }
             }
         } else {
@@ -397,5 +443,16 @@ public final class LanSyncTransport: SyncTransport {
     
     public func unregisterMessageHandler(id: UUID) {
         messageHandlers.removeValue(forKey: id)
+    }
+}
+
+public enum LanSyncTransportError: LocalizedError {
+    case noConnectionToTarget(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .noConnectionToTarget(let deviceId):
+            return "No LAN connection to device \(deviceId.prefix(8))"
+        }
     }
 }

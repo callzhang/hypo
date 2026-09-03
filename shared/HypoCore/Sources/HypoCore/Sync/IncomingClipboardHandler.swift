@@ -47,6 +47,36 @@ public final class IncomingClipboardHandler {
     /// - Parameters:
     ///   - data: The clipboard data (frame-encoded)
     ///   - transportOrigin: Whether the message came via LAN or cloud relay
+    /// Decodes, giving a key that is still being written a moment to appear.
+    ///
+    /// Pairing does not finish at the same instant on both sides: the device
+    /// that showed the code is done once it submits its ack, while the other
+    /// still has to poll for that ack, verify it and store the key. A peer that
+    /// sends the moment it considers itself paired lands in that gap, and the
+    /// item used to be dropped for want of a key with nothing to retry it —
+    /// the first thing you copied after pairing simply vanished, and you had to
+    /// copy again.
+    ///
+    /// Only retries the missing-key case. Anything else is a real failure and
+    /// waiting would just delay reporting it.
+    private func decodeWaitingForKeyIfNeeded(
+        _ data: Data,
+        from deviceId: String,
+        attempts: Int = 6,
+        interval: Duration = .seconds(1)
+    ) async throws -> ClipboardPayload {
+        for attempt in 1...attempts {
+            do {
+                return try await syncEngine.decode(data)
+            } catch let error as DeviceKeyProviderError {
+                guard case .missingKey = error, attempt < attempts else { throw error }
+                logger.info("🔑 [IncomingClipboardHandler] No key yet for \(deviceId.prefix(8)); pairing may still be settling (attempt \(attempt))")
+                try? await Task.sleep(for: interval)
+            }
+        }
+        return try await syncEngine.decode(data)
+    }
+
     public func handle(_ data: Data, transportOrigin: TransportOrigin = .lan) async {
         logger.info("📥 [IncomingClipboardHandler] handle() called: \(data.count.formattedAsKB), origin=\(transportOrigin.rawValue)")
         do {
@@ -70,7 +100,7 @@ public final class IncomingClipboardHandler {
             
             // Decode the encrypted clipboard payload - syncEngine.decode expects the full frame data
             // It will decode the envelope, decrypt the ciphertext, and decode the ClipboardPayload
-            let payload = try await syncEngine.decode(data)
+            let payload = try await decodeWaitingForKeyIfNeeded(data, from: deviceId)
             
             logger.info("📥 Received clipboard: \(payload.contentType.rawValue) from \(deviceName ?? "unknown")")
             

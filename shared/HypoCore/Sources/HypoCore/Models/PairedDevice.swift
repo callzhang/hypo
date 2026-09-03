@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents a device that has been paired with this local device.
-public struct PairedDevice: Identifiable, Equatable, Codable {
+public struct PairedDevice: Identifiable, Equatable, Codable, Sendable {
     public let id: String
     public let name: String
     public let platform: String

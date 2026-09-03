@@ -9,7 +9,9 @@ public enum CloudRelayDefaults {
             "X-Hypo-Client": version,
             "X-Hypo-Environment": "production",
             "X-Device-Id": deviceIdentity.deviceIdString,
-            "X-Device-Platform": "macos"
+            // Was hardcoded "macos". The relay sees this, and DeviceIdentity
+            // already knows what this build is running on.
+            "X-Device-Platform": deviceIdentity.platform.rawValue
         ]
 
         if let authToken = relayAuthToken(deviceId: deviceIdentity.deviceIdString, bundle: bundle) {

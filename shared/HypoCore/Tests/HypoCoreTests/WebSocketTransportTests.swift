@@ -29,6 +29,41 @@ struct WebSocketTransportTests {
     }
 
     @Test
+    func testReceiveFailureReconnectsTheCloudSocket() async throws {
+        // The reconnect task used to await disconnect(), which cancels
+        // reconnectingTask — itself. The Task.isCancelled check right after
+        // returned early, so connect() never ran and the cloud socket stayed
+        // down for the life of the process while the UI still read connected.
+        let stubTask = StubWebSocketTask()
+        let session = StubSession(task: stubTask)
+        let transport = await MainActor.run { WebSocketTransport(
+            configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
+            sessionFactory: { _, _ in session }
+        ) }
+
+        let resumeCount = Locked(0)
+        stubTask.onResume = {
+            resumeCount.withLock { $0 += 1 }
+            transport.handleOpen(task: stubTask)
+        }
+
+        await MainActor.run {
+            transport._testing_setStateConnected(stubTask)
+            transport._testing_receiveNext(on: stubTask)
+        }
+
+        // ENOTCONN, the error the relay drop actually produced.
+        stubTask.receiveHandler?(.failure(NSError(domain: NSPOSIXErrorDomain, code: 57, userInfo: nil)))
+
+        let reconnected = await waitUntil(timeout: .seconds(10)) {
+            resumeCount.withLock { $0 } >= 1
+        }
+        #expect(reconnected, "a receive failure must bring the cloud socket back up")
+
+        await transport.disconnect()
+    }
+
+    @Test
     func testSendUsesFrameCodec() async throws {
         let stubTask = StubWebSocketTask()
         let session = StubSession(task: stubTask)

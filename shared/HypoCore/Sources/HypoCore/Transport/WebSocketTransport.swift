@@ -108,7 +108,16 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     private var lastReceiveFailure: Date?
     private var reconnectingTask: Task<Void, Never>? // Guard to prevent concurrent reconnection attempts
     // Track messages that are "in flight" - send callback fired but transmission may not be complete
-    internal var inFlightMessages: [UUID: QueuedMessage] = [:] // message ID -> queued message
+    // Guarded by `stateLock`. Touch this directly only where that lock is already
+    // held; everywhere else go through `inFlightMessages` below, which takes it.
+    // Two unsynchronised writers corrupt the dictionary's own storage, and the crash
+    // surfaces as `-[__NSTaggedDate objectForKey:]` inside removeValue — nowhere near
+    // the code that actually raced.
+    private var inFlightMessagesStorage: [UUID: QueuedMessage] = [:] // message ID -> queued message
+    internal var inFlightMessages: [UUID: QueuedMessage] {
+        get { stateLock.withLock { inFlightMessagesStorage } }
+        set { stateLock.withLock { inFlightMessagesStorage = newValue } }
+    }
     // Track pending control message queries (query ID -> continuation)
     // Thread-safe access using a serial queue
     private let pendingControlQueriesQueue = DispatchQueue(label: "com.hypo.clipboard.pendingControlQueries")
@@ -164,7 +173,16 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 return
             }
         }
-        
+
+        try await performConnect()
+    }
+
+    /// The connect itself, without the wait-for-reconnection guard above.
+    ///
+    /// The reconnect task has to call this rather than `connect()`: it *is* the
+    /// task that `reconnectingTask` points at, so the guard would have it await
+    /// its own `.value` and hang there instead of reconnecting.
+    private func performConnect() async throws {
         switch state {
         case .connected:
             return
@@ -183,7 +201,6 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         lastActivity = dateProvider()
 
         let session = sessionFactory(self, configuration.idleTimeout)
-        self.session = session
         
         var request = URLRequest(url: configuration.url)
         if configuration.headers.isEmpty {
@@ -207,9 +224,14 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             // For cloud connections, preserve query parameters if present
             finalURL = originalURL
         } else {
-            // For LAN connections, drop the query but keep everything that addresses
-            // the peer. Rebuilding the string by hand used to lose the port, so every
-            // dial went to :80 while peers listen on the port they advertise.
+            // For LAN connections, drop the query and fragment — and nothing
+            // else.
+            //
+            // This used to rebuild the URL as "\(scheme)://\(host)\(path)",
+            // which silently discarded the port: every LAN dial to a peer on
+            // 7010 went to port 80 instead and could never connect. Invisible
+            // on macOS, which is usually dialled rather than dialling; fatal on
+            // iOS, which only ever dials.
             var components = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)
             components?.query = nil
             components?.fragment = nil
@@ -224,6 +246,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
         request.url = finalURL
         let task = session.webSocketTask(with: request)
+        // Published only once the task exists. Assigning earlier let a
+        // concurrent disconnect() invalidate this very session between its
+        // creation and its first use, and creating a task on an invalidated
+        // session throws an ObjC exception that no Swift catch can hold —
+        // the app aborted with "Task created in a session that has been
+        // invalidated" the moment it started dialling peers.
+        self.session = session
         
         // CRITICAL: Set maximumMessageSize to 1GB to support large file transfers
         // This allows WebSocket to automatically fragment large messages using RFC 6455 fragmentation
@@ -256,6 +285,75 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             }
             state = .idle
             throw error
+        }
+    }
+
+    /// Whether these bytes are a pairing handshake message rather than a
+    /// clipboard envelope. Recognised by its keys, the same way the LAN server
+    /// recognises one arriving from the other direction.
+    private func looksLikePairingMessage(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return object["responder_device_id"] != nil || object["initiator_pub_key"] != nil
+    }
+
+    /// Sends bytes exactly as given, outside the envelope protocol.
+    ///
+    /// LAN pairing has to exchange a plain JSON challenge before either side
+    /// holds a shared key, so it cannot go through send(_ envelope:), which
+    /// frames and encrypts. The peer's server recognises a bare pairing
+    /// message by its keys.
+    /// Tells the relay a delivered message could not be used.
+    ///
+    /// Best effort by design: if the socket is down the report is dropped
+    /// rather than queued. The message it describes is already gone, and a
+    /// diagnostic that retries would be a worse thing than a diagnostic that
+    /// occasionally misses.
+    public func reportReceiveFailure(messageId: UUID, reason: String) async {
+        let control: [String: Any] = [
+            "id": UUID().uuidString,
+            "timestamp": ISO8601DateFormatter().string(from: dateProvider()),
+            "version": "1.0",
+            "type": "control",
+            "payload": [
+                "action": "receive_failed",
+                "failed_message_id": messageId.uuidString,
+                "reason": reason
+            ]
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: control) else { return }
+        var framed = Data()
+        withUnsafeBytes(of: UInt32(body.count).bigEndian) { framed.append(contentsOf: $0) }
+        framed.append(body)
+        do {
+            try await sendRaw(framed)
+            logger.debug("📮 [WebSocketTransport] Reported an unusable message to the relay")
+        } catch {
+            logger.debug("📮 [WebSocketTransport] Could not report an unusable message: \(error)")
+        }
+    }
+
+    public func sendRaw(_ data: Data) async throws {
+        let task: WebSocketTasking? = stateLock.withLock {
+            if case .connected(let task) = state { return task }
+            return nil
+        }
+        guard let task else {
+            throw NSError(
+                domain: "WebSocketTransport",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Not connected"]
+            )
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
+            task.send(.data(data)) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
         }
     }
 
@@ -492,7 +590,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 
                 // Track all messages as in-flight until we get server feedback
                 stateLock.withLock {
-                    inFlightMessages[messageId] = queuedMessage
+                    inFlightMessagesStorage[messageId] = queuedMessage
                 }
                 self.logger.debug("📤 [WebSocketTransport] Message in-flight: type=\(contentType), size=\(frameSize.formattedAsKB), id=\(messageId.uuidString.prefix(8))")
                 
@@ -507,7 +605,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                     await MainActor.run {
                         // Check if message is still in-flight
                         let queuedMessage = strongSelf.stateLock.withLock {
-                            return strongSelf.inFlightMessages.removeValue(forKey: messageId)
+                            return strongSelf.inFlightMessagesStorage.removeValue(forKey: messageId)
                         }
                         
                         guard let queuedMessage else {
@@ -628,13 +726,20 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         await disconnect(clearQueue: true)
     }
     
-    private func disconnect(clearQueue: Bool) async {
+    /// Tears down the socket without touching `reconnectingTask`.
+    ///
+    /// The reconnect path must use this one. `disconnect` cancels the reconnect
+    /// task, and the reconnect task awaits the teardown from inside itself — so
+    /// going through `disconnect` there cancels the very task that is running,
+    /// and the `Task.isCancelled` check after it returns early, before `connect()`
+    /// is ever reached. The cloud socket then stays down for the life of the
+    /// process: observed as a single "Connected to cloud relay" at launch and no
+    /// further attempt over the next half hour, while the UI still read connected.
+    private func teardownConnection(clearQueue: Bool) async {
         watchdogTask?.cancel()
         watchdogTask = nil
         queueProcessingTask?.cancel()
         queueProcessingTask = nil
-        reconnectingTask?.cancel()
-        reconnectingTask = nil
         var taskToCancel: WebSocketTasking?
         switch state {
         case .connected(let task):
@@ -678,6 +783,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
         
         await pendingRoundTrips.removeAll()
+    }
+
+    /// Intentional disconnect: also stops any pending reconnect.
+    private func disconnect(clearQueue: Bool) async {
+        reconnectingTask?.cancel()
+        reconnectingTask = nil
+        await teardownConnection(clearQueue: clearQueue)
     }
     
     /// Check if the transport is currently connected
@@ -843,8 +955,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 return
             }
             
-            // Disconnect first, but preserve message queue for retry
-            await self.disconnect(clearQueue: false)
+            // Tear the socket down without cancelling this task — see teardownConnection.
+            await self.teardownConnection(clearQueue: false)
             
             // Check again if cancelled
             guard !Task.isCancelled else {
@@ -854,7 +966,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             
             // Try to reconnect
             do {
-                try await self.connect()
+                try await self.performConnect()
                 // Reset retry count on successful connection
                 self.receiveRetryCount = 0
                 self.lastReceiveFailure = nil
@@ -869,20 +981,32 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
     }
 
+    /// How often to ping an idle cloud-relay socket. Matches Android's
+    /// `TlsWebSocketConfig.idleTimeoutMillis` (30s) — the path drops idle sockets
+    /// well before Fly.io's own 900s idle_timeout would.
+    static let cloudKeepalivePingInterval: TimeInterval = 30
+
     private func startWatchdog(for task: WebSocketTasking) {
         watchdogTask?.cancel()
-        // For cloud relay connections, use ping/pong keepalive instead of idle timeout
-        // Fly.io idle_timeout is configured to 900 seconds (15 minutes, max allowed) in fly.toml
-        // We send pings every 14 minutes (840 seconds) to:
-        // 1. Keep connection alive (well before 15-minute timeout)
-        // 2. Detect dead connections quickly (within 14 minutes)
+        // For cloud relay connections, use ping/pong keepalive instead of idle timeout.
+        // Fly.io's own idle_timeout is 900s, but that is not the shortest timer on
+        // the path: something between the client and the relay — NAT, or the load
+        // balancer — drops an idle socket after about two minutes, and it does so
+        // without a close frame, so the app goes on believing it is connected.
+        //
+        // This was measured, not assumed: with a 14-minute ping the simulator fell
+        // off the relay's connection list roughly two minutes after connecting,
+        // every time, while the UI still showed connected and the drop was noticed
+        // only when the next ping finally failed. Android has always used 30s
+        // (TlsWebSocketConfig.idleTimeoutMillis) and never falls off, which is what
+        // pointed at the interval rather than at anything iOS-specific.
         if configuration.environment == "cloud" || configuration.url.scheme == "wss" {
             logger.debug("⏰ [WebSocketTransport] Starting ping/pong keepalive")
-            logger.debug("   Sending ping every 14 minutes (840s) - Fly.io timeout: 900s (max)")
+            logger.debug("   Sending ping every \(Self.cloudKeepalivePingInterval)s to outlast NAT/LB idle timeouts")
             watchdogTask = Task.detached { [weak self] in
                 guard let self else { return }
                 while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 840_000_000_000) // 14 minutes (840 seconds)
+                    try? await Task.sleep(nanoseconds: UInt64(Self.cloudKeepalivePingInterval * 1_000_000_000))
                     if Task.isCancelled { return }
                     // Access state directly since WebSocketTransport is a class, not an actor
                     guard case .connected(let currentTask) = self.state, currentTask === task else {
@@ -985,8 +1109,10 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
         }
         
         // Check for in-flight messages when connection closes
-        let inFlightCount = inFlightMessages.count
-        let inFlightSizes = inFlightMessages.values.map { $0.data.count.formattedAsKB }.joined(separator: ", ")
+        let (inFlightCount, inFlightSizes) = stateLock.withLock { () -> (Int, String) in
+            (inFlightMessagesStorage.count,
+             inFlightMessagesStorage.values.map { $0.data.count.formattedAsKB }.joined(separator: ", "))
+        }
         
         // Enhanced logging for cloud connections
         var closeMsg = "🔌 [WebSocketTransport] WebSocket closed\n"
@@ -1029,12 +1155,18 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
         // 2. Requeuing would use the same nonce, causing Android to reject it as duplicate
         // 3. If the message truly failed, it will be retried at the HistoryStore level,
         //    which will go through DualSyncTransport and generate a new nonce
-        if !inFlightMessages.isEmpty {
-            let inFlightCount = inFlightMessages.count
+        // Count and clear under one lock: reading the count, then clearing, let another
+        // thread mutate the dictionary in between.
+        let clearedInFlightCount = stateLock.withLock { () -> Int in
+            let count = inFlightMessagesStorage.count
+            inFlightMessagesStorage.removeAll()
+            return count
+        }
+        if clearedInFlightCount > 0 {
+            let inFlightCount = clearedInFlightCount
             logger.info("⚠️ [WebSocketTransport] Socket closed with \(inFlightCount) in-flight message(s)")
             // Not requeuing - messages may have been sent successfully. If not, they will be retried at HistoryStore level with new nonces.
-            // Clear in-flight messages - don't requeue to avoid duplicate nonce errors
-            inFlightMessages.removeAll()
+            // Already cleared above - don't requeue to avoid duplicate nonce errors
             
             // Trigger queue processing after reconnection
             Task { [weak self] in
@@ -1205,6 +1337,11 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                     self.handleIncoming(data: data)
                 } else if case .string(let str) = message {
                     self.logger.info("📝 [WebSocketTransport] Received text message: \(str.prefix(100))")
+                    // Text frames were logged and thrown away. The LAN server
+                    // sends a pairing ack as text on purpose — so Android can
+                    // read it as a JSON string — which meant a Swift client
+                    // asking to pair over the LAN never heard the answer.
+                    self.handleIncoming(data: Data(str.utf8))
                 }
                 self.receiveNext(on: task)
             case .failure(let error):
@@ -1230,8 +1367,10 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                 }
                 
                 // Log detailed error information to diagnose connection failures
-                let inFlightCount = inFlightMessages.count
-                let inFlightSizes = inFlightMessages.values.map { $0.data.count.formattedAsKB }.joined(separator: ", ")
+                let (inFlightCount, inFlightSizes) = stateLock.withLock { () -> (Int, String) in
+                    (inFlightMessagesStorage.count,
+                     inFlightMessagesStorage.values.map { $0.data.count.formattedAsKB }.joined(separator: ", "))
+                }
                 
                 if isSocketNotConnected {
                     // Socket is not connected - this could be:
@@ -1254,15 +1393,19 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                     // 2. Requeuing would use the same nonce, causing Android to reject it as duplicate
                     // 3. If the message truly failed, it will be retried at the HistoryStore level,
                     //    which will go through DualSyncTransport and generate a new nonce
-                    if !inFlightMessages.isEmpty {
+                    let clearedInFlightCount = stateLock.withLock { () -> Int in
+                        let count = inFlightMessagesStorage.count
+                        inFlightMessagesStorage.removeAll()
+                        return count
+                    }
+                    if clearedInFlightCount > 0 {
                         logger.info("⚠️ [WebSocketTransport] Socket disconnected with \(inFlightCount) in-flight message(s)")
                         logger.info("ℹ️ [WebSocketTransport] Not requeuing - messages may have been sent successfully. If not, they will be retried at HistoryStore level with new nonces.")
                         
                         // Update state to idle to prevent further sends on this connection
                         state = .idle
                         
-                        // Clear in-flight messages - don't requeue to avoid duplicate nonce errors
-                        inFlightMessages.removeAll()
+                        // In-flight messages were cleared atomically above, to avoid duplicate nonce errors
                         
                         // Trigger reconnection immediately (don't wait)
                         reconnectWithBackoff()
@@ -1287,6 +1430,17 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     }
 
     private func handleIncoming(data: Data) {
+        // Checked before decoding, not in a catch. A pairing message has no
+        // frame around it — it travels before either side has a key to build
+        // an envelope with — and the codec rejects it with TransportFrameError,
+        // which is not the DecodingError the recovery path below catches. So
+        // the ack that completes LAN pairing arrived, failed to decode, and
+        // was logged as junk.
+        if looksLikePairingMessage(data), let handler = onIncomingMessage {
+            logger.info("🤝 [WebSocketTransport] Forwarding an unframed pairing message")
+            Task { await handler(data, .lan) }
+            return
+        }
         do {
             // Check for error/control messages before decoding as SyncEnvelope
             if data.count >= 4 {
@@ -1335,13 +1489,17 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                                 if let originalMessageIdStr = originalMessageIdStr,
                                    let originalMessageId = UUID(uuidString: originalMessageIdStr) {
                                     // Mark in-flight message as failed and requeue for retry
-                                    if var failedMessage = self.inFlightMessages.removeValue(forKey: originalMessageId) {
+                                    if var failedMessage = self.stateLock.withLock({ self.inFlightMessagesStorage.removeValue(forKey: originalMessageId) }) {
                                         // Check if this is a permanent error that shouldn't be retried
                                         let isPermanentError = code == "device_not_connected" || code == "incorrect_device_id"
                                         
                                         if isPermanentError {
-                                            // Permanent error - don't retry, just log and drop
-                                            // device_not_connected and incorrect_device_id are expected conditions - log as debug
+                                            // Not retried: the relay has told us this will never
+                                            // arrive. Left as a log line on purpose — clipboard sync is
+                                            // best effort, and a notice per offline device would be noise
+                                            // on every copy rather than information. Where this does need
+                                            // to be visible is the server log, which receive_failed and
+                                            // dropped_offline cover.
                                             if code == "device_not_connected" || code == "incorrect_device_id" {
                                                 self.logger.debug("ℹ️ [WebSocketTransport] Permanent error for message \(originalMessageIdStr.prefix(8)): \(code) - dropping")
                                             } else {
@@ -1427,7 +1585,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
             
             // Check if this is an acknowledgment for an in-flight message
             // (In some scenarios, the server may echo back the same envelope ID as acknowledgment)
-            if self.inFlightMessages.removeValue(forKey: envelope.id) != nil {
+            if self.stateLock.withLock({ self.inFlightMessagesStorage.removeValue(forKey: envelope.id) }) != nil {
                 self.logger.debug("✅ [WebSocketTransport] Received ack for message \(envelope.id.uuidString.prefix(8))")
             }
             

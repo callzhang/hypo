@@ -771,6 +771,25 @@ final class MockServerDelegateState: @unchecked Sendable {
         }
     }
     
+    /// Resumes whatever is waiting, with an error.
+    ///
+    /// Needed because a checked continuation ignores task cancellation. Without
+    /// it the waiters below hang for good once their timeout wins: the group
+    /// cancels the waiting child, the child never notices, and the group cannot
+    /// return until it does.
+    func failPendingWaiters(_ error: Error) {
+        lock.withLock {
+            if let continuation = connectionContinuation {
+                continuation.resume(throwing: error)
+                connectionContinuation = nil
+            }
+            if let continuation = dataContinuation {
+                continuation.resume(throwing: error)
+                dataContinuation = nil
+            }
+        }
+    }
+
     func getClipboardData() -> [Data] {
         lock.withLock { clipboardData }
     }
@@ -782,8 +801,12 @@ final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable 
     func waitForConnection(timeout: TimeInterval) async throws -> UUID {
         return try await withThrowingTaskGroup(of: UUID.self) { group in
             group.addTask {
-                return try await withCheckedThrowingContinuation { continuation in
-                    self.state.setConnectionContinuation(continuation)
+                try await withTaskCancellationHandler {
+                    try await withCheckedThrowingContinuation { continuation in
+                        self.state.setConnectionContinuation(continuation)
+                    }
+                } onCancel: {
+                    self.state.failPendingWaiters(CancellationError())
                 }
             }
             group.addTask {
@@ -799,8 +822,12 @@ final class MockServerDelegate: LanWebSocketServerDelegate, @unchecked Sendable 
     func waitForData(timeout: TimeInterval) async throws -> Data {
         return try await withThrowingTaskGroup(of: Data.self) { group in
             group.addTask {
-                return try await withCheckedThrowingContinuation { continuation in
-                    self.state.setDataContinuation(continuation)
+                try await withTaskCancellationHandler {
+                    try await withCheckedThrowingContinuation { continuation in
+                        self.state.setDataContinuation(continuation)
+                    }
+                } onCancel: {
+                    self.state.failPendingWaiters(CancellationError())
                 }
             }
             group.addTask {
@@ -846,6 +873,23 @@ final class PairingDelegateState: @unchecked Sendable {
     func setPairingContinuation(_ continuation: CheckedContinuation<PairingChallengeMessage, Error>) {
         lock.withLock { pairingContinuation = continuation }
     }
+
+    /// Resumes whatever is waiting, with an error. See the note on the twin of
+    /// this in MockServerDelegateState: a checked continuation ignores task
+    /// cancellation, so without this a timed-out waiter never finishes and the
+    /// task group it belongs to can never return.
+    func failPendingWaiters(_ error: Error) {
+        lock.withLock {
+            if let continuation = connectionContinuation {
+                continuation.resume(throwing: error)
+                connectionContinuation = nil
+            }
+            if let continuation = pairingContinuation {
+                continuation.resume(throwing: error)
+                pairingContinuation = nil
+            }
+        }
+    }
     
     func resumePairing(with challenge: PairingChallengeMessage) {
         lock.withLock {
@@ -868,8 +912,12 @@ final class PairingDelegate: LanWebSocketServerDelegate, @unchecked Sendable {
     func waitForConnection(timeout: TimeInterval) async throws -> UUID {
         return try await withThrowingTaskGroup(of: UUID.self) { group in
             group.addTask {
-                return try await withCheckedThrowingContinuation { continuation in
-                    self.state.setConnectionContinuation(continuation)
+                try await withTaskCancellationHandler {
+                    try await withCheckedThrowingContinuation { continuation in
+                        self.state.setConnectionContinuation(continuation)
+                    }
+                } onCancel: {
+                    self.state.failPendingWaiters(CancellationError())
                 }
             }
             group.addTask {

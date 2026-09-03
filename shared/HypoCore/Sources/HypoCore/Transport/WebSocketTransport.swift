@@ -317,6 +317,36 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     /// holds a shared key, so it cannot go through send(_ envelope:), which
     /// frames and encrypts. The peer's server recognises a bare pairing
     /// message by its keys.
+    /// Tells the relay a delivered message could not be used.
+    ///
+    /// Best effort by design: if the socket is down the report is dropped
+    /// rather than queued. The message it describes is already gone, and a
+    /// diagnostic that retries would be a worse thing than a diagnostic that
+    /// occasionally misses.
+    public func reportReceiveFailure(messageId: UUID, reason: String) async {
+        let control: [String: Any] = [
+            "id": UUID().uuidString,
+            "timestamp": ISO8601DateFormatter().string(from: dateProvider()),
+            "version": "1.0",
+            "type": "control",
+            "payload": [
+                "action": "receive_failed",
+                "failed_message_id": messageId.uuidString,
+                "reason": reason
+            ]
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: control) else { return }
+        var framed = Data()
+        withUnsafeBytes(of: UInt32(body.count).bigEndian) { framed.append(contentsOf: $0) }
+        framed.append(body)
+        do {
+            try await sendRaw(framed)
+            logger.debug("📮 [WebSocketTransport] Reported an unusable message to the relay")
+        } catch {
+            logger.debug("📮 [WebSocketTransport] Could not report an unusable message: \(error)")
+        }
+    }
+
     public func sendRaw(_ data: Data) async throws {
         let task: WebSocketTasking? = stateLock.withLock {
             if case .connected(let task) = state { return task }

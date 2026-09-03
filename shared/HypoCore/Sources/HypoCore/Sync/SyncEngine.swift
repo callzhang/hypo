@@ -274,6 +274,21 @@ public protocol SyncTransport: Sendable {
     func connect() async throws
     func send(_ envelope: SyncEnvelope) async throws
     func disconnect() async
+
+    /// Tell the other end that something it delivered could not be used.
+    ///
+    /// Not an ack, and nothing depends on it: the message is already lost and
+    /// is not retried. It exists so the failure reaches the relay's log, which
+    /// otherwise cannot see it at all — handing a frame to a connected socket
+    /// is the last thing the server knows about it, so a device that receives
+    /// bytes it cannot decrypt looks exactly like a successful sync.
+    func reportReceiveFailure(messageId: UUID, reason: String) async
+}
+
+public extension SyncTransport {
+    /// Most transports have nowhere to send this. Only the cloud relay has a
+    /// server to tell.
+    func reportReceiveFailure(messageId: UUID, reason: String) async {}
 }
 
 public final actor SyncEngine {
@@ -433,6 +448,13 @@ public final actor SyncEngine {
                 logger.debug("🗜️ [SyncEngine] Decompressed: \(encryptedData.count) -> \(plaintext.count) bytes")
             } catch {
                 logger.error("❌ [SyncEngine] Decryption failed: \(error)")
+                // The envelope decoded, so its id is known — which is what makes
+                // this reportable. A frame that fails to decode earlier has no
+                // id to name and stays invisible to the server.
+                await transport.reportReceiveFailure(
+                    messageId: envelope.id,
+                    reason: "decryption failed: \(error)"
+                )
                 throw error
             }
         }

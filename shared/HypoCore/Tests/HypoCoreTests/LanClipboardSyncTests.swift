@@ -104,7 +104,18 @@ struct LanClipboardSyncTests {
 
         // And it was applied to the receiving device's clipboard, which is the
         // part the user actually notices.
-        #expect(clipboard.textToReturn == "hello from the phone")
+        //
+        // Waited for separately, because the two are not one step. The receive
+        // path adds to history first and applies to the clipboard after — the
+        // ordering is deliberate, so ClipboardMonitor sees an entry that
+        // already carries its origin — and the window between them is real: on
+        // a device the history write and the clipboard write have been seen
+        // 0.3s apart. Asserting the clipboard the instant history was ready
+        // failed about one full-suite run in ten, reading (nil) == "hello…".
+        let applied = await waitUntil(timeout: .seconds(10)) {
+            await MainActor.run { clipboard.textToReturn == "hello from the phone" }
+        }
+        #expect(applied, "the entry never reached the receiver's clipboard")
     }
 }
 

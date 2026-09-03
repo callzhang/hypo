@@ -4,6 +4,8 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-03
+
 ### Added
 - **Windows Tray Application**: The Windows client is a notification-area
   application rather than a console tool. It syncs text, links, images and files
@@ -37,6 +39,23 @@ All notable changes to the Hypo project will be documented in this file.
   implementations drift apart unnoticed.
 - **Coverage Gate**: `Hypo.Core` coverage is measured on every build and CI
   fails below 80%.
+- **Relay delivery reporting**: `/status` now separates `processed` (arrived at the relay), `delivered` (handed to a connected target) and `dropped_offline` (addressed to a device that was not connected, and discarded — there is no queue). Previously the relay could say how many messages it had seen but not whether any of them reached a device.
+- **Receiver failure reports**: a device that receives a message it cannot decrypt now tells the relay, which logs it and counts it as `receive_failures`. The relay cannot detect this by itself — handing a frame to a connected socket is the last thing it sees, so a device that takes the bytes and fails to decrypt them was indistinguishable from a successful sync. Deliberately not an ack: nothing waits for it and nothing is retried.
+- **Relay without Redis**: `ALLOW_NO_REDIS=1` runs the relay against a process-local store instead. Opt-in, because Redis being unreachable in a deployment is a fault worth failing on — two instances would stop seeing each other's devices. For local development, where there is no second instance and often no Redis.
+
+### Fixed
+- **Relay Secret From A Stray `.env`**: The relay secret is read from a
+  checkout's `.env` — one with `.git` beside it — rather than from any `.env`
+  found by walking up to the filesystem root. A copy of the repository's `.env`
+  left in a system temporary directory was enough to fail five tests on one
+  machine while CI stayed green, and an application taking a secret from a stray
+  file several directories above itself is a surprise however it resolves.
+- **iOS did not show what it sent**: text sent from this device never appeared in its own history. The send loop awaited delivery to every paired device before recording anything locally, so a single unreachable peer kept the entry out indefinitely. It is recorded first now, and no longer marked as though it had arrived from elsewhere.
+- **Cloud connection never recovered from a drop**: two self-references in the reconnect path — it cancelled itself through `disconnect()`, and then waited on its own completion inside `connect()` — meant a dropped relay socket stayed down for the life of the process while the UI still read connected.
+- **Data race on in-flight messages**: eleven of thirteen accesses to the in-flight map ran without the lock the other two took, corrupting the dictionary's own storage. It surfaced as an unrelated-looking crash inside `removeValue`.
+- **Cloud keepalive too slow**: pings went every 14 minutes, derived from Fly.io's 900s idle timeout, but something on the path drops idle sockets after about two minutes without a close frame. Now 30 seconds, matching Android.
+- **iOS relay token lost at random**: the build phase that injects it declared no inputs, so Xcode could schedule it alongside Info.plist generation and the injected value was overwritten — while the build log still reported success and the app shipped unable to authenticate.
+- **Relay counters were never incremented**: `messages`, `redis.operations` and `avg_request_duration_ms` all had no callers and read zero or null regardless of traffic.
 
 ### Changed
 - **Brand Icon Ring Contrast**: The three stacked rings in the app icon now fade in equal steps (1.0 → 0.7 → 0.4) so all three stay visible, replacing the near-invisible gradient fills on the lower two. Applied to the shared SVG source, the Android adaptive icon, launcher PNGs, and the Quick Settings tile — Android no longer carries its own divergent ring styling.
@@ -47,14 +66,6 @@ All notable changes to the Hypo project will be documented in this file.
   another device, and a password from a phone's password manager roaming to a
   Microsoft account is worse than the convenience is good.
 - **Android Devices Section**: Nearby LAN discovery now lives inside the Settings → Devices section — unpaired devices on the same network appear under “Nearby devices” and pair with a single tap, with inline progress, success, and retry states. The pairing screen is code-only and the entry button reads “Pair with Code” instead of “Pair New Device”.
-
-### Fixed
-- **Relay Secret From A Stray `.env`**: The relay secret is read from a
-  checkout's `.env` — one with `.git` beside it — rather than from any `.env`
-  found by walking up to the filesystem root. A copy of the repository's `.env`
-  left in a system temporary directory was enough to fail five tests on one
-  machine while CI stayed green, and an application taking a secret from a stray
-  file several directories above itself is a surprise however it resolves.
 
 ## [1.2.0] - 2026-08-30
 

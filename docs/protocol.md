@@ -408,7 +408,43 @@ Sent by client before closing connection gracefully.
 
 ---
 
-### 4.4 Error
+### 4.4 Receive Failed
+
+Sent by a **receiver** when it was handed a message it could not use — most
+often one that would not decrypt.
+
+```json
+{
+  "id": "...",
+  "timestamp": "...",
+  "version": "1.0",
+  "type": "control",
+  "payload": {
+    "action": "receive_failed",
+    "failed_message_id": "550e8400-e29b-41d4-a716-446655440000",
+    "reason": "decryption failed: authenticationFailure"
+  }
+}
+```
+
+**This is not an acknowledgement.** Nothing waits for it, nothing is retried,
+and the message it describes is already gone. Clipboard sync is best effort and
+stays that way.
+
+It exists because the relay cannot see this class of failure on its own:
+handing a frame to a connected socket is the last thing the server knows about
+it, so a device that takes the bytes and then fails to decrypt them looks
+exactly like a successful sync. The report puts the failure in the server log
+and counts it as `messages.receive_failures` in `/status`, so a sync problem
+can be investigated without physical access to both devices.
+
+Senders may ignore it entirely. A receiver that cannot reach the relay drops
+the report rather than queueing it — a diagnostic that retries is worse than
+one that occasionally misses.
+
+---
+
+### 4.5 Error
 
 Sent by server when an error occurs. Errors always carry a machine readable
 `code`, a human readable `message`, and optional contextual `details` to aid in
@@ -482,7 +518,7 @@ For recoverable errors (`RATE_LIMITED`, `PAYLOAD_TOO_LARGE`) the backend MAY
 attach a `retry_after` value (in milliseconds) inside `details`. Clients SHOULD
 respect this hint before retrying to avoid unnecessary load.
 
-### 4.5 Query Connected Peers (Privacy-Preserving)
+### 4.6 Query Connected Peers (Privacy-Preserving)
 
 Clients can query the status of known peers without exposing their full social graph or receiving a list of all connected devices.
 

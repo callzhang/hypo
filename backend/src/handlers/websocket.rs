@@ -9,6 +9,7 @@ use serde_json::Value;
 use tracing::{error, info, warn};
 
 use crate::models::message::ClipboardMessage;
+use crate::services::metrics::get_metrics;
 use crate::services::session_manager::SessionError;
 use crate::AppState;
 
@@ -152,6 +153,15 @@ pub async fn websocket_handler(
     actix_web::rt::spawn(async move {
         let mut message_count = 0u64;
         let mut error_count = 0u64;
+        // Fetched once: get_metrics takes an async read lock, not something to
+        // do per message. The counters behind it are atomics, so the handle is
+        // cheap to hold and lock-free to bump.
+        //
+        // Nothing incremented these before — increment_messages had no callers
+        // at all — so /status reported zero messages processed however much
+        // traffic went through, which reads like a quiet relay rather than a
+        // counter nobody wired up.
+        let metrics = get_metrics().await;
         let mut last_message_time = reader_start_time;
         let mut close_reason = String::from("stream_ended_normally");
         
@@ -159,6 +169,9 @@ pub async fn websocket_handler(
             match msg_stream.recv().await {
                 Some(Ok(msg)) => {
                     message_count += 1;
+                    if let Some(m) = &metrics {
+                        m.increment_messages();
+                    }
                     last_message_time = std::time::Instant::now();
                     
                     match msg {
@@ -169,6 +182,9 @@ pub async fn websocket_handler(
                                     .await
                             {
                                 error_count += 1;
+                                if let Some(m) = &metrics {
+                                    m.increment_errors();
+                                }
                                 // DeviceNotConnected is expected when target device is offline - log as warn
                                 // Other errors (InvalidMessage, SendError) are actual problems - log as error
                                 match &err {
@@ -201,6 +217,9 @@ pub async fn websocket_handler(
                                     .await
                             {
                                 error_count += 1;
+                                if let Some(m) = &metrics {
+                                    m.increment_errors();
+                                }
                                 // DeviceNotConnected is expected when target device is offline - log as warn
                                 // Other errors (InvalidMessage, SendError) are actual problems - log as error
                                 match &err {
@@ -245,6 +264,9 @@ pub async fn websocket_handler(
                 }
                 Some(Err(e)) => {
                     error_count += 1;
+                    if let Some(m) = &metrics {
+                        m.increment_errors();
+                    }
                     close_reason = format!("stream_error_{:?}", e);
                     
                     let connection_duration = reader_start_time.elapsed();

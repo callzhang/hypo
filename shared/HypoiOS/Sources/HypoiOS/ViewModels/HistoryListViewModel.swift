@@ -126,7 +126,10 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
             originPlatform: identity.platform,
             originDeviceName: identity.deviceName,
             content: .text(text),
-            transportOrigin: .lan
+            // Nil marks this as ours. HistoryStore treats a non-nil origin as
+            // something that arrived from elsewhere, and the row renders a
+            // transport badge to match — wrong for text this device just sent.
+            transportOrigin: nil
         )
 
         let transport = transportManager.loadTransport()
@@ -150,6 +153,16 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
 
         let payload = ClipboardPayload(contentType: .text, data: Data(text.utf8))
 
+        // Record it before sending, not after. The send loop awaits delivery to
+        // every paired device, so a single unreachable peer used to keep the
+        // entry out of this device's own history indefinitely: the user copied
+        // something, the other phone received it, and the phone that sent it
+        // showed nothing. What this device holds should not depend on whether
+        // anyone else could be reached.
+        _ = await store.insert(entry)
+        entries = await store.all()
+        refreshClipboardOffer()
+
         var sent = 0
         var failed = 0
         for device in devices {
@@ -165,10 +178,6 @@ public final class HistoryListViewModel: ObservableObject, RemoteEntryReceiving 
                 failed += 1
             }
         }
-
-        _ = await store.insert(entry)
-        entries = await store.all()
-        refreshClipboardOffer()
 
         let outcome: SendOutcome
         switch (sent, failed) {

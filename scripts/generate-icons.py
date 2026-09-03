@@ -143,6 +143,10 @@ def build_android_foreground_xml():
     here fights the one behind it. `BrandIconResourceTest` asserts the split, so
     emitting the older single-layer design here silently reverted the icon and
     failed that test on the next Android build.
+
+    The layer alphas mirror macos/scripts/icon.svg: 1.0, 0.7, 0.4 top to
+    bottom, equal steps of 0.3 so every ring stays visible on the gradient.
+    `BrandIconResourceTest` asserts these values too.
     """
     return '''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -152,11 +156,11 @@ def build_android_foreground_xml():
     android:viewportHeight="108">
     <path
         android:fillColor="#FFFFFF"
-        android:fillAlpha="0.12"
+        android:fillAlpha="0.4"
         android:pathData="M34,63 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
     <path
         android:fillColor="#FFFFFF"
-        android:fillAlpha="0.25"
+        android:fillAlpha="0.7"
         android:pathData="M34,55 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
     <path
         android:fillColor="#FFFFFF"

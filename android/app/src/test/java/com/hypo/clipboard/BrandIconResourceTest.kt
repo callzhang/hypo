@@ -9,6 +9,11 @@ import org.w3c.dom.Document
 class BrandIconResourceTest {
     private val drawableDirectory = File(requireNotNull(System.getProperty("hypo.drawable.dir")))
 
+    // Bottom to top, matching document order in the drawables. Equal steps of
+    // 0.3 keep every layer visible against the brand gradient; the same values
+    // live in macos/scripts/icon.svg and scripts/generate-icons.py.
+    private val layerAlphas = listOf(0.4, 0.7, 1.0)
+
     @Test
     fun `adaptive launcher icon uses the brand gradient as its full background`() {
         val background = parseDrawable("ic_launcher_background.xml")
@@ -31,6 +36,11 @@ class BrandIconResourceTest {
                 "#FFFFFF",
                 paths.item(index).attributes.getNamedItem("android:fillColor").nodeValue
             )
+            assertEquals(
+                layerAlphas[index],
+                fillAlpha(paths.item(index)),
+                "Layer alphas must step evenly so every ring stays visible"
+            )
         }
     }
 
@@ -45,6 +55,11 @@ class BrandIconResourceTest {
                 "@android:color/white",
                 paths.item(index).attributes.getNamedItem("android:fillColor").nodeValue
             )
+            assertEquals(
+                layerAlphas[index],
+                fillAlpha(paths.item(index)),
+                "Layer alphas must step evenly so every ring stays visible"
+            )
         }
     }
 
@@ -54,4 +69,7 @@ class BrandIconResourceTest {
             .newDocumentBuilder()
             .parse(file)
     }
+
+    private fun fillAlpha(path: org.w3c.dom.Node): Double =
+        path.attributes.getNamedItem("android:fillAlpha")?.nodeValue?.toDouble() ?: 1.0
 }

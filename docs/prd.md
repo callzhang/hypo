@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Project**: Hypo - Cross-Platform Clipboard Sync
-- **Platforms**: Android (8.0+), macOS (14.0+), with support for additional platforms (iOS, Windows, Linux)
+- **Platforms**: Android (8.0+), macOS (14.0+), Windows (10 22H2+), with support for additional platforms (iOS, Linux)
 - **Status**: Production Release (Sprint 11 - Production Release)
 - **Version**: v1.1.6
 - **Last Updated**: January 13, 2026
@@ -32,12 +32,16 @@ Users frequently move between mobile devices (Android, iOS) and desktop computer
 - ✅ Production backend deployed (https://hypo.fly.dev)
 - ✅ SMS auto-sync (Android): Automatically copies incoming SMS to clipboard and syncs to macOS
 - ✅ MIUI/HyperOS optimization: Automatic detection and workarounds for Xiaomi device restrictions
+- ✅ Windows client (10 22H2+, x64 and ARM64): notification-area application with
+  clipboard history, global shortcut, filters and pinning, drag-and-drop,
+  settings, and both LAN and relay transports. Distributed as a self-contained
+  zip; see [`windows/README.md`](../windows/README.md)
 - ✅ Automated build and release pipeline with GitHub Actions
 - ✅ Comprehensive documentation and user guides
 
 ### Planned for Future Releases
 - Multi-device support (>2 devices simultaneously)
-- iOS, Windows, and Linux client applications
+- iOS and Linux client applications
 - Large file support via cloud storage integration
 - Advanced features (OCR, smart paste, clipboard filtering)
 

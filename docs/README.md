@@ -12,42 +12,38 @@ This directory contains all documentation for the Hypo clipboard sync project.
 - **[Changelog](../changelog.md)** - Version history and project status summary
 
 ### User Documentation
-- **[User Guide](USER_GUIDE.md)** - End-user documentation
-- **[User Guide](docs/USER_GUIDE.md)** - Complete user guide including installation instructions
+- **[User Guide](USER_GUIDE.md)** - End-user documentation, including
+  installation for each platform
 - **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
 
+### Per-Client Documentation
+- **[Windows Client](../windows/README.md)** - What is implemented, how it is
+  verified, and where it diverges from its design
+- **[Verifying Windows](../windows/VERIFYING.md)** - What only a real Windows
+  machine can answer, ordered by how likely each is to be broken
+
 ### Development Documentation
-- **[Release Process](RELEASE.md)** - How to create releases
+- **[Version Management](VERSION_MANAGEMENT.md)** - How versions are set and released
+- **[Debugging Sync Issues](DEBUGGING_SYNC_ISSUES.md)** - Diagnosing sync failures
 - **[Changelog](../changelog.md)** - Version history and project status
 
-### Security
-- **[Security](security/)** - Security documentation
-  - [Remote Pairing Audit](security/remote_pairing_audit.md)
-
-### Bug Reports
-- **Resolved bugs** are archived in [Archive](archive/)
-  - [Android Cloud Sync Status](archive/android_cloud_sync_status.md) - ✅ Resolved
-  - [Android LAN Sync Status](archive/android_lan_sync_status.md) - ✅ Resolved
-
-### Archive
-- **[Archive](archive/)** - Historical reports and completed work
-  - Sprint 8 Progress Report
-  - Sprint 8 Bug Report
-  - Optimization Completion Report
-
-### Research
+### Design and Research
+- **[Specifications](superpowers/specs/)** - Design documents, annotated where the
+  implementation diverged
 - **[Research](research/)** - Historical research documents
   - [Cryptography Research](research/crypto_research.md) - Library evaluation (decision completed)
 
-### Additional Documentation
-- **[Release Process](RELEASE.md)** - Release workflow and artifact management
-- **[SMS Auto-Sync](prd.md#45-android-features--implemented)** - SMS sync feature (documented in PRD)
+### Other
+- **[Commercialization](COMMERCIALIZATION.md)** - Business considerations
+- **[SMS Auto-Sync](prd.md)** - SMS sync feature (documented in the PRD)
 
 ## 🚀 Quick Start
 
 1. **New to the project?** Start with [PRD](prd.md) and [Technical Specification](technical.md)
-2. **Setting up?** See [User Guide - Installation Section](docs/USER_GUIDE.md#-installation)
-3. **Developing?** Read [Technical Specification](technical.md) and [Release Process](RELEASE.md)
+2. **Setting up?** See [User Guide](USER_GUIDE.md)
+3. **Developing?** Read [Technical Specification](technical.md), then the client
+   you are working on — [Windows](../windows/README.md), [macOS](../macos/),
+   [Android](../android/README.md)
 4. **Troubleshooting?** Check [Troubleshooting Guide](TROUBLESHOOTING.md)
 5. **Version history?** See [Changelog](../changelog.md)
 

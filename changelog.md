@@ -4,9 +4,56 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Windows Tray Application**: The Windows client is a notification-area
+  application rather than a console tool. It syncs text, links, images and files
+  over the LAN and the relay, keeps a searchable history, and pairs either with
+  devices on the network or with a six-digit code for one that is elsewhere.
+  Distributed as a self-contained zip for x64 and ARM64 — no installer and no
+  .NET runtime to install.
+- **Windows Global Shortcut**: <kbd>Alt</kbd>+<kbd>V</kbd> opens the history
+  from anywhere, with the caret already in the search box; arrow keys choose,
+  <kbd>Enter</kbd> puts the entry back and returns focus to what you were typing
+  in, <kbd>Esc</kbd> leaves with nothing. Reconfigurable, and a combination
+  another application already holds is reported rather than failing silently.
+- **Windows History Filters and Pinning**: Filter by type and by when something
+  was copied, and pin entries to hold them at the top and stop them being
+  trimmed. Each row shows which device sent it, whether it arrived over the
+  network or through the relay, and when.
+- **Windows Drag and Drop**: Drag an entry straight into another application,
+  which puts it there without touching the clipboard.
+- **Windows Settings**: Paired devices with names and whether each is on this
+  network, unpairing, transport and LAN port, history retention and clearing,
+  and whether Hypo starts when you sign in.
+- **Windows Arrival Notifications**: A notification names the device something
+  came from and previews it. Locally copied items never notify. On by default,
+  unlike the two clipboard-sharing settings, because it shares nothing beyond
+  the screen already in front of you.
+- **Windows Light and Dark**: Follows the system theme and switches with it
+  while running; Mica on Windows 11 and an explicit solid background below it.
+- **Shared Fixture Guard**: CI now fails if any client stops reading the shared
+  protocol fixtures. Each suite already fails when a client *disagrees* with
+  them; a client that stops reading them was green, which is how three
+  implementations drift apart unnoticed.
+- **Coverage Gate**: `Hypo.Core` coverage is measured on every build and CI
+  fails below 80%.
+
 ### Changed
 - **Brand Icon Ring Contrast**: The three stacked rings in the app icon now fade in equal steps (1.0 → 0.7 → 0.4) so all three stay visible, replacing the near-invisible gradient fills on the lower two. Applied to the shared SVG source, the Android adaptive icon, launcher PNGs, and the Quick Settings tile — Android no longer carries its own divergent ring styling.
+- **Windows Clipboard Sharing Defaults**: Synced items are kept out of this
+  machine's <kbd>Win</kbd>+<kbd>V</kbd> history and out of the Microsoft cloud
+  clipboard unless you turn either on. Hypo carries whatever was copied on
+  another device, and a password from a phone's password manager roaming to a
+  Microsoft account is worse than the convenience is good.
 - **Android Devices Section**: Nearby LAN discovery now lives inside the Settings → Devices section — unpaired devices on the same network appear under “Nearby devices” and pair with a single tap, with inline progress, success, and retry states. The pairing screen is code-only and the entry button reads “Pair with Code” instead of “Pair New Device”.
+
+### Fixed
+- **Relay Secret From A Stray `.env`**: The relay secret is read from a
+  checkout's `.env` — one with `.git` beside it — rather than from any `.env`
+  found by walking up to the filesystem root. A copy of the repository's `.env`
+  left in a system temporary directory was enough to fail five tests on one
+  machine while CI stayed green, and an application taking a secret from a stray
+  file several directories above itself is a surprise however it resolves.
 
 ## [1.2.0] - 2026-08-30
 

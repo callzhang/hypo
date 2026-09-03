@@ -134,7 +134,10 @@ dotnet run --project src/Hypo.Windows -- run
 ```
 
 `Hypo.Core` has no Windows APIs and is verified against real devices from any
-machine; the Win32 layer is verified by CI on a Windows runner.
+machine; the Win32 layer and the interface are both verified by CI on a Windows
+runner, which shows windows and photographs them — every green build publishes
+`hypo-ui-screenshots`. What a runner cannot judge is listed in
+[`windows/VERIFYING.md`](windows/VERIFYING.md).
 
 Releases carry `Hypo-<version>-windows-x64.zip` and `-arm64.zip` —
 self-contained, unzip and run `Hypo.exe`, no installer and no .NET runtime

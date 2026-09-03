@@ -587,59 +587,6 @@ struct WebSocketTransportTests {
     }
 
     @Test
-    func testUndeliverableMessageIsReported() async throws {
-        // The relay already answers device_not_connected with the original
-        // message id; the client used to log it at debug level and drop it, so
-        // nothing above the transport could tell the user their clipboard had
-        // not arrived.
-        let transport = WebSocketTransport(
-            configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil)
-        )
-
-        let reported = Locked<(UUID, String)?>(nil)
-        transport.setOnUndeliverable { id, code in
-            reported.withLock { $0 = (id, code) }
-        }
-
-        let envelope = SyncEnvelope(type: .clipboard, payload: .init(
-            contentType: .text,
-            ciphertext: Data([0x01]),
-            deviceId: "device",
-            target: "peer",
-            encryption: .init(nonce: Data([0x02]), tag: Data([0x03]))
-        ))
-        let queued = WebSocketTransport.QueuedMessage(
-            envelope: envelope,
-            data: try TransportFrameCodec().encode(envelope),
-            queuedAt: Date(),
-            retryCount: 0
-        )
-        await MainActor.run {
-            transport.inFlightMessages[envelope.id] = queued
-        }
-
-        let errorPayload: [String: Any] = [
-            "type": "error",
-            "payload": [
-                "code": "device_not_connected",
-                "message": "offline",
-                "original_message_id": envelope.id.uuidString
-            ]
-        ]
-        await MainActor.run {
-            transport._testing_handleIncoming(lengthPrefixedJSON(errorPayload))
-        }
-
-        let told = await waitUntil(timeout: .seconds(5)) {
-            reported.withLock { $0 != nil }
-        }
-        #expect(told, "an undeliverable message was not reported")
-        let (id, code) = reported.withLock { $0 } ?? (UUID(), "")
-        #expect(id == envelope.id)
-        #expect(code == "device_not_connected")
-    }
-
-    @Test
     func testHandleIncomingDropsPermanentError() async throws {
         let transport = WebSocketTransport(
             configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil)

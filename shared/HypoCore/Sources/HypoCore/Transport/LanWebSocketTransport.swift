@@ -122,7 +122,18 @@ public final class LanWebSocketTransport: NSObject, SyncTransport {
         case .connecting:
             logger.info("⏳ [LanWebSocketTransport] Already connecting, waiting...")
             try await withCheckedThrowingContinuation { continuation in
-                handshakeContinuation = continuation
+                // The handshake may have finished between the state read above
+                // and this closure running; a continuation stored after that
+                // resume has nobody left to wake it. Re-check before parking.
+                switch state {
+                case .connected:
+                    continuation.resume(returning: ())
+                case .idle:
+                    continuation.resume(throwing: NSError(
+                        domain: NSURLErrorDomain, code: NSURLErrorUnknown))
+                case .connecting:
+                    handshakeContinuation = continuation
+                }
             }
             return
         case .idle:
@@ -946,6 +957,10 @@ extension LanWebSocketTransport: URLSessionWebSocketDelegate {
 
     @_spi(Testing) public func _testing_setStateIdle() {
         state = .idle
+    }
+
+    @_spi(Testing) public func _testing_hasHandshakeWaiter() -> Bool {
+        handshakeContinuation != nil
     }
 
     @_spi(Testing) public func _testing_enqueueQueuedMessage(

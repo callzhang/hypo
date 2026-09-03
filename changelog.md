@@ -4,6 +4,9 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **iOS CI Hang in LanWebSocketTransport Tests**: `connect()` could park a waiter after the handshake had already completed — a lost wakeup that hung the test process until CI's 20-minute step timeout with nothing but keepalive pings in the log. The wait now re-checks state before parking, the racy test waits deterministically instead of sleeping 50ms, and the whole suite carries a one-minute time limit so any future hang fails fast with a named test.
+
 ## [1.3.0] - 2026-09-03
 
 ### Added

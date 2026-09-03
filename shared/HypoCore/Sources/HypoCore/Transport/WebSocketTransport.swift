@@ -89,6 +89,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     private var handshakeStartedAt: Date?
     private let pendingRoundTrips: PendingRoundTripStore
     private var onIncomingMessage: ((Data, TransportOrigin) async -> Void)?
+    /// Called when the relay says a message will never arrive.
+    ///
+    /// The relay does report this — it answers device_not_connected with the
+    /// original message id — and until now the answer was logged at debug level
+    /// and thrown away, so the person who copied something never learned it had
+    /// not reached the other device.
+    private var onUndeliverable: ((UUID, String) async -> Void)?
     private let dateProvider: @Sendable () -> Date
     
     // Thread safety
@@ -156,6 +163,12 @@ public final class WebSocketTransport: NSObject, SyncTransport {
     
     public func setOnIncomingMessage(_ handler: @escaping (Data, TransportOrigin) async -> Void) {
         self.onIncomingMessage = handler
+    }
+
+    /// Handler for messages the relay has said it cannot deliver, given the
+    /// message id and the relay's error code.
+    public func setOnUndeliverable(_ handler: @escaping (UUID, String) async -> Void) {
+        self.onUndeliverable = handler
     }
 
     deinit {
@@ -1464,8 +1477,12 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
                                         let isPermanentError = code == "device_not_connected" || code == "incorrect_device_id"
                                         
                                         if isPermanentError {
-                                            // Permanent error - don't retry, just log and drop
-                                            // device_not_connected and incorrect_device_id are expected conditions - log as debug
+                                            // Not retried — the relay has told us this will never arrive.
+                                            // Whoever is listening gets told, because "your clipboard did
+                                            // not reach that device" is the user's business, not a log line.
+                                            if let notify = self.onUndeliverable {
+                                                Task { await notify(originalMessageId, code) }
+                                            }
                                             if code == "device_not_connected" || code == "incorrect_device_id" {
                                                 self.logger.debug("ℹ️ [WebSocketTransport] Permanent error for message \(originalMessageIdStr.prefix(8)): \(code) - dropping")
                                             } else {

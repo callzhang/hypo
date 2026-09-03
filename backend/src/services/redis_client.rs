@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::debug;
 
+use crate::services::metrics::{get_metrics, Metrics};
+
 #[derive(Debug, thiserror::Error)]
 pub enum PairingCodeError {
     #[error("pairing code not found")]
@@ -100,17 +102,34 @@ impl PairingCodeEntry {
 #[derive(Clone)]
 pub struct RedisClient {
     manager: ConnectionManager,
+    /// Held from construction so counting an operation costs an atomic add.
+    /// get_metrics() takes an async read lock, which is not something to do on
+    /// every Redis call; main initialises metrics before building this, so the
+    /// handle is there to take once.
+    metrics: Option<Metrics>,
 }
 
 impl RedisClient {
     pub async fn new(redis_url: &str) -> Result<Self> {
         let client = Client::open(redis_url)?;
         let manager = ConnectionManager::new(client).await?;
-        
-        Ok(Self { manager })
+        let metrics = get_metrics().await;
+
+        Ok(Self { manager, metrics })
+    }
+
+    /// Counted here rather than at the call sites: every operation goes through
+    /// one of the methods below, so a new caller cannot forget to count itself.
+    /// increment_redis_ops had no callers at all before this, so /status
+    /// reported zero Redis operations no matter how much traffic there was.
+    fn note_op(&self) {
+        if let Some(m) = &self.metrics {
+            m.increment_redis_ops();
+        }
     }
 
     pub async fn register_device_batch(&mut self, registrations: &[(String, String)]) -> Result<()> {
+        self.note_op();
         use redis::Pipeline;
         
         debug!("Registering {} devices in batch", registrations.len());
@@ -128,6 +147,7 @@ impl RedisClient {
     }
 
     pub async fn register_device(&mut self, device_id: &str, connection_id: &str) -> Result<()> {
+        self.note_op();
         use redis::Pipeline;
 
         debug!("Registering device {} with connection {}", device_id, connection_id);
@@ -142,6 +162,7 @@ impl RedisClient {
     }
 
     pub async fn unregister_device(&mut self, device_id: &str) -> Result<()> {
+        self.note_op();
         use redis::{AsyncCommands, Pipeline};
 
         debug!("Unregistering device {}", device_id);
@@ -162,6 +183,7 @@ impl RedisClient {
     }
 
     pub async fn unregister_devices_batch(&mut self, device_ids: &[String]) -> Result<()> {
+        self.note_op();
         use redis::Pipeline;
 
         if device_ids.is_empty() {
@@ -192,6 +214,7 @@ impl RedisClient {
     }
 
     pub async fn get_device_connection(&mut self, device_id: &str) -> Result<Option<String>> {
+        self.note_op();
         use redis::AsyncCommands;
 
         let conn_id: Option<String> = self.manager.get(format!("device:{}", device_id)).await?;
@@ -206,6 +229,7 @@ impl RedisClient {
         initiator_public_key: &str,
         ttl: Duration,
     ) -> Result<PairingCodeEntry, PairingCodeError> {
+        self.note_op();
         let ttl_secs = ttl.as_secs().max(1);
         let issued_at = Utc::now();
         let expires_at = issued_at
@@ -252,6 +276,7 @@ impl RedisClient {
         responder_device_name: &str,
         responder_public_key: &str,
     ) -> Result<PairingCodeEntry, PairingCodeError> {
+        self.note_op();
         let mut entry = self
             .load_pairing_entry(code)
             .await?
@@ -274,6 +299,7 @@ impl RedisClient {
         responder_device_id: &str,
         challenge_json: &str,
     ) -> Result<(), PairingCodeError> {
+        self.note_op();
         let mut entry = self
             .load_pairing_entry(code)
             .await?
@@ -295,6 +321,7 @@ impl RedisClient {
         code: &str,
         initiator_device_id: &str,
     ) -> Result<String, PairingCodeError> {
+        self.note_op();
         let mut entry = self
             .load_pairing_entry(code)
             .await?
@@ -318,6 +345,7 @@ impl RedisClient {
         initiator_device_id: &str,
         ack_json: &str,
     ) -> Result<(), PairingCodeError> {
+        self.note_op();
         let mut entry = self
             .load_pairing_entry(code)
             .await?
@@ -337,6 +365,7 @@ impl RedisClient {
         code: &str,
         responder_device_id: &str,
     ) -> Result<String, PairingCodeError> {
+        self.note_op();
         let mut entry = self
             .load_pairing_entry(code)
             .await?

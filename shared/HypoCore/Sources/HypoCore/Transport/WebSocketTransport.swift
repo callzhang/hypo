@@ -173,7 +173,16 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 return
             }
         }
-        
+
+        try await performConnect()
+    }
+
+    /// The connect itself, without the wait-for-reconnection guard above.
+    ///
+    /// The reconnect task has to call this rather than `connect()`: it *is* the
+    /// task that `reconnectingTask` points at, so the guard would have it await
+    /// its own `.value` and hang there instead of reconnecting.
+    private func performConnect() async throws {
         switch state {
         case .connected:
             return
@@ -687,13 +696,20 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         await disconnect(clearQueue: true)
     }
     
-    private func disconnect(clearQueue: Bool) async {
+    /// Tears down the socket without touching `reconnectingTask`.
+    ///
+    /// The reconnect path must use this one. `disconnect` cancels the reconnect
+    /// task, and the reconnect task awaits the teardown from inside itself — so
+    /// going through `disconnect` there cancels the very task that is running,
+    /// and the `Task.isCancelled` check after it returns early, before `connect()`
+    /// is ever reached. The cloud socket then stays down for the life of the
+    /// process: observed as a single "Connected to cloud relay" at launch and no
+    /// further attempt over the next half hour, while the UI still read connected.
+    private func teardownConnection(clearQueue: Bool) async {
         watchdogTask?.cancel()
         watchdogTask = nil
         queueProcessingTask?.cancel()
         queueProcessingTask = nil
-        reconnectingTask?.cancel()
-        reconnectingTask = nil
         var taskToCancel: WebSocketTasking?
         switch state {
         case .connected(let task):
@@ -737,6 +753,13 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
         
         await pendingRoundTrips.removeAll()
+    }
+
+    /// Intentional disconnect: also stops any pending reconnect.
+    private func disconnect(clearQueue: Bool) async {
+        reconnectingTask?.cancel()
+        reconnectingTask = nil
+        await teardownConnection(clearQueue: clearQueue)
     }
     
     /// Check if the transport is currently connected
@@ -902,8 +925,8 @@ public final class WebSocketTransport: NSObject, SyncTransport {
                 return
             }
             
-            // Disconnect first, but preserve message queue for retry
-            await self.disconnect(clearQueue: false)
+            // Tear the socket down without cancelling this task — see teardownConnection.
+            await self.teardownConnection(clearQueue: false)
             
             // Check again if cancelled
             guard !Task.isCancelled else {
@@ -913,7 +936,7 @@ public final class WebSocketTransport: NSObject, SyncTransport {
             
             // Try to reconnect
             do {
-                try await self.connect()
+                try await self.performConnect()
                 // Reset retry count on successful connection
                 self.receiveRetryCount = 0
                 self.lastReceiveFailure = nil
@@ -928,20 +951,32 @@ public final class WebSocketTransport: NSObject, SyncTransport {
         }
     }
 
+    /// How often to ping an idle cloud-relay socket. Matches Android's
+    /// `TlsWebSocketConfig.idleTimeoutMillis` (30s) — the path drops idle sockets
+    /// well before Fly.io's own 900s idle_timeout would.
+    static let cloudKeepalivePingInterval: TimeInterval = 30
+
     private func startWatchdog(for task: WebSocketTasking) {
         watchdogTask?.cancel()
-        // For cloud relay connections, use ping/pong keepalive instead of idle timeout
-        // Fly.io idle_timeout is configured to 900 seconds (15 minutes, max allowed) in fly.toml
-        // We send pings every 14 minutes (840 seconds) to:
-        // 1. Keep connection alive (well before 15-minute timeout)
-        // 2. Detect dead connections quickly (within 14 minutes)
+        // For cloud relay connections, use ping/pong keepalive instead of idle timeout.
+        // Fly.io's own idle_timeout is 900s, but that is not the shortest timer on
+        // the path: something between the client and the relay — NAT, or the load
+        // balancer — drops an idle socket after about two minutes, and it does so
+        // without a close frame, so the app goes on believing it is connected.
+        //
+        // This was measured, not assumed: with a 14-minute ping the simulator fell
+        // off the relay's connection list roughly two minutes after connecting,
+        // every time, while the UI still showed connected and the drop was noticed
+        // only when the next ping finally failed. Android has always used 30s
+        // (TlsWebSocketConfig.idleTimeoutMillis) and never falls off, which is what
+        // pointed at the interval rather than at anything iOS-specific.
         if configuration.environment == "cloud" || configuration.url.scheme == "wss" {
             logger.debug("⏰ [WebSocketTransport] Starting ping/pong keepalive")
-            logger.debug("   Sending ping every 14 minutes (840s) - Fly.io timeout: 900s (max)")
+            logger.debug("   Sending ping every \(Self.cloudKeepalivePingInterval)s to outlast NAT/LB idle timeouts")
             watchdogTask = Task.detached { [weak self] in
                 guard let self else { return }
                 while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 840_000_000_000) // 14 minutes (840 seconds)
+                    try? await Task.sleep(nanoseconds: UInt64(Self.cloudKeepalivePingInterval * 1_000_000_000))
                     if Task.isCancelled { return }
                     // Access state directly since WebSocketTransport is a class, not an actor
                     guard case .connected(let currentTask) = self.state, currentTask === task else {

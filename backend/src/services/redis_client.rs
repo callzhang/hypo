@@ -3,7 +3,10 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rand::Rng;
 use redis::{aio::ConnectionManager, Client};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+use tokio::sync::Mutex;
 use tracing::debug;
 
 use crate::services::metrics::{get_metrics, Metrics};
@@ -99,9 +102,60 @@ impl PairingCodeEntry {
     }
 }
 
+/// Stand-in for Redis when there is none.
+///
+/// A key/value map with expiry, which is all this client asks of Redis:
+/// device -> connection mappings and pairing entries, every one of them with a
+/// TTL. Single process only, so it is right for local development and wrong
+/// for more than one relay instance — which is why it is opt-in.
+#[derive(Default)]
+pub struct MemoryStore {
+    entries: HashMap<String, (String, Option<SystemTime>)>,
+}
+
+impl MemoryStore {
+    fn get(&mut self, key: &str) -> Option<String> {
+        match self.entries.get(key) {
+            Some((value, expiry)) => {
+                if expiry.is_some_and(|at| SystemTime::now() >= at) {
+                    self.entries.remove(key);
+                    None
+                } else {
+                    Some(value.clone())
+                }
+            }
+            None => None,
+        }
+    }
+
+    fn set_ex(&mut self, key: &str, value: &str, ttl_secs: u64) {
+        let expiry = SystemTime::now().checked_add(Duration::from_secs(ttl_secs));
+        self.entries.insert(key.to_string(), (value.to_string(), expiry));
+    }
+
+    /// SET NX: stores only when the key is free, mirroring the allocation retry
+    /// that pairing codes rely on to avoid handing the same code to two people.
+    fn set_nx_ex(&mut self, key: &str, value: &str, ttl_secs: u64) -> bool {
+        if self.get(key).is_some() {
+            return false;
+        }
+        self.set_ex(key, value, ttl_secs);
+        true
+    }
+
+    fn del(&mut self, key: &str) {
+        self.entries.remove(key);
+    }
+}
+
 #[derive(Clone)]
 pub struct RedisClient {
-    manager: ConnectionManager,
+    /// None when running against the in-memory store. Every Redis path returns
+    /// before reaching it in that case.
+    manager: Option<ConnectionManager>,
+    /// Set only in memory mode. See MemoryStore for why this exists and why it
+    /// is opt-in.
+    memory: Option<Arc<Mutex<MemoryStore>>>,
     /// Held from construction so counting an operation costs an atomic add.
     /// get_metrics() takes an async read lock, which is not something to do on
     /// every Redis call; main initialises metrics before building this, so the
@@ -115,7 +169,21 @@ impl RedisClient {
         let manager = ConnectionManager::new(client).await?;
         let metrics = get_metrics().await;
 
-        Ok(Self { manager, metrics })
+        Ok(Self { manager: Some(manager), memory: None, metrics })
+    }
+
+    /// A client backed by a process-local map instead of Redis.
+    ///
+    /// For running the relay on a machine with no Redis. Sessions and pairing
+    /// entries live in this process only, so two instances would not see each
+    /// other's devices — main gates this behind an environment variable so a
+    /// deployment cannot fall into it by accident when Redis is merely down.
+    pub async fn new_in_memory() -> Self {
+        Self {
+            manager: None,
+            memory: Some(Arc::new(Mutex::new(MemoryStore::default()))),
+            metrics: get_metrics().await,
+        }
     }
 
     /// Counted here rather than at the call sites: every operation goes through
@@ -130,6 +198,14 @@ impl RedisClient {
 
     pub async fn register_device_batch(&mut self, registrations: &[(String, String)]) -> Result<()> {
         self.note_op();
+        if let Some(mem) = &self.memory {
+            let mut mem = mem.lock().await;
+            for (device_id, connection_id) in registrations {
+                mem.set_ex(&format!("device:{}", device_id), connection_id, 3600);
+                mem.set_ex(&format!("conn:{}", connection_id), device_id, 3600);
+            }
+            return Ok(());
+        }
         use redis::Pipeline;
         
         debug!("Registering {} devices in batch", registrations.len());
@@ -142,12 +218,18 @@ impl RedisClient {
             pipe.set_ex(format!("conn:{}", connection_id), device_id, 3600);
         }
         
-        let _: () = pipe.query_async(&mut self.manager).await?;
+        let _: () = pipe.query_async(self.manager.as_mut().expect("redis backend present")).await?;
         Ok(())
     }
 
     pub async fn register_device(&mut self, device_id: &str, connection_id: &str) -> Result<()> {
         self.note_op();
+        if let Some(mem) = &self.memory {
+            let mut mem = mem.lock().await;
+            mem.set_ex(&format!("device:{}", device_id), connection_id, 3600);
+            mem.set_ex(&format!("conn:{}", connection_id), device_id, 3600);
+            return Ok(());
+        }
         use redis::Pipeline;
 
         debug!("Registering device {} with connection {}", device_id, connection_id);
@@ -157,18 +239,26 @@ impl RedisClient {
         pipe.set_ex(format!("device:{}", device_id), connection_id, 3600)
             .set_ex(format!("conn:{}", connection_id), device_id, 3600);
         
-        let _: () = pipe.query_async(&mut self.manager).await?;
+        let _: () = pipe.query_async(self.manager.as_mut().expect("redis backend present")).await?;
         Ok(())
     }
 
     pub async fn unregister_device(&mut self, device_id: &str) -> Result<()> {
         self.note_op();
+        if let Some(mem) = &self.memory {
+            let mut mem = mem.lock().await;
+            if let Some(conn_id) = mem.get(&format!("device:{}", device_id)) {
+                mem.del(&format!("conn:{}", conn_id));
+            }
+            mem.del(&format!("device:{}", device_id));
+            return Ok(());
+        }
         use redis::{AsyncCommands, Pipeline};
 
         debug!("Unregistering device {}", device_id);
 
         // Get connection ID first
-        let conn_id: Option<String> = self.manager.get(format!("device:{}", device_id)).await?;
+        let conn_id: Option<String> = self.manager.as_mut().expect("redis backend present").get(format!("device:{}", device_id)).await?;
 
         if let Some(conn_id) = conn_id {
             // Use pipeline for atomic cleanup
@@ -176,7 +266,7 @@ impl RedisClient {
             pipe.del(format!("device:{}", device_id))
                 .del(format!("conn:{}", conn_id));
             
-            let _: () = pipe.query_async(&mut self.manager).await?;
+            let _: () = pipe.query_async(self.manager.as_mut().expect("redis backend present")).await?;
         }
 
         Ok(())
@@ -184,6 +274,16 @@ impl RedisClient {
 
     pub async fn unregister_devices_batch(&mut self, device_ids: &[String]) -> Result<()> {
         self.note_op();
+        if let Some(mem) = &self.memory {
+            let mut mem = mem.lock().await;
+            for device_id in device_ids {
+                if let Some(conn_id) = mem.get(&format!("device:{}", device_id)) {
+                    mem.del(&format!("conn:{}", conn_id));
+                }
+                mem.del(&format!("device:{}", device_id));
+            }
+            return Ok(());
+        }
         use redis::Pipeline;
 
         if device_ids.is_empty() {
@@ -198,7 +298,7 @@ impl RedisClient {
             pipe.get(format!("device:{}", device_id));
         }
         
-        let conn_ids: Vec<Option<String>> = pipe.query_async(&mut self.manager).await?;
+        let conn_ids: Vec<Option<String>> = pipe.query_async(self.manager.as_mut().expect("redis backend present")).await?;
 
         // Delete all mappings
         let mut delete_pipe = Pipeline::new();
@@ -209,15 +309,18 @@ impl RedisClient {
             }
         }
         
-        let _: () = delete_pipe.query_async(&mut self.manager).await?;
+        let _: () = delete_pipe.query_async(self.manager.as_mut().expect("redis backend present")).await?;
         Ok(())
     }
 
     pub async fn get_device_connection(&mut self, device_id: &str) -> Result<Option<String>> {
         self.note_op();
+        if let Some(mem) = &self.memory {
+            return Ok(mem.lock().await.get(&format!("device:{}", device_id)));
+        }
         use redis::AsyncCommands;
 
-        let conn_id: Option<String> = self.manager.get(format!("device:{}", device_id)).await?;
+        let conn_id: Option<String> = self.manager.as_mut().expect("redis backend present").get(format!("device:{}", device_id)).await?;
 
         Ok(conn_id)
     }
@@ -254,13 +357,24 @@ impl RedisClient {
             };
 
             let payload = serde_json::to_string(&entry)?;
+            if let Some(mem) = &self.memory {
+                let taken = mem.lock().await.set_nx_ex(
+                    &PairingCodeEntry::redis_key(&code),
+                    &payload,
+                    ttl_secs,
+                );
+                if taken {
+                    return Ok(entry);
+                }
+                continue;
+            }
             let mut cmd = redis::cmd("SET");
             cmd.arg(PairingCodeEntry::redis_key(&code))
                 .arg(payload)
                 .arg("EX")
                 .arg(ttl_secs)
                 .arg("NX");
-            let result: Option<String> = cmd.query_async(&mut self.manager).await?;
+            let result: Option<String> = cmd.query_async(self.manager.as_mut().expect("redis backend present")).await?;
             if result.is_some() {
                 return Ok(entry);
             }
@@ -389,14 +503,30 @@ impl RedisClient {
         &mut self,
         code: &str,
     ) -> Result<Option<PairingCodeEntry>, PairingCodeError> {
+        if let Some(mem) = &self.memory {
+            let key = PairingCodeEntry::redis_key(code);
+            let mut mem = mem.lock().await;
+            return match mem.get(&key) {
+                Some(json) => {
+                    let entry: PairingCodeEntry = serde_json::from_str(&json)?;
+                    if entry.expires_at <= Utc::now() {
+                        mem.del(&key);
+                        Ok(None)
+                    } else {
+                        Ok(Some(entry))
+                    }
+                }
+                None => Ok(None),
+            };
+        }
         use redis::AsyncCommands;
 
         let key = PairingCodeEntry::redis_key(code);
-        let value: Option<String> = self.manager.get(&key).await?;
+        let value: Option<String> = self.manager.as_mut().expect("redis backend present").get(&key).await?;
         if let Some(json) = value {
             let entry: PairingCodeEntry = serde_json::from_str(&json)?;
             if entry.expires_at <= Utc::now() {
-                let _: () = self.manager.del(key).await?;
+                let _: () = self.manager.as_mut().expect("redis backend present").del(key).await?;
                 return Ok(None);
             }
             Ok(Some(entry))
@@ -409,20 +539,31 @@ impl RedisClient {
         &mut self,
         entry: &PairingCodeEntry,
     ) -> Result<(), PairingCodeError> {
+        if let Some(mem) = &self.memory {
+            let ttl = entry.ttl_seconds()?;
+            let key = PairingCodeEntry::redis_key(&entry.code);
+            let payload = serde_json::to_string(entry)?;
+            mem.lock().await.set_ex(&key, &payload, ttl);
+            return Ok(());
+        }
         use redis::AsyncCommands;
 
         let ttl = entry.ttl_seconds()?;
         let key = PairingCodeEntry::redis_key(&entry.code);
         let payload = serde_json::to_string(entry)?;
-        self.manager.set_ex::<_, _, ()>(key, payload, ttl).await?;
+        self.manager.as_mut().expect("redis backend present").set_ex::<_, _, ()>(key, payload, ttl).await?;
         Ok(())
     }
 
     async fn delete_pairing_entry(&mut self, code: &str) -> Result<(), PairingCodeError> {
+        if let Some(mem) = &self.memory {
+            mem.lock().await.del(&PairingCodeEntry::redis_key(code));
+            return Ok(());
+        }
         use redis::AsyncCommands;
 
         let key = PairingCodeEntry::redis_key(code);
-        let _: () = self.manager.del(key).await?;
+        let _: () = self.manager.as_mut().expect("redis backend present").del(key).await?;
         Ok(())
     }
 }

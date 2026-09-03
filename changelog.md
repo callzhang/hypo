@@ -40,6 +40,7 @@ All notable changes to the Hypo project will be documented in this file.
 
 ### Changed
 - **Brand Icon Ring Contrast**: The three stacked rings in the app icon now fade in equal steps (1.0 → 0.7 → 0.4) so all three stay visible, replacing the near-invisible gradient fills on the lower two. Applied to the shared SVG source, the Android adaptive icon, launcher PNGs, and the Quick Settings tile — Android no longer carries its own divergent ring styling.
+- **Android Icon Background Rendered Black**: The adaptive icon background declared its gradient as a bare child of the path, which Android silently ignores — launchers composited an empty layer and the icon showed black instead of the brand gradient. The gradient is now wrapped in aapt:attr so it actually applies, and all Android icon drawables (adaptive layers and the Quick Settings tile) are generated from macos/scripts/icon.svg instead of hand-maintained copies, so geometry, opacities, and colors cannot drift again.
 - **Windows Clipboard Sharing Defaults**: Synced items are kept out of this
   machine's <kbd>Win</kbd>+<kbd>V</kbd> history and out of the Microsoft cloud
   clipboard unless you turn either on. Hypo carries whatever was copied on

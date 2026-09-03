@@ -81,9 +81,18 @@ def parse_icon_svg():
     crop_x = center_x - side / 2
     crop_y = center_y - side / 2
 
+    gradient = root.find(".//svg:linearGradient[@id='bgGradient']", ns)
+    gradient_colors = []
+    for stop in gradient.findall("svg:stop", ns):
+        for part in stop.attrib.get("style", "").split(";"):
+            key, _, value = part.partition(":")
+            if key.strip() == "stop-color":
+                gradient_colors.append(value.strip())
+
     return {
         "view_box": view_box,
         "crop_box": (crop_x, crop_y, crop_x + side, crop_y + side),
+        "gradient_colors": gradient_colors,
         "ellipses": [
             {
                 "cx": svg_number(ellipse.attrib["cx"]),
@@ -133,38 +142,79 @@ def create_icon_image(size, svg_data):
     """Create the main app icon by rasterizing macos/scripts/icon.svg."""
     return render_svg_square(size, svg_data)
 
-def build_android_foreground_xml():
+def fmt(value):
+    """Format a projected coordinate without trailing float noise."""
+    return f"{round(value, 2):g}"
+
+
+def build_ellipse_stack_paths(svg_data, viewport, rx, fill_color):
+    """
+    Project the SVG's oval stack into a square vector-drawable viewport.
+
+    The stack is centered and scaled so each oval's x-radius becomes `rx`;
+    positions, proportions, and opacities all come from macos/scripts/icon.svg,
+    so an Android drawable can only ever show what the SVG shows. Document
+    order is preserved (bottom oval first), which is also the paint order.
+    """
+    ellipses = svg_data["ellipses"]
+    scale = rx / ellipses[0]["rx"]
+    stack_center = (
+        min(e["cy"] - e["ry"] for e in ellipses)
+        + max(e["cy"] + e["ry"] for e in ellipses)
+    ) / 2
+
+    paths = []
+    for ellipse in ellipses:
+        cx = viewport / 2
+        cy = viewport / 2 + (ellipse["cy"] - stack_center) * scale
+        ry = ellipse["ry"] * scale
+        alpha = (
+            f'\n        android:fillAlpha="{ellipse["opacity"]:g}"'
+            if ellipse["opacity"] != 1
+            else ""
+        )
+        paths.append(
+            f'    <path\n'
+            f'        android:fillColor="{fill_color}"{alpha}\n'
+            f'        android:pathData="M{fmt(cx - rx)},{fmt(cy)} '
+            f'a{fmt(rx)},{fmt(ry)} 0 1,0 {fmt(2 * rx)},0 '
+            f'a{fmt(rx)},{fmt(ry)} 0 1,0 -{fmt(2 * rx)},0z" />'
+        )
+    return "\n".join(paths)
+
+
+def build_android_foreground_xml(svg_data):
     """
     Adaptive icon foreground: the stacked cards, and nothing else.
 
     The gradient lives in the background layer, not here. An adaptive icon's
     foreground is masked and parallaxed by the launcher, so a shape drawn in it
     gets cropped to whatever silhouette the device uses -- and a second gradient
-    here fights the one behind it. `BrandIconResourceTest` asserts the split, so
-    emitting the older single-layer design here silently reverted the icon and
-    failed that test on the next Android build.
+    here fights the one behind it. `BrandIconResourceTest` asserts the split.
 
-    The layer alphas mirror macos/scripts/icon.svg: 1.0, 0.7, 0.4 top to
-    bottom, equal steps of 0.3 so every ring stays visible on the gradient.
-    `BrandIconResourceTest` asserts these values too.
+    The 108dp canvas is displayed through a ~72dp window with a 66dp safe
+    zone; rx=20 keeps the 40dp-wide stack comfortably inside it.
     """
-    return '''<?xml version="1.0" encoding="utf-8"?>
+    return f'''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.4"
-        android:pathData="M34,63 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.7"
-        android:pathData="M34,55 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M34,47 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
+{build_ellipse_stack_paths(svg_data, viewport=108, rx=20, fill_color="#FFFFFF")}
+</vector>
+'''
+
+
+def build_quick_settings_xml(svg_data):
+    """The Quick Settings tile: the same stack, monochrome, in a 24dp viewport."""
+    return f'''<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+{build_ellipse_stack_paths(svg_data, viewport=24, rx=8, fill_color="@android:color/white")}
 </vector>
 '''
 
@@ -203,27 +253,35 @@ def generate_android_icons(svg_data):
     # The gradient is the background's, filling the whole 108dp square: a launcher
     # masks this layer to its own silhouette, so the colour has to reach the edges
     # or a round mask shows a pale corner where the fill stopped.
-    background_xml = '''<?xml version="1.0" encoding="utf-8"?>
+    #
+    # The gradient must sit inside <aapt:attr name="android:fillColor"> — a bare
+    # <gradient> child of <path> is silently ignored by the VectorDrawable
+    # inflater, the path then has no fill at all, and launchers composite the
+    # empty background layer as black.
+    background_xml = f'''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
-        <gradient
-            android:type="linear"
-            android:startX="54"
-            android:startY="0"
-            android:endX="54"
-            android:endY="108"
-            android:startColor="#5EB1FF"
-            android:endColor="#8458FF" />
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="54"
+                android:startY="0"
+                android:endX="54"
+                android:endY="108"
+                android:startColor="{svg_data["gradient_colors"][0]}"
+                android:endColor="{svg_data["gradient_colors"][-1]}" />
+        </aapt:attr>
     </path>
 </vector>
 '''
     (drawable_dir / "ic_launcher_background.xml").write_text(background_xml)
-    foreground_xml = build_android_foreground_xml()
-    (drawable_dir / "ic_launcher_foreground.xml").write_text(foreground_xml)
+    (drawable_dir / "ic_launcher_foreground.xml").write_text(build_android_foreground_xml(svg_data))
+    (drawable_dir / "ic_quick_settings.xml").write_text(build_quick_settings_xml(svg_data))
     print("  ✓ Adaptive icon drawables generated")
     
     print("✅ Android icons generated")

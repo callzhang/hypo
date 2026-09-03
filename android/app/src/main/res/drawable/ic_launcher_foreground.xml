@@ -7,12 +7,12 @@
     <path
         android:fillColor="#FFFFFF"
         android:fillAlpha="0.4"
-        android:pathData="M34,63 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
+        android:pathData="M34,61.43 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
     <path
         android:fillColor="#FFFFFF"
         android:fillAlpha="0.7"
-        android:pathData="M34,55 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
+        android:pathData="M34,54 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M34,47 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
+        android:pathData="M34,46.57 a20,8 0 1,0 40,0 a20,8 0 1,0 -40,0z" />
 </vector>

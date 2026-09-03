@@ -22,6 +22,17 @@ class BrandIconResourceTest {
         assertEquals(1, gradients.length, "Adaptive background must own the Hypo gradient")
         assertEquals("#5EB1FF", gradients.item(0).attributes.getNamedItem("android:startColor").nodeValue)
         assertEquals("#8458FF", gradients.item(0).attributes.getNamedItem("android:endColor").nodeValue)
+
+        // A bare <gradient> child of <path> is silently ignored at runtime and
+        // the background renders black; only <aapt:attr name="android:fillColor">
+        // actually applies it.
+        val wrapper = gradients.item(0).parentNode
+        assertEquals("aapt:attr", wrapper.nodeName, "Gradient must be wrapped in aapt:attr or it never renders")
+        assertEquals(
+            "android:fillColor",
+            wrapper.attributes.getNamedItem("name").nodeValue,
+            "The aapt:attr wrapper must target the path's fillColor"
+        )
     }
 
     @Test

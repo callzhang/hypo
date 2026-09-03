@@ -15,6 +15,14 @@ pub async fn status_handler(data: web::Data<AppState>) -> HttpResponse {
     let messages_processed = metrics.as_ref()
         .map(|m| m.messages_processed.load(std::sync::atomic::Ordering::Relaxed))
         .unwrap_or(0);
+
+    let messages_delivered = metrics.as_ref()
+        .map(|m| m.messages_delivered.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(0);
+
+    let messages_dropped_offline = metrics.as_ref()
+        .map(|m| m.messages_dropped_offline.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(0);
     
     let redis_operations = metrics.as_ref()
         .map(|m| m.redis_operations.load(std::sync::atomic::Ordering::Relaxed))
@@ -49,7 +57,9 @@ pub async fn status_handler(data: web::Data<AppState>) -> HttpResponse {
         },
         "messages": {
             "processed": messages_processed,
-            "description": "Total number of messages processed since server start"
+            "delivered": messages_delivered,
+            "dropped_offline": messages_dropped_offline,
+            "description": "processed = arrived at the relay; delivered = handed to a connected target; dropped_offline = addressed to a device that was not connected, and discarded, because there is no queue"
         },
         "redis": {
             "operations": redis_operations,

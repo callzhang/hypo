@@ -118,22 +118,43 @@ impl SessionManager {
     }
 
     pub async fn send_binary(&self, device_id: &str, frame: BinaryFrame) -> Result<(), SessionError> {
+        // Counted here rather than in the websocket handler because this is the
+        // only place that knows whether a specific device took the frame. The
+        // handler sees Ok from a broadcast that reached nobody, so counting
+        // there would report deliveries that did not happen.
+        //
+        // get_metrics() takes an async read lock per send. This method already
+        // takes one, and the relay is nowhere near the throughput where a
+        // second matters; the alternative is threading a handle through
+        // SessionManager::new, which is sync.
+        let metrics = crate::services::metrics::get_metrics().await;
+
         let sessions = self.inner.read().await;
         let registered_devices: Vec<String> = sessions.keys().cloned().collect();
         tracing::info!("Attempting to send to device: {}. Registered devices: {:?}", device_id, registered_devices);
-        let sender = sessions
-            .get(device_id)
-            .ok_or_else(|| {
+        let sender = match sessions.get(device_id) {
+            Some(sender) => sender,
+            None => {
                 tracing::warn!("Device {} not found in sessions. Available: {:?}", device_id, registered_devices);
-                SessionError::DeviceNotConnected
-            })?;
-        sender
-            .sender
-            .try_send(frame)
-            .map_err(|err| {
+                // Dropped, not queued — there is no queue.
+                if let Some(m) = &metrics {
+                    m.increment_messages_dropped();
+                }
+                return Err(SessionError::DeviceNotConnected);
+            }
+        };
+        match sender.sender.try_send(frame) {
+            Ok(()) => {
+                if let Some(m) = &metrics {
+                    m.increment_messages_delivered();
+                }
+                Ok(())
+            }
+            Err(err) => {
                 tracing::error!("Failed to send to device {}: {}", device_id, err);
-                SessionError::SendError(err.to_string())
-            })
+                Err(SessionError::SendError(err.to_string()))
+            }
+        }
     }
 
     pub async fn get_active_count(&self) -> usize {
@@ -213,6 +234,49 @@ mod tests {
 
         let err = manager.send("missing", "payload").await.unwrap_err();
         assert!(matches!(err, SessionError::DeviceNotConnected));
+    }
+
+    /// A counter nobody checks is how this whole thing started: three of them
+    /// sat at zero for months because they had no callers, and /status could
+    /// not answer whether a message reached a device.
+    ///
+    /// Deltas rather than absolute values — these are process-global and other
+    /// tests run alongside.
+    #[tokio::test]
+    async fn delivery_and_drops_are_counted() {
+        use crate::services::metrics::{get_metrics, initialize_metrics};
+
+        initialize_metrics().await.expect("metrics initialise");
+        let metrics = get_metrics().await.expect("metrics present");
+        let delivered_before = metrics
+            .messages_delivered
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let dropped_before = metrics
+            .messages_dropped_offline
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        let manager = SessionManager::new();
+        let _rx = manager.register("counted-device".to_string()).await.receiver;
+
+        manager.send("counted-device", "payload").await.expect("send succeeds");
+        let err = manager.send("nobody-here", "payload").await.unwrap_err();
+        assert!(matches!(err, SessionError::DeviceNotConnected));
+
+        let delivered_after = metrics
+            .messages_delivered
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let dropped_after = metrics
+            .messages_dropped_offline
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        assert!(
+            delivered_after > delivered_before,
+            "a send to a connected device did not count as delivered"
+        );
+        assert!(
+            dropped_after > dropped_before,
+            "a send to an absent device did not count as dropped"
+        );
     }
 
     #[tokio::test]

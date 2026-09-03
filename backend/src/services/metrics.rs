@@ -7,6 +7,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub struct Metrics {
     pub websocket_connections: Arc<AtomicU64>,
     pub messages_processed: Arc<AtomicU64>,
+    /// Frames handed to a connected target's channel.
+    pub messages_delivered: Arc<AtomicU64>,
+    /// Frames addressed to a device that was not connected. There is no queue,
+    /// so these are dropped — see the note on increment_messages_dropped.
+    pub messages_dropped_offline: Arc<AtomicU64>,
     pub redis_operations: Arc<AtomicU64>,
     pub error_count: Arc<AtomicU64>,
     pub request_durations: Arc<RwLock<Vec<f64>>>,
@@ -27,6 +32,28 @@ impl Metrics {
     
     pub fn increment_messages(&self) {
         self.messages_processed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A frame that reached its target's channel.
+    ///
+    /// Separate from messages_processed, which counts what arrived at the relay
+    /// rather than what left it. Without the distinction /status cannot answer
+    /// the only question that matters when sync appears broken — did this
+    /// actually reach the other device — and neither can the sender: the client
+    /// logs "Message confirmed (timeout, connection valid)", which is optimism,
+    /// not an ack. The protocol has no ack for clipboard envelopes.
+    pub fn increment_messages_delivered(&self) {
+        self.messages_delivered.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A frame addressed to a device that was not connected.
+    ///
+    /// It is dropped. message_queue in /status describes queue-and-retry as a
+    /// planned feature and none of it exists: SessionManager::send_binary
+    /// returns DeviceNotConnected and the websocket handler logs a warning.
+    /// Counting them at least makes the loss visible from outside.
+    pub fn increment_messages_dropped(&self) {
+        self.messages_dropped_offline.fetch_add(1, Ordering::Relaxed);
     }
     
     pub fn increment_redis_ops(&self) {

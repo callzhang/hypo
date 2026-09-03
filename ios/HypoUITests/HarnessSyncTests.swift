@@ -98,6 +98,65 @@ final class HarnessSyncTests: XCTestCase {
         )
     }
 
+    /// The outbound half on its own, against a harness this app is already
+    /// paired with.
+    ///
+    /// testPairsOverLanAndSyncsBothWays covers both directions but has to pair
+    /// first, and a pairing that settles a little late fails it before the send
+    /// is ever exercised — which is exactly what happened while diagnosing the
+    /// cloud reconnect bug. Keeping the send on its own means the direction that
+    /// needs a real tap can be checked without re-pairing.
+    func testSendsTheClipboardToAnAlreadyPairedPeer() throws {
+        guard FileManager.default.fileExists(atPath: "/tmp/hypo-peer-tests") else {
+            throw XCTSkip("no /tmp/hypo-peer-tests marker; start HypoHarness and touch it to run this")
+        }
+
+        let app = XCUIApplication()
+        app.launch()
+
+        // Skip rather than fail when this app has not paired with the harness.
+        // Without the pairing the send still happens — it just goes to whatever
+        // peers this app does know, so waiting on the harness's file would
+        // report a broken send that is working fine. That is exactly what this
+        // test did on its first run.
+        app.buttons["Settings"].tap()
+        let paired = isPaired("Harness Mac", in: app, timeout: 15)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        guard paired else {
+            throw XCTSkip("this app is not paired with Harness Mac; run testPairsOverLanAndSyncsBothWays first")
+        }
+
+        try? FileManager.default.removeItem(atPath: receivedPath)
+        // A file rather than an environment variable, for the same reason the
+        // skip marker is one: xcodebuild does not forward the shell's
+        // environment to the runner. Writing the marker from outside makes the
+        // text checkable on a real phone, where the only evidence available is
+        // a human reading their own clipboard history.
+        let fromPhone = (try? String(contentsOfFile: "/tmp/hypo-outbound-marker", encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+            ?? "sent from iOS \(UUID().uuidString.prefix(8))"
+        UIPasteboard.general.string = fromPhone
+        print("outbound marker: \(fromPhone)")
+
+        // The control only offers itself for pasteboard contents the app has
+        // not already seen, so bounce through the background to re-check.
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 2)
+        app.activate()
+
+        XCTAssertTrue(
+            waitForSendControl(in: app, resettingTo: fromPhone),
+            "no send control offered"
+        )
+        app.buttons["Paste"].tap()
+
+        XCTAssertTrue(
+            pollForFile(at: receivedPath, containing: fromPhone, timeout: 90),
+            "the phone's clipboard never reached the harness"
+        )
+    }
+
     private func pollForFile(at path: String, containing text: String, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -109,4 +168,9 @@ final class HarnessSyncTests: XCTestCase {
         }
         return false
     }
+}
+
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

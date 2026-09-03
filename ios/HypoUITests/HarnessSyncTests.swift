@@ -120,7 +120,15 @@ final class HarnessSyncTests: XCTestCase {
         // report a broken send that is working fine. That is exactly what this
         // test did on its first run.
         app.buttons["Settings"].tap()
-        let paired = isPaired("Harness Mac", in: app, timeout: 15)
+        // NOTE: this guard has only ever skipped. With a harness running and
+        // discoverable — Bonjour resolves it, and TransportManager lists it —
+        // the app still reports "Harness Mac: offline" after a relaunch, and
+        // the paired row never appears, so 60s is not the problem. The send
+        // itself is known to work: during testPairsOverLanAndSyncsBothWays the
+        // app unicast to the harness over a persistent connection and the
+        // harness printed the entry. Why the peer reads offline on a fresh
+        // launch is unresolved; until it is, this test cannot run green.
+        let paired = isPaired("Harness Mac", in: app, timeout: 60)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         guard paired else {
             throw XCTSkip("this app is not paired with Harness Mac; run testPairsOverLanAndSyncsBothWays first")

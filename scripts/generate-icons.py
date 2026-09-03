@@ -258,6 +258,12 @@ def generate_android_icons(svg_data):
     # <gradient> child of <path> is silently ignored by the VectorDrawable
     # inflater, the path then has no fill at all, and launchers composite the
     # empty background layer as black.
+    #
+    # The gradient spans the ~72dp window a launcher actually shows (y 18..90),
+    # not the full 108dp canvas: spanning the canvas crops the first and last
+    # sixth of the colour ramp off-screen and the icon reads flatter than the
+    # SVG. Outside the span the gradient clamps to its end colours, so the
+    # hidden margins stay on-brand for launchers that reveal more.
     background_xml = f'''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
@@ -270,9 +276,9 @@ def generate_android_icons(svg_data):
             <gradient
                 android:type="linear"
                 android:startX="54"
-                android:startY="0"
+                android:startY="18"
                 android:endX="54"
-                android:endY="108"
+                android:endY="90"
                 android:startColor="{svg_data["gradient_colors"][0]}"
                 android:endColor="{svg_data["gradient_colors"][-1]}" />
         </aapt:attr>

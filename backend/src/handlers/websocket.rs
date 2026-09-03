@@ -649,6 +649,12 @@ struct ControlMessagePayload {
     symmetric_key: Option<String>,
     #[serde(default)]
     device_ids: Option<Vec<String>>,
+    /// receive_failed: which message the receiver could not use.
+    #[serde(default)]
+    failed_message_id: Option<String>,
+    /// receive_failed: why, in the receiver's words.
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 async fn handle_control_message(
@@ -688,6 +694,26 @@ async fn handle_control_message(
                 Err(err) => {
                     warn!("Failed to decode symmetric key for {}: {}", sender_id, err);
                 }
+            }
+        }
+        // A receiver telling us it could not use something we delivered.
+        //
+        // Delivery to a socket is all the relay can see on its own: once a
+        // frame is handed to a connected device the server considers it done,
+        // and a device that receives the bytes but cannot decrypt or apply them
+        // looks identical to a successful sync from here. There is no ack for
+        // clipboard envelopes and this is not one — nothing waits for it and
+        // nothing is retried. It exists so the failure appears in the server
+        // log at all, instead of only on the device it happened to.
+        "receive_failed" => {
+            let failed_id = control.failed_message_id.as_deref().unwrap_or("unknown");
+            let reason = control.reason.as_deref().unwrap_or("unspecified");
+            warn!(
+                "Device {} could not use message {}: {}",
+                sender_id, failed_id, reason
+            );
+            if let Some(m) = get_metrics().await {
+                m.increment_receive_failures();
             }
         }
         "deregister_key" => {

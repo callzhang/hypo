@@ -23,6 +23,10 @@ pub async fn status_handler(data: web::Data<AppState>) -> HttpResponse {
     let messages_dropped_offline = metrics.as_ref()
         .map(|m| m.messages_dropped_offline.load(std::sync::atomic::Ordering::Relaxed))
         .unwrap_or(0);
+
+    let receive_failures = metrics.as_ref()
+        .map(|m| m.receive_failures.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(0);
     
     let redis_operations = metrics.as_ref()
         .map(|m| m.redis_operations.load(std::sync::atomic::Ordering::Relaxed))
@@ -59,7 +63,8 @@ pub async fn status_handler(data: web::Data<AppState>) -> HttpResponse {
             "processed": messages_processed,
             "delivered": messages_delivered,
             "dropped_offline": messages_dropped_offline,
-            "description": "processed = arrived at the relay; delivered = handed to a connected target; dropped_offline = addressed to a device that was not connected, and discarded, because there is no queue"
+            "receive_failures": receive_failures,
+            "description": "processed = arrived at the relay; delivered = handed to a connected target; dropped_offline = addressed to a device that was not connected, and discarded, because there is no queue; receive_failures = a receiver reported it could not decrypt or apply what it was given, which the relay cannot see for itself"
         },
         "redis": {
             "operations": redis_operations,

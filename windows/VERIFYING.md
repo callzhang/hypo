@@ -9,15 +9,31 @@ one is to be broken. Work down it; the first few are where the risk is.
 
 ## Getting a build
 
-Any green CI run publishes `hypo-app-win-x64` and `hypo-app-win-arm64` as
-artifacts. Download, unzip somewhere real — `%LOCALAPPDATA%\Programs\Hypo` —
-and run `Hypo.exe`. Not from inside the zip: Windows unpacks it to a temporary
-folder that disappears.
+From the [latest release](https://github.com/callzhang/hypo/releases/latest):
 
-ARM64 if this is a Windows VM on an Apple Silicon Mac, or a Copilot+ PC.
+- `Hypo-<version>-windows-x64.zip`
+- `Hypo-<version>-windows-arm64.zip` — for a Windows VM on an Apple Silicon
+  Mac, or a Copilot+ PC. The x64 build runs there under emulation; this one
+  does not have to.
+
+Take the release unless you are chasing something that has not shipped yet. Any
+green CI run also publishes the same two builds as the `hypo-app-win-x64` and
+`hypo-app-win-arm64` artifacts, which is how you get a build of `main` between
+releases.
+
+Unzip somewhere real — `%LOCALAPPDATA%\Programs\Hypo` — and run `Hypo.exe`.
+Not from inside the zip: Windows unpacks it to a temporary folder that
+disappears, so the application goes with it the next time you look. Pairings and
+history are safe either way — they live in `%LOCALAPPDATA%\Hypo`, not beside the
+executable — but "start Hypo when I sign in" would point at a path that no
+longer exists.
 
 SmartScreen will say "Windows protected your PC" the first time. That is
 expected for an unsigned zip: **More info → Run anyway**.
+
+The tray menu shows the version. Check it matches the zip you unpacked before
+reporting anything from this list — running an older build against a newer
+device is its own class of confusion.
 
 ## 1. The things most likely to be wrong
 

@@ -71,6 +71,9 @@
     - **Development**: Merge contents of `.secrets` into your local `.env`.
     - **Android**: `build.gradle.kts` automatically injects `RELAY_WS_AUTH_TOKEN` from `.env`.
     - **macOS**: `scripts/build-macos.sh` automatically injects `RELAY_WS_AUTH_TOKEN` from `.env` into `Info.plist`.
+    - **iOS**: an Xcode build phase runs `scripts/inject-ios-relay-token.sh`, which writes the token into the built `Info.plist`. The phase declares that plist as an input so it cannot run before the plist exists — without that Xcode may schedule it alongside `ProcessInfoPlistFile`, and a build that logs "Injected RelayWsAuthToken" can still produce an app with no token in it.
+    - **Missing token**: all three fail the build rather than shipping an app that cannot authenticate, since an empty token reads as a server problem — the relay answers 401 on every connection and nothing says why. `ALLOW_MISSING_RELAY_TOKEN=1` builds anyway; CI sets it because it has no `.env`. Do not set it for a build you intend to install and use.
+    - **Worktrees**: `.env` lives in the main checkout and is gitignored, so it is not in `.worktrees/*`. Each build already finds its way back — iOS and macOS through `git rev-parse --git-common-dir`, Android by reading the worktree's `.git` file and walking to the main checkout — so anything new that reads `.env` needs to do the same rather than looking only beside itself.
 - **LAN Testing**: If LAN tests fail with timeout, use `adb forward tcp:7010 tcp:7010` (automated in `test-sync-matrix.sh`).
 - Regenerate TLS fingerprints with `backend/scripts/cert_fingerprint.sh` after certificate updates.
 - Prefer the repo-scoped Android SDK (`.android-sdk`) to keep builds reproducible; ensure pairing flows respect signed entitlements during macOS testing.

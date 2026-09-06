@@ -89,6 +89,21 @@ brew install redis  # macOS
 redis-server
 ```
 
+**Option C: none**
+```bash
+ALLOW_NO_REDIS=1 cargo run
+```
+
+Runs against a process-local store instead. Device registrations and pairing
+entries then live in this process only, so two relay instances would not see
+each other's devices — which is why it is opt-in rather than an automatic
+fallback: Redis being unreachable in a deployment is a fault worth failing on,
+and pairing breaking because two instances disagree looks like a client bug.
+
+For local development, where there is no second instance and often no Redis,
+this is the whole setup. `/status` behaves normally, including the message
+counters.
+
 ### 3. Configure Environment
 
 ```bash

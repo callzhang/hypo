@@ -1213,7 +1213,8 @@ log show --predicate 'subsystem == "com.hypo.clipboard"' --last 5m | grep -F "co
 **Documentation**:
 - [User Guide](USER_GUIDE.md): Complete feature documentation
 - [User Guide - Installation Section](USER_GUIDE.md#-installation): Setup instructions
-- [Developer Guide](DEVELOPER_GUIDE.md): Technical details
+- [Protocol](protocol.md): The wire format between devices
+- [Debugging Sync Issues](DEBUGGING_SYNC_ISSUES.md): Reading the relay's counters when something is not arriving
 
 **Community Resources**:
 - GitHub Issues: Search existing problems and solutions

@@ -45,18 +45,16 @@ All messages are JSON objects with the following schema:
 | `type` | Enum | Yes | Message type: `clipboard`, `control` |
 | `payload` | Object | Yes | Type-specific payload data |
 
-### 2.2 JSON Schema Reference
+### 2.2 Validating a payload
 
-A machine-readable JSON Schema for protocol messages is available in
-[`docs/protocol.schema.json`](./protocol.schema.json). The schema codifies all
-required fields, enumerations, and content-specific constraints so clients and
-test suites can validate payloads automatically. Example validation command:
+There is no JSON Schema any more. `docs/protocol.schema.json` was published
+once and removed in 5d58c02b as obsolete; this section used to tell you to
+validate against it, which could only fail.
 
-```bash
-pnpm jsonschema docs/protocol.schema.json payload.json
-```
-
-Any linting tool that supports JSON Schema Draft 2020-12 will work.
+What actually holds the clients to this protocol are the shared fixtures in
+`tests/fixtures/`. Every client suite decodes them and fails when it disagrees,
+and CI fails when a client stops reading them at all — so a change to the wire
+format has to be made there first, where all three implementations will see it.
 
 ---
 
@@ -798,7 +796,7 @@ See `tests/protocol-test-vectors.json` for encryption/decryption test vectors (c
 
 ---
 
-## 5. Breaking Changes History
+## 12. Breaking Changes History
 
 ### Device-Agnostic Pairing (November 2025) ✅ Implemented
 

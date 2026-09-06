@@ -1141,9 +1141,9 @@ A: LAN sync may not work with VPN. Cloud relay sync should work normally with mo
 
 **Documentation**:
 - User Guide: This document
-- [Developer Guide](DEVELOPER_GUIDE.md): For technical users
 - [Architecture Overview](architecture.mermaid): System design
-- [API Documentation](api.md): For integrators
+- [Protocol](protocol.md): The wire format, for integrators
+- [Troubleshooting](TROUBLESHOOTING.md): When something is not syncing
 
 **Community Support**:
 - GitHub Issues: Report bugs and request features

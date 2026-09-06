@@ -47,4 +47,21 @@ class QuickSettingsTileManifestTest {
 
         assertEquals(R.drawable.ic_quick_settings, tileService.icon)
     }
+
+    @Test
+    fun `long-pressing the tile opens Hypo rather than the settings details page`() {
+        // Long-press sends ACTION_QS_TILE_PREFERENCES. With nothing declared to
+        // handle it the system shows the app's details page in Settings, which
+        // is about permissions and storage, not the clipboard.
+        val handler = context.packageManager
+            .queryIntentActivities(
+                Intent(TileService.ACTION_QS_TILE_PREFERENCES),
+                PackageManager.MATCH_ALL
+            )
+            .firstOrNull { it.activityInfo.packageName == context.packageName }
+            ?.activityInfo
+
+        assertNotNull(handler, "Long-pressing the tile must land somewhere in Hypo")
+        assertEquals("com.hypo.clipboard.MainActivity", handler.name)
+    }
 }

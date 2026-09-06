@@ -4,6 +4,9 @@ All notable changes to the Hypo project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Quick Settings Tile Long-Press**: Holding the tile opens Hypo instead of the app's details page in Settings, which is about permissions and storage rather than the clipboard the tile is for.
+
 ### Added
 - **Windows Device-Return Notification**: Windows now says when a paired device becomes reachable again, which it never did, and polls the relay for cloud presence — previously it knew only who was on the local network.
 

@@ -46,6 +46,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Long-pressing the Quick Settings tile opens Hypo. Without this
+                 filter the system falls back to the app's details page in
+                 Settings, which is about permissions and storage rather than
+                 the clipboard the tile is for. -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <!-- Process Text Activity - Adds "Copy to Hypo" to text selection context menu -->

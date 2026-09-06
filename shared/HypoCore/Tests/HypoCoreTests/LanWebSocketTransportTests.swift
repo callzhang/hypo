@@ -5,6 +5,11 @@ import FoundationNetworking
 import Testing
 @_spi(Testing) @testable import HypoCore
 
+// The time limit is the difference between a named one-minute failure and CI
+// eating its whole 20-minute step timeout: testConnectWhileConnectingWaitsFor-
+// Handshake once lost a wakeup race and hung xctest with nothing but keepalive
+// pings in the log until the step was killed.
+@Suite(.timeLimit(.minutes(1)))
 struct LanWebSocketTransportTests {
     @Test
     func testConnectResolvesAfterHandshake() async throws {
@@ -400,10 +405,38 @@ struct LanWebSocketTransportTests {
 
         transport._testing_setStateConnecting()
         let connectTask = Task { try await transport.connect() }
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        // Wait until connect() has actually parked its continuation before
+        // opening the socket. A fixed sleep lost this race on a cold CI
+        // simulator: handleOpen ran first, found no waiter, and the
+        // continuation stored afterwards was never resumed — the suite hung
+        // until the step timeout with only keepalive pings in the log.
+        let parked = await waitUntil(timeout: .seconds(5)) {
+            transport._testing_hasHandshakeWaiter()
+        }
+        #expect(parked)
         transport.handleOpen(task: stubTask)
         try await connectTask.value
         #expect(transport.isConnected())
+        await transport.disconnect()
+    }
+
+    @Test
+    func testConnectAfterHandshakeAlreadyCompletedReturnsImmediately() async throws {
+        let stubTask = StubWebSocketTask()
+        let session = StubSession(task: stubTask)
+        let transport = await MainActor.run { LanWebSocketTransport(
+            configuration: .init(url: URL(string: "wss://example.com")!, pinnedFingerprint: nil),
+            sessionFactory: { _, _ in session }
+        ) }
+
+        // The losing side of the race above: the handshake completes before
+        // the second connect() caller gets to wait on it. connect() must see
+        // the connected state and return rather than park forever.
+        transport._testing_setStateConnecting()
+        transport.handleOpen(task: stubTask)
+        try await transport.connect()
+        #expect(transport.isConnected())
+        #expect(!transport._testing_hasHandshakeWaiter())
         await transport.disconnect()
     }
 

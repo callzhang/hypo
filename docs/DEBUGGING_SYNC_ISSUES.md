@@ -1,5 +1,41 @@
 # Debugging Sync Issues
 
+## Start With the Relay's Counters
+
+`GET https://hypo.fly.dev/status` answers the first question — did anything
+actually get through — without needing either device in front of you.
+
+```json
+"messages": {
+  "processed": 1698,        // arrived at the relay
+  "delivered": 1502,        // handed to a connected target
+  "dropped_offline": 196,   // target was not connected; discarded, there is no queue
+  "receive_failures": 3     // a receiver said it could not decrypt what it got
+}
+```
+
+Reading them:
+
+- **`processed` climbing, `delivered` flat** — the sender is reaching the relay
+  and the target is not connected. Check whether the receiving device is
+  actually on the relay: the `connections.devices` list in the same response
+  carries the device ids currently attached.
+- **`dropped_offline` climbing** — same thing, counted. There is no queue: a
+  message for a device that is not connected is discarded, not held. This is
+  deliberate; a clipboard entry delivered half an hour late would overwrite
+  whatever the user is using now.
+- **`receive_failures` climbing** — the bytes arrived and the receiving app
+  could not decrypt them. Usually a key mismatch: the two devices disagree about
+  the pairing. The relay's log names the device and the message id.
+- **All four flat while a device claims to be connected** — the sender is not
+  reaching the relay at all. Its own log is the place to look; note that
+  "Message confirmed (timeout, connection valid)" is optimistic and does not
+  mean anything arrived.
+
+`redis.operations` only moves during pairing — Redis holds device registrations
+and pairing codes, and message forwarding does not touch it. Zero there while
+messages flow is normal, not a fault.
+
 ## Connection Reset Analysis
 
 When Android sends a message but macOS doesn't receive it, and you see a "Connection reset" error, here's what's happening:

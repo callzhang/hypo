@@ -5,26 +5,88 @@ All notable changes to the Hypo project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- **macOS LAN Pairing**: macOS can now start a pairing with a device it discovers on the network, not only answer one. Unpaired devices on the same Wi-Fi appear in Settings → Devices with a Pair button; the handshake is the same one Android and Windows initiate, verified against the responder in tests.
-- **Device Renaming (all platforms)**: The name peers show for a device can be changed in Settings on macOS, Android and Windows (iOS already had it). Blank input is refused and the device advertises itself again under the new name; peers already paired keep the name they recorded until they pair or discover the device again.
 - **Windows Device-Return Notification**: Windows now says when a paired device becomes reachable again, which it never did, and polls the relay for cloud presence — previously it knew only who was on the local network.
-- **Windows JPEG Images**: An image arriving as JPEG is accepted and published to the clipboard as PNG. It used to be refused outright, so any picture large enough to have been re-encoded on the way never arrived.
-- **macOS Debug Status API**: The app serves its own state as JSON on `http://127.0.0.1:7011/status` — relay token present, connection state, paired devices with their online flags, discovered peers and whether each is pairable. `/probe?host=&port=` opens a WebSocket the way pairing does and reports the raw error. Loopback only, no secrets. Turn it off with `defaults write com.hypo.clipboard hypo_debug_api_enabled -bool false`.
 
 ### Changed
-- **Device-Return Notifications**: A device coming online is announced only after it has been offline for 24 hours. It used to fire on every transition, so a phone whose screen sleeps produced several an hour.
-- **macOS Devices List**: Paired devices and unpaired devices on the network are one list in Settings → Devices, each of the latter with a Pair button. The sheet behind the button is code-only and reads "Pair with Code". An empty nearby list now says which kind of empty it is: still looking, everything already paired, or a network that does not let devices reach each other.
-- **Android Devices Section**: Nearby LAN discovery now lives inside the Settings → Devices section — unpaired devices on the same network appear under “Nearby devices” and pair with a single tap, with inline progress, success, and retry states. The pairing screen is code-only and the entry button reads “Pair with Code” instead of “Pair New Device”.
+- **Device-Return Notifications**: A device coming online is announced only after it has been offline for 24 hours. It used to fire on every transition, so a phone whose screen sleeps produced several an hour, and a laptop changing network produced one per peer.
+
+### Fixed
+- **iOS CI Hang in LanWebSocketTransport Tests**: `connect()` could park a waiter after the handshake had already completed — a lost wakeup that hung the test process until CI's 20-minute step timeout with nothing but keepalive pings in the log. The wait now re-checks state before parking, the racy test waits deterministically instead of sleeping 50ms, and the whole suite carries a one-minute time limit so any future hang fails fast with a named test.
+
+## [1.3.0] - 2026-09-03
+
+### Added
+- **Windows Tray Application**: The Windows client is a notification-area
+  application rather than a console tool. It syncs text, links, images and files
+  over the LAN and the relay, keeps a searchable history, and pairs either with
+  devices on the network or with a six-digit code for one that is elsewhere.
+  Distributed as a self-contained zip for x64 and ARM64 — no installer and no
+  .NET runtime to install.
+- **Windows Global Shortcut**: <kbd>Alt</kbd>+<kbd>V</kbd> opens the history
+  from anywhere, with the caret already in the search box; arrow keys choose,
+  <kbd>Enter</kbd> puts the entry back and returns focus to what you were typing
+  in, <kbd>Esc</kbd> leaves with nothing. Reconfigurable, and a combination
+  another application already holds is reported rather than failing silently.
+- **Windows History Filters and Pinning**: Filter by type and by when something
+  was copied, and pin entries to hold them at the top and stop them being
+  trimmed. Each row shows which device sent it, whether it arrived over the
+  network or through the relay, and when.
+- **Windows Drag and Drop**: Drag an entry straight into another application,
+  which puts it there without touching the clipboard.
+- **Windows Settings**: Paired devices with names and whether each is on this
+  network, unpairing, transport and LAN port, history retention and clearing,
+  and whether Hypo starts when you sign in.
+- **Windows Arrival Notifications**: A notification names the device something
+  came from and previews it. Locally copied items never notify. On by default,
+  unlike the two clipboard-sharing settings, because it shares nothing beyond
+  the screen already in front of you.
+- **Windows Light and Dark**: Follows the system theme and switches with it
+  while running; Mica on Windows 11 and an explicit solid background below it.
+- **Shared Fixture Guard**: CI now fails if any client stops reading the shared
+  protocol fixtures. Each suite already fails when a client *disagrees* with
+  them; a client that stops reading them was green, which is how three
+  implementations drift apart unnoticed.
+- **Coverage Gate**: `Hypo.Core` coverage is measured on every build and CI
+  fails below 80%.
+- **Relay delivery reporting**: `/status` now separates `processed` (arrived at the relay), `delivered` (handed to a connected target) and `dropped_offline` (addressed to a device that was not connected, and discarded — there is no queue). Previously the relay could say how many messages it had seen but not whether any of them reached a device.
+- **Receiver failure reports**: a device that receives a message it cannot decrypt now tells the relay, which logs it and counts it as `receive_failures`. The relay cannot detect this by itself — handing a frame to a connected socket is the last thing it sees, so a device that takes the bytes and fails to decrypt them was indistinguishable from a successful sync. Deliberately not an ack: nothing waits for it and nothing is retried.
+- **Relay without Redis**: `ALLOW_NO_REDIS=1` runs the relay against a process-local store instead. Opt-in, because Redis being unreachable in a deployment is a fault worth failing on — two instances would stop seeing each other's devices. For local development, where there is no second instance and often no Redis.
 
 ### Fixed
 - **Image Echo Loop (macOS, Android)**: An image could circulate between two devices indefinitely, adding a history entry each hop. Every check that could have caught it compared bytes, and each hop re-encoded the picture — applying it on macOS decoded and re-encoded it, and capture compresses anything large. Received bytes are now applied verbatim, and what was applied is remembered by shape (pixel dimensions) so the copy that comes back is recognised as ours.
-- **macOS Crash on a Bonjour TXT Record**: A peer advertising a key with no value aborted the app — `NetService.dictionary(fromTXTRecord:)` is typed `[String: Data]` but such an entry bridges as `NSNull`. The record is parsed directly now, so a device that advertises one no longer kills whatever resolves it.
+- **macOS Crash on a Bonjour TXT Record**: A peer advertising a key with no value aborted the app — `NetService.dictionary(fromTXTRecord:)` is typed `[String: Data]` but such an entry bridges as `NSNull`. The record is parsed directly now.
 - **macOS LAN Discovery After a Restart**: A Bonjour browse that failed or stopped was never retried, so a launch before the network was up cost the whole session — the app advertised itself and saw nothing. Failures are retried with backoff, a failed resolve is retried rather than dropping the peer for good, and opening the pairing panel re-runs the browse.
 - **macOS LAN Dialling**: Every outgoing LAN connection went to port 80. Stripping the query rebuilt the peer's URL from scheme and host, and `URL.host` does not carry the port. Only incoming connections worked, which is why it went unnoticed.
 - **macOS Peer Presence**: Peer status was queried only while the app's own relay socket was up, so a local connection problem reported every cloud peer as offline. Presence is a plain HTTP endpoint and is now asked either way.
 - **macOS Device List Accuracy**: Peers restored from cache at startup are published without waiting for a discovery event that never comes; services running on this Mac are no longer offered for pairing; and a paired device no longer shows a LAN address from a network the Mac has left.
 - **Relay Token in Builds**: `build-macos.sh` and `android/app/build.gradle.kts` resolve the main checkout's `.env` themselves instead of relying on the token being exported, and fail rather than producing a build the relay answers with 401. The macOS script also refuses to install a bundle that failed to sign, and checks before stopping the running app.
-- **Icon Generation Scope**: `generate-icons.py` takes platform arguments, so a macOS build no longer rewrites Android's launcher drawables — and the Android output it produces is the design that is committed, rather than an older single-layer one its own test forbids.
+- **Relay Secret From A Stray `.env`**: The relay secret is read from a
+  checkout's `.env` — one with `.git` beside it — rather than from any `.env`
+  found by walking up to the filesystem root. A copy of the repository's `.env`
+  left in a system temporary directory was enough to fail five tests on one
+  machine while CI stayed green, and an application taking a secret from a stray
+  file several directories above itself is a surprise however it resolves.
+- **iOS did not show what it sent**: text sent from this device never appeared in its own history. The send loop awaited delivery to every paired device before recording anything locally, so a single unreachable peer kept the entry out indefinitely. It is recorded first now, and no longer marked as though it had arrived from elsewhere.
+- **Cloud connection never recovered from a drop**: two self-references in the reconnect path — it cancelled itself through `disconnect()`, and then waited on its own completion inside `connect()` — meant a dropped relay socket stayed down for the life of the process while the UI still read connected.
+- **Data race on in-flight messages**: eleven of thirteen accesses to the in-flight map ran without the lock the other two took, corrupting the dictionary's own storage. It surfaced as an unrelated-looking crash inside `removeValue`.
+- **Cloud keepalive too slow**: pings went every 14 minutes, derived from Fly.io's 900s idle timeout, but something on the path drops idle sockets after about two minutes without a close frame. Now 30 seconds, matching Android.
+- **iOS relay token lost at random**: the build phase that injects it declared no inputs, so Xcode could schedule it alongside Info.plist generation and the injected value was overwritten — while the build log still reported success and the app shipped unable to authenticate.
+- **Relay counters were never incremented**: `messages`, `redis.operations` and `avg_request_duration_ms` all had no callers and read zero or null regardless of traffic.
+
+### Changed
+- **Brand Icon Ring Contrast**: The three stacked rings in the app icon now fade in equal steps (1.0 → 0.7 → 0.4) so all three stay visible, replacing the near-invisible gradient fills on the lower two. Applied to the shared SVG source, the Android adaptive icon, launcher PNGs, and the Quick Settings tile — Android no longer carries its own divergent ring styling.
+- **Android Icon Background Rendered Black**: The adaptive icon background declared its gradient as a bare child of the path, which Android silently ignores — launchers composited an empty layer and the icon showed black instead of the brand gradient. The gradient is now wrapped in aapt:attr so it actually applies and spans the launcher-visible window so the full color ramp shows, and all Android icon drawables (adaptive layers and the Quick Settings tile) are generated from macos/scripts/icon.svg instead of hand-maintained copies, so geometry, opacities, and colors cannot drift again.
+- **macOS LAN Pairing**: macOS can now start a pairing with a device it discovers on the network, not only answer one. Unpaired devices on the same Wi-Fi appear in Settings → Devices with a Pair button; the handshake is the same one Android and Windows initiate, verified against the responder in tests.
+- **Device Renaming (all platforms)**: The name peers show for a device can be changed in Settings on macOS, Android and Windows (iOS already had it). Blank input is refused and the device advertises itself again under the new name; peers already paired keep the name they recorded until they pair or discover the device again.
+- **Windows JPEG Images**: An image arriving as JPEG is accepted and published to the clipboard as PNG. It used to be refused outright, so any picture large enough to have been re-encoded on the way never arrived.
+- **macOS Debug Status API**: The app serves its own state as JSON on `http://127.0.0.1:7011/status` — relay token present, connection state, paired devices with their online flags, discovered peers and whether each is pairable. `/probe?host=&port=` opens a WebSocket the way pairing does and reports the raw error. Loopback only, no secrets; `defaults write com.hypo.clipboard hypo_debug_api_enabled -bool false` turns it off.
+- **Windows Clipboard Sharing Defaults**: Synced items are kept out of this
+  machine's <kbd>Win</kbd>+<kbd>V</kbd> history and out of the Microsoft cloud
+  clipboard unless you turn either on. Hypo carries whatever was copied on
+  another device, and a password from a phone's password manager roaming to a
+  Microsoft account is worse than the convenience is good.
+- **macOS Devices List**: Paired devices and unpaired devices on the network are one list in Settings → Devices, each of the latter with a Pair button. The sheet behind the button is code-only and reads "Pair with Code". An empty nearby list now says which kind of empty it is: still looking, everything already paired, or a network that does not let devices reach each other.
+- **Android Devices Section**: Nearby LAN discovery now lives inside the Settings → Devices section — unpaired devices on the same network appear under “Nearby devices” and pair with a single tap, with inline progress, success, and retry states. The pairing screen is code-only and the entry button reads “Pair with Code” instead of “Pair New Device”.
 
 ## [1.2.0] - 2026-08-30
 
